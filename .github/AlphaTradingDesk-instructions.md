@@ -284,7 +284,45 @@ MVP is done when:
 
 ---
 
-## 💡 Development Tips
+## � Commit Convention
+
+All commits **must** follow [Conventional Commits](https://www.conventionalcommits.org/).
+
+### Format
+
+```
+<type>(<scope>): <short description>
+```
+
+- **type** — one of: `feat` · `fix` · `chore` · `ci` · `docs` · `refactor` · `test` · `style` · `perf`
+- **scope** — optional, matches the area changed: `backend` · `frontend` · `db` · `api` · `ui` · `risk` · `journal` · `ci` · `docker`
+- **description** — imperative, lowercase, ≤ 72 chars, **no period**
+
+### Rules
+
+| Rule | ✅ Good | ❌ Bad |
+|------|---------|--------|
+| Imperative mood | `add health endpoint` | `added health endpoint` |
+| Short description | ≤ 72 chars | paragraph-length subject |
+| No body unless truly needed | — | long wall-of-text body |
+| Type matches the change | `fix(api): handle missing profile id` | `feat: fix bug` |
+
+### Examples
+
+```
+feat(backend): add FastAPI health endpoint
+feat(frontend): scaffold Vite + React shell with health badge
+chore: add Makefile with dev/ci/db commands
+ci: add atd-test.yml (ruff + mypy + pytest + vitest)
+fix(config): suppress mypy false-positive on pydantic-settings
+test(frontend): add App smoke tests with vitest
+docs: update implement-phase1 with Step 1 completion notes
+db: add initial Alembic env and migration baseline
+```
+
+---
+
+## �💡 Development Tips
 
 ### Use Transactions
 
