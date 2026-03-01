@@ -117,7 +117,7 @@ Suggested merge points:
 
 4. First Alembic migration → empty DB, connection verified
 
-5. CI: GitHub Actions workflow → lint + test on push to develop
+5. CI: GitHub Actions → `atd-test.yml` — lint + test on every push to develop + PR
 ```
 
 **Done when:** `docker compose -f docker-compose.dev.yml up` → API returns `{"status": "ok"}` on `/health`

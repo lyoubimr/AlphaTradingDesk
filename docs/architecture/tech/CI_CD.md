@@ -2,7 +2,7 @@
 
 **Date:** March 1, 2026
 **Version:** 3.0 (registry-based: build on CI → push GHCR → pull on Dell/GCE/Kube)
-**Status:** CI to create at Step 1 — CD exists, dormant until Dell runner is live
+**Status:** CI created (atd-test.yml) — CD dormant until Dell configured (Step 14)
 
 ---
 
@@ -49,16 +49,15 @@ Mac (dev)
 ```
 .github/
 └── workflows/
-    ├── ci.yml    ← ⏳ to create at implement Step 1 — runs on every PR
-    └── cd.yml    ← ✅ exists — DORMANT until Dell runner configured (Step 14)
+    ├── atd-test.yml    ← ✅ created at Step 1 — runs on every push to develop + PR
+    └── atd-deploy.yml  ← ✅ exists — DORMANT until Dell configured (Step 14)
 ```
 
 ---
 
-## 🧪 `ci.yml` — Tests on Pull Request
+## 🧪 `atd-test.yml` — Tests on every push / PR
 
-> ⏳ **To create at implement Step 1** (project bootstrap).
-> Reference spec below — write the file when the stack exists.
+> ✅ **Created at implement Step 1** (project bootstrap).
 
 ```yaml
 name: CI — Test & Lint
@@ -153,9 +152,9 @@ jobs:
 
 ---
 
-## 🚀 `cd.yml` — Tag, Build, Push & Deploy on merge to main
+## 🚀 `atd-deploy.yml` — Tag, Build, Push & Deploy on merge to main
 
-> ✅ **Already exists** at `.github/workflows/cd.yml`
+> ✅ **Already exists** at `.github/workflows/atd-deploy.yml`
 > ⚠️ **DORMANT** — activate at implement Step 14 (see `SERVER_SETUP.md` § 9.4).
 
 ### How it works
@@ -260,8 +259,8 @@ docs/update-server-setup
 
 | When | Workflow | Runner | What it does | Phase |
 |---|---|---|---|---|
-| PR opened / push to develop | `ci.yml` | GitHub cloud | lint + tests | ⏳ create at Step 1 |
-| PR merged to main | `cd.yml` | GitHub cloud | build → push GHCR → SSH deploy | ⚠️ dormant → activate at Step 14 |
+| push to develop / PR opened | `atd-test.yml` | GitHub cloud | lint + tests | ✅ created at Step 1 |
+| PR merged to main | `atd-deploy.yml` | GitHub cloud | build → push GHCR → SSH deploy | ⚠️ dormant → activate at Step 14 |
 
 **Migration path (zero pipeline rework):**
 ```

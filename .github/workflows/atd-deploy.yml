@@ -1,4 +1,4 @@
-name: CD — Tag, Build & Deploy
+name: ATD — Deploy
 
 on:
   push:

@@ -102,8 +102,8 @@ src/
 | ORM | SQLAlchemy 2.0 |
 | Database | PostgreSQL 15+ |
 | Container | Docker + Docker Compose |
-| CI | GitHub Actions (pytest + ruff on PR) |
-| CD | Dormant — activates at Step 14 of `implement-phase1.md` |
+| CI | GitHub Actions — `atd-test.yml` (ruff + pytest + eslint on push to develop / PR) |
+| CD | `atd-deploy.yml` — Dormant — activates at Step 14 of `implement-phase1.md` |
 
 ### Phase 2+ only (do NOT add to Phase 1)
 
