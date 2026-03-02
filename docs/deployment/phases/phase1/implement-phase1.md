@@ -300,28 +300,32 @@ Layout:
 
 ---
 
-### Step 9 — Frontend: Dashboard (1–2 days)
+### Step 9 — Frontend: Settings/Profiles + ProfilePicker (1 day)
+
+> **⚠️ Plan change (2026-03-02):** Originally Step 12. Moved here because all
+> subsequent Dashboard/Trade/Analysis widgets require an active profile.
+> `/settings/profiles` is a hard prerequisite for Steps 10–12.
 
 ```
-Widgets:
-1. Goals widget
-   - Style selector (persisted per profile)
-   - 3 rows: Daily / Weekly / Monthly (each: goal bar + risk bar)
-   - "No trades today/this week" grey state when no data
-   - Status badge: ✅ ON TRACK / ⚠️ WARNING / 🛑 BLOCKED
-   - Override button when blocked
+ProfilePicker (topbar, all pages):
+  - Dropdown listing all active profiles (GET /api/profiles)
+  - Active profile persisted in localStorage (key: atd_active_profile_id)
+  - Auto-selects first profile if none stored
+  - Shows: name + market_type badge + capital_current
+  - Available on every page via ProfileContext (React context)
 
-2. Market Analysis badge
-   - One chip per active module: "Crypto 🟢 79% · 2d ago"
-   - ⚠️ yellow if stale (>7d), 🟠 orange if >14d
-   - Click → goes to /market-analysis
-
-3. Open Positions list
-   - Symbol, direction, entry, current risk, unrealized PnL (manual entry Phase 1)
-
-4. Performance summary
-   - Win rate, profit factor, equity curve (last 30 trades)
+/settings/profiles:
+  - List all profiles (cards: name, broker, market type, capital, status)
+  - [+ New Profile] button → modal form
+  - Edit profile → same modal pre-filled
+  - Soft-delete (DELETE /api/profiles/:id) with confirmation
+  - Fields: name, broker (dropdown GET /api/brokers), market_type,
+            capital_start, risk_percentage_default, trading_style_id
+  - Active badge on the currently selected profile
 ```
+
+**Done when:** user can create/edit/delete profiles, select active profile
+in topbar, and the selection persists across page reloads.
 
 ---
 
@@ -329,7 +333,7 @@ Widgets:
 
 ```
 /trades/new:
-  - Profile auto-selected (last used)
+  - Profile auto-selected (last used, from ProfileContext)
   - Instrument: searchable dropdown + favourites + recents
   - Direction: big LONG / SHORT toggle
   - Order type: MARKET / LIMIT
@@ -380,12 +384,32 @@ Widgets:
 
 ---
 
-### Step 12 — Frontend: Settings pages (1 day)
+### Step 12 — Frontend: Dashboard (1–2 days)
+
+> **⚠️ Plan change (2026-03-02):** Originally Step 9. Moved here so Dashboard
+> widgets can be built against real data (real trades, real analyses, real goals)
+> rather than empty state. ProfileContext (Step 9) is a hard prerequisite.
 
 ```
-/settings/profiles    ← CRUD, broker selector, currency display
-/settings/goals       ← per style × per period, goal + limit fields
-/settings/instruments ← view seeded catalog + add/edit/delete custom instruments
+Widgets (all read from API using active profile from ProfileContext):
+
+1. Goals widget
+   - Style selector (persisted per profile)
+   - 3 rows: Daily / Weekly / Monthly (each: goal bar + risk bar)
+   - "No trades today/this week" grey state when no data
+   - Status badge: ✅ ON TRACK / ⚠️ WARNING / 🛑 BLOCKED
+   - Override button when blocked
+
+2. Market Analysis badge
+   - One chip per active module: "Crypto 🟢 79% · 2d ago"
+   - ⚠️ yellow if stale (>7d), 🟠 orange if >14d
+   - Click → goes to /market-analysis
+
+3. Open Positions list
+   - Symbol, direction, entry, current risk, unrealized PnL (manual entry Phase 1)
+
+4. Performance summary
+   - Win rate, profit factor, equity curve (last 30 trades)
 ```
 
 ---
