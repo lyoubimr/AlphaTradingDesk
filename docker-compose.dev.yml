@@ -57,6 +57,8 @@ services:
     environment:
       # Tell Vite to poll for file changes (needed on macOS Docker Desktop)
       CHOKIDAR_USEPOLLING: "true"
+      # Inside Docker, backend is reachable via service name, not localhost
+      VITE_API_TARGET: "http://backend:8000"
 
   adminer:
     image: adminer:latest
