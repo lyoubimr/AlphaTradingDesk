@@ -43,14 +43,20 @@ services:
   frontend:
     build:
       context: ./frontend
-      dockerfile: Dockerfile
-    command: npm run dev -- --host
+      dockerfile: Dockerfile.dev       # dev-only: node + Vite HMR (not nginx)
     ports:
       - "5173:5173"
     depends_on:
       - backend
     volumes:
+      # Bind-mount the whole frontend source for HMR to work
       - ./frontend/src:/app/src
+      - ./frontend/public:/app/public
+      - ./frontend/index.html:/app/index.html
+      - ./frontend/vite.config.ts:/app/vite.config.ts
+    environment:
+      # Tell Vite to poll for file changes (needed on macOS Docker Desktop)
+      CHOKIDAR_USEPOLLING: "true"
 
   adminer:
     image: adminer:latest
