@@ -10,6 +10,7 @@ import {
   TrendingUp,
   Eye,
   Activity,
+  Users,
 } from 'lucide-react'
 import { cn } from '../../lib/cn'
 import { Badge } from '../ui/Badge'
@@ -82,7 +83,13 @@ const NAV_GROUPS: NavGroup[] = [
     ],
   },
   {
+    heading: 'Settings',
     items: [
+      {
+        to: '/settings/profiles',
+        label: 'Profiles',
+        icon: <Users size={16} />,
+      },
       {
         to: '/settings',
         label: 'Settings',

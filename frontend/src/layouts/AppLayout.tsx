@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { Outlet } from 'react-router-dom'
 import { Sidebar } from '../components/sidebar/Sidebar'
 import { Topbar } from '../components/topbar/Topbar'
+import { ProfileProvider } from '../context/ProfileContext'
 
 type ApiStatus = 'online' | 'offline' | 'connecting'
 
@@ -58,18 +59,20 @@ export function AppLayout() {
   const { status: apiStatus, environment } = useApiHealth()
 
   return (
-    <div className="flex h-screen bg-surface-950 overflow-hidden">
-      <Sidebar apiStatus={apiStatus} environment={environment} />
+    <ProfileProvider>
+      <div className="flex h-screen bg-surface-950 overflow-hidden">
+        <Sidebar apiStatus={apiStatus} environment={environment} />
 
-      <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
-        <Topbar currentTime={time} />
+        <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
+          <Topbar currentTime={time} />
 
-        <main className="flex-1 overflow-y-auto">
-          <div className="max-w-7xl mx-auto px-6 py-6">
-            <Outlet />
-          </div>
-        </main>
+          <main className="flex-1 overflow-y-auto">
+            <div className="max-w-7xl mx-auto px-6 py-6">
+              <Outlet />
+            </div>
+          </main>
+        </div>
       </div>
-    </div>
+    </ProfileProvider>
   )
 }

@@ -6,6 +6,7 @@ import { RiskPage } from './pages/risk/RiskPage'
 import { MarketAnalysisPage } from './pages/market-analysis/MarketAnalysisPage'
 import { GoalsPage } from './pages/goals/GoalsPage'
 import { SettingsPage } from './pages/settings/SettingsPage'
+import { ProfilesPage } from './pages/settings/ProfilesPage'
 
 export default function App() {
   return (
@@ -18,6 +19,7 @@ export default function App() {
         <Route path="/market-analysis" element={<MarketAnalysisPage />} />
         <Route path="/goals" element={<GoalsPage />} />
         <Route path="/settings" element={<SettingsPage />} />
+        <Route path="/settings/profiles" element={<ProfilesPage />} />
       </Route>
     </Routes>
   )

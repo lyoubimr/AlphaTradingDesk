@@ -6,12 +6,27 @@ import { render, screen } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import App from '../App'
 
-// Mock fetch so the health API call doesn't fail in jsdom
+// Mock fetch so health + profiles API calls don't fail in jsdom
 beforeEach(() => {
   vi.stubGlobal(
     'fetch',
-    vi.fn().mockResolvedValue({
-      json: () => Promise.resolve({ status: 'ok', environment: 'test' }),
+    vi.fn().mockImplementation((url: string) => {
+      // Health endpoint
+      if (typeof url === 'string' && url.includes('/health')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ status: 'ok', environment: 'test' }),
+        })
+      }
+      // Profiles endpoint
+      if (typeof url === 'string' && url.includes('/profiles')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve([]),
+        })
+      }
+      // Default: empty ok response
+      return Promise.resolve({ ok: true, json: () => Promise.resolve([]) })
     }),
   )
 })

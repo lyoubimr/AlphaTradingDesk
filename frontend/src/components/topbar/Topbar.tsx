@@ -1,5 +1,6 @@
 // ── Topbar component ───────────────────────────────────────────────────────
-import { Bell, User } from 'lucide-react'
+import { Bell } from 'lucide-react'
+import { ProfilePicker } from './ProfilePicker'
 
 interface TopbarProps {
   currentTime?: string
@@ -13,20 +14,23 @@ export function Topbar({ currentTime }: TopbarProps) {
       bg-surface-900 border-b border-surface-800
       sticky top-0 z-40
     ">
-      {/* ── Left: market summary pills ─────────────────────────────────── */}
+      {/* ── Left: profile picker ───────────────────────────────────── */}
       <div className="flex items-center gap-3">
-        <MarketPill symbol="BTC" value="~65,420" change="+1.4%" bull />
-        <MarketPill symbol="ETH" value="~3,210" change="-0.3%" />
-        <MarketPill symbol="XAU" value="~2,340" change="+0.7%" bull />
-        <span className="text-[10px] text-slate-700 hidden sm:inline">
-          · Indicative only
-        </span>
+        <ProfilePicker />
       </div>
 
-      {/* ── Right: clock + actions ─────────────────────────────────────── */}
+      {/* ── Right: market pills + clock + actions ──────────────────── */}
       <div className="flex items-center gap-4">
+        {/* Market summary pills */}
+        <div className="hidden md:flex items-center gap-3">
+          <MarketPill symbol="BTC" value="~65,420" change="+1.4%" bull />
+          <MarketPill symbol="ETH" value="~3,210" change="-0.3%" />
+          <MarketPill symbol="XAU" value="~2,340" change="+0.7%" bull />
+          <span className="text-[10px] text-slate-700">· Indicative</span>
+        </div>
+
         {currentTime && (
-          <span className="text-xs font-mono text-slate-600 tabular-nums hidden md:inline">
+          <span className="text-xs font-mono text-slate-600 tabular-nums hidden lg:inline">
             {currentTime}
           </span>
         )}
@@ -36,13 +40,6 @@ export function Topbar({ currentTime }: TopbarProps) {
           aria-label="Notifications"
         >
           <Bell size={16} />
-        </button>
-        <button
-          type="button"
-          className="flex items-center justify-center w-7 h-7 rounded-full bg-surface-700 border border-surface-600 text-slate-400 hover:text-slate-200 transition-colors"
-          aria-label="Profile"
-        >
-          <User size={13} />
         </button>
       </div>
     </header>

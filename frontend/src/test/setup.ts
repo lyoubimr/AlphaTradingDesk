@@ -1,8 +1,21 @@
 import '@testing-library/jest-dom'
-import { beforeAll, afterAll } from 'vitest'
+import { beforeAll, afterAll, vi } from 'vitest'
 
-// Suppress React "not wrapped in act(...)" warnings for async state updates
-// that happen after the test assertion (e.g. fetch-based health polling).
+// ── localStorage mock ─────────────────────────────────────────────────────
+// jsdom provides localStorage but the --localstorage-file flag can disable it.
+// We always provide a reliable in-memory mock so ProfileContext works in tests.
+const localStorageMock = (() => {
+  let store: Record<string, string> = {}
+  return {
+    getItem: (key: string) => store[key] ?? null,
+    setItem: (key: string, value: string) => { store[key] = value },
+    removeItem: (key: string) => { delete store[key] },
+    clear: () => { store = {} },
+  }
+})()
+vi.stubGlobal('localStorage', localStorageMock)
+
+// ── Suppress noisy React warnings in tests ────────────────────────────────
 const originalError = console.error.bind(console.error)
 beforeAll(() => {
   console.error = (...args: unknown[]) => {
