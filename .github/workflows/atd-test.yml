@@ -50,8 +50,10 @@ jobs:
 
       - name: Tests (pytest)
         env:
+          APP_ENV: test
           DATABASE_URL: postgresql://atd:test_password@localhost:5432/atd_test
           SECRET_KEY: test-secret-key-for-ci
+          ENCRYPTION_KEY: test-encryption-key-for-ci
           ENVIRONMENT: test
         run: |
           poetry run pytest tests/ -v --cov=src --cov-report=term-missing -x
