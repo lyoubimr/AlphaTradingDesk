@@ -19,7 +19,10 @@ beforeEach(() => {
 // Helper: render App inside MemoryRouter with a given initial path
 function renderAt(path: string) {
   return render(
-    <MemoryRouter initialEntries={[path]}>
+    <MemoryRouter
+      initialEntries={[path]}
+      future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+    >
       <App />
     </MemoryRouter>,
   )
