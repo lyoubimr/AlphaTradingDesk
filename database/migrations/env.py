@@ -20,12 +20,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 # This single import triggers all model registrations.
 from src.core.models import Base  # noqa: E402
 from src.core.config import settings  # noqa: E402
+from src.core.database import _normalise_db_url  # noqa: E402
 
 # ── Alembic Config object (gives access to alembic.ini values) ────────────────
 config = context.config
 
-# Inject DATABASE_URL from settings — overrides the (empty) value in alembic.ini
-config.set_main_option("sqlalchemy.url", settings.database_url)
+# Inject DATABASE_URL from settings — normalised to psycopg v3 driver
+config.set_main_option("sqlalchemy.url", _normalise_db_url(settings.database_url))
 
 # ── Python logging setup from alembic.ini ─────────────────────────────────────
 if config.config_file_name is not None:

@@ -1,17 +1,39 @@
 """
-Application configuration — loaded from environment variables / .env.dev
+Application configuration — loaded from environment variables.
+
+Priority order (highest → lowest):
+  1. Real environment variables  ← always wins (prod / CI / Docker)
+  2. .env file on disk           ← dev convenience only, never in prod container
+  3. Class defaults              ← safe fallbacks
+
+Which .env file is loaded is controlled by APP_ENV (default: "dev"):
+  APP_ENV=dev   → .env.dev    (local development)
+  APP_ENV=test  → .env.test   (pytest / CI — can be absent)
+  APP_ENV=prod  → .env.prod   (local prod test — absent in Docker)
+
+In Docker (prod), no .env file is present → env vars come from the container
+environment only (docker-compose env_file / Kubernetes secrets / etc.).
+env_file_required=False ensures the app starts cleanly without a file.
 """
+import os
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Resolve which .env file to load based on APP_ENV.
+# Real env vars always take precedence over the file (pydantic-settings default).
+_APP_ENV = os.getenv("APP_ENV", "dev")
+_ENV_FILE = f".env.{_APP_ENV}"  # e.g. .env.dev / .env.test / .env.prod
 
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=".env.dev",
+        env_file=_ENV_FILE,
         env_file_encoding="utf-8",
+        env_file_required=False,  # prod containers have no .env file — that's fine
         extra="ignore",
     )
 
-    # Database
+    # Database — always from env, no default (fails fast if missing)
     database_url: str
 
     # Security
