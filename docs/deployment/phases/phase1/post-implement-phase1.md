@@ -164,3 +164,33 @@ Phase 2 priorities (based on current plan):
 
 **Previous:** ← `implement-phase1.md`  
 **Next:** → Start Phase 2 planning session
+
+---
+
+## 7. 🔧 Improvements identified during Phase 1 implementation
+
+> These are improvements noted **during implementation** — not bugs, not Phase 2 features.
+> Scope: a future minor release (v1.x) or early Phase 2 prep.
+> Each item has a priority: 🟥 High · 🟧 Medium · 🟨 Low
+
+### Broker management
+
+| # | Description | Priority | Notes |
+|---|---|---|---|
+| B-01 | `POST /api/brokers` — allow user to add a custom broker from the UI | 🟧 Medium | Phase 1: brokers are read-only (seeded). The `is_predefined` flag + `is_custom` field on `Instrument` already anticipate this. Just needs a form + endpoint. |
+| B-02 | `POST /api/brokers/{id}/instruments` — allow user to add a custom instrument to any broker | 🟧 Medium | Same as above — `Instrument.is_predefined = false` for user-added rows. |
+| B-03 | `PUT /api/brokers/{id}` / `DELETE` — edit or deactivate a custom broker | 🟨 Low | Only meaningful once B-01 exists. Predefined brokers should never be deleted. |
+
+### Instrument catalog
+
+| # | Description | Priority | Notes |
+|---|---|---|---|
+| I-01 | Instrument aliases — e.g. DJ30 / US30 are the same instrument on different platforms | 🟨 Low | Add an `aliases` TEXT[] column to `instruments`. Searched in dropdown alongside symbol + display_name. |
+| I-02 | `is_active` toggle per instrument in Settings UI | 🟨 Low | Hide instruments the user never trades (keeps the dropdown clean). Already supported in DB. |
+| I-03 | Favourite instruments (⭐ pin up to 5 per broker) | 🟧 Medium | Defined in pre-implement doc. Needs `profile_instrument_favourites` join table or JSONB in `user_preferences`. |
+
+### Market Analysis
+
+| # | Description | Priority | Notes |
+|---|---|---|---|
+| M-01 | Modules 3–5 (Forex, Indices, Universal Overlay) | 🟧 Medium | Deferred by design. Zero schema changes needed — just new rows in `market_analysis_modules` + `market_analysis_indicators` + new seed file. |
