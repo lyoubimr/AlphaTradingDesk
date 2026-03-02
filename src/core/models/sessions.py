@@ -29,6 +29,7 @@ from src.core.database import Base
 class TradingSession(Base):
     """Trading session catalog — all times in UTC."""
     __tablename__ = "sessions"
+    __table_args__ = (UniqueConstraint("name"),)
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     name: Mapped[str] = mapped_column(String(50), nullable=False)

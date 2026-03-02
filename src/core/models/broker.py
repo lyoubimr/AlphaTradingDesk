@@ -15,6 +15,7 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     ForeignKey,
+    Integer,
     Numeric,
     String,
     Text,
@@ -62,6 +63,9 @@ class Instrument(Base):
     pip_size: Mapped[Decimal | None] = mapped_column(Numeric(20, 10))
     tick_value: Mapped[Decimal | None] = mapped_column(Numeric(20, 10))
     min_lot: Mapped[Decimal | None] = mapped_column(Numeric(20, 8))
+    # Max leverage cap per instrument (crypto only — enforced with UI warning, not a hard block)
+    # e.g. BTC/ETH: 50, large caps: 25, mid caps: 10, meme coins: 5
+    max_leverage: Mapped[int | None] = mapped_column(Integer)
     is_predefined: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_at: Mapped[datetime] = mapped_column(
