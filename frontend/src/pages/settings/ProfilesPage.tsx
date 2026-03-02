@@ -2,10 +2,11 @@
 // Full CRUD for trading profiles.
 // Uses ProfileContext (refetch after mutations) + brokersApi for the form.
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
+import type React from 'react'
 import {
   Plus, Edit2, Trash2, TrendingUp, CheckCircle2,
-  AlertCircle, X, Save, Loader2,
+  AlertCircle, X, Save, Loader2, Info,
 } from 'lucide-react'
 import { PageHeader } from '../../components/ui/PageHeader'
 import { useProfile } from '../../context/ProfileContext'
@@ -17,6 +18,30 @@ import type { Profile, ProfileCreate, ProfileUpdate, Broker } from '../../types/
 const MARKET_COLORS: Record<string, string> = {
   Crypto: 'text-brand-400 bg-brand-600/15 border-brand-600/30',
   CFD:    'text-amber-400 bg-amber-500/10  border-amber-500/30',
+}
+
+// ── Tooltip ───────────────────────────────────────────────────────────────
+function Tooltip({ text }: { text: string }) {
+  const [visible, setVisible] = useState(false)
+  const ref = useRef<HTMLSpanElement>(null)
+  return (
+    <span
+      ref={ref}
+      className="relative inline-flex items-center ml-1 cursor-help"
+      onMouseEnter={() => setVisible(true)}
+      onMouseLeave={() => setVisible(false)}
+    >
+      <Info size={11} className="text-slate-500 hover:text-slate-300 transition-colors" />
+      {visible && (
+        <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 z-50
+          w-56 px-3 py-2 rounded-lg bg-surface-700 border border-surface-600
+          text-[11px] text-slate-300 leading-snug shadow-xl pointer-events-none whitespace-normal">
+          {text}
+          <span className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-surface-600" />
+        </span>
+      )}
+    </span>
+  )
 }
 
 // ── Profile Card ──────────────────────────────────────────────────────────
@@ -185,8 +210,35 @@ function ProfileModal({ profile, brokers, onClose, onSaved }: ProfileModalProps)
   const [saving, setSaving] = useState(false)
   const [error, setError]   = useState<string | null>(null)
 
+  // Brokers filtered to match the selected market type
+  const compatibleBrokers = brokers.filter((b) => b.market_type === form.market_type)
+
   const set = (field: keyof ProfileFormData, value: string) =>
     setForm((f) => ({ ...f, [field]: value }))
+
+  // When market_type changes: reset broker if incompatible + clear currency
+  const setMarketType = (mt: 'CFD' | 'Crypto') => {
+    setForm((f) => {
+      const currentBroker = brokers.find((b) => String(b.id) === f.broker_id)
+      const brokerCompatible = currentBroker?.market_type === mt
+      return {
+        ...f,
+        market_type: mt,
+        broker_id: brokerCompatible ? f.broker_id : '',
+        currency:   brokerCompatible ? f.currency : '',
+      }
+    })
+  }
+
+  // When broker changes: auto-fill currency from broker's default_currency
+  const setBroker = (brokerId: string) => {
+    const broker = brokers.find((b) => String(b.id) === brokerId)
+    setForm((f) => ({
+      ...f,
+      broker_id: brokerId,
+      currency: brokerId && broker ? broker.default_currency : f.currency,
+    }))
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -277,7 +329,7 @@ function ProfileModal({ profile, brokers, onClose, onSaved }: ProfileModalProps)
                 <button
                   key={t}
                   type="button"
-                  onClick={() => set('market_type', t)}
+                  onClick={() => setMarketType(t)}
                   className={cn(
                     'py-2 rounded-lg border text-sm font-medium transition-colors',
                     form.market_type === t
@@ -298,16 +350,16 @@ function ProfileModal({ profile, brokers, onClose, onSaved }: ProfileModalProps)
             <Field label="Broker">
               <select
                 value={form.broker_id}
-                onChange={(e) => set('broker_id', e.target.value)}
+                onChange={(e) => setBroker(e.target.value)}
                 className={inputCls}
               >
                 <option value="">— None —</option>
-                {brokers.map((b) => (
+                {compatibleBrokers.map((b) => (
                   <option key={b.id} value={b.id}>{b.name}</option>
                 ))}
               </select>
             </Field>
-            <Field label="Currency">
+            <Field label={<>Currency <Tooltip text="Auto-filled from broker's default currency. You can override it." /></>}>
               <input
                 value={form.currency}
                 onChange={(e) => set('currency', e.target.value)}
@@ -334,7 +386,7 @@ function ProfileModal({ profile, brokers, onClose, onSaved }: ProfileModalProps)
 
           {/* Risk */}
           <div className="grid grid-cols-2 gap-3">
-            <Field label="Risk % per trade">
+            <Field label={<>Risk % per trade <Tooltip text="Percentage of your current capital risked on each individual trade. e.g. 2% on $10 000 = $200 risk per trade." /></>}>
               <input
                 type="number"
                 step="0.01"
@@ -345,7 +397,7 @@ function ProfileModal({ profile, brokers, onClose, onSaved }: ProfileModalProps)
                 className={inputCls}
               />
             </Field>
-            <Field label="Max concurrent risk %">
+            <Field label={<>Max concurrent risk % <Tooltip text="Maximum total risk across ALL open trades at the same time. e.g. 6% means you can have at most 3 trades × 2% open simultaneously." /></>}>
               <input
                 type="number"
                 step="0.01"
@@ -450,10 +502,10 @@ function DeleteModal({
 
 // ── Field wrapper ─────────────────────────────────────────────────────────
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+function Field({ label, children }: { label: React.ReactNode; children: React.ReactNode }) {
   return (
     <div>
-      <label className="block text-xs font-medium text-slate-400 mb-1.5">{label}</label>
+      <label className="flex items-center text-xs font-medium text-slate-400 mb-1.5">{label}</label>
       {children}
     </div>
   )

@@ -50,7 +50,10 @@ export interface ProfileUpdate {
 export interface Broker {
   id: number
   name: string
-  type: string
+  market_type: 'CFD' | 'Crypto'
+  default_currency: string
+  is_predefined: boolean
+  status: string
 }
 
 // ── Generic API error ─────────────────────────────────────────────────────
