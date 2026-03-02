@@ -5,6 +5,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from src.core.config import settings
+from src.brokers.router import router as brokers_router
+from src.profiles.router import router as profiles_router
 
 app = FastAPI(
     title="AlphaTradingDesk",
@@ -19,6 +21,12 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ── API routers ───────────────────────────────────────────────────
+API_PREFIX = "/api"
+
+app.include_router(brokers_router, prefix=API_PREFIX)
+app.include_router(profiles_router, prefix=API_PREFIX)
 
 
 @app.get("/health")
