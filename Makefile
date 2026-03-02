@@ -2,7 +2,7 @@
 # AlphaTradingDesk — Makefile
 # Usage: make <target>
 # ─────────────────────────────────────────────────────────────────
-.PHONY: help dev dev-build dev-down \
+.PHONY: help dev dev-build dev-rebuild-frontend dev-down \
         backend-dev backend-test backend-lint backend-fmt backend-typecheck \
         frontend-install frontend-dev frontend-test frontend-lint frontend-build \
         db-upgrade db-downgrade db-revision db-reset db-seed db-refresh \
@@ -23,6 +23,10 @@ dev: ## Start full dev stack (db + backend + frontend + adminer)
 
 dev-build: ## Rebuild images and start dev stack
 	$(COMPOSE) up --build
+
+dev-rebuild-frontend: ## Force rebuild frontend image (run after npm install / package.json changes)
+	$(COMPOSE) build --no-cache frontend
+	$(COMPOSE) up -d frontend
 
 dev-down: ## Stop and remove dev stack containers
 	$(COMPOSE) down
