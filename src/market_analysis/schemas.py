@@ -1,0 +1,161 @@
+"""
+Pydantic schemas for the Market Analysis API — Step 7.
+
+ModuleOut               GET /api/market-analysis/modules
+IndicatorOut            GET /api/market-analysis/modules/{id}/indicators
+IndicatorConfigItem     GET/PUT /api/profiles/{id}/indicator-config
+SessionCreate           POST /api/market-analysis/sessions
+AnswerIn                answer inside SessionCreate
+SessionOut              response for session endpoints
+AnswerOut               answer row in SessionOut
+StalenessItem           GET /api/profiles/{id}/market-analysis/staleness
+"""
+from __future__ import annotations
+
+from datetime import datetime
+from decimal import Decimal
+from typing import Literal
+
+from pydantic import BaseModel, ConfigDict, Field
+
+Bias = Literal["bullish", "neutral", "bearish"]
+
+
+# ── Modules ───────────────────────────────────────────────────────────────────
+
+class ModuleOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    name: str
+    description: str | None
+    is_dual: bool
+    asset_a: str | None
+    asset_b: str | None
+    is_active: bool
+    sort_order: int
+
+
+# ── Indicators ────────────────────────────────────────────────────────────────
+
+class IndicatorOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    module_id: int
+    key: str
+    label: str
+    asset_target: str          # 'a', 'b', 'single'
+    tv_symbol: str
+    tv_timeframe: str
+    timeframe_level: str       # 'htf', 'mtf', 'ltf'
+    question: str
+    tooltip: str | None
+    answer_bullish: str
+    answer_partial: str
+    answer_bearish: str
+    default_enabled: bool
+    sort_order: int
+
+
+# ── Indicator config (per-profile toggles) ────────────────────────────────────
+
+class IndicatorConfigItem(BaseModel):
+    """One toggle row — used in both GET response and PUT body."""
+    indicator_id: int
+    enabled: bool
+
+
+class IndicatorConfigOut(BaseModel):
+    """Full GET /api/profiles/{id}/indicator-config response."""
+    profile_id: int
+    configs: list[IndicatorConfigItem]
+
+
+# ── Session (save completed analysis) ─────────────────────────────────────────
+
+class AnswerIn(BaseModel):
+    """One answer supplied by the frontend."""
+    indicator_id: int
+    # 0 = bearish, 1 = neutral/partial, 2 = bullish
+    score: int = Field(..., ge=0, le=2)
+    answer_label: str = Field(..., min_length=1)
+
+
+class SessionCreate(BaseModel):
+    """Body for POST /api/market-analysis/sessions."""
+    profile_id: int
+    module_id: int
+    answers: list[AnswerIn] = Field(..., min_length=1)
+    notes: str | None = None
+    analyzed_at: datetime | None = None   # defaults to now() server-side
+
+
+class AnswerOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    session_id: int
+    indicator_id: int
+    score: int
+    answer_label: str
+
+
+class SessionOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    profile_id: int
+    module_id: int
+
+    # Scores — asset A (BTC / Gold / …)
+    score_htf_a: Decimal | None
+    score_mtf_a: Decimal | None
+    score_ltf_a: Decimal | None
+    bias_htf_a: str | None
+    bias_mtf_a: str | None
+    bias_ltf_a: str | None
+
+    # Scores — asset B (Alts — NULL for single-asset modules)
+    score_htf_b: Decimal | None
+    score_mtf_b: Decimal | None
+    score_ltf_b: Decimal | None
+    bias_htf_b: str | None
+    bias_mtf_b: str | None
+    bias_ltf_b: str | None
+
+    notes: str | None
+    analyzed_at: datetime
+    created_at: datetime
+
+    answers: list[AnswerOut] = []
+
+
+class SessionListItem(BaseModel):
+    """Slim version for the history list — no answers."""
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    profile_id: int
+    module_id: int
+    score_htf_a: Decimal | None
+    score_mtf_a: Decimal | None
+    bias_htf_a: str | None
+    bias_mtf_a: str | None
+    score_htf_b: Decimal | None
+    score_mtf_b: Decimal | None
+    bias_htf_b: str | None
+    bias_mtf_b: str | None
+    notes: str | None
+    analyzed_at: datetime
+
+
+# ── Staleness ─────────────────────────────────────────────────────────────────
+
+class StalenessItem(BaseModel):
+    """Freshness status for one module."""
+    module_id: int
+    module_name: str
+    last_analyzed_at: datetime | None
+    days_old: int | None      # None if no session exists yet
+    is_stale: bool            # True if days_old > 7 (or no session at all)
