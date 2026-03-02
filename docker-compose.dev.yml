@@ -29,6 +29,10 @@ services:
     ports:
       - "8000:8000"
     env_file: .env.dev
+    environment:
+      # Override the DATABASE_URL host: inside Docker, the DB is reachable
+      # via the service name "db", not "localhost".
+      DATABASE_URL: postgresql://atd:dev_password@db:5432/atd_dev
     depends_on:
       db:
         condition: service_healthy
