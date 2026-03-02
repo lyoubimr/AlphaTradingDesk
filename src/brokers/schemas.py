@@ -5,7 +5,20 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
+
+
+class InstrumentCreate(BaseModel):
+    """Body for POST /api/brokers/{id}/instruments — add a custom instrument."""
+    symbol: str = Field(..., min_length=1, max_length=30)
+    display_name: str = Field(..., min_length=1, max_length=100)
+    asset_class: str = Field(..., min_length=1, max_length=50)
+    base_currency: str | None = Field(default=None, max_length=10)
+    quote_currency: str | None = Field(default=None, max_length=10)
+    pip_size: Decimal | None = Field(default=None, gt=0)
+    tick_value: Decimal | None = Field(default=None, gt=0)
+    min_lot: Decimal | None = Field(default=None, gt=0)
+    max_leverage: int | None = Field(default=None, gt=0)
 
 
 class InstrumentOut(BaseModel):

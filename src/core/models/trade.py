@@ -193,8 +193,12 @@ class Trade(Base):
     profile: Mapped[Profile] = relationship(back_populates="trades")  # type: ignore[name-defined]
     instrument: Mapped[Instrument | None] = relationship(back_populates="trades")  # type: ignore[name-defined]
     strategy: Mapped[Strategy | None] = relationship(back_populates="trades")
-    positions: Mapped[list[Position]] = relationship(back_populates="trade")
-    trade_tags: Mapped[list[TradeTag]] = relationship(back_populates="trade")
+    positions: Mapped[list[Position]] = relationship(
+        back_populates="trade", cascade="all, delete-orphan", passive_deletes=True
+    )
+    trade_tags: Mapped[list[TradeTag]] = relationship(
+        back_populates="trade", cascade="all, delete-orphan", passive_deletes=True
+    )
 
 
 class Position(Base):
