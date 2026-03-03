@@ -1,8 +1,8 @@
 # 🛠️ Phase 1 — Implementation Plan
 
 **Date:** March 1, 2026  
-**Version:** 1.5  
-**Status:** Step 10 in progress — Trade Form + Risk Logic complete
+**Version:** 1.6  
+**Status:** Step 11 DONE — Goals/Performance frontend complete → **Ready for Phase 1 v1.0.0 release**
 
 > This document describes **what to build, in what order**.  
 > Each step is a working, testable increment — nothing is left dangling.
@@ -102,6 +102,32 @@ Changements :
 - Shows R-multiples as primary metric, currency as secondary
 - Grades: 🔴 Negative / 🟡 Marginal / 🟢 Good / 💎 Excellent
 - **4-level WR source priority** (see Win-rate architecture below)
+
+### Step 11 — DONE (2026-03-03) — Goals / Performance frontend
+
+**Backend additions:**
+- `GET /api/trading-styles` — new `styles_router` in `src/brokers/router.py`, `TradingStyleOut` schema
+- `GET /api/stats/winrate` — `stats_router` was imported in `main.py` but never registered; fixed
+- `src/main.py` — now properly includes `styles_router` + `stats_router`
+
+**Frontend changes:**
+- `frontend/src/types/api.ts` — added `TradingStyle`, `GoalOut`, `GoalCreate`, `GoalUpdate`, `GoalProgressItem`, `GoalPeriod` types
+- `frontend/src/lib/api.ts` — added `stylesApi.list()` + full `goalsApi` (list, create, update, progress)
+- `frontend/src/pages/goals/GoalsPage.tsx` — **fully replaced** placeholder data with real backend:
+  - KPI bar: active goals, goals hit this period, avg progress %, worst risk limit usage
+  - `ProgressCard` grid — one live card per active goal (period P&L %, target/limit, progress bar, risk bar; color-coded for goal hit / limit hit)
+  - `GoalRow` table — all goals, toggle active/inactive, sorted by style + period
+  - `NewGoalModal` — create goal: style dropdown (from API), period selector, profit target %, loss limit %
+  - Validation: goal > 0, limit < 0, duplicate detection (same style + period)
+  - Show-all toggle for profiles with many goals
+  - How goals work — explanation panel (periods, progress computation, limit circuit-breaker)
+
+**Key rules:**
+- Progress is computed on-demand from closed trades in the current period (no caching in Phase 1)
+- Open/partial trades do NOT count toward period P&L
+- Daily = today, Weekly = Mon–Sun (ISO), Monthly = 1st–last day of month
+- `goal_pct > 0` (enforced by DB CHECK + frontend), `limit_pct < 0` (enforced by DB CHECK + frontend)
+- Duplicate (profile, style, period) is rejected → PUT to update instead
 
 ---
 
@@ -1123,7 +1149,46 @@ crontab -e
 
 ---
 
-## �📦 Deliverable at end of Phase 1
+## 🚀 Phase 1 — v1.0.0 Release checklist
+
+> Steps 1–11 complete. After this checklist → merge `develop → main` → tag `v1.0.0`.
+
+### Code
+
+- [x] Step 1 — Project bootstrap (FastAPI + Vite + Docker + CI)
+- [x] Step 2–3 — Full DB schema + Alembic migrations + seed data
+- [x] Step 4–7 — All backend routes (profiles, brokers, trades, strategies, goals, stats, market analysis)
+- [x] Step 9 — Settings/Profiles page + ProfilePicker
+- [x] Step 10 — Trade form (risk calc, multi-TP, LIMIT lifecycle, expectancy, margin/leverage)
+- [x] Step 11 — Goals page (real backend: create, toggle, live progress, KPIs)
+
+### Quality gates
+
+- [ ] `make lint` — ruff + mypy pass (0 errors)
+- [ ] `make lint-fe` — eslint pass
+- [ ] `make test` — pytest all green
+- [ ] `vitest run` — all tests pass
+- [ ] Manual QA: create profile → log trade → partial close → full close → goal progress updates
+
+### Git
+
+```bash
+# Confirm clean working tree
+git status
+
+# Final commit
+git add -A && git commit -m "feat(goals): Step 11 — connect Goals page to real backend"
+
+# Merge to main and tag
+git checkout main
+git merge --no-ff develop -m "feat: Phase 1 complete — v1.0.0"
+git tag v1.0.0
+git push origin main --tags
+```
+
+---
+
+## 📦 Deliverable at end of Phase 1
 
 ```
 ✅ Docker Compose dev stack (API + DB + Frontend)
@@ -1133,10 +1198,10 @@ crontab -e
 ✅ No JSON config files — everything configurable via UI
 ✅ Makefile (make dev, make deploy, make db-sync)
 ✅ scripts/deploy.sh on the Dell
-✅ scripts/sync-db-prod-to-dev.sh tested and working
 ✅ README.md with setup instructions
 ```
 
 ---
 
-**Next:** → `post-implement-phase1.md`
+**Next:** → `post-implement-phase1.md` → Dell deploy (Step 14)
+
