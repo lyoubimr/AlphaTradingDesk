@@ -34,10 +34,11 @@ const inputCls = [
 // ─────────────────────────────────────────────────────────────────────────────
 
 function Field({
-  label, hint, error, children,
+  label, hint, hintClassName, error, children,
 }: {
   label: React.ReactNode
   hint?: string
+  hintClassName?: string
   error?: string | null
   children: React.ReactNode
 }) {
@@ -52,7 +53,7 @@ function Field({
             <AlertTriangle size={10} />{error}
           </p>
         : hint
-          ? <p className="text-[10px] text-slate-500 mt-1">{hint}</p>
+          ? <p className={cn('text-[10px] mt-1', hintClassName ?? 'text-slate-500')}>{hint}</p>
           : null
       }
     </div>
@@ -846,8 +847,20 @@ export function NewTradePage() {
   // Warn when margin level < 150% (comfortable buffer above typical 100% margin call)
   const cfdMarginCallRisk = cfdMarginLevel != null && cfdMarginLevel < 150
 
+  // ── Crypto: broker-required margin = notional / leverage ─────────────────
+  // This is what the exchange actually locks — it changes with leverage.
+  // Distinct from safe margin (risk / (SL% - MMR)) which is the recommended
+  // collateral to avoid liquidation before SL.
+  const cryptoMarginRequired = useMemo((): number | null => {
+    if (!isCrypto || calc.lot_size == null || entryNum == null || leverageNum <= 0) return null
+    return (calc.lot_size * entryNum) / leverageNum
+  }, [isCrypto, calc.lot_size, entryNum, leverageNum])
+
+  // marginDisplay = safe margin for the input field (user can override)
   const marginDisplay = marginOverride !== '' ? Number(marginOverride) : marginCalculated
-  const marginIsHigh  = marginDisplay != null && capital != null && marginDisplay > capital * 0.5
+  // For the "MARGIN REQ." pill: broker-required (Crypto) or notional/leverage (CFD)
+  const marginPillValue = isCrypto ? cryptoMarginRequired : marginDisplay
+  const marginIsHigh  = marginPillValue != null && capital != null && marginPillValue > capital * 0.5
 
   // ── Per-TP metrics ────────────────────────────────────────────────────────
   const tpMetrics = useMemo(() => tps.map((tp) => {
@@ -1166,15 +1179,28 @@ export function NewTradePage() {
                 </div>
               </Field>
               <Field
-                label={<>Safe margin ({ccy}) <Tip text={`Min collateral to lock so you won't get liquidated before your SL. Formula: risk ÷ (SL% − MMR). MMR = 0.5% (standard exchange tier-1).`} /></>}
+                label={<>Safe margin ({ccy}) <Tip text={`Collateral minimum à déposer pour que ta liquidation reste APRÈS ton SL.\n\nFormule : risk_amount ÷ (SL% − MMR)\nMMR = 0.5% (maintenance margin rate tier-1 standard).\n\nSi cette valeur dépasse ton capital → monte le levier ou réduis le risque %.`} /></>}
                 hint={marginCalculated != null && capital != null
-                  ? `${fmt((marginCalculated / capital) * 100, 1)}% of capital`
+                  ? (() => {
+                      const pct = (marginCalculated / capital) * 100
+                      return `${fmt(pct, 1)}% of capital${pct > 100 ? ' ⚠ exceeds capital' : pct > 50 ? ' — high' : ''}`
+                    })()
+                  : undefined}
+                hintClassName={marginCalculated != null && capital != null
+                  ? (marginCalculated > capital ? 'text-red-400' : marginCalculated > capital * 0.5 ? 'text-amber-400' : 'text-slate-500')
                   : undefined}>
                 <PriceInput
                   value={marginOverride !== '' ? marginOverride : (marginCalculated != null ? String(marginCalculated.toFixed(2)) : '')}
                   onChange={setMarginOverride} ccy={ccy}
-                  className={marginIsHigh ? 'border-amber-500/40' : ''}
+                  className={marginCalculated != null && capital != null && marginCalculated > capital ? 'border-red-500/50' : marginIsHigh ? 'border-amber-500/40' : ''}
                   placeholder={marginCalculated != null ? fmt(marginCalculated, 2).replace(/,/g, '') : '—'} />
+                {/* Warning: safe margin > capital → trade impossible at this leverage/risk */}
+                {marginCalculated != null && capital != null && marginCalculated > capital && (
+                  <p className="text-[10px] text-red-400 mt-1 flex items-center gap-1">
+                    <AlertTriangle size={9} className="shrink-0" />
+                    Safe margin {fmt(marginCalculated, 2)} {ccy} &gt; capital {fmt(capital, 2)} {ccy} — monte le levier ou réduis le risque %
+                  </p>
+                )}
                 {/* Estimated liquidation price — small, below input */}
                 {liqPrice != null && (
                   <p className={cn(
@@ -1252,17 +1278,17 @@ export function NewTradePage() {
                 sub={isCFD ? 'lots' : 'units'}
                 color={isCFD ? 'blue' : 'default'}
               />
-              {/* Crypto: margin is the actionable value (what you lock) → blue. */}
-              {isCrypto && marginDisplay != null && (
-                <CalcPill label="Margin req." value={`${fmt(marginDisplay)} ${ccy}`} sub={`at ×${leverageNum}`} color={marginIsHigh ? 'amber' : 'blue'} />
+              {/* Crypto: margin required by the broker = notional / leverage → changes with leverage. */}
+              {isCrypto && marginPillValue != null && (
+                <CalcPill label="Margin req." value={`${fmt(marginPillValue)} ${ccy}`} sub={`at ×${leverageNum}`} color={marginIsHigh ? 'amber' : 'blue'} />
               )}
             </div>
           )}
 
-          {isCrypto && marginIsHigh && marginDisplay != null && (
+          {isCrypto && marginIsHigh && marginPillValue != null && (
             <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs">
               <AlertTriangle size={13} className="shrink-0" />
-              Margin <span className="font-mono font-bold mx-1">{fmt(marginDisplay)} {ccy}</span> exceeds 50% of capital — consider reducing leverage.
+              Margin <span className="font-mono font-bold mx-1">{fmt(marginPillValue)} {ccy}</span> exceeds 50% of capital — consider reducing leverage.
             </div>
           )}
         </Section>
