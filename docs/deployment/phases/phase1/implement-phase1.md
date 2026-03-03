@@ -810,6 +810,42 @@ Widgets (all read from API using active profile from ProfileContext):
 
 ---
 
+### 🗒️ Post-Phase 1 backlog — features volontairement reportées
+
+> Ces features sont **identifiées, conçues, mais hors scope Phase 1**.
+> À implémenter en priorité au début de Phase 2 avant d'attaquer Volatility.
+
+#### Indicator Editor (Settings → Market Analysis)
+
+**Contexte :** Les questions/indicateurs sont actuellement définis en DB via `seed_market_analysis.py`
+et sont read-only depuis l'UI. Les modifier manuellement en DB via Adminer fonctionne
+(`UPDATE market_analysis_indicators SET question = '…' WHERE key = '…'`) mais ce n'est pas ergonomique.
+
+**Ce qu'il faut construire :**
+
+Backend :
+```
+PATCH /api/market-analysis/indicators/{id}
+  Body: { question?, label?, tooltip?, answer_bullish?, answer_partial?, answer_bearish?, default_enabled? }
+  → Met à jour uniquement les champs fournis (partial update)
+  → Seuls les champs "UI text" sont patchables — key, module_id, asset_target, tv_symbol, tv_timeframe, timeframe_level sont immutables
+```
+
+Frontend : `/settings/market-analysis`
+```
+- Liste de tous les indicateurs groupés par module
+- Inline edit : clic sur question → textarea en place
+- Toggle default_enabled par indicateur
+- Bouton Save par ligne
+- Reset to default (depuis les valeurs de la seed)
+```
+
+**Note importante :** `profile_indicator_config` (toggle ON/OFF par profil) **existe déjà**
+via `GET/PUT /api/profiles/{id}/indicator-config`. Ce endpoint peut être exposé dans
+`/settings/market-analysis` dès Phase 2 sans backend supplémentaire.
+
+---
+
 ### Step 14 — Scripts & Tooling (once app runs end-to-end)
 
 > ⚠️ **Do not create these files before Step 13 is done.**  
