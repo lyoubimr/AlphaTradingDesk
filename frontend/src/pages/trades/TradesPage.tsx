@@ -10,17 +10,21 @@ import { tradesApi } from '../../lib/api'
 import type { TradeListItem } from '../../types/api'
 
 // ── Status badge ──────────────────────────────────────────────────────────
-function StatusBadge({ status }: { status: string }) {
+function StatusBadge({ status, orderType }: { status: string; orderType?: string }) {
   const map: Record<string, { label: string; className: string }> = {
-    open:      { label: 'Open',      className: 'text-brand-300 bg-brand-600/15 border border-brand-600/30' },
-    partial:   { label: 'Partial',   className: 'text-amber-300 bg-amber-500/10 border border-amber-500/30' },
-    closed:    { label: 'Closed',    className: 'text-slate-400 bg-surface-700 border border-surface-600' },
-    cancelled: { label: 'Cancelled', className: 'text-slate-600 bg-surface-800 border border-surface-700 line-through' },
+    pending:   { label: '⏳ Pending',   className: 'text-yellow-300 bg-yellow-500/10 border border-yellow-500/30' },
+    open:      { label: 'Open',         className: 'text-brand-300 bg-brand-600/15 border border-brand-600/30' },
+    partial:   { label: 'Partial',      className: 'text-amber-300 bg-amber-500/10 border border-amber-500/30' },
+    closed:    { label: 'Closed',       className: 'text-slate-400 bg-surface-700 border border-surface-600' },
+    cancelled: { label: 'Cancelled',    className: 'text-slate-600 bg-surface-800 border border-surface-700 line-through' },
   }
   const s = map[status] ?? { label: status, className: 'text-slate-500' }
   return (
-    <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium ${s.className}`}>
+    <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium ${s.className}`}>
       {s.label}
+      {status === 'pending' && orderType === 'LIMIT' && (
+        <span className="text-yellow-600 font-mono">LIMIT</span>
+      )}
     </span>
   )
 }
@@ -53,6 +57,7 @@ export function TradesPage() {
   const [loading, setLoading]       = useState(false)
   const [error, setError]           = useState<string | null>(null)
   const [cancelling, setCancelling] = useState<number | null>(null)
+  const [activating, setActivating] = useState<number | null>(null)
 
   const fetchTrades = useCallback(() => {
     if (!activeProfile) { setTrades([]); return }
@@ -68,11 +73,10 @@ export function TradesPage() {
   useEffect(() => { fetchTrades() }, [fetchTrades])
 
   async function handleCancel(tradeId: number) {
-    if (!confirm('Cancel this trade? It will be marked as cancelled with no capital or win-rate impact.')) return
+    if (!confirm('Cancel this LIMIT order? It will be marked as cancelled with no capital or win-rate impact.')) return
     setCancelling(tradeId)
     try {
       await tradesApi.cancel(tradeId)
-      // Optimistically flip status in local state — no full refetch needed
       setTrades((prev) =>
         prev.map((t) => t.id === tradeId ? { ...t, status: 'cancelled' as const } : t)
       )
@@ -80,6 +84,21 @@ export function TradesPage() {
       alert(`Cancel failed: ${(e as Error).message}`)
     } finally {
       setCancelling(null)
+    }
+  }
+
+  async function handleActivate(tradeId: number) {
+    if (!confirm('Mark this LIMIT order as triggered? It will become an active trade and reserve capital-risk.')) return
+    setActivating(tradeId)
+    try {
+      await tradesApi.activate(tradeId)
+      setTrades((prev) =>
+        prev.map((t) => t.id === tradeId ? { ...t, status: 'open' as const } : t)
+      )
+    } catch (e: unknown) {
+      alert(`Activate failed: ${(e as Error).message}`)
+    } finally {
+      setActivating(null)
     }
   }
 
@@ -228,12 +247,14 @@ export function TradesPage() {
                 </thead>
                 <tbody>
                   {trades.map((t) => {
-                    const pnlNum        = t.realized_pnl ? parseFloat(t.realized_pnl) : null
-                    const isBull        = pnlNum !== null && pnlNum > 0
-                    const isBear        = pnlNum !== null && pnlNum < 0
-                    const isCancellable = t.status === 'open'
-                    const isCancelling  = cancelling === t.id
-                    const isDimmed      = t.status === 'cancelled'
+                    const pnlNum         = t.realized_pnl ? parseFloat(t.realized_pnl) : null
+                    const isBull         = pnlNum !== null && pnlNum > 0
+                    const isBear         = pnlNum !== null && pnlNum < 0
+                    const isActivatable  = t.status === 'pending'
+                    const isCancellable  = t.status === 'pending'
+                    const isActivating_  = activating === t.id
+                    const isCancelling_  = cancelling === t.id
+                    const isDimmed       = t.status === 'cancelled'
 
                     return (
                       <tr
@@ -265,7 +286,7 @@ export function TradesPage() {
 
                         {/* Status */}
                         <td className="px-4 py-2.5">
-                          <StatusBadge status={t.status} />
+                          <StatusBadge status={t.status} orderType={t.order_type} />
                         </td>
 
                         {/* Entry */}
@@ -304,24 +325,46 @@ export function TradesPage() {
 
                         {/* Actions */}
                         <td className="px-4 py-2.5">
-                          {isCancellable && (
-                            <button
-                              type="button"
-                              disabled={isCancelling}
-                              onClick={() => handleCancel(t.id)}
-                              className="flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium
-                                         text-slate-500 hover:text-red-400 hover:bg-red-500/10
-                                         border border-transparent hover:border-red-500/30
-                                         transition-colors disabled:opacity-40"
-                              title="Cancel this limit order — no capital or win-rate impact"
-                            >
-                              {isCancelling
-                                ? <Loader2 size={10} className="animate-spin" />
-                                : <X size={10} />
-                              }
-                              Cancel
-                            </button>
-                          )}
+                          <div className="flex items-center gap-1.5">
+                            {/* Activate — pending LIMIT only */}
+                            {isActivatable && (
+                              <button
+                                type="button"
+                                disabled={isActivating_}
+                                onClick={() => handleActivate(t.id)}
+                                className="flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium
+                                           text-green-400 hover:text-green-300 hover:bg-green-500/10
+                                           border border-transparent hover:border-green-500/30
+                                           transition-colors disabled:opacity-40"
+                                title="Mark this LIMIT order as triggered — reserves capital-risk"
+                              >
+                                {isActivating_
+                                  ? <Loader2 size={10} className="animate-spin" />
+                                  : <span>▶</span>
+                                }
+                                Activate
+                              </button>
+                            )}
+                            {/* Cancel — pending LIMIT only */}
+                            {isCancellable && (
+                              <button
+                                type="button"
+                                disabled={isCancelling_}
+                                onClick={() => handleCancel(t.id)}
+                                className="flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium
+                                           text-slate-500 hover:text-red-400 hover:bg-red-500/10
+                                           border border-transparent hover:border-red-500/30
+                                           transition-colors disabled:opacity-40"
+                                title="Cancel this LIMIT order — no capital or win-rate impact"
+                              >
+                                {isCancelling_
+                                  ? <Loader2 size={10} className="animate-spin" />
+                                  : <X size={10} />
+                                }
+                                Cancel
+                              </button>
+                            )}
+                          </div>
                         </td>
                       </tr>
                     )

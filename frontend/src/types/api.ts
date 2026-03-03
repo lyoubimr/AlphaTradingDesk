@@ -95,7 +95,8 @@ export interface TradeOpen {
   profile_id: number
   instrument_id: number
   pair: string
-  direction: 'long' | 'short'    // backend normalises, but send lowercase
+  direction: 'long' | 'short'
+  order_type: 'MARKET' | 'LIMIT'       // MARKET → 'open', LIMIT → 'pending'
   asset_class: string
   analyzed_timeframe?: string | null
   entry_price: string
@@ -122,13 +123,14 @@ export interface TradeListItem {
   profile_id: number
   pair: string
   direction: 'LONG' | 'SHORT'
+  order_type: 'MARKET' | 'LIMIT'
   entry_price: string
   entry_date: string | null
   stop_loss: string
   nb_take_profits: number
   risk_amount: string
   potential_profit: string | null
-  status: 'open' | 'partial' | 'closed' | 'cancelled'
+  status: 'pending' | 'open' | 'partial' | 'closed' | 'cancelled'
   realized_pnl: string | null
   closed_at: string | null
   created_at: string

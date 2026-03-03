@@ -2,14 +2,15 @@
 Trade Journal router.
 
 Routes:
-  POST   /api/trades                  ← open trade
+  POST   /api/trades                  ← open trade (MARKET → 'open', LIMIT → 'pending')
   GET    /api/trades                  ← journal list (paginated + filters)
   GET    /api/trades/{id}             ← trade detail
   PUT    /api/trades/{id}             ← update (SL, notes, strategy…)
+  POST   /api/trades/{id}/activate    ← LIMIT triggered: pending → open (reserves risk)
   POST   /api/trades/{id}/close       ← full close
   POST   /api/trades/{id}/partial     ← partial close (TP hit)
-  POST   /api/trades/{id}/cancel      ← cancel open limit order (no capital/WR impact)
-  DELETE /api/trades/{id}             ← physical delete (open/partial/cancelled only)
+  POST   /api/trades/{id}/cancel      ← cancel pending LIMIT order (no capital/WR impact)
+  DELETE /api/trades/{id}             ← physical delete (pending/open/partial/cancelled only)
 """
 from __future__ import annotations
 
@@ -74,6 +75,18 @@ def update_trade(
     return service.update_trade(db, trade_id, data)
 
 
+@router.post("/{trade_id}/activate", response_model=TradeOut)
+def activate_trade(trade_id: int, db: Session = Depends(get_db)) -> object:
+    """
+    Activate a pending LIMIT order — the limit price was touched by the market.
+
+    Transitions status: pending → open.
+    Reserves risk (current_risk = risk_amount) at this point, not at order placement.
+    Only 'pending' LIMIT trades can be activated.
+    """
+    return service.activate_trade(db, trade_id)
+
+
 @router.post("/{trade_id}/close", response_model=TradeOut)
 def full_close(
     trade_id: int,
@@ -104,10 +117,10 @@ def partial_close(
 @router.post("/{trade_id}/cancel", response_model=TradeOut)
 def cancel_trade(trade_id: int, db: Session = Depends(get_db)) -> object:
     """
-    Cancel an open limit order.
+    Cancel a pending LIMIT order (never triggered).
 
     Sets status='cancelled'. No impact on capital or WR stats.
-    Only 'open' trades can be cancelled (partials have real fills).
+    Only 'pending' trades can be cancelled — open trades must be closed normally.
     The trade is kept as a journal record — use DELETE to remove it entirely.
     """
     return service.cancel_trade(db, trade_id)

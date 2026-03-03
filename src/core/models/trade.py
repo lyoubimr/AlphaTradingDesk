@@ -96,7 +96,10 @@ class Trade(Base):
             "direction IN ('long', 'short')", name="ck_trades_direction"
         ),
         CheckConstraint(
-            "status IN ('open', 'partial', 'closed', 'cancelled')", name="ck_trades_status"
+            "status IN ('pending', 'open', 'partial', 'closed', 'cancelled')", name="ck_trades_status"
+        ),
+        CheckConstraint(
+            "order_type IN ('MARKET', 'LIMIT')", name="ck_trades_order_type"
         ),
         CheckConstraint("risk_amount > 0", name="ck_trades_risk_amount_positive"),
         CheckConstraint("potential_profit > 0", name="ck_trades_potential_profit_positive"),
@@ -153,7 +156,13 @@ class Trade(Base):
     potential_profit: Mapped[Decimal] = mapped_column(Numeric(20, 2), nullable=False)
     current_risk: Mapped[Decimal | None] = mapped_column(Numeric(20, 2))
 
-    # Trade status
+    # Order type + Trade status
+    order_type: Mapped[str] = mapped_column(String(10), nullable=False, default="MARKET")
+    # pending = LIMIT order placed but not yet triggered (no capital reserved)
+    # open    = trade active (capital-risk reserved)
+    # partial = one or more TPs hit, at least one position still open
+    # closed  = all positions closed, PnL finalised, capital updated
+    # cancelled = LIMIT order cancelled before it triggered (no capital impact)
     status: Mapped[str] = mapped_column(String(50), nullable=False, default="open")
     realized_pnl: Mapped[Decimal | None] = mapped_column(Numeric(20, 2))
 

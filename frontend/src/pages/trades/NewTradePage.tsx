@@ -898,6 +898,7 @@ export function NewTradePage() {
         instrument_id:      instrument.id,
         pair:               instrument.symbol,
         direction:          direction.toLowerCase() as 'long' | 'short',
+        order_type:         orderType,
         asset_class:        instrument.asset_class,
         analyzed_timeframe: timeframe || null,
         entry_price:        entry,

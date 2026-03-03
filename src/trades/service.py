@@ -277,6 +277,7 @@ def open_trade(db: Session, data: TradeOpen) -> TradeOut:
         strategy_id=data.strategy_id,
         pair=data.pair,
         direction=data.direction,
+        order_type=data.order_type,
         asset_class=(
             data.asset_class
             or (instrument.asset_class if instrument else None)
@@ -288,8 +289,10 @@ def open_trade(db: Session, data: TradeOpen) -> TradeOut:
         nb_take_profits=len(data.positions),
         risk_amount=risk_amount,
         potential_profit=potential_profit,
-        current_risk=risk_amount,   # at open, full risk is in play
-        status="open",
+        # LIMIT orders start as 'pending' — no capital-risk reserved yet.
+        # MARKET orders start as 'open'   — full risk reserved immediately.
+        status="pending" if data.order_type == "LIMIT" else "open",
+        current_risk=Decimal("0.00") if data.order_type == "LIMIT" else risk_amount,
         session_tag=data.session_tag,
         notes=data.notes,
         confidence_score=data.confidence_score,
@@ -483,22 +486,62 @@ def full_close(db: Session, trade_id: int, data: TradeClose) -> Trade:
     return trade
 
 
-def cancel_trade(db: Session, trade_id: int) -> Trade:
+def activate_trade(db: Session, trade_id: int) -> Trade:
     """
-    Cancel an open limit order.
+    Activate a pending LIMIT order — marks it as triggered by the market.
+
+    Transition: pending → open
+
+    Effects:
+    - trade.status = 'open'
+    - trade.current_risk is set to trade.risk_amount
+      (capital-risk is reserved NOW, not at order placement)
 
     Rules:
-    - Only 'open' trades can be cancelled (a partial already has real fills).
+    - Only 'pending' trades can be activated.
+    - MARKET trades are already 'open' from creation — this endpoint is LIMIT-only.
+    - No capital or WR stats are changed here (that happens on full_close).
+    """
+    trade = _get_trade_or_404(db, trade_id)
+
+    if trade.status != "pending":
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                f"Only 'pending' LIMIT orders can be activated. "
+                f"Current status: '{trade.status}'."
+            ),
+        )
+
+    trade.status = "open"
+    trade.current_risk = trade.risk_amount  # risk is now live
+
+    db.commit()
+    db.refresh(trade)
+    return trade
+
+
+def cancel_trade(db: Session, trade_id: int) -> Trade:
+    """
+    Cancel a pending LIMIT order.
+
+    Rules:
+    - Only 'pending' trades can be cancelled.
+      (An 'open' trade already has real fills → use full_close instead.)
     - Sets status = 'cancelled', current_risk = 0.
     - Does NOT update profile.capital_current or any WR counters.
     - Trade is kept as a journal record (not deleted).
     """
     trade = _get_trade_or_404(db, trade_id)
 
-    if trade.status != "open":
+    if trade.status != "pending":
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"Only 'open' trades can be cancelled. Current status: {trade.status}.",
+            detail=(
+                f"Only 'pending' LIMIT orders can be cancelled. "
+                f"Current status: '{trade.status}'. "
+                f"If the trade is 'open', close it via the close endpoint."
+            ),
         )
 
     trade.status = "cancelled"

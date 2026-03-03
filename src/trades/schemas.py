@@ -20,7 +20,8 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 Direction = Literal["long", "short", "LONG", "SHORT"]
-TradeStatus = Literal["open", "partial", "closed", "cancelled"]
+OrderType = Literal["MARKET", "LIMIT"]
+TradeStatus = Literal["pending", "open", "partial", "closed", "cancelled"]
 Period = Literal["daily", "weekly", "monthly"]
 
 
@@ -66,6 +67,7 @@ class TradeOpen(BaseModel):
     instrument_id: int | None = None    # None → free-text pair allowed
     pair: str = Field(..., min_length=1, max_length=20)
     direction: Direction
+    order_type: OrderType = "MARKET"    # MARKET → opens as 'open'; LIMIT → opens as 'pending'
     asset_class: str | None = Field(default=None, max_length=50)
     analyzed_timeframe: str | None = Field(default=None, max_length=10)
 
@@ -183,6 +185,7 @@ class TradeOut(BaseModel):
     strategy_id: int | None
     pair: str
     direction: str
+    order_type: str
     asset_class: str | None
     analyzed_timeframe: str | None
     entry_price: Decimal
@@ -215,6 +218,7 @@ class TradeListItem(BaseModel):
     profile_id: int
     pair: str
     direction: str
+    order_type: str
     entry_price: Decimal
     entry_date: datetime
     stop_loss: Decimal

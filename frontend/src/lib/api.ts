@@ -121,6 +121,9 @@ export const tradesApi = {
   cancel: (tradeId: number): Promise<TradeOut> =>
     request(`/trades/${tradeId}/cancel`, { method: 'POST' }),
 
+  activate: (tradeId: number): Promise<TradeOut> =>
+    request(`/trades/${tradeId}/activate`, { method: 'POST' }),
+
   delete: (tradeId: number): Promise<void> =>
     request(`/trades/${tradeId}`, { method: 'DELETE' }),
 }
