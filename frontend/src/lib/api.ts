@@ -3,7 +3,7 @@
 // Base URL: Vite proxy rewrites /api/* → backend:8000/*
 // Never use fetch() directly in components — always use this module.
 
-import type { Profile, ProfileCreate, ProfileUpdate, Broker, Instrument, TradeOpen, TradeClose, TradePartialClose, TradeListItem, TradeOut, Strategy, StrategyCreate, WinRateStats } from '../types/api'
+import type { Profile, ProfileCreate, ProfileUpdate, Broker, Instrument, TradeOpen, TradeClose, TradePartialClose, TradeUpdate, TradeListItem, TradeOut, Strategy, StrategyCreate, WinRateStats, TradingStyle, GoalOut, GoalCreate, GoalUpdate, GoalProgressItem } from '../types/api'
 
 const BASE = '/api'
 
@@ -124,6 +124,15 @@ export const tradesApi = {
   activate: (tradeId: number): Promise<TradeOut> =>
     request(`/trades/${tradeId}/activate`, { method: 'POST' }),
 
+  update: (tradeId: number, data: TradeUpdate): Promise<TradeOut> =>
+    request(`/trades/${tradeId}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+
+  breakeven: (tradeId: number): Promise<TradeOut> =>
+    request(`/trades/${tradeId}/breakeven`, { method: 'POST' }),
+
   delete: (tradeId: number): Promise<void> =>
     request(`/trades/${tradeId}`, { method: 'DELETE' }),
 }
@@ -141,4 +150,33 @@ export const statsApi = {
     const qs = profileId != null ? `?profile_id=${profileId}` : ''
     return request(`/stats/winrate${qs}`)
   },
+}
+
+// ── Trading Styles ────────────────────────────────────────────────────────
+
+export const stylesApi = {
+  list: (): Promise<TradingStyle[]> =>
+    request('/trading-styles'),
+}
+
+// ── Goals ─────────────────────────────────────────────────────────────────
+
+export const goalsApi = {
+  list: (profileId: number): Promise<GoalOut[]> =>
+    request(`/profiles/${profileId}/goals`),
+
+  create: (profileId: number, data: GoalCreate): Promise<GoalOut> =>
+    request(`/profiles/${profileId}/goals`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  update: (profileId: number, styleId: number, period: string, data: GoalUpdate): Promise<GoalOut> =>
+    request(`/profiles/${profileId}/goals/${styleId}/${period}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+
+  progress: (profileId: number): Promise<GoalProgressItem[]> =>
+    request(`/profiles/${profileId}/goals/progress`),
 }

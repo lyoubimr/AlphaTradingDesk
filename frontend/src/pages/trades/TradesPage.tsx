@@ -37,14 +37,20 @@ function deriveKPIs(trades: TradeListItem[]) {
   const winRate  = closed.length >= 5
     ? `${((wins.length / closed.length) * 100).toFixed(1)}%`
     : '—'
-  const totalPnl = closed.reduce((acc, t) => acc + parseFloat(t.realized_pnl ?? '0'), 0)
+  // Total P&L = sum of realized_pnl (closed) + booked_pnl (partial positions already taken)
+  const totalPnl = trades.reduce((acc, t) => {
+    if (t.status === 'closed') return acc + parseFloat(t.realized_pnl ?? '0')
+    if (t.booked_pnl) return acc + parseFloat(t.booked_pnl)
+    return acc
+  }, 0)
+  const hasPnl = closed.length > 0 || trades.some((t) => t.booked_pnl)
   const sign = totalPnl >= 0 ? '+' : ''
   return {
     total:       trades.length,
     openCount:   openList.length,
     winRate,
     winRateSub:  closed.length < 5 ? 'Min 5 closed trades' : `${wins.length}/${closed.length} wins`,
-    totalPnl:    closed.length > 0 ? `${sign}$${totalPnl.toFixed(2)}` : '—',
+    totalPnl:    hasPnl ? `${sign}$${totalPnl.toFixed(2)}` : '—',
     totalPnlPos: totalPnl >= 0,
   }
 }
@@ -247,7 +253,9 @@ export function TradesPage() {
                 </thead>
                 <tbody>
                   {trades.map((t) => {
-                    const pnlNum         = t.realized_pnl ? parseFloat(t.realized_pnl) : null
+                    const pnlNum         = t.realized_pnl ? parseFloat(t.realized_pnl)
+                                         : t.booked_pnl   ? parseFloat(t.booked_pnl)
+                                         : null
                     const isBull         = pnlNum !== null && pnlNum > 0
                     const isBear         = pnlNum !== null && pnlNum < 0
                     const isActivatable  = t.status === 'pending'
@@ -259,7 +267,8 @@ export function TradesPage() {
                     return (
                       <tr
                         key={t.id}
-                        className={`border-b border-surface-700/50 transition-colors ${
+                        onClick={() => navigate(`/trades/${t.id}`)}
+                        className={`border-b border-surface-700/50 transition-colors cursor-pointer ${
                           isDimmed
                             ? 'opacity-40 hover:opacity-60'
                             : 'hover:bg-surface-700/30'
@@ -275,7 +284,12 @@ export function TradesPage() {
                         </td>
 
                         {/* Pair */}
-                        <td className="px-4 py-2.5 text-slate-200 font-medium">{t.pair}</td>
+                        <td className="px-4 py-2.5 font-medium">
+                          <span className="text-slate-200">{t.instrument_display_name ?? t.pair}</span>
+                          {t.instrument_display_name && (
+                            <span className="ml-1.5 text-[10px] text-slate-600 font-mono">{t.pair}</span>
+                          )}
+                        </td>
 
                         {/* Direction */}
                         <td className="px-4 py-2.5">
@@ -315,6 +329,10 @@ export function TradesPage() {
                           {pnlNum !== null ? (
                             <span className={isBull ? 'text-green-400' : isBear ? 'text-red-400' : 'text-slate-400'}>
                               {isBull ? '+' : ''}{pnlNum.toFixed(2)}
+                              {/* Show TP marker for partial booked P&L */}
+                              {!t.realized_pnl && t.booked_pnl && (
+                                <span className="ml-1 text-[9px] text-slate-500">partial</span>
+                              )}
                             </span>
                           ) : t.status === 'cancelled' ? (
                             <span className="text-slate-700">—</span>
@@ -324,7 +342,7 @@ export function TradesPage() {
                         </td>
 
                         {/* Actions */}
-                        <td className="px-4 py-2.5">
+                        <td className="px-4 py-2.5" onClick={(e) => e.stopPropagation()}>
                           <div className="flex items-center gap-1.5">
                             {/* Activate — pending LIMIT only */}
                             {isActivatable && (

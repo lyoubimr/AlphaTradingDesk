@@ -1,7 +1,25 @@
-// ── /trades/new — v6 ─────────────────────────────────────────────────────
+// ── /trades/new — v7 ─────────────────────────────────────────────────────
 // Fixed Fractional · multi-TP presets · SL validation · Strategy dropdown
-// Crypto: safe margin (MMR-aware) + estimated liquidation price
+// Crypto: practical margin ↔ leverage (bidirectional) + liquidation price
 // CFD: notional margin + margin level % + margin call warning
+//
+// ── Crypto margin/leverage logic ─────────────────────────────────────────
+// Practical margin proposal: 2 × risk_amount
+//   → always affordable (risk_amount ≤ capital × risk%), well above SL
+//   → avoids the "safe margin > capital" problem of the MMR formula
+//
+// Derived leverage: notional / margin
+//   notional = lot_size × entry_price
+//   leverage = notional / margin  (capped at instrument max_leverage)
+//
+// Bidirectional binding:
+//   • User edits MARGIN  → leverage auto-recalculated
+//   • User moves LEVERAGE slider → margin auto-recalculated
+//   • Recalculation is "soft" — values update but neither field is locked
+//
+// Liq. price (isolated): entry × (1 − 1/leverage + MMR)  [LONG]
+//                         entry × (1 + 1/leverage − MMR)  [SHORT]
+// Warning shown when liq price crosses SL.
 
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import type React from 'react'
@@ -568,15 +586,27 @@ function ExpectancyPanel({ calc, totalProfit, pctValid, selectedStrategy, active
           <p className={cn('text-2xl font-mono font-bold leading-tight', grade.text)}>
             {expectancyR >= 0 ? '+' : ''}{expectancyR.toFixed(2)}R
           </p>
-          <p className="text-[10px] text-slate-500 leading-tight">
-            {expectancyEur >= 0 ? '+' : ''}{fmt(expectancyEur)} {ccy} per trade avg
+          <p className="text-[10px] text-slate-400 leading-tight font-mono">
+            {expectancyEur >= 0 ? '+' : ''}{fmt(expectancyEur)} {ccy} / trade
+          </p>
+          <p className="text-[9px] text-slate-600 leading-tight mt-0.5">
+            1R = {fmt(riskAmt)} {ccy} risked
           </p>
         </div>
       </div>
 
       {/* ── Formula breakdown ─────────────────────────────────────────── */}
       <div className="rounded-lg bg-surface-800/70 px-3 py-2.5 space-y-1.5 border border-surface-700/50">
-        <p className="text-[9px] text-slate-600 uppercase tracking-wider font-medium mb-1">
+        {/* What is "R" — brief explainer */}
+        <div className="flex items-start gap-1.5 pb-1.5 border-b border-surface-700/40">
+          <span className="text-amber-400 text-[10px] font-bold leading-tight mt-px">R</span>
+          <p className="text-[10px] text-slate-500 leading-relaxed">
+            <span className="text-amber-400 font-semibold">1R = {fmt(riskAmt)} {ccy}</span> — your exact risk on this trade.
+            {' '}R is universal: +1.64R means <em>"for every $1 you risk, you expect +$1.64 back on average"</em>
+            {' '}— independent of account size or risk %.
+          </p>
+        </div>
+        <p className="text-[9px] text-slate-600 uppercase tracking-wider font-medium pt-0.5">
           How it's calculated
         </p>
         <div className="flex items-center gap-1.5 text-[11px] font-mono flex-wrap">
@@ -589,6 +619,10 @@ function ExpectancyPanel({ calc, totalProfit, pctValid, selectedStrategy, active
           <span className="text-slate-500">=</span>
           <span className={cn('font-bold', grade.text)}>
             {expectancyR >= 0 ? '+' : ''}{expectancyR.toFixed(2)}R
+          </span>
+          <span className="text-slate-600">≈</span>
+          <span className={cn('font-bold text-[10px]', grade.text)}>
+            {expectancyEur >= 0 ? '+' : ''}{fmt(expectancyEur)} {ccy}
           </span>
         </div>
         <div className="grid grid-cols-3 gap-1.5 pt-1">
@@ -603,7 +637,7 @@ function ExpectancyPanel({ calc, totalProfit, pctValid, selectedStrategy, active
             <span className="text-slate-600">Avg win (R)</span>
             <p className="text-emerald-400 font-semibold">{avgWinR.toFixed(2)}R</p>
             <p className="text-[9px] text-slate-600 leading-tight mt-0.5">
-              +{fmt(totalProfit)} {ccy} ÷ {fmt(riskAmt)} {ccy}
+              +{fmt(totalProfit)} ÷ {fmt(riskAmt)} {ccy}
             </p>
           </div>
           <div className="text-[10px]">
@@ -670,8 +704,15 @@ export function NewTradePage() {
   const [riskSyncDir, setRiskSyncDir] = useState<'pct' | 'amt'>('pct')
 
   // Leverage & margin — Crypto profiles only
+  // lastEdit tracks which field the user touched last so the *other* field
+  // is auto-derived.  'leverage' = slider/button drove last change;
+  // 'margin' = user typed in the margin input.
   const [leverage, setLeverage]             = useState('1')
-  const [marginOverride, setMarginOverride] = useState<string>('')
+  const [marginInput, setMarginInput]       = useState<string>('')    // raw user margin input
+  const [lastEdit, setLastEdit]             = useState<'leverage' | 'margin'>('margin')
+  // Safety buffer sur la marge proposée (fees + slippage). Configurable par l'user.
+  // Valeurs typiques : 10% (tight), 20% (standard), 30% (conservative)
+  const [safetyBuffer, setSafetyBuffer]     = useState(0.20)
 
   const [timeframe, setTimeframe]   = useState('')
   const [confidence, setConfidence] = useState('')
@@ -731,13 +772,21 @@ export function NewTradePage() {
     setConfidence('')
     setTradeTags([])
     setNotes('')
+    setMarginInput('')
+    setLastEdit('margin')  // par défaut : marge proposée drive le levier
   }, [activeProfile?.id])
 
-  // ── Auto-set leverage to instrument max (Crypto only) ─────────────────────
+  // ── Quand l'instrument change (Crypto) : reset vers marge proposée ───────
+  // On NE pré-remplit PAS avec max_leverage — le slider se calera automatiquement
+  // sur proposedLeverage dès que entry + SL + risk sont renseignés.
+  // On passe en mode lastEdit='margin' avec marginInput='' (= marge proposée active).
   useEffect(() => {
     if (!isCrypto) return
+    setMarginInput('')
+    setLastEdit('margin')
+    // Leverage state = max_leverage pour la borne du slider,
+    // mais l'affichage réel sera effectiveLeverage = proposedLeverage.
     setLeverage(instrument?.max_leverage ? String(instrument.max_leverage) : '1')
-    setMarginOverride('')
   }, [instrument, isCrypto])
 
   // ── Numerics ──────────────────────────────────────────────────────────────
@@ -780,85 +829,178 @@ export function NewTradePage() {
   // ── Margin & liquidation ──────────────────────────────────────────────────
   //
   // ┌─ CRYPTO (isolated futures — Binance/Bybit style) ──────────────────────┐
-  // │  MMR = 0.5% (maintenance margin rate, tier-1 standard)                 │
-  // │  Safe margin = risk_amount / (SL_dist% - MMR)                          │
-  // │    → guarantees liquidation CANNOT happen before SL hits               │
-  // │  Liquidation price (LONG)  = entry × (1 - 1/leverage + MMR)            │
-  // │  Liquidation price (SHORT) = entry × (1 + 1/leverage - MMR)            │
+  // │                                                                        │
+  // │  PROPOSED MARGIN formula (from risk-first approach):                  │
+  // │                                                                        │
+  // │    margin = 2 × risk_amount × (1 + SAFETY_BUFFER)                     │
+  // │                                                                        │
+  // │    - ×2    : garantit que la liq est environ 2× plus loin que le SL   │
+  // │    - ×1.20 : buffer 20% pour absorber fees + slippage SL              │
+  // │                                                                        │
+  // │    Ex: risk=10$, entry=64465, SL=62451 (3.12%)                        │
+  // │      margin = 2 × 10 × 1.20 = 24$                                     │
+  // │                                                                        │
+  // │  LEVERAGE DÉDUIT de la marge proposée:                                │
+  // │                                                                        │
+  // │    L = risk / (margin × SL_pct)                                       │
+  // │                                                                        │
+  // │    Preuve : PnL_si_SL_hit = margin × L × SL_pct = risk_amount         │
+  // │    → L = risk / (margin × SL_pct)                                     │
+  // │                                                                        │
+  // │    Ex: L = 10 / (24 × 0.0312) = 10 / 0.749 ≈ 13.4 → arrondi à 13    │
+  // │                                                                        │
+  // │  BIDIRECTIONNEL:                                                       │
+  // │    lastEdit='margin'   → leverage dérivé via la formule ci-dessus     │
+  // │    lastEdit='leverage' → margin dérivée via notional / leverage        │
+  // │                                                                        │
+  // │  Liquidation (LONG)  = entry × (1 − 1/L + MMR)                        │
+  // │  Liquidation (SHORT) = entry × (1 + 1/L − MMR)                        │
   // └────────────────────────────────────────────────────────────────────────┘
   //
   // ┌─ CFD (retail broker — IG, XM, OANDA style) ────────────────────────────┐
-  // │  Required margin = notional / leverage                                  │
-  // │    notional = lot_size × contract_size × entry                          │
-  // │    contract_size defaults to 1 (instruments table stores pip/lot values)│
-  // │  Maintenance margin = 50% of required (ESMA standard)                  │
-  // │  Margin level % = equity / used_margin × 100                           │
-  // │    equity ≈ capital (before trade opens)                                │
-  // │  Margin call warning when margin level < 150% (broker usually at 100%) │
+  // │  Le trader ne choisit pas la marge — il choisit les LOTS.             │
+  // │  Le broker verrouille la marge automatiquement.                       │
+  // │  Marge estimée = notional / broker_leverage                           │
+  // │    notional = lot_size × entry_price                                  │
+  // │  Maintenance margin = 50% de la marge (norme ESMA)                   │
+  // │  Margin level = capital / marge × 100  (avertissement si < 150%)     │
   // └────────────────────────────────────────────────────────────────────────┘
 
-  const CRYPTO_MMR = 0.005 // 0.5% — standard tier-1 maintenance margin rate
+  const CRYPTO_MMR = 0.005  // 0.5% — maintenance margin rate tier-1 standard
+  // MARGIN_SAFETY_BUFFER est maintenant l'état `safetyBuffer` (configurable dans l'UI)
 
-  const marginCalculated = useMemo((): number | null => {
-    if (!calc.valid || calc.lot_size == null || entryNum == null) return null
+  // ── Notional value ────────────────────────────────────────────────────────
+  // = lot_size × entry_price  (contract_size = 1 pour tous les instruments Phase 1)
+  const notional = useMemo((): number | null => {
+    if (!isCrypto || calc.lot_size == null || entryNum == null) return null
+    return calc.lot_size * entryNum
+  }, [isCrypto, calc.lot_size, entryNum])
 
-    if (isCrypto) {
-      // Safe margin: must be large enough so liquidation price > SL
-      // Formula: risk / (SL_dist% - MMR)
-      // Guard: if SL distance % ≤ MMR the formula is undefined (impossible trade)
-      if (slDistancePct == null || slDistancePct / 100 <= CRYPTO_MMR) return null
-      const riskAmt = calc.risk_amount ?? 0
-      return riskAmt / (slDistancePct / 100 - CRYPTO_MMR)
+  // ── Proposed margin (default quand l'utilisateur n'a rien tapé) ───────────
+  //   margin = 2 × risk × (1 + SAFETY_BUFFER)
+  //   → ×2 : liq ~2× au-delà du SL
+  //   → ×1.20 : buffer fees/slippage
+  const proposedMargin = useMemo((): number | null => {
+    if (!isCrypto || calc.risk_amount == null) return null
+    return calc.risk_amount * 2 * (1 + safetyBuffer)
+  }, [isCrypto, calc.risk_amount, safetyBuffer])
+
+  // ── Proposed leverage (déduit de la marge proposée) ──────────────────────
+  //   L = risk / (margin × SL_pct)
+  //   → formule exacte : PnL_si_SL = margin × L × SL_pct = risk
+  const proposedLeverage = useMemo((): number | null => {
+    if (!isCrypto || calc.risk_amount == null || proposedMargin == null) return null
+    if (slDistancePct == null || slDistancePct <= 0) return null
+    const slPct = slDistancePct / 100
+    const raw = calc.risk_amount / (proposedMargin * slPct)
+    // Arrondi à l'entier, borné entre 1 et maxLeverage
+    return Math.max(1, Math.min(maxLeverage, Math.round(raw)))
+  }, [isCrypto, calc.risk_amount, proposedMargin, slDistancePct, maxLeverage])
+
+  // ── Effective margin (valeur réellement utilisée) ─────────────────────────
+  // • User a tapé dans le champ margin → on utilise ça
+  // • Sinon → proposedMargin
+  const effectiveMargin = useMemo((): number | null => {
+    if (!isCrypto) return null
+    if (marginInput !== '' && Number(marginInput) > 0) return Number(marginInput)
+    return proposedMargin
+  }, [isCrypto, marginInput, proposedMargin])
+
+  // ── Effective leverage ─────────────────────────────────────────────────────
+  // • lastEdit='leverage' → slider/bouton → leverageNum (saisi directement)
+  // • lastEdit='margin'   → dérivé: L = risk / (margin × SL_pct)
+  //   Si marginInput='' (marge proposée active), on utilise proposedLeverage directement.
+  //   Si l'utilisateur a tapé une marge, on recalcule via la formule.
+  const effectiveLeverage = useMemo((): number => {
+    if (!isCrypto) return 1
+
+    if (lastEdit === 'margin') {
+      // Cas 1 : marge proposée active (user n'a rien tapé)
+      if (marginInput === '' && proposedLeverage != null) {
+        return proposedLeverage
+      }
+      // Cas 2 : user a tapé une marge → L = risk / (margin × SL_pct)
+      if (effectiveMargin != null && effectiveMargin > 0) {
+        if (calc.risk_amount != null && slDistancePct != null && slDistancePct > 0) {
+          const slPct = slDistancePct / 100
+          const derived = calc.risk_amount / (effectiveMargin * slPct)
+          return Math.max(1, Math.min(maxLeverage, Math.round(derived)))
+        }
+        // Fallback si SL pas encore renseigné: notional / margin
+        if (notional != null) {
+          const derived = notional / effectiveMargin
+          return Math.max(1, Math.min(maxLeverage, Math.round(derived)))
+        }
+      }
     }
 
-    if (isCFD) {
-      // Standard CFD: notional / leverage  (leverage is always ≥ 1 from instrument)
-      // For CFD profiles leverageNum is always 1 from our flag — but the instrument
-      // carries its own max_leverage we use as the "broker leverage" for this calc.
-      const brokerLeverage = instrument?.max_leverage ?? 1
-      const notional = calc.lot_size * entryNum // lot × price (contract_size = 1)
-      return notional / brokerLeverage
-    }
+    // lastEdit='leverage' → valeur directe du slider
+    return leverageNum
+  }, [isCrypto, lastEdit, marginInput, proposedLeverage, effectiveMargin, calc.risk_amount, slDistancePct, notional, leverageNum, maxLeverage])
 
-    return null
-  }, [isCrypto, isCFD, calc, entryNum, slDistancePct, instrument?.max_leverage])
+  // ── Displayed margin in the input field ───────────────────────────────────
+  // • lastEdit='leverage' → margin dérivée via notional / leverage
+  // • lastEdit='margin'   → ce que l'utilisateur a tapé (ou proposedMargin si vide)
+  const derivedMarginFromLeverage = useMemo((): number | null => {
+    if (!isCrypto || notional == null || effectiveLeverage <= 0) return null
+    return notional / effectiveLeverage
+  }, [isCrypto, notional, effectiveLeverage])
 
-  // Estimated liquidation price (Crypto only — math is exact for isolated margin)
+  const displayedMargin = useMemo((): number | null => {
+    if (!isCrypto) return null
+    if (lastEdit === 'leverage') return derivedMarginFromLeverage
+    if (marginInput !== '' && Number(marginInput) > 0) return Number(marginInput)
+    return proposedMargin
+  }, [isCrypto, lastEdit, derivedMarginFromLeverage, marginInput, proposedMargin])
+
+  // Estimated liquidation price (Crypto only — isolated margin formula)
   const liqPrice = useMemo((): number | null => {
-    if (!isCrypto || entryNum == null || leverageNum <= 1) return null
+    if (!isCrypto || entryNum == null || effectiveLeverage <= 1) return null
     if (direction === 'LONG')
-      return entryNum * (1 - 1 / leverageNum + CRYPTO_MMR)
-    return entryNum * (1 + 1 / leverageNum - CRYPTO_MMR)
-  }, [isCrypto, entryNum, leverageNum, direction])
+      return entryNum * (1 - 1 / effectiveLeverage + CRYPTO_MMR)
+    return entryNum * (1 + 1 / effectiveLeverage - CRYPTO_MMR)
+  }, [isCrypto, entryNum, effectiveLeverage, direction])
 
   // Safety check: liq price must be on the other side of SL
-  // LONG:  liqPrice < slNum  → OK, SHORT: liqPrice > slNum → OK
   const liqBeforeSl = useMemo((): boolean => {
     if (!isCrypto || liqPrice == null || slNum == null) return false
     if (direction === 'LONG')  return liqPrice >= slNum   // liq ≥ SL → danger
     return liqPrice <= slNum                               // liq ≤ SL → danger
   }, [isCrypto, liqPrice, slNum, direction])
 
-  // CFD: maintenance margin (50% of required) and margin level
+  // Margin vs. capital health indicators
+  const marginVsCapital = useMemo((): 'ok' | 'high' | 'exceeds' | null => {
+    if (!isCrypto || displayedMargin == null || capital == null) return null
+    if (displayedMargin > capital)         return 'exceeds'
+    if (displayedMargin > capital * 0.3)   return 'high'
+    return 'ok'
+  }, [isCrypto, displayedMargin, capital])
+
+  // ── CFD margin ────────────────────────────────────────────────────────────
+  const marginCalculated = useMemo((): number | null => {
+    if (!isCFD) return null
+    if (calc.lot_size == null || entryNum == null) return null
+    const brokerLeverage = instrument?.max_leverage ?? 1
+    const cfNotional = calc.lot_size * entryNum
+    return cfNotional / brokerLeverage
+  }, [isCFD, calc.lot_size, entryNum, instrument?.max_leverage])
+
   const cfdMaintenanceMargin = isCFD && marginCalculated != null
     ? marginCalculated * 0.5 : null
   const cfdMarginLevel = isCFD && marginCalculated != null && capital != null && marginCalculated > 0
     ? (capital / marginCalculated) * 100 : null
-  // Warn when margin level < 150% (comfortable buffer above typical 100% margin call)
   const cfdMarginCallRisk = cfdMarginLevel != null && cfdMarginLevel < 150
 
-  // ── Crypto: broker-required margin = notional / leverage ─────────────────
-  // This is what the exchange actually locks — it changes with leverage.
-  // Distinct from safe margin (risk / (SL% - MMR)) which is the recommended
-  // collateral to avoid liquidation before SL.
-  const cryptoMarginRequired = useMemo((): number | null => {
-    if (!isCrypto || calc.lot_size == null || entryNum == null || leverageNum <= 0) return null
-    return (calc.lot_size * entryNum) / leverageNum
-  }, [isCrypto, calc.lot_size, entryNum, leverageNum])
+  // marginDisplay (CFD) — for the informational block
+  const marginDisplay = marginCalculated
 
-  // marginDisplay = safe margin for the input field (user can override)
-  const marginDisplay = marginOverride !== '' ? Number(marginOverride) : marginCalculated
-  // For the "MARGIN REQ." pill: broker-required (Crypto) or notional/leverage (CFD)
+  // ── Pill display for Crypto ───────────────────────────────────────────────
+  // Show the broker-required margin (notional / effective leverage) in the pill
+  const cryptoMarginRequired = useMemo((): number | null => {
+    if (!isCrypto || notional == null || effectiveLeverage <= 0) return null
+    return notional / effectiveLeverage
+  }, [isCrypto, notional, effectiveLeverage])
+
   const marginPillValue = isCrypto ? cryptoMarginRequired : marginDisplay
   const marginIsHigh  = marginPillValue != null && capital != null && marginPillValue > capital * 0.5
 
@@ -1154,22 +1296,31 @@ export function NewTradePage() {
           {isCrypto && (
             <div className="grid grid-cols-2 gap-3">
               <Field
-                label={<>Leverage <Tip text={`Max: ×${maxLeverage}. ×1 = spot (no leverage). Lower = less liquidation risk.`} /></>}
+                label={<>Leverage <Tip text={`Max: ×${maxLeverage}. ×1 = spot (no leverage). Changing leverage auto-recalculates margin. Changing margin auto-derives leverage.`} /></>}
                 hint={`Instrument max: ×${maxLeverage}`}>
                 <div className="space-y-2">
                   <div className="flex items-center gap-3">
-                    <span className="text-brand-300 text-sm font-mono font-bold w-12 shrink-0 text-right">×{leverageNum}</span>
-                    <input type="range" min="1" max={maxLeverage} step="1" value={leverage}
-                      onChange={(e) => { setLeverage(e.target.value); setMarginOverride('') }}
+                    <span className="text-brand-300 text-sm font-mono font-bold w-12 shrink-0 text-right">×{effectiveLeverage}</span>
+                    <input type="range" min="1" max={maxLeverage} step="1" value={effectiveLeverage}
+                      onChange={(e) => {
+                        setLeverage(e.target.value)
+                        setLastEdit('leverage')
+                        // clear margin input so derivation runs from leverage
+                        setMarginInput('')
+                      }}
                       className="flex-1 accent-brand-500 cursor-pointer" />
                     <span className="text-[10px] text-slate-600 w-8 shrink-0">×{maxLeverage}</span>
                   </div>
                   <div className="flex gap-1 flex-wrap">
                     {[1, 2, 5, 10, 20, 50, 100].filter((v) => v <= maxLeverage).map((v) => (
                       <button key={v} type="button"
-                        onClick={() => { setLeverage(String(v)); setMarginOverride('') }}
+                        onClick={() => {
+                          setLeverage(String(v))
+                          setLastEdit('leverage')
+                          setMarginInput('')
+                        }}
                         className={cn('px-2 py-0.5 rounded text-[10px] font-mono border transition-all',
-                          leverageNum === v
+                          effectiveLeverage === v
                             ? 'bg-brand-600/20 border-brand-500/50 text-brand-300'
                             : 'bg-surface-700 border-surface-600 text-slate-500 hover:text-slate-300')}>
                         ×{v}
@@ -1179,29 +1330,86 @@ export function NewTradePage() {
                 </div>
               </Field>
               <Field
-                label={<>Safe margin ({ccy}) <Tip text={`Collateral minimum à déposer pour que ta liquidation reste APRÈS ton SL.\n\nFormule : risk_amount ÷ (SL% − MMR)\nMMR = 0.5% (maintenance margin rate tier-1 standard).\n\nSi cette valeur dépasse ton capital → monte le levier ou réduis le risque %.`} /></>}
-                hint={marginCalculated != null && capital != null
-                  ? (() => {
-                      const pct = (marginCalculated / capital) * 100
-                      return `${fmt(pct, 1)}% of capital${pct > 100 ? ' ⚠ exceeds capital' : pct > 50 ? ' — high' : ''}`
-                    })()
-                  : undefined}
-                hintClassName={marginCalculated != null && capital != null
-                  ? (marginCalculated > capital ? 'text-red-400' : marginCalculated > capital * 0.5 ? 'text-amber-400' : 'text-slate-500')
-                  : undefined}>
+                label={<>Margin — collateral ({ccy}) <Tip text={`Your margin = collateral you deposit to open the trade.\n\nThis is YOUR choice — you just need to deposit enough to cover the broker's minimum requirement (Margin Required = notional ÷ leverage).\n\nProposed formula:\nmargin = 2 × risk × (1 + buffer)\nbuffer = ${(safetyBuffer * 100).toFixed(0)}% (covers fees + slippage)\n\nDerived leverage:\nL = risk / (margin × SL%)\n→ if SL is hit, you lose exactly risk_amount\n\nEdit margin → leverage recalculated.\nEdit leverage → margin recalculated.`} /></>}
+                hint={(() => {
+                  if (displayedMargin == null || capital == null) return undefined
+                  const pct = (displayedMargin / capital) * 100
+                  if (marginVsCapital === 'exceeds') return `${fmt(pct, 1)}% of capital ⚠ exceeds capital`
+                  if (marginVsCapital === 'high')    return `${fmt(pct, 1)}% of capital — consider lower margin`
+                  return `${fmt(pct, 1)}% of capital`
+                })()}
+                hintClassName={
+                  marginVsCapital === 'exceeds' ? 'text-red-400'
+                  : marginVsCapital === 'high'  ? 'text-amber-400'
+                  : 'text-slate-500'
+                }>
                 <PriceInput
-                  value={marginOverride !== '' ? marginOverride : (marginCalculated != null ? String(marginCalculated.toFixed(2)) : '')}
-                  onChange={setMarginOverride} ccy={ccy}
-                  className={marginCalculated != null && capital != null && marginCalculated > capital ? 'border-red-500/50' : marginIsHigh ? 'border-amber-500/40' : ''}
-                  placeholder={marginCalculated != null ? fmt(marginCalculated, 2).replace(/,/g, '') : '—'} />
-                {/* Warning: safe margin > capital → trade impossible at this leverage/risk */}
-                {marginCalculated != null && capital != null && marginCalculated > capital && (
+                  value={marginInput !== ''
+                    ? marginInput
+                    : (displayedMargin != null ? String(displayedMargin.toFixed(2)) : '')}
+                  onChange={(v) => {
+                    setMarginInput(v)
+                    setLastEdit('margin')
+                    // Dérive le levier via L = risk / (margin × SL_pct) si SL connu
+                    if (v && Number(v) > 0) {
+                      if (calc.risk_amount != null && slDistancePct != null && slDistancePct > 0) {
+                        const slPct = slDistancePct / 100
+                        const derived = Math.max(1, Math.min(maxLeverage, Math.round(calc.risk_amount / (Number(v) * slPct))))
+                        setLeverage(String(derived))
+                      } else if (notional != null) {
+                        const derived = Math.max(1, Math.min(maxLeverage, Math.round(notional / Number(v))))
+                        setLeverage(String(derived))
+                      }
+                    }
+                  }}
+                  ccy={ccy}
+                  className={
+                    marginVsCapital === 'exceeds' ? 'border-red-500/50'
+                    : marginVsCapital === 'high'  ? 'border-amber-500/40'
+                    : ''
+                  }
+                  placeholder={
+                    proposedMargin != null
+                      ? fmt(proposedMargin, 2).replace(/,/g, '')
+                      : '—'
+                  }
+                />
+                {/* Formule + sélecteur de buffer — visible quand l'user n'a pas touché le champ */}
+                {marginInput === '' && proposedMargin != null && calc.risk_amount != null && (
+                  <div className="mt-1.5 space-y-1">
+                    <p className="text-[10px] text-slate-500 font-mono">
+                      2 × {fmt(calc.risk_amount, 2)} × {(1 + safetyBuffer).toFixed(2)} ={' '}
+                      <span className="text-brand-400">{fmt(proposedMargin, 2)} {ccy}</span>
+                      {proposedLeverage != null && slDistancePct != null && (
+                        <span className="text-slate-600 ml-1">→ ×{proposedLeverage}</span>
+                      )}
+                    </p>
+                    {/* Buffer configurable — fees/slippage cushion */}
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[9px] text-slate-600 uppercase tracking-wider">Buffer fees/slippage :</span>
+                      {([0.10, 0.20, 0.30, 0.40] as const).map((b) => (
+                        <button key={b} type="button"
+                          onClick={() => setSafetyBuffer(b)}
+                          className={cn(
+                            'px-1.5 py-0.5 rounded text-[10px] font-mono border transition-all',
+                            safetyBuffer === b
+                              ? 'bg-brand-600/20 border-brand-500/50 text-brand-300'
+                              : 'bg-surface-700 border-surface-600 text-slate-500 hover:text-slate-300',
+                          )}>
+                          +{(b * 100).toFixed(0)}%
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {/* Warning: margin > capital */}
+                {marginVsCapital === 'exceeds' && displayedMargin != null && capital != null && (
                   <p className="text-[10px] text-red-400 mt-1 flex items-center gap-1">
                     <AlertTriangle size={9} className="shrink-0" />
-                    Safe margin {fmt(marginCalculated, 2)} {ccy} &gt; capital {fmt(capital, 2)} {ccy} — monte le levier ou réduis le risque %
+                    Margin {fmt(displayedMargin, 2)} {ccy} &gt; capital — increase leverage or reduce risk %
                   </p>
                 )}
-                {/* Estimated liquidation price — small, below input */}
+                {/* Estimated liquidation price */}
                 {liqPrice != null && (
                   <p className={cn(
                     'text-[10px] font-mono mt-1 flex items-center gap-1',
@@ -1211,7 +1419,7 @@ export function NewTradePage() {
                       ? <AlertTriangle size={9} className="shrink-0" />
                       : <span className="text-slate-600">⚡</span>}
                     Liq. est. {fmt(liqPrice, 4)} {ccy}
-                    {liqBeforeSl && <span className="text-red-400/80"> — liq before SL! reduce leverage</span>}
+                    {liqBeforeSl && <span className="text-red-400/80"> — liq before SL! increase leverage (reduce margin)</span>}
                   </p>
                 )}
               </Field>
@@ -1278,9 +1486,14 @@ export function NewTradePage() {
                 sub={isCFD ? 'lots' : 'units'}
                 color={isCFD ? 'blue' : 'default'}
               />
-              {/* Crypto: margin required by the broker = notional / leverage → changes with leverage. */}
+              {/* Crypto: margin REQUIRED by the broker = notional / leverage. This is the minimum you must deposit. */}
               {isCrypto && marginPillValue != null && (
-                <CalcPill label="Margin req." value={`${fmt(marginPillValue)} ${ccy}`} sub={`at ×${leverageNum}`} color={marginIsHigh ? 'amber' : 'blue'} />
+                <CalcPill
+                  label="Margin required (broker)"
+                  value={`${fmt(marginPillValue)} ${ccy}`}
+                  sub={`notional ÷ ×${effectiveLeverage}`}
+                  color={marginIsHigh ? 'amber' : 'blue'}
+                />
               )}
             </div>
           )}
