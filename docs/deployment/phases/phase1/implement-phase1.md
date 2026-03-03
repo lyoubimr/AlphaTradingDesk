@@ -59,7 +59,31 @@
   (`take_profit_price`, `position_number`, lowercase direction, `entry_date: null`)
 - Improved API error handler: FastAPI 422 arrays are flattened to human-readable string
 
-**Trade Journal (TradesPage.tsx) — completed (2026-03-03):**
+**LIMIT order cycle de vie complet (2026-03-03):**
+
+Nouveau cycle de vie des trades :
+```
+MARKET: open → partial → closed
+LIMIT:  pending → open → partial → closed
+                ↘ cancelled  (jamais déclenché)
+```
+
+Règles :
+- `MARKET` → status = `open` à la création, `current_risk = risk_amount` réservé immédiatement
+- `LIMIT`  → status = `pending` à la création, `current_risk = 0` (aucun risque réservé)
+- `POST /api/trades/{id}/activate` → `pending → open`, réserve le risque à ce moment-là
+- `POST /api/trades/{id}/cancel`   → `pending → cancelled` uniquement (les trades `open` se closent normalement)
+
+Changements :
+- Migration `c45438781a38` : colonne `order_type VARCHAR(10)` + CHECK `IN ('MARKET','LIMIT')` + status `pending` ajouté + index `idx_trades_order_type`
+- `src/core/models/trade.py` — champ `order_type`, contraintes mises à jour
+- `src/trades/schemas.py` — `OrderType` Literal, `TradeStatus` inclut `pending`, `TradeOpen.order_type`, `TradeOut/TradeListItem.order_type`
+- `src/trades/service.py` — `open_trade` branch MARKET/LIMIT, `activate_trade()`, `cancel_trade()` restreint à `pending`
+- `src/trades/router.py` — `POST /api/trades/{id}/activate`
+- `frontend/src/types/api.ts` — `TradeOpen.order_type`, `TradeListItem.order_type + status pending`
+- `frontend/src/lib/api.ts` — `tradesApi.activate()`
+- `frontend/src/pages/trades/NewTradePage.tsx` — `order_type` inclus dans le payload
+- `frontend/src/pages/trades/TradesPage.tsx` — badge `⏳ Pending LIMIT`, bouton `Activate` (vert) + `Cancel` (rouge) sur les trades `pending`
 - Replaced fake sample data with real API calls (`tradesApi.list(profileId)`)
 - Live KPIs: total trades, open count, win rate (≥5 closed trades), total P&L
 - Status badges: Open (blue) / Partial (amber) / Closed (gray) / Cancelled (dimmed strikethrough)
