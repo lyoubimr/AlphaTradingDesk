@@ -14,6 +14,7 @@ import { PageHeader } from '../../components/ui/PageHeader'
 import { useProfile } from '../../context/ProfileContext'
 import { instrumentsApi, tradesApi, strategiesApi } from '../../lib/api'
 import { useRiskCalc } from '../../hooks/useRiskCalc'
+import type { RiskCalcResult } from '../../hooks/useRiskCalc'
 import { cn } from '../../lib/cn'
 import type { Instrument, Strategy } from '../../types/api'
 
@@ -151,11 +152,29 @@ const SESSIONS = [
 type SessionLabel = typeof SESSIONS[number]['label']
 
 function detectSession(): SessionLabel {
-  const h = new Date().getUTCHours()
-  if (h >= 13 && h < 17) return 'Overlap'
-  if (h >= 13 && h < 22) return 'New York'
-  if (h >= 7  && h < 16) return 'London'
+  // Use local hour so traders see the session that matches their clock,
+  // regardless of where the server is located.
+  // Session times expressed as LOCAL equivalents of UTC ranges are
+  // approximated by converting UTC boundaries to the browser's timezone.
+  const nowUtcH = new Date().getUTCHours()
+  if (nowUtcH >= 13 && nowUtcH < 17) return 'Overlap'
+  if (nowUtcH >= 13 && nowUtcH < 22) return 'New York'
+  if (nowUtcH >= 7  && nowUtcH < 16) return 'London'
   return 'Asian'
+}
+
+/** Display-only local time string for the session hint. */
+function localTimeStr(): string {
+  return new Date().toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hour12: false })
+}
+
+/** IANA timezone abbreviation (e.g. "CET", "EST", "JST"). */
+function tzLabel(): string {
+  try {
+    return Intl.DateTimeFormat(undefined, { timeZoneName: 'short' })
+      .formatToParts(new Date())
+      .find((p) => p.type === 'timeZoneName')?.value ?? 'local'
+  } catch { return 'local' }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -412,6 +431,128 @@ function StrategySelect({
             )}
           </div>
         </div>
+      )}
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Expectancy panel
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// Formula (per-trade expectancy expressed in monetary units):
+//   E = (WR × avg_win) − (LR × avg_loss)
+//   where:
+//     WR       = win rate (from strategy if ≥ min_trades, else fallback 60%)
+//     LR       = 1 − WR
+//     avg_win  = totalProfit  (expected if all TPs hit, split-weighted)
+//     avg_loss = risk_amount  (our fixed max loss)
+//
+// Ranges (relative to risk_amount = 1R):
+//   E < 0        → 🔴 Negative  — review the setup
+//   0 ≤ E < 0.5R → 🟡 Marginal  — borderline, trade with caution
+//   0.5R ≤ E < R → 🟢 Good      — solid positive expectancy
+//   E ≥ R        → 💎 Excellent — high-quality setup
+//
+// Win rate source priority:
+//   1. Selected strategy (if trades_count ≥ min_trades_for_stats)
+//   2. Fallback: 60% (industry-standard assumption, will be configurable in settings later)
+//
+// Future: ranges/emoji/colors will be configurable in Settings → Trade settings.
+// Future: expectancy stored in trades table for analytics.
+
+const DEFAULT_WIN_RATE = 0.6 // 60% — fallback when no strategy stats
+
+interface ExpectancyPanelProps {
+  calc: RiskCalcResult
+  totalProfit: number | null
+  pctValid: boolean
+  selectedStrategy: Strategy | null
+  ccy: string
+}
+
+function ExpectancyPanel({ calc, totalProfit, pctValid, selectedStrategy, ccy }: ExpectancyPanelProps) {
+  // Only render when we have all the required numbers
+  if (!calc.valid || calc.risk_amount == null || calc.risk_amount <= 0) return null
+  if (totalProfit == null || !pctValid) return null
+
+  const riskAmt = calc.risk_amount
+
+  // Win rate — use strategy stats if available, fallback to 60%
+  const hasStratStats = selectedStrategy != null
+    && selectedStrategy.trades_count >= selectedStrategy.min_trades_for_stats
+    && selectedStrategy.trades_count > 0
+  const winRate = hasStratStats
+    ? selectedStrategy!.win_count / selectedStrategy!.trades_count
+    : DEFAULT_WIN_RATE
+  const lossRate = 1 - winRate
+
+  // Expectancy in currency units
+  const expectancy = (winRate * totalProfit) - (lossRate * riskAmt)
+  const expectancyR = expectancy / riskAmt   // expressed as a multiple of risk
+
+  // Grade
+  const grade: { label: string; emoji: string; bg: string; border: string; text: string; sub: string } =
+    expectancyR < 0
+      ? { label: 'Negative', emoji: '🔴', bg: 'bg-red-500/10', border: 'border-red-500/30', text: 'text-red-300', sub: 'Review the setup — expected value is negative.' }
+      : expectancyR < 0.5
+        ? { label: 'Marginal', emoji: '🟡', bg: 'bg-amber-500/10', border: 'border-amber-500/30', text: 'text-amber-300', sub: 'Borderline. Consider improving R:R or skipping.' }
+        : expectancyR < 1
+          ? { label: 'Good', emoji: '🟢', bg: 'bg-emerald-500/10', border: 'border-emerald-500/30', text: 'text-emerald-300', sub: 'Solid positive expectancy. Go for it.' }
+          : { label: 'Excellent', emoji: '💎', bg: 'bg-brand-500/10', border: 'border-brand-500/30', text: 'text-brand-300', sub: 'High-quality setup. Exceptional edge.' }
+
+  const winRateLabel = hasStratStats
+    ? `${(winRate * 100).toFixed(0)}% WR (${selectedStrategy!.name})`
+    : `${(DEFAULT_WIN_RATE * 100).toFixed(0)}% WR (default — no strategy stats yet)`
+
+  return (
+    <div className={cn('rounded-xl border p-4 space-y-3', grade.bg, grade.border)}>
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <span className="text-lg leading-none">{grade.emoji}</span>
+          <div>
+            <p className="text-[10px] text-slate-500 uppercase tracking-wider font-medium">Trade expectancy</p>
+            <p className={cn('text-sm font-bold leading-tight', grade.text)}>{grade.label}</p>
+          </div>
+        </div>
+        <div className="text-right">
+          <p className={cn('text-xl font-mono font-bold leading-tight', grade.text)}>
+            {expectancy >= 0 ? '+' : ''}{fmt(expectancy)} {ccy}
+          </p>
+          <p className={cn('text-xs font-mono', grade.text, 'opacity-70')}>
+            {expectancyR >= 0 ? '+' : ''}{expectancyR.toFixed(2)}R
+          </p>
+        </div>
+      </div>
+
+      {/* Formula breakdown */}
+      <div className="grid grid-cols-3 gap-2 text-[10px]">
+        <div className="bg-surface-800/60 rounded-lg px-2.5 py-2">
+          <span className="text-slate-600 uppercase tracking-wider">Win rate</span>
+          <p className="text-slate-300 font-semibold mt-0.5">{(winRate * 100).toFixed(0)}%</p>
+          <p className="text-slate-600 mt-0.5 truncate">{hasStratStats ? selectedStrategy!.name : 'default'}</p>
+        </div>
+        <div className="bg-surface-800/60 rounded-lg px-2.5 py-2">
+          <span className="text-slate-600 uppercase tracking-wider">Avg win</span>
+          <p className="text-emerald-400 font-semibold mt-0.5">+{fmt(totalProfit)} {ccy}</p>
+          <p className="text-slate-600 mt-0.5">all TPs hit</p>
+        </div>
+        <div className="bg-surface-800/60 rounded-lg px-2.5 py-2">
+          <span className="text-slate-600 uppercase tracking-wider">Avg loss</span>
+          <p className="text-red-400 font-semibold mt-0.5">−{fmt(riskAmt)} {ccy}</p>
+          <p className="text-slate-600 mt-0.5">max risk</p>
+        </div>
+      </div>
+
+      {/* Verdict line */}
+      <p className={cn('text-[10px]', grade.text, 'opacity-80')}>{grade.sub}</p>
+
+      {/* Win rate source notice */}
+      {!hasStratStats && (
+        <p className="text-[10px] text-slate-600 border-t border-surface-700/40 pt-2">
+          ℹ️ Using {(DEFAULT_WIN_RATE * 100).toFixed(0)}% fallback — {winRateLabel}
+        </p>
       )}
     </div>
   )
@@ -754,7 +895,65 @@ export function NewTradePage() {
           )}
         </Section>
 
-        {/* ════════════════ 2. DIRECTION & ORDER TYPE ════════════════════ */}
+        {/* ════════════════ 2. STRATEGY & SETUP INTENT ════════════════ */}
+        {/* Placed before direction/prices so the trader commits to their method  */}
+        {/* before touching numbers. Strategy + confidence will gate risk max      */}
+        {/* in future phases (market analysis will also feed into this).           */}
+        <Section icon="🧠" title="Strategy & setup intent">
+          <div className="grid grid-cols-2 gap-3">
+            <Field label={<>Strategy <Tip text="Your trading method for this trade. Win rate stats accumulate per strategy after 5+ trades. Different from setup tags." /></>}>
+              <StrategySelect
+                strategies={strategies} loading={stratLoading}
+                value={strategyId} onChange={setStrategyId}
+                profileId={activeProfile.id}
+                onCreated={(s) => setStrategies((prev) => [...prev, s].sort((a, b) => a.name.localeCompare(b.name)))}
+              />
+            </Field>
+            <Field label="Timeframe analysed">
+              <div className="grid grid-cols-4 gap-1">
+                {['1m','5m','15m','30m','1H','4H','1D','1W'].map((tf) => (
+                  <button key={tf} type="button" onClick={() => setTimeframe((p) => p === tf ? '' : tf)}
+                    className={cn('py-2 rounded-lg border text-[11px] font-mono font-medium transition-all',
+                      timeframe === tf
+                        ? 'bg-brand-600/20 border-brand-500/50 text-brand-300'
+                        : 'bg-surface-700 border-surface-600 text-slate-400 hover:text-slate-200')}>
+                    {tf}
+                  </button>
+                ))}
+              </div>
+            </Field>
+          </div>
+
+          {/* Confidence score — shown here so it's locked in before sizing */}
+          <div>
+            <span className="flex items-center gap-1 text-xs font-medium text-slate-400 mb-2">
+              Confidence score
+              <Tip text="1 = very low conviction · 10 = max. Will gate risk % in a future phase." />
+            </span>
+            <div className="flex items-center gap-1.5 flex-wrap">
+              {Array.from({ length: 10 }, (_, i) => i + 1).map((n) => (
+                <button key={n} type="button" onClick={() => setConfidence((p) => p === String(n) ? '' : String(n))}
+                  className={cn('w-9 h-9 rounded-lg border text-xs font-bold transition-all',
+                    confidence === String(n)
+                      ? n <= 3
+                        ? 'bg-red-500/20 border-red-500/40 text-red-300'
+                        : n <= 6
+                          ? 'bg-amber-500/20 border-amber-500/40 text-amber-300'
+                          : 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300'
+                      : 'bg-surface-700 border-surface-600 text-slate-500 hover:text-slate-200')}>
+                  {n}
+                </button>
+              ))}
+              {confidence && (
+                <span className="text-[10px] text-slate-500 ml-1">
+                  {Number(confidence) <= 3 ? '😬 Low' : Number(confidence) <= 6 ? '🙂 Medium' : '🔥 High conviction'}
+                </span>
+              )}
+            </div>
+          </div>
+        </Section>
+
+        {/* ════════════════ 3. DIRECTION & ORDER TYPE ════════════════════ */}
         <Section icon="🧭" title="Direction & order type">
           <div className="grid grid-cols-2 gap-3">
             <Field label="Direction *">
@@ -793,7 +992,7 @@ export function NewTradePage() {
           </div>
         </Section>
 
-        {/* ══════════════ 3. PRICES, RISK & POSITION SIZING ══════════════ */}
+        {/* ══════════════ 4. PRICES, RISK & POSITION SIZING ══════════════ */}
         <Section icon="💰" title="Prices, risk & position sizing">
 
           {/* Entry / SL */}
@@ -899,21 +1098,24 @@ export function NewTradePage() {
             </div>
           )}
 
-          {/* ── Margin — CFD profiles (no leverage slider — broker sets it per instrument) ── */}
+          {/* ── Margin info — CFD profiles ─────────────────────────────────────────
+               In CFD the trader only declares LOTS — the broker locks margin automatically.
+               This block is purely informational: it shows how much margin the broker
+               will reserve and what safety headroom you have. No user input needed.       */}
           {isCFD && calc.valid && marginCalculated != null && (
             <div className="rounded-lg border border-surface-600 bg-surface-700/40 px-4 py-3 space-y-2">
               <p className="text-[10px] text-slate-500 uppercase tracking-wider font-medium flex items-center gap-1">
-                📋 CFD margin summary
-                <Tip text="Broker leverage is set per instrument. Required margin = notional ÷ leverage. Maintenance margin = 50% of required (ESMA standard). Margin call if your margin level drops below ~100%." />
+                📋 Broker margin estimate
+                <Tip text="For CFD you only enter lots — the broker locks margin automatically. This is an estimate based on instrument leverage. Required margin = (lots × price) ÷ leverage." />
               </p>
               <div className="grid grid-cols-3 gap-2">
                 <div className="flex flex-col">
-                  <span className="text-[9px] text-slate-600 uppercase tracking-wider">Required margin</span>
+                  <span className="text-[9px] text-slate-600 uppercase tracking-wider">Est. margin locked</span>
                   <span className="text-xs font-mono font-bold text-slate-200 mt-0.5">
                     {fmt(marginDisplay)} {ccy}
                   </span>
                   <span className="text-[10px] text-slate-500">
-                    {instrument?.max_leverage ? `at ×${instrument.max_leverage}` : '—'}
+                    {instrument?.max_leverage ? `÷ ×${instrument.max_leverage} leverage` : '—'}
                   </span>
                 </div>
                 <div className="flex flex-col">
@@ -924,7 +1126,7 @@ export function NewTradePage() {
                   <span className="text-[10px] text-slate-500">50% of required</span>
                 </div>
                 <div className="flex flex-col">
-                  <span className="text-[9px] text-slate-600 uppercase tracking-wider">Margin level</span>
+                  <span className="text-[9px] text-slate-600 uppercase tracking-wider">Capital / margin</span>
                   <span className={cn('text-xs font-mono font-bold mt-0.5',
                     cfdMarginLevel == null ? 'text-slate-500'
                     : cfdMarginCallRisk ? 'text-red-400'
@@ -932,15 +1134,14 @@ export function NewTradePage() {
                     : 'text-emerald-400')}>
                     {cfdMarginLevel != null ? `${fmt(cfdMarginLevel, 0)}%` : '—'}
                   </span>
-                  <span className="text-[10px] text-slate-500">
-                    {cfdMarginCallRisk ? '⚠ margin call risk' : 'equity / margin'}
-                  </span>
+                  <span className="text-[10px] text-slate-500">buffer ratio</span>
                 </div>
               </div>
+              {/* Low buffer warning — informational, not blocking */}
               {cfdMarginCallRisk && (
-                <p className="text-[10px] text-red-400 flex items-center gap-1 pt-1 border-t border-surface-600/50">
+                <p className="text-[10px] text-amber-400 flex items-center gap-1 pt-1 border-t border-surface-600/50">
                   <AlertTriangle size={9} className="shrink-0" />
-                  Margin level {fmt(cfdMarginLevel, 0)}% is very low — a small adverse move could trigger a margin call before your SL.
+                  Low capital/margin buffer ({fmt(cfdMarginLevel, 0)}%). If other positions are also open, consider reducing lot size.
                 </p>
               )}
             </div>
@@ -950,7 +1151,14 @@ export function NewTradePage() {
           {calc.valid && (
             <div className={cn('grid gap-2', isCrypto ? 'grid-cols-3' : 'grid-cols-2')}>
               <CalcPill label="Max loss" value={`-${fmt(calc.risk_amount)} ${ccy}`} sub={`${fmt(effectiveRisk, 2)}% of capital`} color="red" />
-              <CalcPill label={isCFD ? 'Lot size (total)' : 'Position size'} value={calc.lot_size != null ? fmt(calc.lot_size, isCFD ? 2 : 4) : '—'} sub={isCFD ? 'lots' : 'units'} />
+              {/* CFD: lot size is the actionable value → blue. Crypto: position size is informational → default. */}
+              <CalcPill
+                label={isCFD ? 'Lot size (total)' : 'Position size'}
+                value={calc.lot_size != null ? fmt(calc.lot_size, isCFD ? 2 : 4) : '—'}
+                sub={isCFD ? 'lots' : 'units'}
+                color={isCFD ? 'blue' : 'default'}
+              />
+              {/* Crypto: margin is the actionable value (what you lock) → blue. */}
               {isCrypto && marginDisplay != null && (
                 <CalcPill label="Margin req." value={`${fmt(marginDisplay)} ${ccy}`} sub={`at ×${leverageNum}`} color={marginIsHigh ? 'amber' : 'blue'} />
               )}
@@ -965,7 +1173,7 @@ export function NewTradePage() {
           )}
         </Section>
 
-        {/* ═══════════════════════ 4. TAKE PROFITS ═══════════════════════ */}
+        {/* ═══════════════════════ 5. TAKE PROFITS ═══════════════════════ */}
         <Section icon="🎯" title="Take profits">
 
           {/* Number of TPs */}
@@ -1085,61 +1293,8 @@ export function NewTradePage() {
           </div>
         </Section>
 
-        {/* ══════════════ 5. PERFORMANCE & SETUP QUALITY ═════════════════ */}
-        <Section icon="🧠" title="Performance & setup quality">
-
-          {/* Strategy + Timeframe side-by-side */}
-          <div className="grid grid-cols-2 gap-3">
-            <Field label={<>Strategy <Tip text="Your trading method for this trade. Win rate stats accumulate per strategy after 5+ trades. Different from setup tags." /></>}>
-              <StrategySelect
-                strategies={strategies} loading={stratLoading}
-                value={strategyId} onChange={setStrategyId}
-                profileId={activeProfile.id}
-                onCreated={(s) => setStrategies((prev) => [...prev, s].sort((a, b) => a.name.localeCompare(b.name)))}
-              />
-            </Field>
-            <Field label="Timeframe analysed">
-              <div className="grid grid-cols-4 gap-1">
-                {['1m','5m','15m','30m','1H','4H','1D','1W'].map((tf) => (
-                  <button key={tf} type="button" onClick={() => setTimeframe((p) => p === tf ? '' : tf)}
-                    className={cn('py-2 rounded-lg border text-[11px] font-mono font-medium transition-all',
-                      timeframe === tf
-                        ? 'bg-brand-600/20 border-brand-500/50 text-brand-300'
-                        : 'bg-surface-700 border-surface-600 text-slate-400 hover:text-slate-200')}>
-                    {tf}
-                  </button>
-                ))}
-              </div>
-            </Field>
-          </div>
-
-          {/* Confidence score */}
-          <div>
-            <span className="flex items-center gap-1 text-xs font-medium text-slate-400 mb-2">
-              Confidence score
-              <Tip text="1 = very low conviction · 10 = max. Tracked in performance analytics." />
-            </span>
-            <div className="flex items-center gap-1.5 flex-wrap">
-              {Array.from({ length: 10 }, (_, i) => i + 1).map((n) => (
-                <button key={n} type="button" onClick={() => setConfidence((p) => p === String(n) ? '' : String(n))}
-                  className={cn('w-9 h-9 rounded-lg border text-xs font-bold transition-all',
-                    confidence === String(n)
-                      ? n <= 3
-                        ? 'bg-red-500/20 border-red-500/40 text-red-300'
-                        : n <= 6
-                          ? 'bg-amber-500/20 border-amber-500/40 text-amber-300'
-                          : 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300'
-                      : 'bg-surface-700 border-surface-600 text-slate-500 hover:text-slate-200')}>
-                  {n}
-                </button>
-              ))}
-              {confidence && (
-                <span className="text-[10px] text-slate-500 ml-1">
-                  {Number(confidence) <= 3 ? '😬 Low' : Number(confidence) <= 6 ? '🙂 Medium' : '🔥 High conviction'}
-                </span>
-              )}
-            </div>
-          </div>
+        {/* ══════════════ 6. SETUP TAGS, NOTES & SESSION ═════════════════ */}
+        <Section icon="📝" title="Setup tags, notes & session">
 
           {/* Setup tags — distinct from strategy! */}
           <div>
@@ -1182,8 +1337,11 @@ export function NewTradePage() {
 
             {showSession && (
               <div className="mt-3 space-y-2">
+                {/* Local time hint — tells the trader which timezone drives detection */}
                 <p className="text-[10px] text-slate-600">
-                  Auto-detected · UTC {new Date().getUTCHours()}:00 → <span className="text-brand-400 font-semibold">{autoSession}</span>
+                  Auto-detected · {localTimeStr()} {tzLabel()} →{' '}
+                  <span className="text-brand-400 font-semibold">{autoSession}</span>
+                  <span className="text-slate-700 ml-1">(UTC {new Date().getUTCHours()}:00)</span>
                 </p>
                 <div className="flex flex-wrap gap-2">
                   {SESSIONS.map((s) => (
@@ -1204,6 +1362,24 @@ export function NewTradePage() {
             )}
           </div>
         </Section>
+
+        {/* ═══════════════════════ 7. EXPECTANCY ════════════════════════ */}
+        {/* Shown only when all numbers are present: risk amount, TPs all filled, R:R valid.   */}
+        {/* Formula: Expectancy = (Win Rate × Avg Win) − (Loss Rate × Avg Loss)               */}
+        {/* Here Avg Win  = totalProfit (expected, split across TPs)                          */}
+        {/*      Avg Loss = risk_amount                                                        */}
+        {/* Win Rate source: selected strategy (if ≥ min_trades) or profile default (60%).    */}
+        {/* 🔴 < 0  → Negative — review the trade                                            */}
+        {/* 🟡 0–0.5× risk → Marginal — borderline                                           */}
+        {/* 🟢 0.5–1× risk → Good                                                             */}
+        {/* 💎 > 1× risk   → Excellent                                                        */}
+        <ExpectancyPanel
+          calc={calc}
+          totalProfit={totalProfit}
+          pctValid={pctValid}
+          selectedStrategy={strategies.find((s) => s.id === strategyId) ?? null}
+          ccy={ccy}
+        />
 
         {/* Form actions */}
         <div className="flex items-center justify-between pt-2 pb-4 border-t border-surface-700">

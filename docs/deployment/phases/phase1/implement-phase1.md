@@ -20,7 +20,140 @@
 ```
 main       ← prod only — never commit directly, only receives PR merges
 develop    ← your daily work branch ← YOU ARE HERE
-feature/*  ← optional, for big isolated features (off develop)
+feature/*  ← optional, for big isolated features ---
+
+## 📌 Future phases — planning notes (captured 2026-03-03)
+
+These features are **intentionally deferred** from Phase 1. Each will become its
+own step or sub-step in a later phase. Captured here so the context is not lost.
+
+---
+
+### 🔵 Risk gating by strategy + confidence (Phase 2 step candidate)
+
+**Context:** In the trade form, strategy and confidence level are collected *before*
+the trader touches any numbers (sections 2 & 3). This ordering is intentional:
+in a future step these values will **gate the maximum allowed risk percentage**.
+
+**Planned logic:**
+```
+base_risk_pct  = profile.risk_percentage_default
+
+if strategy.win_rate ≥ threshold_high AND confidence ≥ 8:
+    effective_risk_max = base_risk_pct × 1.25   # high-WR + high conviction → more room
+elif strategy.win_rate < threshold_low OR confidence ≤ 3:
+    effective_risk_max = base_risk_pct × 0.75   # low-WR or low conviction → reduced
+else:
+    effective_risk_max = base_risk_pct
+
+# Phase 3: market analysis score also feeds into risk gating
+if market_analysis.bias == 'bullish' AND direction == 'LONG':
+    effective_risk_max *= 1.10
+elif market_analysis.bias == 'bearish' AND direction == 'LONG':
+    effective_risk_max *= 0.90
+```
+
+**Where to implement:**
+- Backend: `GET /api/profiles/:id/effective-risk?strategy_id=&confidence=&direction=`
+- Frontend: trade form shows `Effective max risk: X.X%` badge when strategy/confidence are set
+- DB: `strategies.win_rate_threshold_high/low` configurable per profile (Settings → Strategies)
+
+---
+
+### 🔵 Strategy settings page (Phase 2 step candidate)
+
+**Context:** Strategies currently show a live win rate in the dropdown (once
+`trades_count ≥ min_trades_for_stats`). A dedicated settings page is needed for:
+
+- List all strategies per profile (name, emoji, win rate bar, trades count)
+- Edit name / emoji
+- Set `min_trades_for_stats` override per strategy (default: 5)
+- Set `win_rate_threshold_high` and `win_rate_threshold_low` (default: 60% / 45%)
+- Archive / delete strategy (with confirmation — archived strategies still appear in closed trades)
+- Performance sparkline: win/loss streak, avg R:R per strategy
+
+**Route:** `/settings/strategies`
+
+---
+
+### 🔵 LIMIT vs MARKET risk impact (Phase 2 step candidate)
+
+**Context:** Order type (MARKET / LIMIT) has different risk accounting implications:
+
+| Order type | Risk impact                          |
+|------------|--------------------------------------|
+| MARKET     | Immediately adds to `current_risk`   |
+| LIMIT      | **Pending** — does NOT add to risk until triggered |
+
+**Problem:** A trader could place multiple LIMIT orders that together would exceed
+`risk_max`, without realising it until they all trigger simultaneously.
+
+**Planned logic:**
+```
+current_risk   = Σ risk of all MARKET (open) trades
+pending_risk   = Σ risk of all LIMIT (pending) trades, per profile
+combined_risk  = current_risk + pending_risk
+
+if combined_risk > profile.risk_max_pct:
+    dashboard_notification(
+        level='warning',
+        message=f"{profile.name}: pending LIMIT orders would push total risk to "
+                f"{combined_risk:.1f}% — exceeds your limit of {profile.risk_max_pct:.1f}%. "
+                "Cancel or reduce a pending limit, or reduce risk on an open position."
+    )
+```
+
+**Where to implement:**
+- Backend: new field `trades.status = 'LIMIT_PENDING'` (alongside existing OPEN/CLOSED/CANCELLED)
+- Dashboard widget: **Risk overview** — split current vs pending risk, warning banner
+- Trade form: when order type = LIMIT, show banner `"Limit orders don't consume risk until triggered."`
+- When a LIMIT is triggered (manually updated): status changes to OPEN → recalculate risk
+
+---
+
+### 🔵 Trade settings + Expectancy configuration (Phase 2 step candidate)
+
+**Context:** The trade form shows an **Expectancy panel** (Section 7) with hardcoded
+ranges and a 60% fallback win rate. These should be user-configurable.
+
+**Current defaults (hardcoded in `NewTradePage.tsx`):**
+```
+DEFAULT_WIN_RATE = 60%
+Grade thresholds (as multiple of R):
+  < 0    → 🔴 Negative
+  0–0.5  → 🟡 Marginal
+  0.5–1  → 🟢 Good
+  ≥ 1    → 💎 Excellent
+```
+
+**Planned settings (route: `/settings/trade`):**
+- Default win rate fallback (%)
+- Expectancy grade thresholds (editable table: label / emoji / threshold)
+- Whether to store expectancy value on trade submit (default: ON)
+- Whether to show expectancy panel on trade form (default: ON)
+
+**DB change needed:**
+- `trades.expectancy_at_open DECIMAL(10,4)` — stored at submit time, calculated frontend-side
+- `user_preferences.expectancy_config JSONB` — stores thresholds per profile
+
+---
+
+### 🔵 Market analysis → risk gating (Phase 3 step candidate)
+
+**Context:** Market analysis sessions (Crypto, Gold modules) produce a bias score
+(Bullish / Neutral / Bearish). This should feed into risk gating alongside strategy
+and confidence (see "Risk gating" note above).
+
+**Planned logic:**
+- `GET /api/profiles/:id/market-analysis/latest` returns `{ bias, score_pct, days_old }`
+- If analysis > 7 days old → treat as Neutral (stale)
+- Trade form badge: `"Crypto 🟢 79% · 2d ago"` shown above Section 3 (Prices)
+- Risk multiplier applied server-side (or client-side preview in Section 3 header)
+
+---
+
+**Phase:** 1 · **Step:** 10 active · **Branch:** `develop`
+f develop)
 fix/*      ← optional, for bugfixes (off develop)
 ```
 
