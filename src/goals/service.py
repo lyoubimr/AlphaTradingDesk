@@ -2,10 +2,14 @@
 Goals service — business logic for profile_goals CRUD and progress computation.
 
 Progress is computed on request (no background job in Phase 1):
-  - reads closed trades for the active period window
-  - sums realized_pnl / capital_current → pnl_pct
+  - reads closed trades AND partial trades with booked profits in the period window
+  - sums realized_pnl (closed) + closed-position pnl (partial) / capital_current → pnl_pct
   - compares against goal_pct and limit_pct
   - periods with goal_pct=0 AND limit_pct=0 are skipped (not a valid goal)
+
+P&L sources:
+  • status='closed'  → Trade.realized_pnl    (full trade closed, filtered by closed_at)
+  • status='partial' → sum(Position.realized_pnl WHERE exit_date in window)  (partial TP hit)
 """
 from __future__ import annotations
 
@@ -18,7 +22,7 @@ from sqlalchemy.orm import Session
 
 from src.core.models.broker import Profile, TradingStyle
 from src.core.models.goals import ProfileGoal
-from src.core.models.trade import Trade
+from src.core.models.trade import Position, Trade
 from src.goals.schemas import GoalCreate, GoalProgressItem, GoalUpdate
 
 # ── Internal helpers ──────────────────────────────────────────────────────────
@@ -95,16 +99,23 @@ def _compute_pnl_pct(
     period_end: date,
 ) -> Decimal:
     """
-    Sum realized_pnl of all closed trades within [period_start, period_end]
-    for the given profile, then express as % of capital_current.
+    Sum all realized P&L within [period_start, period_end] for a profile:
 
-    Returns Decimal("0.00") if no closed trades in the window.
+    1. **Closed trades** — Trade.realized_pnl, filtered by Trade.closed_at in window.
+    2. **Partial trades** — sum of Position.realized_pnl for positions whose exit_date
+       falls within the window (TP hits already booked while the trade is still open).
+
+    Returns % of capital_current (Decimal, 4 decimal places).
+    Returns Decimal("0.0000") if capital is zero.
     """
-    # Convert dates to datetime bounds for TIMESTAMP column comparison
-    start_dt = datetime(period_start.year, period_start.month, period_start.day, 0, 0, 0)
-    end_dt = datetime(period_end.year, period_end.month, period_end.day, 23, 59, 59)
+    if capital == 0:
+        return Decimal("0.0000")
 
-    result = (
+    start_dt = datetime(period_start.year, period_start.month, period_start.day, 0, 0, 0)
+    end_dt   = datetime(period_end.year,   period_end.month,   period_end.day,   23, 59, 59)
+
+    # ① Fully closed trades in window
+    closed_sum = (
         db.query(func.coalesce(func.sum(Trade.realized_pnl), Decimal("0")))
         .filter(
             Trade.profile_id == profile_id,
@@ -114,10 +125,25 @@ def _compute_pnl_pct(
         )
         .scalar()
     )
-    pnl = Decimal(str(result)) if result is not None else Decimal("0")
-    if capital == 0:
-        return Decimal("0.00")
-    return (pnl / capital * 100).quantize(Decimal("0.0001"))
+
+    # ② Partial-TP profits — positions that were closed within the window,
+    #    belonging to a trade that is still 'partial' (not yet fully closed).
+    #    We join through Trade to scope by profile_id.
+    partial_sum = (
+        db.query(func.coalesce(func.sum(Position.realized_pnl), Decimal("0")))
+        .join(Trade, Position.trade_id == Trade.id)
+        .filter(
+            Trade.profile_id == profile_id,
+            Trade.status == "partial",
+            Position.status == "closed",
+            Position.exit_date >= start_dt,
+            Position.exit_date <= end_dt,
+        )
+        .scalar()
+    )
+
+    total_pnl = Decimal(str(closed_sum or 0)) + Decimal(str(partial_sum or 0))
+    return (total_pnl / capital * 100).quantize(Decimal("0.0001"))
 
 
 # ── Public service functions ──────────────────────────────────────────────────
@@ -226,13 +252,17 @@ def get_progress(db: Session, profile_id: int) -> list[GoalProgressItem]:
             else Decimal("0.00")
         )
 
-        # Progress toward risk limit (positive scale: 100% = limit breached)
-        # limit_pct is negative, pnl_pct is negative when losing
-        risk_progress = (
-            (pnl_pct / goal.limit_pct * 100).quantize(Decimal("0.01"))
-            if goal.limit_pct != 0
-            else Decimal("0.00")
-        )
+        # Progress toward risk limit (0–100+% scale: 100% = limit breached).
+        # Both pnl_pct and limit_pct are negative when losing, so the ratio is positive.
+        # When pnl_pct is positive (profit) the ratio would be negative → clamp to 0:
+        # there is zero risk-limit consumption when you're in profit.
+        if goal.limit_pct != 0 and pnl_pct < 0:
+            risk_progress = max(
+                Decimal("0.00"),
+                (pnl_pct / goal.limit_pct * 100).quantize(Decimal("0.01")),
+            )
+        else:
+            risk_progress = Decimal("0.00")
 
         items.append(
             GoalProgressItem(
