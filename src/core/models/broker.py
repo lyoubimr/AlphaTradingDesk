@@ -166,10 +166,8 @@ class Profile(Base):
 
 
 # Forward-reference imports (resolved at runtime, avoid circular imports)
-from src.core.models.trade import Strategy, Tag, Trade  # noqa: E402
-from src.core.models.journal import NoteTemplate, PerformanceSnapshot  # noqa: E402
 from src.core.models.goals import GoalProgressLog, ProfileGoal  # noqa: E402
-from src.core.models.sessions import UserPreferences  # noqa: E402
+from src.core.models.journal import NoteTemplate, PerformanceSnapshot  # noqa: E402
 from src.core.models.market_analysis import (  # noqa: E402
     MarketAnalysisConfig,
     MarketAnalysisSession,
@@ -177,3 +175,5 @@ from src.core.models.market_analysis import (  # noqa: E402
     ProfileIndicatorConfig,
     WeeklyEvent,
 )
+from src.core.models.sessions import UserPreferences  # noqa: E402
+from src.core.models.trade import Strategy, Tag, Trade  # noqa: E402

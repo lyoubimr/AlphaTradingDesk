@@ -1,5 +1,6 @@
 // ── Trade Journal page ─────────────────────────────────────────────────────
 import { Plus, Filter, Download } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
 import { PageHeader } from '../../components/ui/PageHeader'
 import { Badge } from '../../components/ui/Badge'
 import { ComingSoon } from '../../components/ui/ComingSoon'
@@ -26,6 +27,7 @@ const SAMPLE_TRADES: TradeRow[] = [
 ]
 
 export function TradesPage() {
+  const navigate = useNavigate()
   return (
     <div>
       <PageHeader
@@ -43,7 +45,11 @@ export function TradesPage() {
             <button type="button" className="atd-btn-ghost" disabled>
               <Download size={14} /> Export
             </button>
-            <button type="button" className="atd-btn-primary" disabled>
+            <button
+              type="button"
+              className="atd-btn-primary"
+              onClick={() => navigate('/trades/new')}
+            >
               <Plus size={14} /> New Trade
             </button>
           </>
@@ -104,8 +110,8 @@ export function TradesPage() {
       </div>
 
       <ComingSoon
-        feature="Trade entry form, multi-TP, filters, and P&L chart"
-        phase="Phase 1 — Step 9+"
+        feature="Real trade data, multi-TP tracking, filters, and P&L chart"
+        phase="Phase 1 — Step 11+"
       />
     </div>
   )

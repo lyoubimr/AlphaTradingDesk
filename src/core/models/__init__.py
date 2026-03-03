@@ -11,11 +11,11 @@ from src.core.database import Base  # noqa: F401 — re-exported for Alembic
 # Order matters only for readability; SQLAlchemy resolves FK relationships lazily.
 from src.core.models import (  # noqa: F401
     broker,
-    trade,
-    journal,
     goals,
-    sessions,
+    journal,
     market_analysis,
+    sessions,
+    trade,
 )
 
 __all__ = ["Base"]

@@ -5,7 +5,7 @@
 .PHONY: help dev dev-build dev-rebuild-frontend dev-down \
         backend-dev backend-test backend-lint backend-fmt backend-typecheck \
         frontend-install frontend-dev frontend-test frontend-lint frontend-build \
-        db-upgrade db-downgrade db-revision db-reset db-seed db-refresh \
+        db-upgrade db-downgrade db-revision db-reset db-seed db-refresh db-recover \
         clean
 
 COMPOSE      := docker compose -f docker-compose.dev.yml
@@ -91,6 +91,11 @@ db-seed: ## Run all seed scripts (idempotent — safe to re-run)
 db-refresh: ## Reset DB + re-apply migrations + re-seed (full clean slate, DESTRUCTIVE!)
 	$(MAKE) db-reset
 	$(MAKE) db-seed
+
+db-recover: ## Recover from stale alembic_version (schema wiped but version row survived — no DROP needed)
+	$(COMPOSE) exec db psql -U atd -d atd_dev -c "DELETE FROM alembic_version;"
+	APP_ENV=dev PYTHONPATH=. $(POETRY) alembic upgrade head
+	APP_ENV=dev PYTHONPATH=. $(POETRY) python database/migrations/seeds/seed_all.py
 
 ## ── CI checks (run same checks as GitHub Actions) ────────────────
 ci-backend: backend-lint backend-typecheck backend-test ## Run all backend CI checks locally

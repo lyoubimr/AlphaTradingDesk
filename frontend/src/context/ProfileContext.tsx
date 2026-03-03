@@ -74,7 +74,8 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
       .finally(() => setLoading(false))
   }, [])
 
-  useEffect(() => { fetchProfiles() }, [fetchProfiles])
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(() => { fetchProfiles() }, [fetchProfiles]) // fetchProfiles uses async .then() — not a synchronous setState
 
   const activeProfile = profiles.find((p) => p.id === activeProfileId) ?? null
 
@@ -96,7 +97,7 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
 }
 
 // ── Hook ──────────────────────────────────────────────────────────────────
-
+// eslint-disable-next-line react-refresh/only-export-components
 export function useProfile(): ProfileContextValue {
   const ctx = useContext(ProfileContext)
   if (!ctx) throw new Error('useProfile must be used inside <ProfileProvider>')

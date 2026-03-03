@@ -3,7 +3,7 @@
 // Base URL: Vite proxy rewrites /api/* → backend:8000/*
 // Never use fetch() directly in components — always use this module.
 
-import type { Profile, ProfileCreate, ProfileUpdate, Broker } from '../types/api'
+import type { Profile, ProfileCreate, ProfileUpdate, Broker, Instrument, TradeOpen, TradeClose, TradePartialClose, TradeListItem, TradeOut, Strategy, StrategyCreate } from '../types/api'
 
 const BASE = '/api'
 
@@ -53,4 +53,58 @@ export const profilesApi = {
 export const brokersApi = {
   list: (): Promise<Broker[]> =>
     request('/brokers'),
+}
+
+// ── Instruments ───────────────────────────────────────────────────────────
+
+export const instrumentsApi = {
+  listByBroker: (brokerId: number): Promise<Instrument[]> =>
+    request(`/brokers/${brokerId}/instruments`),
+}
+
+// ── Strategies ────────────────────────────────────────────────────────────
+
+export const strategiesApi = {
+  list: (profileId: number): Promise<Strategy[]> =>
+    request(`/profiles/${profileId}/strategies`),
+
+  create: (profileId: number, data: StrategyCreate): Promise<Strategy> =>
+    request(`/profiles/${profileId}/strategies`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  delete: (profileId: number, strategyId: number): Promise<void> =>
+    request(`/profiles/${profileId}/strategies/${strategyId}`, { method: 'DELETE' }),
+}
+
+// ── Trades ────────────────────────────────────────────────────────────────
+
+export const tradesApi = {
+  list: (profileId: number): Promise<TradeListItem[]> =>
+    request(`/trades?profile_id=${profileId}`),
+
+  get: (tradeId: number): Promise<TradeOut> =>
+    request(`/trades/${tradeId}`),
+
+  open: (data: TradeOpen): Promise<TradeOut> =>
+    request('/trades', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  close: (tradeId: number, data: TradeClose): Promise<TradeOut> =>
+    request(`/trades/${tradeId}/close`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  partialClose: (tradeId: number, data: TradePartialClose): Promise<TradeOut> =>
+    request(`/trades/${tradeId}/partial`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  delete: (tradeId: number): Promise<void> =>
+    request(`/trades/${tradeId}`, { method: 'DELETE' }),
 }

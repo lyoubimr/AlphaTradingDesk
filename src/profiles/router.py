@@ -7,6 +7,10 @@ Routes:
   GET    /api/profiles/{id}         → get profile by id
   PUT    /api/profiles/{id}         → update profile (partial — only provided fields)
   DELETE /api/profiles/{id}         → soft-delete (status = 'deleted')
+
+  GET    /api/profiles/{id}/strategies   → list strategies for profile
+  POST   /api/profiles/{id}/strategies   → create strategy for profile
+  DELETE /api/profiles/{id}/strategies/{sid} → delete strategy
 """
 from __future__ import annotations
 
@@ -16,7 +20,13 @@ from sqlalchemy.orm import Session
 
 from src.core.deps import get_db
 from src.profiles import service
-from src.profiles.schemas import ProfileCreate, ProfileOut, ProfileUpdate
+from src.profiles.schemas import (
+    ProfileCreate,
+    ProfileOut,
+    ProfileUpdate,
+    StrategyCreate,
+    StrategyOut,
+)
 
 router = APIRouter(prefix="/profiles", tags=["profiles"])
 
@@ -48,4 +58,41 @@ def update_profile(
 @router.delete("/{profile_id}", status_code=status.HTTP_204_NO_CONTENT, response_model=None)
 def delete_profile(profile_id: int, db: Session = Depends(get_db)) -> Response:
     service.delete(db, profile_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+# ── Strategies ────────────────────────────────────────────────────────────────
+
+@router.get("/{profile_id}/strategies", response_model=list[StrategyOut])
+def list_strategies(profile_id: int, db: Session = Depends(get_db)) -> list:
+    """List all active strategies for a profile."""
+    return service.list_strategies(db, profile_id)
+
+
+@router.post(
+    "/{profile_id}/strategies",
+    response_model=StrategyOut,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_strategy(
+    profile_id: int,
+    data: StrategyCreate,
+    db: Session = Depends(get_db),
+) -> object:
+    """Create a new strategy for a profile."""
+    return service.create_strategy(db, profile_id, data)
+
+
+@router.delete(
+    "/{profile_id}/strategies/{strategy_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    response_model=None,
+)
+def delete_strategy(
+    profile_id: int,
+    strategy_id: int,
+    db: Session = Depends(get_db),
+) -> Response:
+    """Soft-delete a strategy (sets status = 'archived')."""
+    service.delete_strategy(db, profile_id, strategy_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)

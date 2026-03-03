@@ -4,12 +4,14 @@ Pydantic schemas for profiles.
 ProfileCreate  — body for POST /api/profiles
 ProfileUpdate  — body for PUT  /api/profiles/{id}  (all fields optional)
 ProfileOut     — response shape (safe to expose)
+StrategyCreate — body for POST /api/profiles/{id}/strategies
+StrategyOut    — response shape for strategies
 """
 from __future__ import annotations
 
 from decimal import Decimal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class ProfileCreate(BaseModel):
@@ -58,3 +60,26 @@ class ProfileOut(BaseModel):
     description: str | None
     notes: str | None
     status: str
+
+# ── Strategy schemas ──────────────────────────────────────────────────────────
+
+class StrategyCreate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=255)
+    description: str | None = None
+    emoji: str | None = Field(default=None, max_length=10)
+    color: str | None = Field(default=None, max_length=7)
+
+
+class StrategyOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    profile_id: int
+    name: str
+    description: str | None
+    emoji: str | None
+    color: str | None
+    status: str
+    trades_count: int
+    win_count: int
+    min_trades_for_stats: int

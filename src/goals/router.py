@@ -10,7 +10,6 @@ Routes:
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, status
-from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
 from src.core.deps import get_db

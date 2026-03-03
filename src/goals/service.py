@@ -17,10 +17,9 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from src.core.models.broker import Profile, TradingStyle
-from src.core.models.goals import GoalProgressLog, ProfileGoal
+from src.core.models.goals import ProfileGoal
 from src.core.models.trade import Trade
 from src.goals.schemas import GoalCreate, GoalProgressItem, GoalUpdate
-
 
 # ── Internal helpers ──────────────────────────────────────────────────────────
 
