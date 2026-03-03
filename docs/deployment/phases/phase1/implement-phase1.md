@@ -170,6 +170,57 @@ Only `open` trades can be cancelled (a `partial` already has real fills).
 
 ---
 
+## 🔧 Fix: Lazy DB engine + Alembic infra (2026-03-03)
+
+**Root cause:** `engine = create_engine(...)` was at **module level** in `src/core/database.py`.  
+Any import of `src.core.models` (including Alembic CLI, pytest collection, etc.) would  
+immediately try to open DB connections — causing Alembic commands to appear to hang  
+(output goes to stderr, exit code was 0, but looked silent/frozen in the terminal).
+
+**Additional problem:** `Dockerfile.backend` did not `COPY alembic.ini`, so running  
+`alembic` inside the container had no config file. Same for `docker-compose.dev.yml` —  
+no volume mount for `alembic.ini`.
+
+**What was broken:**
+- DB had `alembic_version = c45438781a38` stamp but **zero tables** (migrations never ran)
+- `/api/profiles` returned 500 (`relation "profiles" does not exist`)
+- `make db-upgrade` / `make db-current` appeared to hang
+
+**Fix — `src/core/database.py`:**
+```python
+# BEFORE (broken): engine created at import time
+engine = create_engine(_normalise_db_url(settings.database_url), ...)
+SessionLocal = sessionmaker(bind=engine, ...)
+
+# AFTER (correct): lazy — engine created on first call to get_engine()
+def get_engine() -> Engine: ...          # returns/creates the singleton engine
+def get_session_factory() -> sessionmaker: ...  # bound to the lazy engine
+def get_db(): ...                        # FastAPI dependency (kept here for convenience)
+```
+
+**Fix — `Dockerfile.backend`:**
+```dockerfile
+COPY alembic.ini ./alembic.ini   # ← added
+```
+
+**Fix — `docker-compose.dev.yml`:**
+```yaml
+volumes:
+  - ./alembic.ini:/app/alembic.ini   # ← added
+```
+
+**Fix — `Makefile`:**
+- Replaced `POETRY := poetry run` (poetry not on PATH) with `.venv/bin/*` variables
+- All `db-*` targets now run via `$(COMPOSE) exec -T backend alembic ...`  
+  (container has `db` hostname, `-T` avoids TTY issues in CI/scripts)
+- Added `db-current` and `db-history` targets
+- Note: Alembic output goes to **stderr** (configured in `alembic.ini`), so commands
+  appear silent in stdout-only contexts — exit code 0 = success
+
+**Verified:** `make db-upgrade` exits 0, `/api/profiles` returns `200 []`
+
+---
+
 ## 🌿 Git Workflow — How to commit during Phase 1
 
 ### Branch strategy
