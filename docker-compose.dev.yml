@@ -39,6 +39,7 @@ services:
     volumes:
       - ./src:/app/src
       - ./database:/app/database
+      - ./alembic.ini:/app/alembic.ini
 
   frontend:
     build:

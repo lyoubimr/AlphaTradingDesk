@@ -5,11 +5,17 @@
 .PHONY: help dev dev-build dev-rebuild-frontend dev-down \
         backend-dev backend-test backend-lint backend-fmt backend-typecheck \
         frontend-install frontend-dev frontend-test frontend-lint frontend-build \
-        db-upgrade db-downgrade db-revision db-reset db-seed db-refresh db-recover \
+        db-upgrade db-downgrade db-current db-history db-revision db-reset db-seed db-refresh db-recover \
         clean
 
 COMPOSE      := docker compose -f docker-compose.dev.yml
-POETRY       := poetry run
+# Use the in-project venv directly — poetry is not required on PATH.
+# All Python commands go through .venv/bin/* (created by `poetry install`).
+PYTHON       := .venv/bin/python
+ALEMBIC      := APP_ENV=dev .venv/bin/alembic
+PYTEST       := .venv/bin/pytest
+RUFF         := .venv/bin/ruff
+MYPY         := .venv/bin/mypy
 FRONTEND_DIR := frontend
 
 ## ── Help ─────────────────────────────────────────────────────────
@@ -36,23 +42,23 @@ dev-logs: ## Follow logs for all services
 
 ## ── Backend (local, no Docker) ───────────────────────────────────
 backend-dev: ## Run FastAPI dev server locally (hot-reload)
-	$(POETRY) uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload
+	APP_ENV=dev $(PYTHON) -m uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload
 
 backend-test: ## Run backend tests
-	$(POETRY) pytest tests/ -v
+	APP_ENV=test $(PYTEST) tests/ -v
 
 backend-test-cov: ## Run backend tests with coverage
-	$(POETRY) pytest tests/ --cov=src --cov-report=term-missing
+	APP_ENV=test $(PYTEST) tests/ --cov=src --cov-report=term-missing
 
 backend-lint: ## Run ruff linter
-	$(POETRY) ruff check src/ tests/
+	$(RUFF) check src/ tests/
 
 backend-fmt: ## Auto-fix ruff + format
-	$(POETRY) ruff check --fix src/ tests/
-	$(POETRY) ruff format src/ tests/
+	$(RUFF) check --fix src/ tests/
+	$(RUFF) format src/ tests/
 
 backend-typecheck: ## Run mypy type checker
-	$(POETRY) mypy src/
+	$(MYPY) src/
 
 ## ── Frontend (local, no Docker) ──────────────────────────────────
 frontend-install: ## Install frontend npm dependencies
@@ -71,31 +77,43 @@ frontend-build: ## Build frontend for production
 	cd $(FRONTEND_DIR) && npm run build
 
 ## ── Database / Alembic ───────────────────────────────────────────
+# All migration commands run inside the backend container where the DB is
+# reachable via the "db" service name (no localhost port-forwarding involved).
+# The alembic.ini and migrations are mounted via docker-compose volumes.
+# -T disables pseudo-TTY allocation — required when running from scripts/CI.
 db-upgrade: ## Apply all pending Alembic migrations
-	$(POETRY) alembic upgrade head
+	$(COMPOSE) exec -T backend alembic upgrade head
 
 db-downgrade: ## Roll back last Alembic migration
-	$(POETRY) alembic downgrade -1
+	$(COMPOSE) exec -T backend alembic downgrade -1
+
+db-current: ## Show current Alembic revision
+	$(COMPOSE) exec -T backend alembic current
+
+db-history: ## Show Alembic migration history
+	$(COMPOSE) exec -T backend alembic history
 
 db-revision: ## Generate new Alembic migration (usage: make db-revision msg="add users table")
-	$(POETRY) alembic revision --autogenerate -m "$(msg)"
+	$(COMPOSE) exec -T backend alembic revision --autogenerate -m "$(msg)"
 
 db-reset: ## Drop and recreate the dev DB (DESTRUCTIVE!)
-	$(COMPOSE) exec db psql -U atd -c "DROP DATABASE IF EXISTS atd_dev;" postgres
-	$(COMPOSE) exec db psql -U atd -c "CREATE DATABASE atd_dev;" postgres
+	$(COMPOSE) exec -T db psql -U atd -c "DROP DATABASE IF EXISTS atd_dev;" postgres
+	$(COMPOSE) exec -T db psql -U atd -c "CREATE DATABASE atd_dev;" postgres
 	$(MAKE) db-upgrade
 
 db-seed: ## Run all seed scripts (idempotent — safe to re-run)
-	$(POETRY) python -m database.migrations.seeds.seed_all
+	$(COMPOSE) exec -T backend python -m database.migrations.seeds.seed_all
 
 db-refresh: ## Reset DB + re-apply migrations + re-seed (full clean slate, DESTRUCTIVE!)
 	$(MAKE) db-reset
 	$(MAKE) db-seed
 
-db-recover: ## Recover from stale alembic_version (schema wiped but version row survived — no DROP needed)
-	$(COMPOSE) exec db psql -U atd -d atd_dev -c "DELETE FROM alembic_version;"
-	APP_ENV=dev PYTHONPATH=. $(POETRY) alembic upgrade head
-	APP_ENV=dev PYTHONPATH=. $(POETRY) python database/migrations/seeds/seed_all.py
+db-recover: ## Recover from stale alembic_version (schema wiped but stamp survived)
+	@echo "→ Removing stale alembic_version stamp…"
+	$(COMPOSE) exec -T db psql -U atd -d atd_dev -c "DELETE FROM alembic_version;"
+	@echo "→ Running all migrations from base…"
+	$(COMPOSE) exec -T backend alembic upgrade head
+	@echo "✓ DB recovered and up to date."
 
 ## ── CI checks (run same checks as GitHub Actions) ────────────────
 ci-backend: backend-lint backend-typecheck backend-test ## Run all backend CI checks locally

@@ -7,7 +7,7 @@ from collections.abc import Generator
 
 from sqlalchemy.orm import Session
 
-from src.core.database import SessionLocal
+from src.core.database import get_session_factory
 
 
 def get_db() -> Generator[Session, None, None]:
@@ -17,7 +17,7 @@ def get_db() -> Generator[Session, None, None]:
     Usage in a route:
         def my_route(db: Session = Depends(get_db)): ...
     """
-    db = SessionLocal()
+    db = get_session_factory()()
     try:
         yield db
     finally:

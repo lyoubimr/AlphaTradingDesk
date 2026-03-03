@@ -22,7 +22,8 @@ from __future__ import annotations
 import logging
 import sys
 
-from src.core.database import SessionLocal
+from src.core.database import get_session_factory
+SessionLocal = get_session_factory()
 from database.migrations.seeds.seed_brokers import seed_brokers
 from database.migrations.seeds.seed_instruments import seed_instruments
 from database.migrations.seeds.seed_market_analysis import seed_market_analysis
