@@ -1,9 +1,52 @@
 // ── Topbar component ───────────────────────────────────────────────────────
-import { Bell } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { Bell, TrendingUp } from 'lucide-react'
 import { ProfilePicker } from './ProfilePicker'
+import { statsApi } from '../../lib/api'
+import type { WinRateStats } from '../../types/api'
 
 interface TopbarProps {
   currentTime?: string
+}
+
+// ── Global WR pill ────────────────────────────────────────────────────────
+// Displays the mean win-rate across all profiles that have ≥5 closed trades.
+// Fetches once on mount and refreshes every 60s. Silent on error.
+function GlobalWRPill() {
+  const [wr, setWr] = useState<number | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    const fetch_ = () => {
+      statsApi.winrate().then((data: WinRateStats) => {
+        if (cancelled) return
+        const eligible = data.profiles.filter((p) => p.has_data && p.win_rate_pct !== null)
+        if (eligible.length === 0) return
+        const mean = eligible.reduce((sum, p) => sum + (p.win_rate_pct ?? 0), 0) / eligible.length
+        setWr(Math.round(mean * 10) / 10)
+      }).catch(() => { /* silent */ })
+    }
+    fetch_()
+    const id = setInterval(fetch_, 60_000)
+    return () => { cancelled = true; clearInterval(id) }
+  }, [])
+
+  if (wr === null) return null
+
+  const color = wr >= 55 ? 'text-green-400' : wr >= 45 ? 'text-amber-400' : 'text-red-400'
+  return (
+    <div
+      className="hidden lg:flex items-center gap-1.5 text-xs px-2 py-1 rounded
+                 bg-surface-800 border border-surface-700"
+      title="Global win-rate — mean across all profiles with ≥5 trades"
+    >
+      <TrendingUp size={11} className={color} />
+      <span className="text-slate-500">Global WR</span>
+      <span className={`font-mono font-semibold tabular-nums ${color}`}>
+        {wr.toFixed(1)}%
+      </span>
+    </div>
+  )
 }
 
 export function Topbar({ currentTime }: TopbarProps) {
@@ -19,9 +62,12 @@ export function Topbar({ currentTime }: TopbarProps) {
         <ProfilePicker />
       </div>
 
-      {/* ── Right: market pills + clock + actions ──────────────────── */}
+      {/* ── Right: WR pill + market pills + clock + actions ────────── */}
       <div className="flex items-center gap-4">
-        {/* Market summary pills */}
+        {/* Global win-rate across all profiles */}
+        <GlobalWRPill />
+
+        {/* Market summary pills (indicative — static placeholder for now) */}
         <div className="hidden md:flex items-center gap-3">
           <MarketPill symbol="BTC" value="~65,420" change="+1.4%" bull />
           <MarketPill symbol="ETH" value="~3,210" change="-0.3%" />

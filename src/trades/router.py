@@ -8,7 +8,8 @@ Routes:
   PUT    /api/trades/{id}             ← update (SL, notes, strategy…)
   POST   /api/trades/{id}/close       ← full close
   POST   /api/trades/{id}/partial     ← partial close (TP hit)
-  DELETE /api/trades/{id}             ← soft-delete
+  POST   /api/trades/{id}/cancel      ← cancel open limit order (no capital/WR impact)
+  DELETE /api/trades/{id}             ← physical delete (open/partial/cancelled only)
 """
 from __future__ import annotations
 
@@ -100,8 +101,20 @@ def partial_close(
     return service.partial_close(db, trade_id, data)
 
 
+@router.post("/{trade_id}/cancel", response_model=TradeOut)
+def cancel_trade(trade_id: int, db: Session = Depends(get_db)) -> object:
+    """
+    Cancel an open limit order.
+
+    Sets status='cancelled'. No impact on capital or WR stats.
+    Only 'open' trades can be cancelled (partials have real fills).
+    The trade is kept as a journal record — use DELETE to remove it entirely.
+    """
+    return service.cancel_trade(db, trade_id)
+
+
 @router.delete("/{trade_id}", status_code=status.HTTP_204_NO_CONTENT, response_model=None)
 def delete_trade(trade_id: int, db: Session = Depends(get_db)) -> Response:
-    """Delete an open/partial trade. Closed trades cannot be deleted (permanent journal record)."""
+    """Delete an open/partial/cancelled trade. Closed trades cannot be deleted."""
     service.delete_trade(db, trade_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)

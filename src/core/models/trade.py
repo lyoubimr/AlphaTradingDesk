@@ -96,7 +96,7 @@ class Trade(Base):
             "direction IN ('long', 'short')", name="ck_trades_direction"
         ),
         CheckConstraint(
-            "status IN ('open', 'partial', 'closed')", name="ck_trades_status"
+            "status IN ('open', 'partial', 'closed', 'cancelled')", name="ck_trades_status"
         ),
         CheckConstraint("risk_amount > 0", name="ck_trades_risk_amount_positive"),
         CheckConstraint("potential_profit > 0", name="ck_trades_potential_profit_positive"),

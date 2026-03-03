@@ -1,8 +1,8 @@
 # 🛠️ Phase 1 — Implementation Plan
 
 **Date:** March 1, 2026  
-**Version:** 1.2  
-**Status:** Ready to start — follows validation of `pre-implement-phase1.md`
+**Version:** 1.5  
+**Status:** Step 10 in progress — Trade Form + Risk Logic complete
 
 > This document describes **what to build, in what order**.  
 > Each step is a working, testable increment — nothing is left dangling.
@@ -10,6 +10,139 @@
 > **Dev environment during Steps 1–13:** everything runs locally on the Mac.  
 > Postgres runs in Docker on the Mac — no Dell needed yet.  
 > The Dell comes in at Step 14.0 (migration) and Step 14.1 (prod deploy).
+
+---
+
+## ✅ Completed work log
+
+### Step 1 — DONE (2026-03-01)
+- `pyproject.toml` + Poetry venv (Python 3.11)
+- `src/main.py` — FastAPI app + `/health` endpoint
+- `src/core/config.py` — Pydantic settings
+- `docker-compose.dev.yml` — db + backend + frontend + adminer
+- `Dockerfile.backend` + `frontend/Dockerfile`
+- `Makefile` — all dev/ci/db commands
+- `.env.example` / `.env.dev`
+- `tests/test_health.py` — pytest passing
+- `frontend/` — Vite + React + TypeScript + vitest
+
+### Step 2–3 — DONE (2026-03-01/02)
+- Full Phase 1 DB schema via Alembic (76f6b651fb6d)
+- Seed data: brokers (Kraken, Vantage), instruments, sessions, trading styles, market analysis modules/indicators
+
+### Step 4–7 — DONE (2026-03-02)
+- All backend routes working: profiles, brokers, instruments, trades, strategies, market analysis
+- Full trade lifecycle: open → partial close → full close → PnL + capital update (same transaction)
+- Atomic strategy WR stats update on `full_close` (trades_count, win_count)
+
+### Step 9 — DONE (2026-03-02)
+- `ProfileContext` — active profile persisted in localStorage
+- `/settings/profiles` — CRUD, broker selector, ProfilePicker topbar
+- ProfilePicker on all pages, auto-selects first profile
+
+### Step 10 — IN PROGRESS (2026-03-02/03)
+
+**Trade form (NewTradePage.tsx) — completed:**
+- Fixed Fractional position sizing (Crypto: units, CFD: lots)
+- Multi-TP presets (1–4 TPs, Smart Scale / Balanced / Aggressive / Conservative / Profit Max)
+- SL direction validation (LONG: SL < entry, SHORT: SL > entry)
+- Crypto: leverage slider, safe margin calc (MMR-aware), estimated liquidation price
+- CFD: broker margin estimate, maintenance margin, margin level %, margin call warning
+- Session auto-detection (UTC-based)
+- Strategy dropdown with inline "New strategy" creation
+- Confidence score 1–10
+- Setup tags (chart patterns / confluences)
+- **Expectancy panel** (see below)
+
+**Frontend payload fix (2026-03-02):**
+- Fixed `[object Object]` error on submit — corrected field names to match backend schema
+  (`take_profit_price`, `position_number`, lowercase direction, `entry_date: null`)
+- Improved API error handler: FastAPI 422 arrays are flattened to human-readable string
+
+**Trade Journal (TradesPage.tsx) — completed (2026-03-03):**
+- Replaced fake sample data with real API calls (`tradesApi.list(profileId)`)
+- Live KPIs: total trades, open count, win rate (≥5 closed trades), total P&L
+- Status badges: Open (blue) / Partial (amber) / Closed (gray) / Cancelled (dimmed strikethrough)
+- Cancel button on `open` trades → calls `POST /api/trades/{id}/cancel`, optimistic UI update
+- Loading skeleton + empty state + error banner
+- `TradeListItem.status` type updated to include `'partial'`
+- `tradesApi.cancel(tradeId)` added to `api.ts`
+
+**Global WR pill in Topbar — completed (2026-03-03):**
+- `GlobalWRPill` component fetches `GET /api/stats/winrate` on mount + every 60s (silent on error)
+- Displays mean WR across profiles with ≥5 trades — color-coded (green/amber/red)
+- Hidden if no profiles have enough data yet
+
+**Expectancy panel (2026-03-03):**
+- Formula: `E(R) = WR × AvgWinR − (1−WR) × 1R`
+- Shows R-multiples as primary metric, currency as secondary
+- Grades: 🔴 Negative / 🟡 Marginal / 🟢 Good / 💎 Excellent
+- **4-level WR source priority** (see Win-rate architecture below)
+
+---
+
+## 🏗️ Win-rate architecture (implemented 2026-03-03)
+
+Three independent win-rate levels, each with its own source and scope:
+
+| Level | Source | Scope | Updated when |
+|-------|--------|-------|--------------|
+| **Strategy WR** | `strategies.win_count / trades_count` | Only trades using this strategy | `full_close` if `strategy_id` is set |
+| **Profile WR** | `profiles.win_count / trades_count` | ALL closed trades of this profile, strategy-agnostic | Every `full_close`, always |
+| **Global WR** | Computed in frontend | `mean(profile.win_rate_pct)` across profiles with ≥5 trades | Not stored — derived on the fly |
+
+### Priority in ExpectancyPanel (trade form)
+```
+1. 🟢 Strategy WR  — if strategy selected AND trades_count ≥ min_trades_for_stats
+2. 🔵 Profile WR   — if activeProfile.trades_count ≥ 5
+3. 🟡 Global WR    — mean of all profiles that have ≥5 closed trades
+4. ⚪ Fallback 60%  — no history at all
+```
+
+### Backend changes
+- `profiles.trades_count` + `profiles.win_count` — added to DB model + `ProfileOut` schema
+- Migration: `a3c7d8e91f02_add_winrate_stats_to_profiles.py`
+- `trades/service.py full_close` — atomically increments `profile.trades_count` + `win_count`
+  in the same transaction as `capital_current` update and strategy stats
+- `GET /api/stats/winrate` (`src/stats/router.py`) — returns per-profile WR list
+  (uses `profiles` table directly, NOT strategy aggregation)
+- `stats/schemas.py` — `ProfileWinRate` + `WinRateStats` Pydantic models
+
+### Frontend changes
+- `types/api.ts` — `Profile` type: added `trades_count`, `win_count`
+- `types/api.ts` — new `ProfileWinRate`, `WinRateStats` types
+- `lib/api.ts` — new `statsApi.winrate(profileId?)` function
+- `NewTradePage.tsx` — `ExpectancyPanel` uses 4-level WR priority
+- `NewTradePage.tsx` — fetches `globalWrStats` from `/api/stats/winrate` on mount (silent on error)
+
+---
+
+## 🚫 Cancel trade — LIMIT order (implemented 2026-03-03)
+
+**Problem:** A LIMIT order that never triggers should be cancellable without deleting the journal record and without impacting any stats.
+
+**Solution:** `status = 'cancelled'` (new terminal state alongside `closed`)
+
+### Rules
+| Action | `status` | Capital impact | Profile WR | Strategy WR |
+|--------|----------|---------------|------------|-------------|
+| `full_close` | `closed` | ✅ updated | ✅ incremented | ✅ incremented (if strat set) |
+| `cancel_trade` | `cancelled` | ❌ no change | ❌ no change | ❌ no change |
+| `delete_trade` | removed | ❌ no change | ❌ no change | ❌ no change |
+
+Only `open` trades can be cancelled (a `partial` already has real fills).
+
+### Changes
+- **Migration** `b1d4f2a83e55_add_cancelled_status_to_trades.py`:
+  - drops `ck_trades_status` CHECK constraint
+  - re-creates with `IN ('open', 'partial', 'closed', 'cancelled')`
+- `src/core/models/trade.py` — `ck_trades_status` updated
+- `src/trades/schemas.py` — `TradeStatus` Literal updated
+- `src/trades/service.py` — new `cancel_trade()` function
+- `src/trades/router.py` — `POST /api/trades/{id}/cancel` endpoint
+- `delete_trade` now also allows deleting `cancelled` trades
+
+---
 
 ---
 
@@ -29,64 +162,11 @@ own step or sub-step in a later phase. Captured here so the context is not lost.
 
 ---
 
-### 🔵 Risk gating by strategy + confidence (Phase 2 step candidate)
+### 🔵 LIMIT order risk accounting (Phase 2 step candidate)
 
-**Context:** In the trade form, strategy and confidence level are collected *before*
-the trader touches any numbers (sections 2 & 3). This ordering is intentional:
-in a future step these values will **gate the maximum allowed risk percentage**.
-
-**Planned logic:**
-```
-base_risk_pct  = profile.risk_percentage_default
-
-if strategy.win_rate ≥ threshold_high AND confidence ≥ 8:
-    effective_risk_max = base_risk_pct × 1.25   # high-WR + high conviction → more room
-elif strategy.win_rate < threshold_low OR confidence ≤ 3:
-    effective_risk_max = base_risk_pct × 0.75   # low-WR or low conviction → reduced
-else:
-    effective_risk_max = base_risk_pct
-
-# Phase 3: market analysis score also feeds into risk gating
-if market_analysis.bias == 'bullish' AND direction == 'LONG':
-    effective_risk_max *= 1.10
-elif market_analysis.bias == 'bearish' AND direction == 'LONG':
-    effective_risk_max *= 0.90
-```
-
-**Where to implement:**
-- Backend: `GET /api/profiles/:id/effective-risk?strategy_id=&confidence=&direction=`
-- Frontend: trade form shows `Effective max risk: X.X%` badge when strategy/confidence are set
-- DB: `strategies.win_rate_threshold_high/low` configurable per profile (Settings → Strategies)
-
----
-
-### 🔵 Strategy settings page (Phase 2 step candidate)
-
-**Context:** Strategies currently show a live win rate in the dropdown (once
-`trades_count ≥ min_trades_for_stats`). A dedicated settings page is needed for:
-
-- List all strategies per profile (name, emoji, win rate bar, trades count)
-- Edit name / emoji
-- Set `min_trades_for_stats` override per strategy (default: 5)
-- Set `win_rate_threshold_high` and `win_rate_threshold_low` (default: 60% / 45%)
-- Archive / delete strategy (with confirmation — archived strategies still appear in closed trades)
-- Performance sparkline: win/loss streak, avg R:R per strategy
-
-**Route:** `/settings/strategies`
-
----
-
-### 🔵 LIMIT vs MARKET risk impact (Phase 2 step candidate)
-
-**Context:** Order type (MARKET / LIMIT) has different risk accounting implications:
-
-| Order type | Risk impact                          |
-|------------|--------------------------------------|
-| MARKET     | Immediately adds to `current_risk`   |
-| LIMIT      | **Pending** — does NOT add to risk until triggered |
-
-**Problem:** A trader could place multiple LIMIT orders that together would exceed
-`risk_max`, without realising it until they all trigger simultaneously.
+**Context:** Currently `open` LIMIT orders have the same risk accounting as MARKET orders.
+A cancelled LIMIT has no capital/WR impact (✅ implemented). But multiple pending LIMITs
+that all trigger simultaneously could exceed `max_concurrent_risk_pct` without warning.
 
 **Planned logic:**
 ```
@@ -94,30 +174,101 @@ current_risk   = Σ risk of all MARKET (open) trades
 pending_risk   = Σ risk of all LIMIT (pending) trades, per profile
 combined_risk  = current_risk + pending_risk
 
-if combined_risk > profile.risk_max_pct:
+if combined_risk > profile.max_concurrent_risk_pct:
     dashboard_notification(
         level='warning',
-        message=f"{profile.name}: pending LIMIT orders would push total risk to "
-                f"{combined_risk:.1f}% — exceeds your limit of {profile.risk_max_pct:.1f}%. "
-                "Cancel or reduce a pending limit, or reduce risk on an open position."
+        message="Pending LIMIT orders would push total risk to X.X% — exceeds max."
     )
 ```
 
 **Where to implement:**
-- Backend: new field `trades.status = 'LIMIT_PENDING'` (alongside existing OPEN/CLOSED/CANCELLED)
-- Dashboard widget: **Risk overview** — split current vs pending risk, warning banner
-- Trade form: when order type = LIMIT, show banner `"Limit orders don't consume risk until triggered."`
-- When a LIMIT is triggered (manually updated): status changes to OPEN → recalculate risk
+- Trade model: differentiate `order_type = 'LIMIT'` as pending vs triggered
+- Dashboard: **Risk overview widget** — split current vs pending risk
+- Trade form: banner when order_type = LIMIT: "Limit orders don't consume risk until triggered."
+- When LIMIT triggers: status changes to open → recalculate combined risk
+
+---
+
+### 🔵 Risk gating by strategy + confidence (Phase 2 step candidate)
+
+**Context:** In the trade form, strategy and confidence are collected before any numbers.
+In a future step these will **gate the maximum allowed risk percentage**.
+
+**Planned logic:**
+```
+base_risk_pct  = profile.risk_percentage_default
+
+if strategy.win_rate ≥ threshold_high AND confidence ≥ 8:
+    effective_risk_max = base_risk_pct × 1.25
+elif strategy.win_rate < threshold_low OR confidence ≤ 3:
+    effective_risk_max = base_risk_pct × 0.75
+else:
+    effective_risk_max = base_risk_pct
+
+# Phase 3: market analysis also feeds into risk gating
+if market_analysis.bias == 'bullish' AND direction == 'LONG':
+    effective_risk_max *= 1.10
+```
+
+**Where to implement:**
+- Backend: `GET /api/profiles/:id/effective-risk?strategy_id=&confidence=&direction=`
+- Frontend: trade form shows `Effective max risk: X.X%` badge
+- DB: `strategies.win_rate_threshold_high/low` configurable per profile
+
+---
+
+### 🔵 Strategy settings page (Phase 2 step candidate)
+
+**Context:** Strategies show live WR in the dropdown. A dedicated settings page is needed.
+
+**Route:** `/settings/strategies`
+- List all strategies per profile (name, emoji, win rate bar, trades count)
+- Edit name / emoji
+- Set `min_trades_for_stats` override per strategy (default: 5)
+- Set `win_rate_threshold_high` / `win_rate_threshold_low` (default: 60% / 45%)
+- Archive / delete strategy (archived still appear in closed trade history)
+- Performance sparkline: win/loss streak, avg R:R per strategy
 
 ---
 
 ### 🔵 Trade settings + Expectancy configuration (Phase 2 step candidate)
 
-**Context:** The trade form shows an **Expectancy panel** (Section 7) with hardcoded
-ranges and a 60% fallback win rate. These should be user-configurable.
+**Context:** ExpectancyPanel has hardcoded thresholds and 60% fallback.
 
 **Current defaults (hardcoded in `NewTradePage.tsx`):**
 ```
+DEFAULT_WIN_RATE = 60%
+MIN_PROFILE_TRADES = 5
+Grade thresholds (as R-multiple):
+  < 0    → 🔴 Negative
+  0–0.5  → 🟡 Marginal
+  0.5–1  → 🟢 Good
+  ≥ 1    → 💎 Excellent
+```
+
+**Planned settings (route: `/settings/trade`):**
+- Default win rate fallback (%)
+- Expectancy grade thresholds (editable)
+- Whether to store expectancy value on trade submit (default: ON)
+- Whether to show expectancy panel on trade form (default: ON)
+
+**DB change needed:**
+- `trades.expectancy_at_open DECIMAL(10,4)` — stored at submit time
+- `user_preferences.expectancy_config JSONB` — stores thresholds per profile
+
+---
+
+### 🔵 Market analysis → risk gating (Phase 3 step candidate)
+
+**Context:** Market analysis sessions produce a bias score. This should feed into
+risk gating alongside strategy and confidence (see "Risk gating" note above).
+
+**Planned logic:**
+- `GET /api/profiles/:id/market-analysis/latest` returns `{ bias, score_pct, days_old }`
+- If analysis > 7 days old → treat as Neutral (stale)
+- Trade form badge: `"Crypto 🟢 79% · 2d ago"` shown above Section 3 (Prices)
+
+---
 DEFAULT_WIN_RATE = 60%
 Grade thresholds (as multiple of R):
   < 0    → 🔴 Negative

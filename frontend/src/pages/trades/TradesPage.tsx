@@ -1,33 +1,90 @@
 // ── Trade Journal page ─────────────────────────────────────────────────────
-import { Plus, Filter, Download } from 'lucide-react'
+import { useEffect, useState, useCallback } from 'react'
+import { Plus, Filter, Download, X, Loader2, RefreshCw } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { PageHeader } from '../../components/ui/PageHeader'
 import { Badge } from '../../components/ui/Badge'
-import { ComingSoon } from '../../components/ui/ComingSoon'
 import { StatCard } from '../../components/ui/StatCard'
+import { useProfile } from '../../context/ProfileContext'
+import { tradesApi } from '../../lib/api'
+import type { TradeListItem } from '../../types/api'
 
-// ── Fake trade rows (placeholder) ─────────────────────────────────────────
-interface TradeRow {
-  id: number
-  symbol: string
-  side: 'LONG' | 'SHORT'
-  entry: string
-  exit: string | null
-  size: string
-  pnl: string | null
-  rr: string | null
-  strategy: string
-  date: string
+// ── Status badge ──────────────────────────────────────────────────────────
+function StatusBadge({ status }: { status: string }) {
+  const map: Record<string, { label: string; className: string }> = {
+    open:      { label: 'Open',      className: 'text-brand-300 bg-brand-600/15 border border-brand-600/30' },
+    partial:   { label: 'Partial',   className: 'text-amber-300 bg-amber-500/10 border border-amber-500/30' },
+    closed:    { label: 'Closed',    className: 'text-slate-400 bg-surface-700 border border-surface-600' },
+    cancelled: { label: 'Cancelled', className: 'text-slate-600 bg-surface-800 border border-surface-700 line-through' },
+  }
+  const s = map[status] ?? { label: status, className: 'text-slate-500' }
+  return (
+    <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium ${s.className}`}>
+      {s.label}
+    </span>
+  )
 }
 
-const SAMPLE_TRADES: TradeRow[] = [
-  { id: 1, symbol: 'BTC/USD', side: 'LONG',  entry: '64,200', exit: '65,800', size: '0.05', pnl: '+$80',  rr: '1.6R', strategy: 'Breakout', date: '2026-03-01' },
-  { id: 2, symbol: 'ETH/USD', side: 'SHORT', entry: '3,310',  exit: '3,180',  size: '0.5',  pnl: '+$65',  rr: '1.3R', strategy: 'Range',    date: '2026-02-28' },
-  { id: 3, symbol: 'XAU/USD', side: 'LONG',  entry: '2,310',  exit: null,     size: '0.1',  pnl: null,    rr: null,   strategy: 'Trend',    date: '2026-03-02' },
-]
+// ── Derived KPIs ──────────────────────────────────────────────────────────
+function deriveKPIs(trades: TradeListItem[]) {
+  const closed   = trades.filter((t) => t.status === 'closed')
+  const openList = trades.filter((t) => t.status === 'open' || t.status === 'partial')
+  const wins     = closed.filter((t) => t.realized_pnl && parseFloat(t.realized_pnl) > 0)
+  const winRate  = closed.length >= 5
+    ? `${((wins.length / closed.length) * 100).toFixed(1)}%`
+    : '—'
+  const totalPnl = closed.reduce((acc, t) => acc + parseFloat(t.realized_pnl ?? '0'), 0)
+  const sign = totalPnl >= 0 ? '+' : ''
+  return {
+    total:       trades.length,
+    openCount:   openList.length,
+    winRate,
+    winRateSub:  closed.length < 5 ? 'Min 5 closed trades' : `${wins.length}/${closed.length} wins`,
+    totalPnl:    closed.length > 0 ? `${sign}$${totalPnl.toFixed(2)}` : '—',
+    totalPnlPos: totalPnl >= 0,
+  }
+}
 
 export function TradesPage() {
   const navigate = useNavigate()
+  const { activeProfile } = useProfile()
+
+  const [trades, setTrades]         = useState<TradeListItem[]>([])
+  const [loading, setLoading]       = useState(false)
+  const [error, setError]           = useState<string | null>(null)
+  const [cancelling, setCancelling] = useState<number | null>(null)
+
+  const fetchTrades = useCallback(() => {
+    if (!activeProfile) { setTrades([]); return }
+    setLoading(true)
+    setError(null)
+    tradesApi
+      .list(activeProfile.id)
+      .then(setTrades)
+      .catch((e: Error) => setError(e.message))
+      .finally(() => setLoading(false))
+  }, [activeProfile])
+
+  useEffect(() => { fetchTrades() }, [fetchTrades])
+
+  async function handleCancel(tradeId: number) {
+    if (!confirm('Cancel this trade? It will be marked as cancelled with no capital or win-rate impact.')) return
+    setCancelling(tradeId)
+    try {
+      await tradesApi.cancel(tradeId)
+      // Optimistically flip status in local state — no full refetch needed
+      setTrades((prev) =>
+        prev.map((t) => t.id === tradeId ? { ...t, status: 'cancelled' as const } : t)
+      )
+    } catch (e: unknown) {
+      alert(`Cancel failed: ${(e as Error).message}`)
+    } finally {
+      setCancelling(null)
+    }
+  }
+
+  const kpis = deriveKPIs(trades)
+
   return (
     <div>
       <PageHeader
@@ -39,6 +96,15 @@ export function TradesPage() {
         info="Each trade can have multiple take-profit positions (multi-TP). Win rate is only shown after 5+ trades."
         actions={
           <>
+            <button
+              type="button"
+              className="atd-btn-ghost"
+              onClick={fetchTrades}
+              disabled={loading}
+              title="Refresh"
+            >
+              <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
+            </button>
             <button type="button" className="atd-btn-ghost" disabled>
               <Filter size={14} /> Filters
             </button>
@@ -58,61 +124,214 @@ export function TradesPage() {
 
       {/* ── KPIs ──────────────────────────────────────────────────────── */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-        <StatCard label="Total Trades"   value="—" sub="No data yet"         accent="brand"   info="Total closed + open trades in your journal." />
-        <StatCard label="Win Rate"       value="—" sub="Min 5 trades"        accent="bull"    info="Percentage of winning trades. Requires at least 5 closed trades." />
-        <StatCard label="Avg R:R"        value="—" sub="Risk / Reward ratio"  accent="neutral" info="Average realised risk-to-reward ratio across all closed trades." />
-        <StatCard label="Total P&L"      value="—" sub="Gross, no commission" accent="bull"    info="Sum of all closed trade P&L. Does not include open positions." />
+        <StatCard
+          label="Total Trades"
+          value={loading ? '…' : String(kpis.total)}
+          sub={loading ? '' : `${kpis.openCount} open`}
+          accent="brand"
+          info="Total trades in your journal (open + partial + closed)."
+        />
+        <StatCard
+          label="Win Rate"
+          value={loading ? '…' : kpis.winRate}
+          sub={loading ? '' : kpis.winRateSub}
+          accent="bull"
+          info="Win rate across closed trades. Requires at least 5 closed trades to be meaningful."
+        />
+        <StatCard
+          label="Avg R:R"
+          value="—"
+          sub="Coming soon"
+          accent="neutral"
+          info="Average realised risk-to-reward ratio across all closed trades."
+        />
+        <StatCard
+          label="Total P&L"
+          value={loading ? '…' : kpis.totalPnl}
+          sub="Closed trades only"
+          accent={kpis.totalPnl.startsWith('-') ? 'bear' : kpis.totalPnl === '—' ? 'neutral' : 'bull'}
+          info="Sum of P&L for all closed trades. Does not include open positions."
+        />
       </div>
 
-      {/* ── Placeholder table ─────────────────────────────────────────── */}
-      <div className="rounded-xl bg-surface-800 border border-surface-700 overflow-hidden mb-6">
-        <div className="flex items-center justify-between px-5 py-3 border-b border-surface-700">
-          <span className="text-sm font-medium text-slate-400">Recent Trades</span>
-          <Badge label="Sample data" variant="neutral" />
+      {/* ── Error state ───────────────────────────────────────────────── */}
+      {error && (
+        <div className="mb-6 rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
+          ⚠️ {error}
         </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-xs">
-            <thead>
-              <tr className="border-b border-surface-700">
-                {['Date', 'Symbol', 'Side', 'Entry', 'Exit', 'Size', 'P&L', 'R:R', 'Strategy'].map((h) => (
-                  <th key={h} className="px-4 py-2.5 text-left text-slate-600 font-medium uppercase tracking-wider">
-                    {h}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {SAMPLE_TRADES.map((t) => (
-                <tr key={t.id} className="border-b border-surface-700/50 hover:bg-surface-700/30 transition-colors">
-                  <td className="px-4 py-2.5 text-slate-500 font-mono">{t.date}</td>
-                  <td className="px-4 py-2.5 text-slate-200 font-medium">{t.symbol}</td>
-                  <td className="px-4 py-2.5">
-                    <span className={t.side === 'LONG' ? 'text-green-400' : 'text-red-400'}>
-                      {t.side}
-                    </span>
-                  </td>
-                  <td className="px-4 py-2.5 text-slate-400 tabular-nums font-mono">{t.entry}</td>
-                  <td className="px-4 py-2.5 text-slate-400 tabular-nums font-mono">{t.exit ?? '—'}</td>
-                  <td className="px-4 py-2.5 text-slate-500 tabular-nums">{t.size}</td>
-                  <td className="px-4 py-2.5 tabular-nums font-mono">
-                    {t.pnl
-                      ? <span className={t.pnl.startsWith('+') ? 'text-green-400' : 'text-red-400'}>{t.pnl}</span>
-                      : <span className="text-slate-600">Open</span>
-                    }
-                  </td>
-                  <td className="px-4 py-2.5 text-slate-500 tabular-nums">{t.rr ?? '—'}</td>
-                  <td className="px-4 py-2.5 text-slate-600">{t.strategy}</td>
-                </tr>
+      )}
+
+      {/* ── No active profile ─────────────────────────────────────────── */}
+      {!activeProfile && !loading && (
+        <div className="rounded-xl bg-surface-800 border border-surface-700 p-10 text-center text-slate-500 text-sm">
+          Select or create a profile to view your trades.
+        </div>
+      )}
+
+      {/* ── Trades table ──────────────────────────────────────────────── */}
+      {activeProfile && (
+        <div className="rounded-xl bg-surface-800 border border-surface-700 overflow-hidden mb-6">
+          {/* Table header bar */}
+          <div className="flex items-center justify-between px-5 py-3 border-b border-surface-700">
+            <span className="text-sm font-medium text-slate-400">
+              Recent Trades
+              {!loading && trades.length > 0 && (
+                <span className="ml-2 text-xs text-slate-600">({trades.length})</span>
+              )}
+            </span>
+            {loading
+              ? <Loader2 size={14} className="animate-spin text-slate-600" />
+              : trades.length === 0
+                ? <Badge label="No trades yet" variant="neutral" />
+                : null
+            }
+          </div>
+
+          {/* Empty state */}
+          {!loading && trades.length === 0 && (
+            <div className="px-5 py-12 text-center text-slate-600 text-sm">
+              No trades logged yet.{' '}
+              <button
+                type="button"
+                className="text-brand-400 hover:text-brand-300 underline underline-offset-2 transition-colors"
+                onClick={() => navigate('/trades/new')}
+              >
+                Log your first trade →
+              </button>
+            </div>
+          )}
+
+          {/* Loading skeleton */}
+          {loading && (
+            <div className="px-5 py-8 space-y-3">
+              {[1, 2, 3].map((i) => (
+                <div key={i} className="h-7 rounded bg-surface-700 animate-pulse" />
               ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
+            </div>
+          )}
 
-      <ComingSoon
-        feature="Real trade data, multi-TP tracking, filters, and P&L chart"
-        phase="Phase 1 — Step 11+"
-      />
+          {/* Actual table */}
+          {!loading && trades.length > 0 && (
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="border-b border-surface-700">
+                    {['Date', 'Pair', 'Side', 'Status', 'Entry', 'Stop Loss', 'Risk', 'P&L', ''].map((h, i) => (
+                      <th
+                        key={i}
+                        className="px-4 py-2.5 text-left text-slate-600 font-medium uppercase tracking-wider whitespace-nowrap"
+                      >
+                        {h}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {trades.map((t) => {
+                    const pnlNum        = t.realized_pnl ? parseFloat(t.realized_pnl) : null
+                    const isBull        = pnlNum !== null && pnlNum > 0
+                    const isBear        = pnlNum !== null && pnlNum < 0
+                    const isCancellable = t.status === 'open'
+                    const isCancelling  = cancelling === t.id
+                    const isDimmed      = t.status === 'cancelled'
+
+                    return (
+                      <tr
+                        key={t.id}
+                        className={`border-b border-surface-700/50 transition-colors ${
+                          isDimmed
+                            ? 'opacity-40 hover:opacity-60'
+                            : 'hover:bg-surface-700/30'
+                        }`}
+                      >
+                        {/* Date */}
+                        <td className="px-4 py-2.5 text-slate-500 font-mono whitespace-nowrap">
+                          {(t.entry_date || t.created_at)
+                            ? new Date(t.entry_date ?? t.created_at).toLocaleDateString('en-GB', {
+                                day: '2-digit', month: 'short', year: '2-digit',
+                              })
+                            : '—'}
+                        </td>
+
+                        {/* Pair */}
+                        <td className="px-4 py-2.5 text-slate-200 font-medium">{t.pair}</td>
+
+                        {/* Direction */}
+                        <td className="px-4 py-2.5">
+                          <span className={t.direction === 'LONG' ? 'text-green-400' : 'text-red-400'}>
+                            {t.direction}
+                          </span>
+                        </td>
+
+                        {/* Status */}
+                        <td className="px-4 py-2.5">
+                          <StatusBadge status={t.status} />
+                        </td>
+
+                        {/* Entry */}
+                        <td className="px-4 py-2.5 text-slate-400 tabular-nums font-mono">
+                          {parseFloat(t.entry_price).toLocaleString(undefined, {
+                            minimumFractionDigits: 2,
+                            maximumFractionDigits: 5,
+                          })}
+                        </td>
+
+                        {/* Stop loss */}
+                        <td className="px-4 py-2.5 text-red-500/70 tabular-nums font-mono">
+                          {parseFloat(t.stop_loss).toLocaleString(undefined, {
+                            minimumFractionDigits: 2,
+                            maximumFractionDigits: 5,
+                          })}
+                        </td>
+
+                        {/* Risk */}
+                        <td className="px-4 py-2.5 text-slate-500 tabular-nums">
+                          ${parseFloat(t.risk_amount).toFixed(2)}
+                        </td>
+
+                        {/* P&L */}
+                        <td className="px-4 py-2.5 tabular-nums font-mono">
+                          {pnlNum !== null ? (
+                            <span className={isBull ? 'text-green-400' : isBear ? 'text-red-400' : 'text-slate-400'}>
+                              {isBull ? '+' : ''}{pnlNum.toFixed(2)}
+                            </span>
+                          ) : t.status === 'cancelled' ? (
+                            <span className="text-slate-700">—</span>
+                          ) : (
+                            <span className="text-brand-500/60">Open</span>
+                          )}
+                        </td>
+
+                        {/* Actions */}
+                        <td className="px-4 py-2.5">
+                          {isCancellable && (
+                            <button
+                              type="button"
+                              disabled={isCancelling}
+                              onClick={() => handleCancel(t.id)}
+                              className="flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium
+                                         text-slate-500 hover:text-red-400 hover:bg-red-500/10
+                                         border border-transparent hover:border-red-500/30
+                                         transition-colors disabled:opacity-40"
+                              title="Cancel this limit order — no capital or win-rate impact"
+                            >
+                              {isCancelling
+                                ? <Loader2 size={10} className="animate-spin" />
+                                : <X size={10} />
+                              }
+                              Cancel
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }

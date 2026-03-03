@@ -22,8 +22,10 @@ Full close flow:
   3. trade.status = 'closed', trade.closed_at = now()
   4. In same transaction:
      a. profile.capital_current += realized_pnl
-     b. strategy.trades_count += 1  (if strategy set)
-     c. strategy.win_count   += 1  (if PnL > 0)
+     b. profile.trades_count    += 1
+     c. profile.win_count       += 1  (if PnL > 0)
+     d. strategy.trades_count   += 1  (if strategy set)
+     e. strategy.win_count      += 1  (if PnL > 0 and strategy set)
 
 Capital is ALWAYS updated in the same DB transaction as trade close.
 """
@@ -281,7 +283,7 @@ def open_trade(db: Session, data: TradeOpen) -> TradeOut:
         ),
         analyzed_timeframe=data.analyzed_timeframe,
         entry_price=data.entry_price,
-        entry_date=data.entry_date,
+        entry_date=data.entry_date or datetime.utcnow(),
         stop_loss=data.stop_loss,
         nb_take_profits=len(data.positions),
         risk_amount=risk_amount,
@@ -457,12 +459,16 @@ def full_close(db: Session, trade_id: int, data: TradeClose) -> Trade:
     trade.closed_at = exit_dt
     trade.current_risk = Decimal("0.00")
 
-    # -- Atomic capital update -------------------------------------------------
+    # -- Atomic capital + profile win-rate update --------------------------------
     profile = db.query(Profile).filter(Profile.id == trade.profile_id).first()
     if profile:
         profile.capital_current = (
             profile.capital_current + trade.realized_pnl
         ).quantize(Decimal("0.01"))
+        # Always increment trade count; win_count only when PnL > 0
+        profile.trades_count += 1
+        if trade.realized_pnl > 0:
+            profile.win_count += 1
 
     # -- Atomic strategy stats update ------------------------------------------
     if trade.strategy_id:
@@ -477,12 +483,38 @@ def full_close(db: Session, trade_id: int, data: TradeClose) -> Trade:
     return trade
 
 
+def cancel_trade(db: Session, trade_id: int) -> Trade:
+    """
+    Cancel an open limit order.
+
+    Rules:
+    - Only 'open' trades can be cancelled (a partial already has real fills).
+    - Sets status = 'cancelled', current_risk = 0.
+    - Does NOT update profile.capital_current or any WR counters.
+    - Trade is kept as a journal record (not deleted).
+    """
+    trade = _get_trade_or_404(db, trade_id)
+
+    if trade.status != "open":
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Only 'open' trades can be cancelled. Current status: {trade.status}.",
+        )
+
+    trade.status = "cancelled"
+    trade.current_risk = Decimal("0.00")
+
+    db.commit()
+    db.refresh(trade)
+    return trade
+
+
 def delete_trade(db: Session, trade_id: int) -> None:
     """
-    Delete a trade.
+    Physically delete a trade.
 
-    Open/partial trades are physically deleted (no PnL impact, nothing to preserve).
-    Closed trades are rejected -- they are the permanent journal record.
+    Open/partial/cancelled trades are physically deleted.
+    Closed trades are rejected — they are the permanent journal record.
     """
     trade = _get_trade_or_404(db, trade_id)
 

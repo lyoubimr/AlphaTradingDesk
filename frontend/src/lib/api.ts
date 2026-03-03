@@ -3,7 +3,7 @@
 // Base URL: Vite proxy rewrites /api/* → backend:8000/*
 // Never use fetch() directly in components — always use this module.
 
-import type { Profile, ProfileCreate, ProfileUpdate, Broker, Instrument, TradeOpen, TradeClose, TradePartialClose, TradeListItem, TradeOut, Strategy, StrategyCreate } from '../types/api'
+import type { Profile, ProfileCreate, ProfileUpdate, Broker, Instrument, TradeOpen, TradeClose, TradePartialClose, TradeListItem, TradeOut, Strategy, StrategyCreate, WinRateStats } from '../types/api'
 
 const BASE = '/api'
 
@@ -17,7 +17,20 @@ async function request<T>(
   })
   if (!res.ok) {
     const body = await res.json().catch(() => ({ detail: res.statusText }))
-    throw new Error(body?.detail ?? `HTTP ${res.status}`)
+    // FastAPI 422 returns detail as an array of validation error objects.
+    // Flatten them into a human-readable string.
+    let detail: string
+    if (Array.isArray(body?.detail)) {
+      detail = (body.detail as Array<{ loc?: string[]; msg?: string }>)
+        .map((e) => {
+          const field = e.loc?.slice(1).join('.') ?? ''
+          return field ? `${field}: ${e.msg}` : (e.msg ?? JSON.stringify(e))
+        })
+        .join(' · ')
+    } else {
+      detail = body?.detail ?? `HTTP ${res.status}`
+    }
+    throw new Error(detail)
   }
   if (res.status === 204) return undefined as T
   return res.json() as Promise<T>
@@ -105,6 +118,24 @@ export const tradesApi = {
       body: JSON.stringify(data),
     }),
 
+  cancel: (tradeId: number): Promise<TradeOut> =>
+    request(`/trades/${tradeId}/cancel`, { method: 'POST' }),
+
   delete: (tradeId: number): Promise<void> =>
     request(`/trades/${tradeId}`, { method: 'DELETE' }),
+}
+
+// ── Stats ─────────────────────────────────────────────────────────────────
+
+export const statsApi = {
+  /**
+   * GET /api/stats/winrate
+   * Returns profile-level WR stats (trades_count + win_count from the profiles table).
+   * The global WR is NOT returned here — it is computed in the frontend as:
+   *   mean(p.win_rate_pct for p in profiles if p.has_data)
+   */
+  winrate: (profileId?: number): Promise<WinRateStats> => {
+    const qs = profileId != null ? `?profile_id=${profileId}` : ''
+    return request(`/stats/winrate${qs}`)
+  },
 }

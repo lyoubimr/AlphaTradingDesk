@@ -12,11 +12,11 @@ import {
 } from 'lucide-react'
 import { PageHeader } from '../../components/ui/PageHeader'
 import { useProfile } from '../../context/ProfileContext'
-import { instrumentsApi, tradesApi, strategiesApi } from '../../lib/api'
+import { instrumentsApi, tradesApi, strategiesApi, statsApi } from '../../lib/api'
 import { useRiskCalc } from '../../hooks/useRiskCalc'
 import type { RiskCalcResult } from '../../hooks/useRiskCalc'
 import { cn } from '../../lib/cn'
-import type { Instrument, Strategy } from '../../types/api'
+import type { Instrument, Profile, Strategy, WinRateStats } from '../../types/api'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Shared styles
@@ -440,123 +440,202 @@ function StrategySelect({
 // Expectancy panel
 // ─────────────────────────────────────────────────────────────────────────────
 //
-// Formula (per-trade expectancy expressed in monetary units):
-//   E = (WR × avg_win) − (LR × avg_loss)
-//   where:
-//     WR       = win rate (from strategy if ≥ min_trades, else fallback 60%)
-//     LR       = 1 − WR
-//     avg_win  = totalProfit  (expected if all TPs hit, split-weighted)
-//     avg_loss = risk_amount  (our fixed max loss)
+// Formula (per-trade expectancy expressed in R-multiples):
+//   E(R) = WR × AvgWinR  −  LR × AvgLossR
+//   AvgWinR  = totalProfit / riskAmt   ← "how many R you win on a win"
+//   AvgLossR = 1.0                     ← you always lose exactly 1R on a loss
 //
-// Ranges (relative to risk_amount = 1R):
-//   E < 0        → 🔴 Negative  — review the setup
-//   0 ≤ E < 0.5R → 🟡 Marginal  — borderline, trade with caution
-//   0.5R ≤ E < R → 🟢 Good      — solid positive expectancy
-//   E ≥ R        → 💎 Excellent — high-quality setup
+// Win-rate source priority (4 levels):
+//   1. Selected strategy  — strategy.win_count / trades_count  (if ≥ min_trades_for_stats)
+//   2. Active profile     — profile.win_count / trades_count   (if ≥ 5 closed trades)
+//   3. Global             — mean(wr) across all profiles with data (computed in front)
+//   4. Fallback           — 60% (industry standard)
 //
-// Win rate source priority:
-//   1. Selected strategy (if trades_count ≥ min_trades_for_stats)
-//   2. Fallback: 60% (industry-standard assumption, will be configurable in settings later)
-//
-// Future: ranges/emoji/colors will be configurable in Settings → Trade settings.
-// Future: expectancy stored in trades table for analytics.
+// Level 3 (global) is computed here from the WinRateStats fetched from /api/stats/winrate.
 
-const DEFAULT_WIN_RATE = 0.6 // 60% — fallback when no strategy stats
+const DEFAULT_WIN_RATE = 0.6        // 60% fallback
+const MIN_PROFILE_TRADES = 5        // mirrors backend MIN_PROFILE_TRADES
 
 interface ExpectancyPanelProps {
   calc: RiskCalcResult
   totalProfit: number | null
   pctValid: boolean
   selectedStrategy: Strategy | null
+  activeProfile: Profile
+  globalWrStats: WinRateStats | null  // from /api/stats/winrate, null = not loaded yet
   ccy: string
 }
 
-function ExpectancyPanel({ calc, totalProfit, pctValid, selectedStrategy, ccy }: ExpectancyPanelProps) {
-  // Only render when we have all the required numbers
+// ── Expectancy formula ────────────────────────────────────────────────────
+//
+//   E(R) = WR × (totalProfit / riskAmt)  −  (1 − WR) × 1
+//
+// Example: risk=10, totalProfit=20, WR=60%
+//   AvgWinR  = 20/10 = 2R
+//   E(R)     = 0.6×2R − 0.4×1R = 1.2 − 0.4 = +0.8R   ✓
+
+function ExpectancyPanel({ calc, totalProfit, pctValid, selectedStrategy, activeProfile, globalWrStats, ccy }: ExpectancyPanelProps) {
   if (!calc.valid || calc.risk_amount == null || calc.risk_amount <= 0) return null
   if (totalProfit == null || !pctValid) return null
 
-  const riskAmt = calc.risk_amount
+  const riskAmt  = calc.risk_amount
+  const avgWinR  = totalProfit / riskAmt
+  const avgLossR = 1.0
 
-  // Win rate — use strategy stats if available, fallback to 60%
+  // ── Win-rate priority ─────────────────────────────────────────────────
+  // Level 1: selected strategy (if enough trades)
   const hasStratStats = selectedStrategy != null
     && selectedStrategy.trades_count >= selectedStrategy.min_trades_for_stats
     && selectedStrategy.trades_count > 0
-  const winRate = hasStratStats
+
+  // Level 2: active profile (from profiles.win_count / trades_count)
+  const profileTrades = activeProfile.trades_count
+  const profileWins   = activeProfile.win_count
+  const hasProfileStats = profileTrades >= MIN_PROFILE_TRADES
+
+  // Level 3: global = mean of all profiles that have data
+  //   computed in front from the WinRateStats response
+  const globalWr: number | null = useMemo(() => {
+    if (!globalWrStats) return null
+    const withData = globalWrStats.profiles.filter(
+      (p) => p.has_data && p.win_rate_pct != null
+    )
+    if (withData.length === 0) return null
+    const sum = withData.reduce((s, p) => s + (p.win_rate_pct ?? 0), 0)
+    return sum / withData.length / 100   // convert % to ratio
+  }, [globalWrStats])
+
+  const hasGlobalStats = globalWr != null
+
+  // Pick the best available source
+  type WrSource = 'strategy' | 'profile' | 'global' | 'fallback'
+  const wrSource: WrSource = hasStratStats ? 'strategy'
+    : hasProfileStats ? 'profile'
+    : hasGlobalStats  ? 'global'
+    : 'fallback'
+
+  const winRate: number = wrSource === 'strategy'
     ? selectedStrategy!.win_count / selectedStrategy!.trades_count
-    : DEFAULT_WIN_RATE
+    : wrSource === 'profile'
+      ? profileWins / profileTrades
+      : wrSource === 'global'
+        ? globalWr!
+        : DEFAULT_WIN_RATE
+
+  const winRateSourceLabel: string = wrSource === 'strategy'
+    ? `${selectedStrategy!.name} (${selectedStrategy!.trades_count} trades)`
+    : wrSource === 'profile'
+      ? `${activeProfile.name} profile (${profileTrades} trades)`
+      : wrSource === 'global'
+        ? `Global average (${globalWrStats!.profiles.filter((p) => p.has_data).length} profiles)`
+        : `Default 60% — no trade history yet`
+
   const lossRate = 1 - winRate
 
-  // Expectancy in currency units
-  const expectancy = (winRate * totalProfit) - (lossRate * riskAmt)
-  const expectancyR = expectancy / riskAmt   // expressed as a multiple of risk
+  // ── Expectancy ────────────────────────────────────────────────────────
+  const expectancyR   = winRate * avgWinR - lossRate * avgLossR
+  const expectancyEur = expectancyR * riskAmt
 
-  // Grade
-  const grade: { label: string; emoji: string; bg: string; border: string; text: string; sub: string } =
-    expectancyR < 0
-      ? { label: 'Negative', emoji: '🔴', bg: 'bg-red-500/10', border: 'border-red-500/30', text: 'text-red-300', sub: 'Review the setup — expected value is negative.' }
-      : expectancyR < 0.5
-        ? { label: 'Marginal', emoji: '🟡', bg: 'bg-amber-500/10', border: 'border-amber-500/30', text: 'text-amber-300', sub: 'Borderline. Consider improving R:R or skipping.' }
-        : expectancyR < 1
-          ? { label: 'Good', emoji: '🟢', bg: 'bg-emerald-500/10', border: 'border-emerald-500/30', text: 'text-emerald-300', sub: 'Solid positive expectancy. Go for it.' }
-          : { label: 'Excellent', emoji: '💎', bg: 'bg-brand-500/10', border: 'border-brand-500/30', text: 'text-brand-300', sub: 'High-quality setup. Exceptional edge.' }
+  // ── Grade ─────────────────────────────────────────────────────────────
+  const grade = expectancyR < 0
+    ? { label: 'Negative',   emoji: '🔴', bg: 'bg-red-500/10',     border: 'border-red-500/30',     text: 'text-red-300',     sub: 'Expected value is negative — review setup.' }
+    : expectancyR < 0.5
+      ? { label: 'Marginal', emoji: '🟡', bg: 'bg-amber-500/10',   border: 'border-amber-500/30',   text: 'text-amber-300',   sub: 'Borderline. Improve R:R or confidence before taking.' }
+      : expectancyR < 1
+        ? { label: 'Good',     emoji: '🟢', bg: 'bg-emerald-500/10', border: 'border-emerald-500/30', text: 'text-emerald-300', sub: 'Solid positive expectancy. Good setup.' }
+        : { label: 'Excellent', emoji: '💎', bg: 'bg-brand-500/10',   border: 'border-brand-500/30',   text: 'text-brand-300',   sub: 'Exceptional edge. High-conviction setup.' }
 
-  const winRateLabel = hasStratStats
-    ? `${(winRate * 100).toFixed(0)}% WR (${selectedStrategy!.name})`
-    : `${(DEFAULT_WIN_RATE * 100).toFixed(0)}% WR (default — no strategy stats yet)`
+  // Badge color per WR source level
+  const wrBadgeCls = wrSource === 'strategy' ? 'text-emerald-400'
+    : wrSource === 'profile'  ? 'text-brand-300'
+    : wrSource === 'global'   ? 'text-amber-300'
+    : 'text-slate-400'
 
   return (
     <div className={cn('rounded-xl border p-4 space-y-3', grade.bg, grade.border)}>
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <span className="text-lg leading-none">{grade.emoji}</span>
+
+      {/* ── Header: grade + E(R) primary ─────────────────────────────── */}
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2.5">
+          <span className="text-2xl leading-none">{grade.emoji}</span>
           <div>
             <p className="text-[10px] text-slate-500 uppercase tracking-wider font-medium">Trade expectancy</p>
             <p className={cn('text-sm font-bold leading-tight', grade.text)}>{grade.label}</p>
           </div>
         </div>
         <div className="text-right">
-          <p className={cn('text-xl font-mono font-bold leading-tight', grade.text)}>
-            {expectancy >= 0 ? '+' : ''}{fmt(expectancy)} {ccy}
-          </p>
-          <p className={cn('text-xs font-mono', grade.text, 'opacity-70')}>
+          <p className={cn('text-2xl font-mono font-bold leading-tight', grade.text)}>
             {expectancyR >= 0 ? '+' : ''}{expectancyR.toFixed(2)}R
           </p>
+          <p className="text-[10px] text-slate-500 leading-tight">
+            {expectancyEur >= 0 ? '+' : ''}{fmt(expectancyEur)} {ccy} per trade avg
+          </p>
         </div>
       </div>
 
-      {/* Formula breakdown */}
-      <div className="grid grid-cols-3 gap-2 text-[10px]">
-        <div className="bg-surface-800/60 rounded-lg px-2.5 py-2">
-          <span className="text-slate-600 uppercase tracking-wider">Win rate</span>
-          <p className="text-slate-300 font-semibold mt-0.5">{(winRate * 100).toFixed(0)}%</p>
-          <p className="text-slate-600 mt-0.5 truncate">{hasStratStats ? selectedStrategy!.name : 'default'}</p>
+      {/* ── Formula breakdown ─────────────────────────────────────────── */}
+      <div className="rounded-lg bg-surface-800/70 px-3 py-2.5 space-y-1.5 border border-surface-700/50">
+        <p className="text-[9px] text-slate-600 uppercase tracking-wider font-medium mb-1">
+          How it's calculated
+        </p>
+        <div className="flex items-center gap-1.5 text-[11px] font-mono flex-wrap">
+          <span className="text-slate-500">E(R) =</span>
+          <span className="text-emerald-400">{(winRate * 100).toFixed(0)}%</span>
+          <span className="text-slate-600">× {avgWinR.toFixed(2)}R</span>
+          <span className="text-slate-600">−</span>
+          <span className="text-red-400">{(lossRate * 100).toFixed(0)}%</span>
+          <span className="text-slate-600">× 1R</span>
+          <span className="text-slate-500">=</span>
+          <span className={cn('font-bold', grade.text)}>
+            {expectancyR >= 0 ? '+' : ''}{expectancyR.toFixed(2)}R
+          </span>
         </div>
-        <div className="bg-surface-800/60 rounded-lg px-2.5 py-2">
-          <span className="text-slate-600 uppercase tracking-wider">Avg win</span>
-          <p className="text-emerald-400 font-semibold mt-0.5">+{fmt(totalProfit)} {ccy}</p>
-          <p className="text-slate-600 mt-0.5">all TPs hit</p>
-        </div>
-        <div className="bg-surface-800/60 rounded-lg px-2.5 py-2">
-          <span className="text-slate-600 uppercase tracking-wider">Avg loss</span>
-          <p className="text-red-400 font-semibold mt-0.5">−{fmt(riskAmt)} {ccy}</p>
-          <p className="text-slate-600 mt-0.5">max risk</p>
+        <div className="grid grid-cols-3 gap-1.5 pt-1">
+          <div className="text-[10px]">
+            <span className="text-slate-600">Win rate</span>
+            <p className={cn('font-semibold', wrBadgeCls)}>
+              {(winRate * 100).toFixed(0)}%
+            </p>
+            <p className="text-[9px] text-slate-600 truncate leading-tight mt-0.5">{winRateSourceLabel}</p>
+          </div>
+          <div className="text-[10px]">
+            <span className="text-slate-600">Avg win (R)</span>
+            <p className="text-emerald-400 font-semibold">{avgWinR.toFixed(2)}R</p>
+            <p className="text-[9px] text-slate-600 leading-tight mt-0.5">
+              +{fmt(totalProfit)} {ccy} ÷ {fmt(riskAmt)} {ccy}
+            </p>
+          </div>
+          <div className="text-[10px]">
+            <span className="text-slate-600">Avg loss (R)</span>
+            <p className="text-red-400 font-semibold">1.00R</p>
+            <p className="text-[9px] text-slate-600 leading-tight mt-0.5">
+              always −{fmt(riskAmt)} {ccy}
+            </p>
+          </div>
         </div>
       </div>
 
-      {/* Verdict line */}
-      <p className={cn('text-[10px]', grade.text, 'opacity-80')}>{grade.sub}</p>
+      {/* Verdict */}
+      <p className={cn('text-[11px] font-medium', grade.text, 'opacity-90')}>{grade.sub}</p>
 
-      {/* Win rate source notice */}
-      {!hasStratStats && (
-        <p className="text-[10px] text-slate-600 border-t border-surface-700/40 pt-2">
-          ℹ️ Using {(DEFAULT_WIN_RATE * 100).toFixed(0)}% fallback — {winRateLabel}
+      {/* WR source notice — only shown when NOT using strategy-level stats */}
+      {wrSource !== 'strategy' && (
+        <p className="text-[10px] text-slate-600 border-t border-surface-700/40 pt-2 leading-relaxed">
+          {wrSource === 'profile' && (
+            <>📊 Profile win rate used — {activeProfile.name}: {(winRate * 100).toFixed(0)}% across {profileTrades} trades. Select a strategy with ≥{selectedStrategy?.min_trades_for_stats ?? 5} trades for strategy-specific data.</>
+          )}
+          {wrSource === 'global' && (
+            <>🌐 Global average win rate used ({(winRate * 100).toFixed(0)}% across {globalWrStats!.profiles.filter((p) => p.has_data).length} profiles). No profile history yet — close {MIN_PROFILE_TRADES}+ trades to unlock profile WR.</>
+          )}
+          {wrSource === 'fallback' && (
+            <>📊 Using {(DEFAULT_WIN_RATE * 100).toFixed(0)}% default — no trade history yet. Win rate becomes dynamic once you close {MIN_PROFILE_TRADES}+ trades.</>
+          )}
         </p>
       )}
     </div>
   )
 }
+
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Main page
@@ -571,6 +650,9 @@ export function NewTradePage() {
   const [strategies, setStrategies]     = useState<Strategy[]>([])
   const [stratLoading, setStratLoading] = useState(false)
   const [strategyId, setStrategyId]     = useState<number | null>(null)
+
+  // Global WR stats — for the 3rd-level WR fallback in ExpectancyPanel
+  const [globalWrStats, setGlobalWrStats] = useState<WinRateStats | null>(null)
 
   const [instrument, setInstrument] = useState<Instrument | null>(null)
   const [direction, setDirection]   = useState<'LONG' | 'SHORT'>('LONG')
@@ -625,6 +707,13 @@ export function NewTradePage() {
       .then(setStrategies).catch(() => setStrategies([]))
       .finally(() => setStratLoading(false))
   }, [activeProfile?.id])
+
+  // ── Load global WR stats (for 3rd-level fallback in ExpectancyPanel) ──────
+  // Fetched once on mount; refreshed if profile changes (profile id = cache key).
+  // Errors are silent — panel falls back to 60% default gracefully.
+  useEffect(() => {
+    statsApi.winrate().then(setGlobalWrStats).catch(() => setGlobalWrStats(null))
+  }, [])
 
   // ── Reset form fields when active profile changes ─────────────────────────
   useEffect(() => {
@@ -808,13 +897,17 @@ export function NewTradePage() {
         profile_id:         activeProfile.id,
         instrument_id:      instrument.id,
         pair:               instrument.symbol,
-        direction,
+        direction:          direction.toLowerCase() as 'long' | 'short',
         asset_class:        instrument.asset_class,
         analyzed_timeframe: timeframe || null,
         entry_price:        entry,
-        entry_date:         null,
+        entry_date:         null,       // backend defaults to utcnow()
         stop_loss:          sl,
-        positions:          tps.map((t) => ({ tp_price: t.price, lot_percentage: Number(t.pct) })),
+        positions:          tps.map((t, i) => ({
+          position_number:    i + 1,
+          take_profit_price:  t.price,
+          lot_percentage:     Number(t.pct),
+        })),
         risk_pct_override:  riskPct || null,
         strategy_id:        strategyId ?? null,
         session_tag:        sessionTag || null,
@@ -1378,6 +1471,8 @@ export function NewTradePage() {
           totalProfit={totalProfit}
           pctValid={pctValid}
           selectedStrategy={strategies.find((s) => s.id === strategyId) ?? null}
+          activeProfile={activeProfile}
+          globalWrStats={globalWrStats}
           ccy={ccy}
         />
 

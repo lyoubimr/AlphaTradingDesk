@@ -14,6 +14,10 @@ export interface Profile {
   capital_current: string
   risk_percentage_default: string
   max_concurrent_risk_pct: string
+  // Win-rate stats — updated atomically on every trade close (same tx as capital)
+  // ALL closed trades of this profile, regardless of strategy.
+  trades_count: number
+  win_count: number
   description: string | null
   notes: string | null
   status: 'active' | 'archived' | 'deleted'
@@ -80,22 +84,24 @@ export interface Instrument {
 
 // ── Trades ────────────────────────────────────────────────────────────────
 
+/** One TP target sent to POST /api/trades */
 export interface TradePosition {
-  tp_price: string
-  lot_percentage: number  // e.g. 50 means 50% of position
+  position_number: number         // 1-based index
+  take_profit_price: string       // Decimal as string
+  lot_percentage: number          // e.g. 50 means 50% of position
 }
 
 export interface TradeOpen {
   profile_id: number
   instrument_id: number
   pair: string
-  direction: 'LONG' | 'SHORT'
+  direction: 'long' | 'short'    // backend normalises, but send lowercase
   asset_class: string
   analyzed_timeframe?: string | null
   entry_price: string
-  entry_date?: string | null
+  entry_date?: string | null      // null → backend defaults to utcnow()
   stop_loss: string
-  positions: TradePosition[]          // at least 1 TP required
+  positions: TradePosition[]      // 1–4 TPs required
   risk_pct_override?: string | null
   strategy_id?: number | null
   session_tag?: string | null
@@ -122,7 +128,7 @@ export interface TradeListItem {
   nb_take_profits: number
   risk_amount: string
   potential_profit: string | null
-  status: 'open' | 'closed' | 'cancelled'
+  status: 'open' | 'partial' | 'closed' | 'cancelled'
   realized_pnl: string | null
   closed_at: string | null
   created_at: string
@@ -181,4 +187,24 @@ export interface StrategyCreate {
   description?: string | null
   emoji?: string | null
   color?: string | null
+}
+
+// ── Stats / Win-rate ──────────────────────────────────────────────────────
+//
+// Three win-rate levels:
+//   1. Strategy WR  — strategy.win_count / trades_count   (per strategy, from /profiles/{id}/strategies)
+//   2. Profile WR   — profile.win_count  / trades_count   (per profile, from /stats/winrate)
+//   3. Global WR    — computed in frontend: mean(p.win_rate_pct for p if p.has_data)
+
+export interface ProfileWinRate {
+  profile_id: number
+  profile_name: string
+  trades_total: number
+  wins_total: number
+  win_rate_pct: number | null   // null → trades_total < 5 (not reliable yet)
+  has_data: boolean
+}
+
+export interface WinRateStats {
+  profiles: ProfileWinRate[]
 }

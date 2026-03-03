@@ -57,6 +57,9 @@ class ProfileOut(BaseModel):
     capital_current: Decimal
     risk_percentage_default: Decimal
     max_concurrent_risk_pct: Decimal
+    # Win-rate stats — updated atomically on every trade close
+    trades_count: int
+    win_count: int
     description: str | None
     notes: str | None
     status: str

@@ -135,6 +135,11 @@ class Profile(Base):
         Numeric(5, 2), nullable=False, default=Decimal("2.0")
     )
 
+    # Win-rate stats — updated atomically on every trade close (same transaction)
+    # These are PROFILE-level stats: all trades of this profile, regardless of strategy.
+    trades_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    win_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
     # Metadata
     description: Mapped[str | None] = mapped_column(Text)
     notes: Mapped[str | None] = mapped_column(Text)

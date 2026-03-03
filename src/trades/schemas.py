@@ -19,16 +19,21 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-Direction = Literal["long", "short"]
-TradeStatus = Literal["open", "partial", "closed"]
+Direction = Literal["long", "short", "LONG", "SHORT"]
+TradeStatus = Literal["open", "partial", "closed", "cancelled"]
 Period = Literal["daily", "weekly", "monthly"]
 
 
 # ── Position schemas ───────────────────────────────────────────────────────────
 
 class PositionIn(BaseModel):
-    """One TP target supplied when opening a trade (1–3 positions)."""
-    position_number: int = Field(..., ge=1, le=3)
+    """One TP target supplied when opening a trade (1–4 positions).
+    
+    position_number is optional: if omitted the backend auto-assigns
+    based on list order (1-based).  Kept for backward-compat if a
+    caller supplies it explicitly.
+    """
+    position_number: int | None = Field(default=None, ge=1, le=4)
     take_profit_price: Decimal = Field(..., gt=0)
     lot_percentage: Decimal = Field(..., gt=0, le=100)
 
@@ -65,10 +70,10 @@ class TradeOpen(BaseModel):
     analyzed_timeframe: str | None = Field(default=None, max_length=10)
 
     entry_price: Decimal = Field(..., gt=0)
-    entry_date: datetime
+    entry_date: datetime | None = None   # if None → backend uses utcnow()
     stop_loss: Decimal = Field(..., gt=0)
 
-    positions: list[PositionIn] = Field(..., min_length=1, max_length=3)
+    positions: list[PositionIn] = Field(..., min_length=1, max_length=4)
 
     # Optional overrides — if None the profile default is used
     risk_pct_override: Decimal | None = Field(default=None, gt=0, le=10)
@@ -79,29 +84,40 @@ class TradeOpen(BaseModel):
     confidence_score: int | None = Field(default=None, ge=0, le=100)
 
     @model_validator(mode="after")
-    def validate_positions_sum(self) -> TradeOpen:
-        """lot_percentage across all positions must sum to exactly 100."""
+    def normalise_and_validate(self) -> TradeOpen:
+        """
+        1. Normalise direction to lowercase.
+        2. Auto-assign position_number if omitted (1-based from list order).
+        3. Validate lot_percentage sums to 100.
+        4. Validate position_numbers are unique.
+        5. Validate SL direction.
+        """
+        # 1. Normalise direction
+        self.direction = self.direction.lower()  # type: ignore[assignment]
+
+        # 2. Auto-assign position_number
+        for idx, pos in enumerate(self.positions, start=1):
+            if pos.position_number is None:
+                pos.position_number = idx
+
+        # 3. Lot sum
         total = sum(p.lot_percentage for p in self.positions)
         if total != Decimal("100"):
             raise ValueError(
                 f"lot_percentage across all positions must sum to 100, got {total}."
             )
-        return self
 
-    @model_validator(mode="after")
-    def validate_position_numbers_unique(self) -> TradeOpen:
+        # 4. Unique position numbers
         nums = [p.position_number for p in self.positions]
         if len(nums) != len(set(nums)):
             raise ValueError("position_number must be unique across positions.")
-        return self
 
-    @model_validator(mode="after")
-    def validate_sl_direction(self) -> TradeOpen:
-        """SL must be below entry for long, above for short."""
+        # 5. SL direction
         if self.direction == "long" and self.stop_loss >= self.entry_price:
             raise ValueError("For a long trade, stop_loss must be below entry_price.")
         if self.direction == "short" and self.stop_loss <= self.entry_price:
             raise ValueError("For a short trade, stop_loss must be above entry_price.")
+
         return self
 
 
