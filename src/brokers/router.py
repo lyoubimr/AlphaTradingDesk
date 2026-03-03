@@ -5,17 +5,25 @@ Routes:
   GET    /api/brokers                          → list all active brokers
   GET    /api/brokers/{broker_id}/instruments  → list active instruments for a broker
   POST   /api/brokers/{broker_id}/instruments  → add a custom instrument
+  GET    /api/trading-styles                   → list all trading styles (for goals)
 """
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from src.brokers.schemas import BrokerOut, InstrumentCreate, InstrumentOut
+from src.brokers.schemas import BrokerOut, InstrumentCreate, InstrumentOut, TradingStyleOut
 from src.core.deps import get_db
-from src.core.models.broker import Broker, Instrument
+from src.core.models.broker import Broker, Instrument, TradingStyle
 
 router = APIRouter(prefix="/brokers", tags=["brokers"])
+styles_router = APIRouter(prefix="/trading-styles", tags=["reference"])
+
+
+@styles_router.get("", response_model=list[TradingStyleOut])
+def list_trading_styles(db: Session = Depends(get_db)) -> list[TradingStyle]:
+    """Return all trading styles (Scalping, Day Trading, Swing, Position...)."""
+    return db.query(TradingStyle).order_by(TradingStyle.sort_order, TradingStyle.name).all()
 
 
 @router.get("", response_model=list[BrokerOut])

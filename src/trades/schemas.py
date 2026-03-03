@@ -126,13 +126,30 @@ class TradeOpen(BaseModel):
 # ── Trade update ──────────────────────────────────────────────────────────────
 
 class TradeUpdate(BaseModel):
-    """PUT /api/trades/{id} — partial update, only sent fields are changed."""
+    """
+    PUT /api/trades/{id} — partial update, only sent fields are changed.
+
+    Fields available for all non-closed statuses:
+        stop_loss, strategy_id, notes, confidence_score, session_tag,
+        analyzed_timeframe
+
+    Fields only available for 'pending' trades (LIMIT not yet triggered):
+        entry_price — recalculates risk_amount, lot sizes, potential_profit
+        amend_positions — replace all TP targets (same validation as TradeOpen)
+
+    The backend will raise 422 if entry_price / amend_positions are sent
+    for a trade that is already 'open', 'partial', or 'closed'.
+    """
     stop_loss: Decimal | None = Field(default=None, gt=0)
     strategy_id: int | None = None
     notes: str | None = None
     confidence_score: int | None = Field(default=None, ge=0, le=100)
     session_tag: str | None = Field(default=None, max_length=20)
     analyzed_timeframe: str | None = Field(default=None, max_length=10)
+
+    # ── pending-only amendments ───────────────────────────────────────────
+    entry_price: Decimal | None = Field(default=None, gt=0)
+    amend_positions: list[PositionIn] | None = None   # replaces ALL positions if set
 
 
 # ── Full close ────────────────────────────────────────────────────────────────
@@ -184,6 +201,7 @@ class TradeOut(BaseModel):
     instrument_id: int | None
     strategy_id: int | None
     pair: str
+    instrument_display_name: str | None = None  # from instrument.display_name, None for free-text pairs
     direction: str
     order_type: str
     asset_class: str | None
@@ -217,6 +235,7 @@ class TradeListItem(BaseModel):
     id: int
     profile_id: int
     pair: str
+    instrument_display_name: str | None = None  # populated by list_trades service
     direction: str
     order_type: str
     entry_price: Decimal
@@ -227,5 +246,8 @@ class TradeListItem(BaseModel):
     potential_profit: Decimal
     status: str
     realized_pnl: Decimal | None
+    # Sum of realized_pnl across all already-closed positions (for partial trades).
+    # Equals realized_pnl once the trade is fully closed.
+    booked_pnl: Decimal | None = None
     closed_at: datetime | None
     created_at: datetime

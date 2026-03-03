@@ -35,17 +35,19 @@ from datetime import datetime
 from decimal import Decimal
 
 from fastapi import HTTPException, status
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from src.core.models.broker import Instrument, Profile
 from src.core.models.trade import Position, Strategy, Trade
 from src.trades.schemas import (
     TradeClose,
+    TradeListItem,
     TradeOpen,
     TradeOut,
     TradePartialClose,
     TradeSizeResult,
     TradeUpdate,
+    PositionIn,
 )
 
 # -- Constants -----------------------------------------------------------------
@@ -71,7 +73,12 @@ def _get_profile_or_404(db: Session, profile_id: int) -> Profile:
 
 
 def _get_trade_or_404(db: Session, trade_id: int) -> Trade:
-    t = db.query(Trade).filter(Trade.id == trade_id).first()
+    t = (
+        db.query(Trade)
+        .options(joinedload(Trade.instrument), joinedload(Trade.positions))
+        .filter(Trade.id == trade_id)
+        .first()
+    )
     if not t:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -237,11 +244,33 @@ def _recalculate_current_risk(trade: Trade, db: Session) -> Decimal:
     return (trade.risk_amount * total_open_pct / 100).quantize(Decimal("0.01"))
 
 
+def _trade_to_out(trade: Trade, size_info: TradeSizeResult | None = None) -> TradeOut:
+    """
+    Convert a Trade ORM object to a TradeOut schema.
+    Resolves instrument_display_name from the instrument relationship if loaded.
+    """
+    out = TradeOut.model_validate(trade)
+    # Populate display name — trade.instrument must be eagerly loaded before calling this.
+    if trade.instrument is not None:
+        out.instrument_display_name = trade.instrument.display_name
+    if size_info is not None:
+        out.size_info = size_info
+    return out
+
+
+def _reload_and_out(db: Session, trade_id: int, size_info: TradeSizeResult | None = None) -> TradeOut:
+    """
+    Reload a trade fresh from DB with joinedload (instrument + positions),
+    then convert to TradeOut. Use this after any commit() to ensure the
+    instrument relationship is populated (avoids post-commit lazy-load failures).
+    """
+    trade = _get_trade_or_404(db, trade_id)
+    return _trade_to_out(trade, size_info)
+
+
 def _attach_size_info(trade: Trade, size_info: TradeSizeResult) -> TradeOut:
     """Build a TradeOut from a Trade ORM object and attach size_info."""
-    out = TradeOut.model_validate(trade)
-    out.size_info = size_info
-    return out
+    return _trade_to_out(trade, size_info)
 
 
 # -- Public service functions --------------------------------------------------
@@ -311,8 +340,8 @@ def open_trade(db: Session, data: TradeOpen) -> TradeOut:
         db.add(pos)
 
     db.commit()
-    db.refresh(trade)
-    return _attach_size_info(trade, size_info)
+    # Reload fresh with joinedload to populate instrument_display_name
+    return _reload_and_out(db, trade.id, size_info)
 
 
 def list_trades(
@@ -325,9 +354,12 @@ def list_trades(
 ) -> list[Trade]:
     """
     Return trades (most recent first) with optional filters.
-    Only valid statuses (open, partial, closed) are stored -- no deleted flag needed.
+    Eagerly loads instrument + positions so display_name and booked_pnl are available.
     """
-    q = db.query(Trade)
+    q = (
+        db.query(Trade)
+        .options(joinedload(Trade.instrument), joinedload(Trade.positions))
+    )
 
     if profile_id is not None:
         q = q.filter(Trade.profile_id == profile_id)
@@ -336,19 +368,46 @@ def list_trades(
     if pair is not None:
         q = q.filter(Trade.pair.ilike(f"%{pair}%"))
 
-    return (
+    trades = (
         q.order_by(Trade.entry_date.desc())
         .offset(offset)
         .limit(limit)
         .all()
     )
 
+    items = []
+    for t in trades:
+        item = TradeListItem.model_validate(t)
+        if t.instrument is not None:
+            item.instrument_display_name = t.instrument.display_name
+        # booked_pnl: sum of realized_pnl from all closed positions (for partial trades)
+        item.booked_pnl = sum(
+            (p.realized_pnl for p in t.positions if p.realized_pnl is not None),
+            Decimal("0.00"),
+        ) or None
+        items.append(item)
+    return items
 
-def get_trade(db: Session, trade_id: int) -> Trade:
-    return _get_trade_or_404(db, trade_id)
+
+def get_trade(db: Session, trade_id: int) -> TradeOut:
+    trade = _get_trade_or_404(db, trade_id)
+    return _trade_to_out(trade)
 
 
-def update_trade(db: Session, trade_id: int, data: TradeUpdate) -> Trade:
+def update_trade(db: Session, trade_id: int, data: TradeUpdate) -> TradeOut:
+    """
+    Partial update for a trade.
+
+    Always allowed (pending / open / partial):
+        stop_loss, strategy_id, notes, confidence_score, session_tag,
+        analyzed_timeframe
+
+    Pending-only (LIMIT not yet triggered):
+        entry_price      — recalculates risk_amount, lot sizes, potential_profit
+        amend_positions  — replaces all TP positions
+
+    Closed trades cannot be modified at all.
+    """
     trade = _get_trade_or_404(db, trade_id)
 
     if trade.status == "closed":
@@ -357,19 +416,164 @@ def update_trade(db: Session, trade_id: int, data: TradeUpdate) -> Trade:
             detail="Cannot update a closed trade.",
         )
 
-    for field, value in data.model_dump(exclude_unset=True).items():
-        setattr(trade, field, value)
+    # ── Guard: pending-only fields on non-pending trade ───────────────────
+    amend_entry = data.entry_price is not None
+    amend_positions = data.amend_positions is not None
 
-    # If SL was moved, recalculate current_risk
-    if "stop_loss" in data.model_fields_set:
+    if (amend_entry or amend_positions) and trade.status != "pending":
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                "entry_price and amend_positions can only be changed on a 'pending' "
+                f"LIMIT order. Current status: '{trade.status}'. "
+                "Once a trade is open/active, amend the stop-loss instead."
+            ),
+        )
+
+    # ── Apply simple scalar fields ────────────────────────────────────────
+    simple_fields = {"stop_loss", "strategy_id", "notes", "confidence_score", "session_tag", "analyzed_timeframe"}
+    for field in simple_fields:
+        if field in data.model_fields_set:
+            setattr(trade, field, getattr(data, field))
+
+    # ── Recalculate risk when SL changed (open/partial) ───────────────────
+    if "stop_loss" in data.model_fields_set and not amend_entry:
         trade.current_risk = _recalculate_current_risk(trade, db)
 
+    # ── Amend entry (pending-only) ─────────────────────────────────────────
+    if amend_entry:
+        new_entry = data.entry_price
+        sl = data.stop_loss if data.stop_loss is not None else trade.stop_loss
+
+        # Validate SL direction against the new entry
+        if trade.direction == "long" and sl >= new_entry:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="For a long trade, stop_loss must be below entry_price.",
+            )
+        if trade.direction == "short" and sl <= new_entry:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="For a short trade, stop_loss must be above entry_price.",
+            )
+
+        trade.entry_price = new_entry
+        trade.stop_loss = sl
+
+        # Recalculate risk_amount from original profile risk%
+        profile = db.query(Profile).filter(Profile.id == trade.profile_id).first()
+        if profile:
+            instrument = (
+                db.query(Instrument).filter(Instrument.id == trade.instrument_id).first()
+                if trade.instrument_id else None
+            )
+            # Rebuild a minimal TradeOpen-like object for _compute_size_info
+            dummy = TradeOpen(
+                profile_id=trade.profile_id,
+                pair=trade.pair,
+                direction=trade.direction,
+                entry_price=new_entry,
+                stop_loss=sl,
+                asset_class=trade.asset_class,
+                positions=[
+                    PositionIn(
+                        position_number=p.position_number,
+                        take_profit_price=p.take_profit_price,
+                        lot_percentage=p.lot_percentage,
+                    )
+                    for p in trade.positions
+                ],
+            )
+            # Use profile's default risk% (not overridable on amend — keeps original intent)
+            risk_pct = profile.risk_percentage_default
+            risk_amount = (profile.capital_current * risk_pct / 100).quantize(Decimal("0.01"))
+            size_info = _compute_size_info(profile, instrument, dummy, risk_amount)
+            potential_profit = _compute_potential_profit(dummy, size_info)
+
+            trade.risk_amount = risk_amount
+            trade.potential_profit = potential_profit
+            # pending → current_risk stays 0 until activate
+
+    # ── Amend positions (pending-only) ────────────────────────────────────
+    if amend_positions:
+        # Validate lot sum
+        total_pct = sum(p.lot_percentage for p in data.amend_positions)  # type: ignore[union-attr]
+        if total_pct != Decimal("100"):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"amend_positions lot_percentage must sum to 100, got {total_pct}.",
+            )
+
+        # Delete existing positions and replace
+        for pos in list(trade.positions):
+            db.delete(pos)
+        db.flush()
+
+        entry = trade.entry_price
+        new_positions = data.amend_positions  # type: ignore[union-attr]
+        for idx, pos_in in enumerate(new_positions, start=1):
+            if pos_in.position_number is None:
+                pos_in.position_number = idx
+            pos = Position(
+                trade_id=trade.id,
+                position_number=pos_in.position_number,
+                take_profit_price=pos_in.take_profit_price,
+                lot_percentage=pos_in.lot_percentage,
+                status="open",
+            )
+            db.add(pos)
+        trade.nb_take_profits = len(new_positions)
+
+        # Recompute potential_profit from new TPs
+        best_tp = max(new_positions, key=lambda p: p.position_number)
+        price_dist = abs(trade.entry_price - trade.stop_loss)
+        if price_dist > 0:
+            total_units = trade.risk_amount / price_dist
+            tp_dist = abs(best_tp.take_profit_price - entry)
+            trade.potential_profit = (total_units * tp_dist).quantize(Decimal("0.01"))
+
     db.commit()
-    db.refresh(trade)
-    return trade
+    return _reload_and_out(db, trade.id)
 
 
-def partial_close(db: Session, trade_id: int, data: TradePartialClose) -> Trade:
+def move_to_breakeven(db: Session, trade_id: int) -> TradeOut:
+    """
+    Move stop-loss to entry price (breakeven).
+
+    Rules:
+    - Only open / partial trades can be moved to BE.
+    - Sets trade.stop_loss = trade.entry_price.
+    - Sets trade.current_risk = 0 (no remaining downside risk at BE).
+    - Does NOT close any position.
+
+    This is a dedicated endpoint so the intent is crystal-clear in the journal.
+    Equivalent to partial_close(move_to_be=True) but without closing a position.
+    """
+    trade = _get_trade_or_404(db, trade_id)
+
+    if trade.status not in ("open", "partial"):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                f"Can only move to breakeven on an 'open' or 'partial' trade. "
+                f"Current status: '{trade.status}'."
+            ),
+        )
+
+    if trade.stop_loss == trade.entry_price:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Stop-loss is already at breakeven (entry price).",
+        )
+
+    trade.stop_loss = trade.entry_price
+    trade.current_risk = Decimal("0.00")
+
+    db.commit()
+    return _reload_and_out(db, trade_id)
+
+
+def partial_close(db: Session, trade_id: int, data: TradePartialClose) -> TradeOut:
     """
     Close one TP position.
 
@@ -420,11 +624,10 @@ def partial_close(db: Session, trade_id: int, data: TradePartialClose) -> Trade:
     trade.status = "partial"
 
     db.commit()
-    db.refresh(trade)
-    return trade
+    return _reload_and_out(db, trade_id)
 
 
-def full_close(db: Session, trade_id: int, data: TradeClose) -> Trade:
+def full_close(db: Session, trade_id: int, data: TradeClose) -> TradeOut:
     """
     Fully close a trade.
 
@@ -482,11 +685,10 @@ def full_close(db: Session, trade_id: int, data: TradeClose) -> Trade:
                 strategy.win_count += 1
 
     db.commit()
-    db.refresh(trade)
-    return trade
+    return _reload_and_out(db, trade_id)
 
 
-def activate_trade(db: Session, trade_id: int) -> Trade:
+def activate_trade(db: Session, trade_id: int) -> TradeOut:
     """
     Activate a pending LIMIT order — marks it as triggered by the market.
 
@@ -517,11 +719,10 @@ def activate_trade(db: Session, trade_id: int) -> Trade:
     trade.current_risk = trade.risk_amount  # risk is now live
 
     db.commit()
-    db.refresh(trade)
-    return trade
+    return _reload_and_out(db, trade_id)
 
 
-def cancel_trade(db: Session, trade_id: int) -> Trade:
+def cancel_trade(db: Session, trade_id: int) -> TradeOut:
     """
     Cancel a pending LIMIT order.
 
@@ -548,8 +749,7 @@ def cancel_trade(db: Session, trade_id: int) -> Trade:
     trade.current_risk = Decimal("0.00")
 
     db.commit()
-    db.refresh(trade)
-    return trade
+    return _reload_and_out(db, trade_id)
 
 
 def delete_trade(db: Session, trade_id: int) -> None:

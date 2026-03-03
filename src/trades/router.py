@@ -5,8 +5,9 @@ Routes:
   POST   /api/trades                  ← open trade (MARKET → 'open', LIMIT → 'pending')
   GET    /api/trades                  ← journal list (paginated + filters)
   GET    /api/trades/{id}             ← trade detail
-  PUT    /api/trades/{id}             ← update (SL, notes, strategy…)
+  PUT    /api/trades/{id}             ← update (SL, notes, strategy… | pending: also entry + TPs)
   POST   /api/trades/{id}/activate    ← LIMIT triggered: pending → open (reserves risk)
+  POST   /api/trades/{id}/breakeven   ← move SL to entry price, current_risk → 0
   POST   /api/trades/{id}/close       ← full close
   POST   /api/trades/{id}/partial     ← partial close (TP hit)
   POST   /api/trades/{id}/cancel      ← cancel pending LIMIT order (no capital/WR impact)
@@ -85,6 +86,19 @@ def activate_trade(trade_id: int, db: Session = Depends(get_db)) -> object:
     Only 'pending' LIMIT trades can be activated.
     """
     return service.activate_trade(db, trade_id)
+
+
+@router.post("/{trade_id}/breakeven", response_model=TradeOut)
+def move_to_breakeven(trade_id: int, db: Session = Depends(get_db)) -> object:
+    """
+    Move stop-loss to entry price (breakeven).
+
+    - Sets stop_loss = entry_price.
+    - Sets current_risk = 0 (no remaining downside exposure at BE).
+    - Only available for 'open' or 'partial' trades.
+    - Does NOT close any position — use partial_close to book a TP first.
+    """
+    return service.move_to_breakeven(db, trade_id)
 
 
 @router.post("/{trade_id}/close", response_model=TradeOut)
