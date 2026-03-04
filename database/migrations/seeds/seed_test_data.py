@@ -1,19 +1,16 @@
 """
-Seed: test profiles + strategies + trades for dev/demo.
+Seed: test profiles + strategies + trades + goals + market analysis sessions.
 
 Creates TWO realistic profiles:
-  1. "Crypto Trader"  — Kraken broker, 2 strategies, mix of open/partial/closed trades
-  2. "CFD Trader"     — Vantage broker, 2 strategies, mix of open/partial/closed trades
+  1. "🧪 Crypto Trader (Test)"  — Kraken, swing/day_trading goals, Crypto MA sessions
+  2. "🧪 CFD Trader (Test)"     — Vantage, swing goals, Gold MA sessions
 
-Every trade exercises a different lifecycle state:
-  - open MARKET trade (1 TP)
-  - open MARKET trade (3 TPs) — simulates multi-TP setup
-  - partial trade (TP1 hit, BE moved)    ← tests the BE bug fix
-  - closed winning trade
-  - closed losing trade
-  - pending LIMIT trade
+Features covered:
+  Trades   : open / partial+BE / closed-win / closed-loss / pending LIMIT
+  Goals    : daily + weekly + monthly goals per style (active + inactive)
+  MA       : 3 sessions per profile — fresh / stale / old — with all answers filled
 
-Idempotent: deletes existing test data by profile name before re-inserting.
+Idempotent: cleans test profiles by name before re-inserting.
 Safe to re-run at any time.
 
 Usage:
@@ -25,11 +22,18 @@ from __future__ import annotations
 
 import logging
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 from src.core.database import get_session_factory
 from src.core.models.broker import Broker, Instrument, Profile, TradingStyle
+from src.core.models.goals import ProfileGoal
+from src.core.models.market_analysis import (
+    MarketAnalysisAnswer,
+    MarketAnalysisIndicator,
+    MarketAnalysisModule,
+    MarketAnalysisSession,
+)
 from src.core.models.trade import Position, Strategy, Trade
 
 logging.basicConfig(
@@ -47,18 +51,40 @@ CFD_PROFILE_NAME    = "🧪 CFD Trader (Test)"
 
 
 def _clean_existing(session) -> None:
-    """Remove test profiles (cascades to trades + positions via FK)."""
+    """
+    Remove ALL data that belongs to test profiles, but KEEP the profile rows
+    themselves so their IDs stay stable across re-seeds.
+
+    Deletes (in FK order):
+      MA answers → MA sessions → goals → positions → trades → strategies
+    The profile row is then reset to its initial values (capital, counters…).
+    """
     for name in (CRYPTO_PROFILE_NAME, CFD_PROFILE_NAME):
         p = session.query(Profile).filter(Profile.name == name).first()
-        if p:
-            # Delete positions → trades → strategies → profile
-            for trade in session.query(Trade).filter(Trade.profile_id == p.id).all():
-                session.query(Position).filter(Position.trade_id == trade.id).delete()
-                session.delete(trade)
-            session.query(Strategy).filter(Strategy.profile_id == p.id).delete()
-            session.delete(p)
-            session.flush()
-            logger.info("Cleaned existing test profile: %s", name)
+        if not p:
+            continue
+        pid = p.id
+
+        # MA answers → MA sessions
+        for ms in session.query(MarketAnalysisSession).filter(
+            MarketAnalysisSession.profile_id == pid
+        ).all():
+            session.query(MarketAnalysisAnswer).filter(
+                MarketAnalysisAnswer.session_id == ms.id
+            ).delete()
+            session.delete(ms)
+
+        # Goals
+        session.query(ProfileGoal).filter(ProfileGoal.profile_id == pid).delete()
+
+        # Positions → Trades → Strategies
+        for trade in session.query(Trade).filter(Trade.profile_id == pid).all():
+            session.query(Position).filter(Position.trade_id == trade.id).delete()
+            session.delete(trade)
+        session.query(Strategy).filter(Strategy.profile_id == pid).delete()
+
+        session.flush()
+        logger.info("Cleaned data for test profile id=%d '%s' (profile row kept)", pid, name)
 
 
 def _get_broker(session, name: str) -> Broker:
@@ -129,27 +155,39 @@ def _make_trade(
     )
 
 
-def seed_crypto_profile(session) -> None:
-    """Create Kraken / Crypto test profile with realistic trades."""
+def seed_crypto_profile(session) -> Profile:
+    """Create or update Kraken / Crypto test profile with realistic trades."""
     broker   = _get_broker(session, "Kraken")
     btc_inst = _get_instrument(session, "PF_XBTUSD")
     eth_inst = _get_instrument(session, "PF_ETHUSD")
     sol_inst = _get_instrument(session, "PF_SOLUSD")
-    swing    = _get_style(session, "swing")
 
-    profile = Profile(
-        name=CRYPTO_PROFILE_NAME,
-        broker_id=broker.id,
-        market_type="Crypto",
-        capital_start=Decimal("10000.00"),
-        capital_current=Decimal("10480.00"),   # after wins/losses below
-        currency="USD",
-        risk_percentage_default=Decimal("1.00"),
-        max_concurrent_risk_pct=Decimal("4.00"),
-        trades_count=3,
-        win_count=2,
-    )
-    session.add(profile)
+    # Upsert — keep existing row to preserve stable ID
+    profile = session.query(Profile).filter(Profile.name == CRYPTO_PROFILE_NAME).first()
+    if profile:
+        profile.broker_id               = broker.id
+        profile.market_type             = "Crypto"
+        profile.capital_start           = Decimal("10000.00")
+        profile.capital_current         = Decimal("10480.00")
+        profile.currency                = "USD"
+        profile.risk_percentage_default = Decimal("1.00")
+        profile.max_concurrent_risk_pct = Decimal("4.00")
+        profile.trades_count            = 3
+        profile.win_count               = 2
+    else:
+        profile = Profile(
+            name=CRYPTO_PROFILE_NAME,
+            broker_id=broker.id,
+            market_type="Crypto",
+            capital_start=Decimal("10000.00"),
+            capital_current=Decimal("10480.00"),
+            currency="USD",
+            risk_percentage_default=Decimal("1.00"),
+            max_concurrent_risk_pct=Decimal("4.00"),
+            trades_count=3,
+            win_count=2,
+        )
+        session.add(profile)
     session.flush()
 
     # Strategies
@@ -363,28 +401,41 @@ def seed_crypto_profile(session) -> None:
 
     session.flush()
     logger.info("Crypto profile seeded: %s (id=%d) — 6 trades", profile.name, profile.id)
+    return profile
 
 
-def seed_cfd_profile(session) -> None:
-    """Create Vantage / CFD test profile with realistic trades."""
+def seed_cfd_profile(session) -> Profile:
+    """Create or update Vantage / CFD test profile with realistic trades."""
     broker   = _get_broker(session, "Vantage")
     xau_inst = _get_instrument(session, "XAUUSD")
     eur_inst = _get_instrument(session, "EURUSD")
-    day      = _get_style(session, "day_trading")
 
-    profile = Profile(
-        name=CFD_PROFILE_NAME,
-        broker_id=broker.id,
-        market_type="CFD",
-        capital_start=Decimal("5000.00"),
-        capital_current=Decimal("5230.00"),
-        currency="EUR",
-        risk_percentage_default=Decimal("1.00"),
-        max_concurrent_risk_pct=Decimal("4.00"),
-        trades_count=3,
-        win_count=2,
-    )
-    session.add(profile)
+    # Upsert — keep existing row to preserve stable ID
+    profile = session.query(Profile).filter(Profile.name == CFD_PROFILE_NAME).first()
+    if profile:
+        profile.broker_id               = broker.id
+        profile.market_type             = "CFD"
+        profile.capital_start           = Decimal("5000.00")
+        profile.capital_current         = Decimal("5230.00")
+        profile.currency                = "EUR"
+        profile.risk_percentage_default = Decimal("1.00")
+        profile.max_concurrent_risk_pct = Decimal("4.00")
+        profile.trades_count            = 3
+        profile.win_count               = 2
+    else:
+        profile = Profile(
+            name=CFD_PROFILE_NAME,
+            broker_id=broker.id,
+            market_type="CFD",
+            capital_start=Decimal("5000.00"),
+            capital_current=Decimal("5230.00"),
+            currency="EUR",
+            risk_percentage_default=Decimal("1.00"),
+            max_concurrent_risk_pct=Decimal("4.00"),
+            trades_count=3,
+            win_count=2,
+        )
+        session.add(profile)
     session.flush()
 
     strat_gold = Strategy(
@@ -565,17 +616,210 @@ def seed_cfd_profile(session) -> None:
 
     session.flush()
     logger.info("CFD profile seeded: %s (id=%d) — 5 trades", profile.name, profile.id)
+    return profile
 
+
+# ── Goals ─────────────────────────────────────────────────────────────────────
+
+def seed_goals(session, profile: Profile, style_names: list[str]) -> None:
+    """
+    Insert goals for a profile covering all combinations:
+      - daily / weekly / monthly periods
+      - multiple trading styles
+      - mix of active / inactive
+
+    Exercises: goal_progress_pct, risk_progress_pct, goal_hit, limit_hit.
+    """
+    goals: list[tuple] = []
+    # (style_name, period, goal_pct, limit_pct, is_active)
+    for style_name in style_names:
+        style = session.query(TradingStyle).filter(TradingStyle.name == style_name).first()
+        if not style:
+            continue
+        goals += [
+            (style.id, "daily",   Decimal("0.50"),  Decimal("-0.30"), True),
+            (style.id, "weekly",  Decimal("2.00"),  Decimal("-1.00"), True),
+            (style.id, "monthly", Decimal("6.00"),  Decimal("-3.00"), True),
+        ]
+
+    # Add one inactive goal using a style NOT in the list, to avoid unique conflicts
+    # This tests the inactive-goal filter in the UI
+    if len(style_names) > 0:
+        extra_style = session.query(TradingStyle).filter(
+            TradingStyle.name.notin_(style_names)
+        ).first()
+        if extra_style:
+            goals.append((extra_style.id, "monthly", Decimal("10.00"), Decimal("-5.00"), False))
+
+    for style_id, period, goal_pct, limit_pct, is_active in goals:
+        session.add(ProfileGoal(
+            profile_id=profile.id,
+            style_id=style_id,
+            period=period,
+            goal_pct=goal_pct,
+            limit_pct=limit_pct,
+            is_active=is_active,
+        ))
+
+    session.flush()
+    logger.info("Goals seeded for profile %s — %d goals", profile.name, len(goals))
+
+
+# ── Market Analysis sessions ───────────────────────────────────────────────────
+
+def _make_session(
+    session,
+    profile_id: int,
+    module: MarketAnalysisModule,
+    indicators: list[MarketAnalysisIndicator],
+    analyzed_at: datetime,
+    scores: dict[str, int],   # indicator.key → score (+1 bull / -1 bear / 0 neutral)
+    notes: str | None = None,
+) -> MarketAnalysisSession:
+    """
+    Insert one MarketAnalysisSession + all answers.
+
+    scores dict maps indicator key → integer score:
+      +1 = bullish answer, 0 = neutral/partial, -1 = bearish
+    Missing keys default to 0 (neutral).
+    """
+    # Compute per-timeframe scores from answers
+    htf_inds = [i for i in indicators if i.timeframe_level == "htf"]
+    mtf_inds = [i for i in indicators if i.timeframe_level == "mtf"]
+    ltf_inds = [i for i in indicators if i.timeframe_level == "ltf"]
+
+    def _avg(inds: list) -> Decimal | None:
+        if not inds:
+            return None
+        total = sum(scores.get(i.key, 0) for i in inds)
+        return Decimal(str(round(total / len(inds), 2)))
+
+    htf_score = _avg(htf_inds)
+    mtf_score = _avg(mtf_inds)
+    ltf_score = _avg(ltf_inds) if ltf_inds else None
+
+    bias_map = {1: "bullish", -1: "bearish", 0: "neutral"}
+
+    def _bias(score: Decimal | None) -> str | None:
+        if score is None:
+            return None
+        return "bullish" if score > 0 else ("bearish" if score < 0 else "neutral")
+
+    ms = MarketAnalysisSession(
+        profile_id=profile_id,
+        module_id=module.id,
+        score_htf_a=htf_score,
+        score_mtf_a=mtf_score,
+        score_ltf_a=ltf_score,
+        bias_htf_a=_bias(htf_score),
+        bias_mtf_a=_bias(mtf_score),
+        bias_ltf_a=_bias(ltf_score),
+        notes=notes,
+        analyzed_at=analyzed_at,
+        created_at=analyzed_at,
+    )
+    session.add(ms)
+    session.flush()
+
+    for ind in indicators:
+        sc = scores.get(ind.key, 0)
+        if sc > 0:
+            answer_label = ind.answer_bullish
+        elif sc < 0:
+            answer_label = ind.answer_bearish
+        else:
+            answer_label = ind.answer_partial
+        session.add(MarketAnalysisAnswer(
+            session_id=ms.id,
+            indicator_id=ind.id,
+            score=sc,
+            answer_label=answer_label,
+        ))
+
+    session.flush()
+    return ms
+
+
+def seed_market_analysis(session, profile: Profile, module_name: str) -> None:
+    """
+    Insert 3 MA sessions for a profile:
+      1. Fresh  — analyzed today         → score strongly bullish
+      2. Stale  — analyzed 2 days ago    → score mixed/neutral
+      3. Old    — analyzed 8 days ago    → score bearish
+
+    Covers: fresh badge, stale badge, history list, score ring display.
+    """
+    module = session.query(MarketAnalysisModule).filter(
+        MarketAnalysisModule.name == module_name
+    ).first()
+    if not module:
+        raise RuntimeError(f"MA module '{module_name}' not found — run make db-seed first.")
+
+    indicators = (
+        session.query(MarketAnalysisIndicator)
+        .filter(MarketAnalysisIndicator.module_id == module.id)
+        .order_by(MarketAnalysisIndicator.sort_order)
+        .all()
+    )
+    keys = [i.key for i in indicators]
+
+    now = datetime.now(tz=timezone.utc)
+
+    # ── Session 1: Fresh — strong bull ────────────────────────────────────────
+    _make_session(
+        session, profile.id, module, indicators,
+        analyzed_at=now - timedelta(hours=2),
+        scores={k: 1 for k in keys},   # all bullish
+        notes="Structure bullish across all timeframes. Clear trend continuation.",
+    )
+
+    # ── Session 2: Stale — mixed ──────────────────────────────────────────────
+    mixed = {k: (1 if i % 2 == 0 else -1) for i, k in enumerate(keys)}
+    _make_session(
+        session, profile.id, module, indicators,
+        analyzed_at=now - timedelta(days=2, hours=4),
+        scores=mixed,
+        notes="Mixed signals. HTF bullish but MTF shows distribution. Wait for confirmation.",
+    )
+
+    # ── Session 3: Old — bear ─────────────────────────────────────────────────
+    _make_session(
+        session, profile.id, module, indicators,
+        analyzed_at=now - timedelta(days=8),
+        scores={k: -1 for k in keys},   # all bearish
+        notes="Bearish breakdown. Avoid longs until structure repairs.",
+    )
+
+    session.flush()
+    logger.info(
+        "MA sessions seeded for profile %s — module '%s' — 3 sessions",
+        profile.name, module_name,
+    )
+
+
+# ── Orchestrator ──────────────────────────────────────────────────────────────
 
 def run_test_seed() -> None:
     logger.info("=== Starting test data seed ===")
     with SessionLocal() as session:
         try:
             _clean_existing(session)
-            seed_crypto_profile(session)
-            seed_cfd_profile(session)
+
+            # ── Crypto profile ──────────────────────────────────────────────
+            crypto_profile = seed_crypto_profile(session)
+            seed_goals(session, crypto_profile, ["swing", "day_trading"])
+            seed_market_analysis(session, crypto_profile, "Crypto")
+
+            # ── CFD profile ─────────────────────────────────────────────────
+            cfd_profile = seed_cfd_profile(session)
+            seed_goals(session, cfd_profile, ["swing"])
+            seed_market_analysis(session, cfd_profile, "Gold")
+
             session.commit()
-            logger.info("=== Test data seed complete ===")
+            logger.info(
+                "=== Test data seed complete — crypto id=%d, cfd id=%d ===",
+                crypto_profile.id, cfd_profile.id,
+            )
         except Exception:
             session.rollback()
             logger.exception("Test data seed FAILED — rolled back.")
