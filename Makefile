@@ -2,10 +2,10 @@
 # AlphaTradingDesk — Makefile
 # Usage: make <target>
 # ─────────────────────────────────────────────────────────────────
-.PHONY: help dev dev-build dev-rebuild-frontend dev-down \
+.PHONY: help dev dev-up dev-build dev-rebuild-frontend dev-down \
         backend-dev backend-test backend-lint backend-fmt backend-typecheck \
         frontend-install frontend-dev frontend-test frontend-lint frontend-build \
-        db-upgrade db-downgrade db-current db-history db-revision db-reset db-seed db-refresh db-recover \
+        db-upgrade db-downgrade db-current db-history db-revision db-reset db-seed db-seed-test db-refresh db-recover \
         clean
 
 COMPOSE      := docker compose -f docker-compose.dev.yml
@@ -26,6 +26,16 @@ help: ## Show this help
 ## ── Docker Compose dev stack ─────────────────────────────────────
 dev: ## Start full dev stack (db + backend + frontend + adminer)
 	$(COMPOSE) up
+
+dev-up: ## Start stack detached + auto-migrate + auto-seed (safe to re-run)
+	$(COMPOSE) up -d
+	@echo "⏳ Waiting for DB to be healthy…"
+	@until $(COMPOSE) exec -T db pg_isready -U atd -d atd_dev > /dev/null 2>&1; do sleep 1; done
+	@echo "✅ DB ready — running migrations…"
+	$(MAKE) db-upgrade
+	@echo "✅ Migrations done — seeding reference data…"
+	$(MAKE) db-seed
+	@echo "🚀 Stack ready — backend: http://localhost:8000  frontend: http://localhost:5173"
 
 dev-build: ## Rebuild images and start dev stack
 	$(COMPOSE) up --build
@@ -103,6 +113,9 @@ db-reset: ## Drop and recreate the dev DB (DESTRUCTIVE!)
 
 db-seed: ## Run all seed scripts (idempotent — safe to re-run)
 	$(COMPOSE) exec -T backend python -m database.migrations.seeds.seed_all
+
+db-seed-test: ## Inject test profiles + trades for dev (Crypto + CFD, idempotent)
+	$(COMPOSE) exec -T backend python -m database.migrations.seeds.seed_test_data
 
 db-refresh: ## Reset DB + re-apply migrations + re-seed (full clean slate, DESTRUCTIVE!)
 	$(MAKE) db-reset

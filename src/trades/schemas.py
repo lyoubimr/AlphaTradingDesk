@@ -244,6 +244,7 @@ class TradeListItem(BaseModel):
     nb_take_profits: int
     risk_amount: Decimal
     potential_profit: Decimal
+    current_risk: Decimal | None   # 0 after BE move, None for pending LIMIT orders
     status: str
     realized_pnl: Decimal | None
     # Sum of realized_pnl across all already-closed positions (for partial trades).

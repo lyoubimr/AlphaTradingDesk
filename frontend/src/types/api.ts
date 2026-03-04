@@ -131,6 +131,7 @@ export interface TradeListItem {
   nb_take_profits: number
   risk_amount: string
   potential_profit: string | null
+  current_risk: string | null       // 0.00 after BE move, null for pending LIMIT orders
   status: 'pending' | 'open' | 'partial' | 'closed' | 'cancelled'
   realized_pnl: string | null       // non-null only when fully closed
   booked_pnl: string | null         // sum of closed-position PnLs (partial trades)
@@ -156,7 +157,7 @@ export interface TradeOut extends TradeListItem {
   strategy_id: number | null
   asset_class: string
   analyzed_timeframe: string | null
-  current_risk: string | null
+  // current_risk is inherited from TradeListItem
   session_tag: string | null
   notes: string | null
   confidence_score: number | null
@@ -285,4 +286,118 @@ export interface ProfileWinRate {
 
 export interface WinRateStats {
   profiles: ProfileWinRate[]
+}
+
+// ── Market Analysis ───────────────────────────────────────────────────────
+
+export interface MAModule {
+  id: number
+  name: string
+  description: string | null
+  is_dual: boolean          // true = has asset A + B (e.g. BTC + Alts)
+  asset_a: string | null    // e.g. "BTC"
+  asset_b: string | null    // e.g. "Alts"
+  is_active: boolean
+  sort_order: number
+}
+
+export type TFLevel = 'htf' | 'mtf' | 'ltf'
+export type MABias = 'bullish' | 'neutral' | 'bearish'
+
+export interface MAIndicator {
+  id: number
+  module_id: number
+  key: string
+  label: string
+  asset_target: 'a' | 'b' | 'single'
+  tv_symbol: string
+  tv_timeframe: string
+  timeframe_level: TFLevel
+  question: string
+  tooltip: string | null
+  answer_bullish: string
+  answer_partial: string
+  answer_bearish: string
+  default_enabled: boolean
+  sort_order: number
+}
+
+export interface MAIndicatorConfig {
+  indicator_id: number
+  enabled: boolean
+}
+
+export interface MAIndicatorConfigOut {
+  profile_id: number
+  configs: MAIndicatorConfig[]
+}
+
+export interface MAAnswerIn {
+  indicator_id: number
+  score: 0 | 1 | 2   // 0=bearish, 1=neutral, 2=bullish
+  answer_label: string
+}
+
+export interface MASessionCreate {
+  profile_id: number
+  module_id: number
+  answers: MAAnswerIn[]
+  notes?: string | null
+  analyzed_at?: string | null
+}
+
+export interface MAAnswerOut {
+  id: number
+  session_id: number
+  indicator_id: number
+  score: number
+  answer_label: string
+}
+
+export interface MASessionOut {
+  id: number
+  profile_id: number
+  module_id: number
+  // Asset A scores (BTC / Gold / single)
+  score_htf_a: string | null
+  score_mtf_a: string | null
+  score_ltf_a: string | null
+  bias_htf_a: MABias | null
+  bias_mtf_a: MABias | null
+  bias_ltf_a: MABias | null
+  // Asset B scores (Alts — null for single-asset)
+  score_htf_b: string | null
+  score_mtf_b: string | null
+  score_ltf_b: string | null
+  bias_htf_b: MABias | null
+  bias_mtf_b: MABias | null
+  bias_ltf_b: MABias | null
+  notes: string | null
+  analyzed_at: string
+  created_at: string
+  answers: MAAnswerOut[]
+}
+
+export interface MASessionListItem {
+  id: number
+  profile_id: number
+  module_id: number
+  score_htf_a: string | null
+  score_mtf_a: string | null
+  bias_htf_a: MABias | null
+  bias_mtf_a: MABias | null
+  score_htf_b: string | null
+  score_mtf_b: string | null
+  bias_htf_b: MABias | null
+  bias_mtf_b: MABias | null
+  notes: string | null
+  analyzed_at: string
+}
+
+export interface MAStalenessItem {
+  module_id: number
+  module_name: string
+  last_analyzed_at: string | null
+  days_old: number | null
+  is_stale: boolean
 }
