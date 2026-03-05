@@ -14,11 +14,19 @@ interface HealthData {
 }
 
 function useClock() {
-  const [time, setTime] = useState(() => new Date().toUTCString().slice(17, 25) + ' UTC')
+  const formatTime = () => {
+    const now = new Date()
+    const localTime = now.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
+    const utcTime = now.toUTCString().slice(17, 22) + ' UTC'
+    // Get short timezone abbreviation
+    const tzAbbr = Intl.DateTimeFormat(undefined, { timeZoneName: 'short' })
+      .formatToParts(now)
+      .find((p) => p.type === 'timeZoneName')?.value ?? ''
+    return `${localTime} ${tzAbbr}  ·  ${utcTime}`
+  }
+  const [time, setTime] = useState(formatTime)
   useEffect(() => {
-    const id = setInterval(() => {
-      setTime(new Date().toUTCString().slice(17, 25) + ' UTC')
-    }, 1_000)
+    const id = setInterval(() => setTime(formatTime()), 1_000)
     return () => clearInterval(id)
   }, [])
   return time

@@ -3,7 +3,17 @@
 // Base URL: Vite proxy rewrites /api/* → backend:8000/*
 // Never use fetch() directly in components — always use this module.
 
-import type { Profile, ProfileCreate, ProfileUpdate, Broker, Instrument, TradeOpen, TradeClose, TradePartialClose, TradeUpdate, TradeListItem, TradeOut, Strategy, StrategyCreate, WinRateStats, TradingStyle, GoalOut, GoalCreate, GoalUpdate, GoalProgressItem } from '../types/api'
+import type {
+  Profile, ProfileCreate, ProfileUpdate,
+  Broker, Instrument,
+  TradeOpen, TradeClose, TradePartialClose, TradeUpdate, TradeListItem, TradeOut,
+  Strategy, StrategyCreate,
+  WinRateStats,
+  TradingStyle,
+  GoalOut, GoalCreate, GoalUpdate, GoalProgressItem,
+  MAModule, MAIndicator, MAIndicatorConfig, MAIndicatorConfigOut, MAIndicatorUpdate,
+  MASessionCreate, MASessionOut, MASessionListItem, MAStalenessItem,
+} from '../types/api'
 
 const BASE = '/api'
 
@@ -165,6 +175,7 @@ export const goalsApi = {
   list: (profileId: number): Promise<GoalOut[]> =>
     request(`/profiles/${profileId}/goals`),
 
+  /** POST — creates or upserts (reactivates + updates values if already exists) */
   create: (profileId: number, data: GoalCreate): Promise<GoalOut> =>
     request(`/profiles/${profileId}/goals`, {
       method: 'POST',
@@ -177,6 +188,65 @@ export const goalsApi = {
       body: JSON.stringify(data),
     }),
 
+  delete: (profileId: number, styleId: number, period: string): Promise<void> =>
+    request(`/profiles/${profileId}/goals/${styleId}/${period}`, { method: 'DELETE' }),
+
   progress: (profileId: number): Promise<GoalProgressItem[]> =>
     request(`/profiles/${profileId}/goals/progress`),
+}
+
+// ── Market Analysis ───────────────────────────────────────────────────────
+
+export const maApi = {
+  /** GET /api/market-analysis/modules */
+  listModules: (): Promise<MAModule[]> =>
+    request('/market-analysis/modules'),
+
+  /** GET /api/market-analysis/modules/{id}/indicators */
+  listIndicators: (moduleId: number): Promise<MAIndicator[]> =>
+    request(`/market-analysis/modules/${moduleId}/indicators`),
+
+  /** GET /api/market-analysis/sessions?module_id=&limit= (global — no profile filter) */
+  listSessions: (moduleId?: number, limit = 50): Promise<MASessionListItem[]> => {
+    const qs = new URLSearchParams({ limit: String(limit) })
+    if (moduleId != null) qs.set('module_id', String(moduleId))
+    return request(`/market-analysis/sessions?${qs}`)
+  },
+
+  /** GET /api/market-analysis/sessions/{id} */
+  getSession: (sessionId: number): Promise<MASessionOut> =>
+    request(`/market-analysis/sessions/${sessionId}`),
+
+  /** POST /api/market-analysis/sessions */
+  createSession: (data: MASessionCreate): Promise<MASessionOut> =>
+    request('/market-analysis/sessions', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  /** GET /api/profiles/{id}/indicator-config */
+  getIndicatorConfig: (profileId: number): Promise<MAIndicatorConfigOut> =>
+    request(`/profiles/${profileId}/indicator-config`),
+
+  /** PUT /api/profiles/{id}/indicator-config */
+  saveIndicatorConfig: (profileId: number, configs: MAIndicatorConfig[]): Promise<MAIndicatorConfigOut> =>
+    request(`/profiles/${profileId}/indicator-config`, {
+      method: 'PUT',
+      body: JSON.stringify(configs),
+    }),
+
+  /** PATCH /api/market-analysis/indicators/{id} */
+  patchIndicator: (indicatorId: number, data: MAIndicatorUpdate): Promise<MAIndicator> =>
+    request(`/market-analysis/indicators/${indicatorId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    }),
+
+  /** GET /api/profiles/{id}/market-analysis/staleness (profile-scoped, for dashboard widget) */
+  getStaleness: (profileId: number): Promise<MAStalenessItem[]> =>
+    request(`/profiles/${profileId}/market-analysis/staleness`),
+
+  /** GET /api/market-analysis/staleness (global — last session per module across all profiles) */
+  getStalenessGlobal: (): Promise<MAStalenessItem[]> =>
+    request('/market-analysis/staleness'),
 }

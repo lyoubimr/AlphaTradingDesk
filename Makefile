@@ -5,8 +5,8 @@
 .PHONY: help dev dev-up dev-build dev-rebuild-frontend dev-down \
         backend-dev backend-test backend-lint backend-fmt backend-typecheck \
         frontend-install frontend-dev frontend-test frontend-lint frontend-build \
-        db-upgrade db-downgrade db-current db-history db-revision db-reset db-seed db-seed-test db-refresh db-recover \
-        clean
+        db-upgrade db-downgrade db-current db-history db-revision db-reset db-seed db-seed-ma db-seed-test db-refresh db-recover \
+        hmr clean
 
 COMPOSE      := docker compose -f docker-compose.dev.yml
 # Use the in-project venv directly — poetry is not required on PATH.
@@ -114,6 +114,12 @@ db-reset: ## Drop and recreate the dev DB (DESTRUCTIVE!)
 db-seed: ## Run all seed scripts (idempotent — safe to re-run)
 	$(COMPOSE) exec -T backend python -m database.migrations.seeds.seed_all
 
+db-seed-ma: ## Re-seed market analysis indicators only (add new indicators to existing DB)
+	$(COMPOSE) exec -T backend python -c "\
+from src.core.database import get_session_factory; \
+from database.migrations.seeds.seed_market_analysis import seed_market_analysis; \
+db = get_session_factory()(); seed_market_analysis(db); db.commit(); db.close(); print('MA seed OK')"
+
 db-seed-test: ## Inject test profiles + trades for dev (Crypto + CFD, idempotent)
 	$(COMPOSE) exec -T backend python -m database.migrations.seeds.seed_test_data
 
@@ -136,6 +142,11 @@ ci-frontend: frontend-lint frontend-test ## Run all frontend CI checks locally
 ci: ci-backend ci-frontend ## Run all CI checks locally
 
 ## ── Housekeeping ─────────────────────────────────────────────────
+hmr: ## Force Vite HMR reload for all frontend files (macOS Docker workaround)
+	@echo "→ Touching all frontend src files inside container to trigger Vite HMR…"
+	$(COMPOSE) exec -T frontend find /app/src -name "*.tsx" -o -name "*.ts" -o -name "*.css" | xargs -r $(COMPOSE) exec -T frontend touch
+	@echo "✓ HMR reload sent — check browser."
+
 clean: ## Remove Python cache files and build artifacts
 	find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
 	find . -type d -name ".pytest_cache" -exec rm -rf {} + 2>/dev/null || true

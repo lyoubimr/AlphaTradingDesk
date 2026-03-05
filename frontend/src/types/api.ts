@@ -266,6 +266,7 @@ export interface GoalProgressItem {
   risk_progress_pct: string   // 0–100+
   goal_hit: boolean
   limit_hit: boolean
+  trade_count: number         // 0 = no activity this period → show "No trades" row
 }
 
 // ── Stats / Win-rate ──────────────────────────────────────────────────────
@@ -330,6 +331,17 @@ export interface MAIndicatorConfig {
 export interface MAIndicatorConfigOut {
   profile_id: number
   configs: MAIndicatorConfig[]
+}
+
+/** PATCH /api/market-analysis/indicators/{id} — only UI-text fields */
+export interface MAIndicatorUpdate {
+  label?: string
+  question?: string
+  tooltip?: string | null
+  answer_bullish?: string
+  answer_partial?: string
+  answer_bearish?: string
+  default_enabled?: boolean
 }
 
 export interface MAAnswerIn {

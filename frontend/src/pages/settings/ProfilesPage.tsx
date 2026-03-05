@@ -20,6 +20,36 @@ const MARKET_COLORS: Record<string, string> = {
   CFD:    'text-amber-400 bg-amber-500/10  border-amber-500/30',
 }
 
+// ── Profile name suggestions ──────────────────────────────────────────────
+// Inspirational trading profile name presets.
+// Islamic / Arabic flavour with motivational intent.
+const NAME_SUGGESTIONS: Record<'Crypto' | 'CFD', string[]> = {
+  Crypto: [
+    '🌙 Hilal Crypto',
+    '🕌 Sabr Scalp',
+    '⚡ Barq Futures',
+    '🌊 Mawj Alts',
+    '🦅 Hurriya BTC',
+    '🔥 Naar Momentum',
+    '💎 Zahra Portfolio',
+    '🌟 Nour Swing',
+    '🏔️ Jabal HODLer',
+    '🌍 Ard Diversified',
+  ],
+  CFD: [
+    '🌙 Qamar CFD',
+    '⚖️ Mizan Risk',
+    '🏆 Fawz Gold',
+    '🌺 Ward Forex',
+    '🦁 Asad Indices',
+    '🌊 Bahr Scalp',
+    '💡 Nur Swing',
+    '🌟 Najm Day Trade',
+    '🏅 Majd Funded',
+    '⚡ Ra\'d Breakout',
+  ],
+}
+
 // ── Tooltip ───────────────────────────────────────────────────────────────
 function Tooltip({ text }: { text: string }) {
   const [visible, setVisible] = useState(false)
@@ -320,6 +350,29 @@ function ProfileModal({ profile, brokers, onClose, onSaved }: ProfileModalProps)
               placeholder="e.g. Crypto Scalping, CFD Swing"
               className={inputCls}
             />
+            {/* Name suggestions — only shown in create mode */}
+            {!isEdit && (
+              <div className="mt-2">
+                <p className="text-[10px] text-slate-600 mb-1.5 uppercase tracking-wider">Quick pick ✨</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {NAME_SUGGESTIONS[form.market_type].map((suggestion) => (
+                    <button
+                      key={suggestion}
+                      type="button"
+                      onClick={() => set('name', suggestion)}
+                      className={cn(
+                        'text-[11px] px-2 py-1 rounded-lg border transition-colors',
+                        form.name === suggestion
+                          ? 'bg-brand-600/20 border-brand-600/40 text-brand-300'
+                          : 'bg-surface-700/60 border-surface-600/60 text-slate-500 hover:text-slate-300 hover:border-surface-500',
+                      )}
+                    >
+                      {suggestion}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
           </Field>
 
           {/* Market type */}

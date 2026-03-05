@@ -20,6 +20,12 @@ export default defineConfig({
   },
   server: {
     host: '0.0.0.0',
+    // Force polling-based file watcher — required for bind-mount volumes
+    // inside Docker Desktop on macOS (inotify events not forwarded to guest).
+    watch: {
+      usePolling: true,
+      interval: 300,       // ms — low enough to feel instant, not heavy on CPU
+    },
     proxy: {
       '/api': {
         target: API_TARGET,

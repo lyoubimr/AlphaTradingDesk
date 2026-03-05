@@ -91,46 +91,44 @@ def _period_window(period: str, ref: date) -> tuple[date, date]:
     raise ValueError(f"Unknown period: {period}")
 
 
-def _compute_pnl_pct(
+def _compute_pnl_pct_and_count(
     db: Session,
     profile_id: int,
     capital: Decimal,
     period_start: date,
     period_end: date,
-) -> Decimal:
+) -> tuple[Decimal, int]:
     """
-    Sum all realized P&L within [period_start, period_end] for a profile:
+    Sum all realized P&L within [period_start, period_end] for a profile
+    and count the number of trade events (closed trades + partial-TP positions).
 
-    1. **Closed trades** — Trade.realized_pnl, filtered by Trade.closed_at in window.
-    2. **Partial trades** — sum of Position.realized_pnl for positions whose exit_date
-       falls within the window (TP hits already booked while the trade is still open).
-
-    Returns % of capital_current (Decimal, 4 decimal places).
-    Returns Decimal("0.0000") if capital is zero.
+    Returns (pnl_pct, trade_count):
+      - pnl_pct    — % of capital_current (Decimal, 4 decimal places)
+      - trade_count — int (0 means no activity this period → show greyed row in UI)
     """
     if capital == 0:
-        return Decimal("0.0000")
+        return Decimal("0.0000"), 0
 
     start_dt = datetime(period_start.year, period_start.month, period_start.day, 0, 0, 0)
     end_dt   = datetime(period_end.year,   period_end.month,   period_end.day,   23, 59, 59)
 
     # ① Fully closed trades in window
-    closed_sum = (
-        db.query(func.coalesce(func.sum(Trade.realized_pnl), Decimal("0")))
+    closed_rows = (
+        db.query(Trade.realized_pnl)
         .filter(
             Trade.profile_id == profile_id,
             Trade.status == "closed",
             Trade.closed_at >= start_dt,
             Trade.closed_at <= end_dt,
         )
-        .scalar()
+        .all()
     )
+    closed_sum = sum((r[0] or Decimal("0")) for r in closed_rows)
 
-    # ② Partial-TP profits — positions that were closed within the window,
-    #    belonging to a trade that is still 'partial' (not yet fully closed).
-    #    We join through Trade to scope by profile_id.
-    partial_sum = (
-        db.query(func.coalesce(func.sum(Position.realized_pnl), Decimal("0")))
+    # ② Partial-TP profits — positions closed within the window
+    #    belonging to a trade that is still 'partial'.
+    partial_rows = (
+        db.query(Position.realized_pnl)
         .join(Trade, Position.trade_id == Trade.id)
         .filter(
             Trade.profile_id == profile_id,
@@ -139,11 +137,26 @@ def _compute_pnl_pct(
             Position.exit_date >= start_dt,
             Position.exit_date <= end_dt,
         )
-        .scalar()
+        .all()
     )
+    partial_sum = sum((r[0] or Decimal("0")) for r in partial_rows)
 
-    total_pnl = Decimal(str(closed_sum or 0)) + Decimal(str(partial_sum or 0))
-    return (total_pnl / capital * 100).quantize(Decimal("0.0001"))
+    trade_count = len(closed_rows) + len(partial_rows)
+    total_pnl = Decimal(str(closed_sum)) + Decimal(str(partial_sum))
+    pnl_pct = (total_pnl / capital * 100).quantize(Decimal("0.0001"))
+    return pnl_pct, trade_count
+
+
+# Keep old name as alias for backward compatibility (used nowhere else but safer)
+def _compute_pnl_pct(
+    db: Session,
+    profile_id: int,
+    capital: Decimal,
+    period_start: date,
+    period_end: date,
+) -> Decimal:
+    pnl, _ = _compute_pnl_pct_and_count(db, profile_id, capital, period_start, period_end)
+    return pnl
 
 
 # ── Public service functions ──────────────────────────────────────────────────
@@ -160,10 +173,18 @@ def get_goals(db: Session, profile_id: int) -> list[ProfileGoal]:
 
 
 def create_goal(db: Session, profile_id: int, data: GoalCreate) -> ProfileGoal:
+    """
+    Create a new goal, or upsert if one already exists for the same
+    (profile_id, style_id, period) tuple.
+
+    If an existing goal is found (active or inactive):
+      - update goal_pct, limit_pct with the new values
+      - re-activate it (is_active=True)
+    This prevents the UI from being blocked by a previously deactivated goal.
+    """
     _get_profile_or_404(db, profile_id)
     _get_style_or_422(db, data.style_id)
 
-    # Enforce unique (profile_id, style_id, period) — return 409 if already exists
     existing = (
         db.query(ProfileGoal)
         .filter(
@@ -174,13 +195,13 @@ def create_goal(db: Session, profile_id: int, data: GoalCreate) -> ProfileGoal:
         .first()
     )
     if existing:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=(
-                f"A goal already exists for profile={profile_id}, "
-                f"style={data.style_id}, period={data.period}. Use PUT to update it."
-            ),
-        )
+        # Upsert: update values + reactivate
+        existing.goal_pct = data.goal_pct
+        existing.limit_pct = data.limit_pct
+        existing.is_active = True
+        db.commit()
+        db.refresh(existing)
+        return existing
 
     goal = ProfileGoal(
         profile_id=profile_id,
@@ -213,6 +234,13 @@ def update_goal(
     return goal
 
 
+def delete_goal(db: Session, profile_id: int, style_id: int, period: str) -> None:
+    """Permanently delete a goal row."""
+    goal = _get_goal_or_404(db, profile_id, style_id, period)
+    db.delete(goal)
+    db.commit()
+
+
 def get_progress(db: Session, profile_id: int) -> list[GoalProgressItem]:
     """
     Compute real-time progress for all active goals of a profile.
@@ -237,7 +265,7 @@ def get_progress(db: Session, profile_id: int) -> list[GoalProgressItem]:
     for goal in active_goals:
         period_start, period_end = _period_window(goal.period, today)
 
-        pnl_pct = _compute_pnl_pct(
+        pnl_pct, trade_count = _compute_pnl_pct_and_count(
             db,
             profile_id,
             profile.capital_current,
@@ -278,6 +306,7 @@ def get_progress(db: Session, profile_id: int) -> list[GoalProgressItem]:
                 risk_progress_pct=risk_progress,
                 goal_hit=pnl_pct >= goal.goal_pct,
                 limit_hit=pnl_pct <= goal.limit_pct,
+                trade_count=trade_count,
             )
         )
 

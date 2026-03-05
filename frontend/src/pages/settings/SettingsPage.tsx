@@ -1,9 +1,12 @@
 // ── Settings page ──────────────────────────────────────────────────────────
-import { User, Database, Bell, Shield, Info } from 'lucide-react'
+import { User, Database, Bell, Shield, Info, Palette } from 'lucide-react'
+import { Link } from 'react-router-dom'
 import { PageHeader } from '../../components/ui/PageHeader'
 import { Badge } from '../../components/ui/Badge'
 import { ComingSoon } from '../../components/ui/ComingSoon'
 import { InfoBubble } from '../../components/ui/InfoBubble'
+import { useTheme, THEMES, type ThemeId } from '../../context/ThemeContext'
+import { cn } from '../../lib/cn'
 
 // ── Section card ──────────────────────────────────────────────────────────
 function SettingsSection({
@@ -53,6 +56,8 @@ function SettingRow({ label, value, info }: { label: string; value: string; info
 
 // ── Page ──────────────────────────────────────────────────────────────────
 export function SettingsPage() {
+  const { theme, setTheme } = useTheme()
+
   return (
     <div>
       <PageHeader
@@ -64,7 +69,50 @@ export function SettingsPage() {
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
 
-        {/* ── Profile ─────────────────────────────────────────────────── */}
+        {/* ── Appearance / Themes ─────────────────────────────────────── */}
+        <SettingsSection
+          icon={<Palette size={16} />}
+          title="Appearance"
+          description="Choose a colour theme for the app — persisted locally"
+        >
+          <div className="space-y-2 pt-1">
+            {THEMES.map((t) => (
+              <button
+                key={t.id}
+                type="button"
+                onClick={() => setTheme(t.id as ThemeId)}
+                className={cn(
+                  'w-full flex items-center gap-3 px-3 py-2.5 rounded-lg border transition-all text-left',
+                  theme === t.id
+                    ? 'border-brand-500/50 bg-brand-600/10'
+                    : 'border-surface-600/50 bg-surface-700/40 hover:border-surface-500',
+                )}
+              >
+                {/* Colour swatch */}
+                <span
+                  className={cn(
+                    'w-5 h-5 rounded-full shrink-0 ring-2 ring-offset-1 ring-offset-surface-800 transition-all',
+                    theme === t.id ? 'ring-white/40' : 'ring-transparent',
+                  )}
+                  style={{ backgroundColor: t.swatch }}
+                />
+                <span className="flex-1 min-w-0">
+                  <span className="text-xs font-medium text-slate-200 block">
+                    {t.emoji} {t.label}
+                  </span>
+                  <span className="text-[10px] text-slate-500 leading-snug block truncate">
+                    {t.description}
+                  </span>
+                </span>
+                {theme === t.id && (
+                  <span className="text-[10px] font-semibold text-brand-400 bg-brand-600/15 border border-brand-600/30 px-2 py-0.5 rounded-full shrink-0">
+                    Active
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
+        </SettingsSection>
         <SettingsSection
           icon={<User size={16} />}
           title="Profile"
@@ -95,11 +143,18 @@ export function SettingsPage() {
           icon={<Info size={16} />}
           title="Market Analysis"
           description="Indicator visibility and module configuration"
-          badge="Coming Soon"
         >
           <SettingRow label="Staleness threshold" value="7 days"   info="Sessions older than this are flagged as stale and shown with a warning." />
-          <SettingRow label="Active modules"      value="—"        info="Toggle which market modules appear in your analysis view." />
+          <SettingRow label="Active modules"      value="2 active" info="Crypto and Gold modules are active. Forex/Indices coming post-Phase 1." />
           <SettingRow label="Per-profile toggles" value="Enabled"  info="Each indicator can be individually enabled/disabled per profile." />
+          <div className="pt-2">
+            <Link
+              to="/settings/market-analysis"
+              className="inline-flex items-center gap-1.5 text-xs text-brand-400 hover:text-brand-300 transition-colors underline underline-offset-2"
+            >
+              Open Indicator Editor →
+            </Link>
+          </div>
         </SettingsSection>
 
         {/* ── Notifications ───────────────────────────────────────────── */}

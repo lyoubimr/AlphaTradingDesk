@@ -3,7 +3,6 @@ import { NavLink } from 'react-router-dom'
 import {
   LayoutDashboard,
   BookOpen,
-  ShieldAlert,
   BarChart2,
   Target,
   Settings,
@@ -11,6 +10,7 @@ import {
   Eye,
   Activity,
   Users,
+  SlidersHorizontal,
 } from 'lucide-react'
 import { cn } from '../../lib/cn'
 import { Badge } from '../ui/Badge'
@@ -45,11 +45,6 @@ const NAV_GROUPS: NavGroup[] = [
         to: '/trades',
         label: 'Trade Journal',
         icon: <BookOpen size={16} />,
-      },
-      {
-        to: '/risk',
-        label: 'Risk Manager',
-        icon: <ShieldAlert size={16} />,
       },
       {
         to: '/goals',
@@ -89,6 +84,11 @@ const NAV_GROUPS: NavGroup[] = [
         to: '/settings/profiles',
         label: 'Profiles',
         icon: <Users size={16} />,
+      },
+      {
+        to: '/settings/market-analysis',
+        label: 'Indicator Editor',
+        icon: <SlidersHorizontal size={16} />,
       },
       {
         to: '/settings',

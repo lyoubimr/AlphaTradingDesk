@@ -39,6 +39,7 @@ from src.core.models.market_analysis import (
 from src.market_analysis.schemas import (
     AnswerIn,
     IndicatorConfigItem,
+    IndicatorUpdate,
     SessionCreate,
     StalenessItem,
 )
@@ -216,6 +217,32 @@ def list_indicators(db: Session, module_id: int) -> list[MarketAnalysisIndicator
     )
 
 
+def patch_indicator(
+    db: Session, indicator_id: int, data: IndicatorUpdate
+) -> MarketAnalysisIndicator:
+    """
+    Partial update for UI-text fields only.
+    Immutable fields (key, module_id, asset_target, tv_symbol, tv_timeframe,
+    timeframe_level, sort_order) cannot be changed via this endpoint.
+    """
+    ind = db.query(MarketAnalysisIndicator).filter(
+        MarketAnalysisIndicator.id == indicator_id
+    ).first()
+    if not ind:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Indicator {indicator_id} not found.",
+        )
+
+    update_data = data.model_dump(exclude_unset=True)
+    for field, value in update_data.items():
+        setattr(ind, field, value)
+
+    db.commit()
+    db.refresh(ind)
+    return ind
+
+
 def get_indicator_config(
     db: Session, profile_id: int
 ) -> tuple[int, list[IndicatorConfigItem]]:
@@ -372,9 +399,37 @@ def get_session(db: Session, session_id: int) -> MarketAnalysisSession:
     return _get_session_or_404(db, session_id)
 
 
+def _staleness_item(
+    mod: MarketAnalysisModule,
+    last_session: MarketAnalysisSession | None,
+    now: datetime,
+) -> StalenessItem:
+    """Build a StalenessItem from a module and its last session (may be None)."""
+    if last_session is None:
+        return StalenessItem(
+            module_id=mod.id,
+            module_name=mod.name,
+            last_analyzed_at=None,
+            days_old=None,
+            is_stale=True,
+        )
+    last_dt = last_session.analyzed_at
+    if last_dt.tzinfo is None:
+        last_dt = last_dt.replace(tzinfo=UTC)
+    days_old = (now - last_dt).days
+    return StalenessItem(
+        module_id=mod.id,
+        module_name=mod.name,
+        last_analyzed_at=last_session.analyzed_at,
+        days_old=days_old,
+        is_stale=days_old > STALE_DAYS,
+    )
+
+
 def get_staleness(db: Session, profile_id: int) -> list[StalenessItem]:
     """
-    For each active module, return the last session date and staleness flag.
+    For each active module, return the last session date and staleness flag
+    for a specific profile.
     is_stale = True if no session exists OR days_old > STALE_DAYS.
     """
     _get_profile_or_404(db, profile_id)
@@ -399,31 +454,33 @@ def get_staleness(db: Session, profile_id: int) -> list[StalenessItem]:
             .order_by(MarketAnalysisSession.analyzed_at.desc())
             .first()
         )
+        result.append(_staleness_item(mod, last_session, now))
 
-        if last_session is None:
-            result.append(
-                StalenessItem(
-                    module_id=mod.id,
-                    module_name=mod.name,
-                    last_analyzed_at=None,
-                    days_old=None,
-                    is_stale=True,
-                )
-            )
-        else:
-            last_dt = last_session.analyzed_at
-            # Make timezone-aware if stored as naive
-            if last_dt.tzinfo is None:
-                last_dt = last_dt.replace(tzinfo=UTC)
-            days_old = (now - last_dt).days
-            result.append(
-                StalenessItem(
-                    module_id=mod.id,
-                    module_name=mod.name,
-                    last_analyzed_at=last_session.analyzed_at,
-                    days_old=days_old,
-                    is_stale=days_old > STALE_DAYS,
-                )
-            )
+    return result
+
+
+def get_staleness_global(db: Session) -> list[StalenessItem]:
+    """
+    Global staleness — most recent session per module across ALL profiles.
+    Used on the Market Analysis page which is not scoped to one profile.
+    """
+    modules = (
+        db.query(MarketAnalysisModule)
+        .filter(MarketAnalysisModule.is_active.is_(True))
+        .order_by(MarketAnalysisModule.sort_order)
+        .all()
+    )
+
+    now = datetime.now(UTC)
+    result: list[StalenessItem] = []
+
+    for mod in modules:
+        last_session = (
+            db.query(MarketAnalysisSession)
+            .filter(MarketAnalysisSession.module_id == mod.id)
+            .order_by(MarketAnalysisSession.analyzed_at.desc())
+            .first()
+        )
+        result.append(_staleness_item(mod, last_session, now))
 
     return result

@@ -1,22 +1,20 @@
-// ── Dashboard — Step 12 ───────────────────────────────────────────────────
-// All 4 widgets connected to real API:
-//   1. Goals widget        — style selector + daily/weekly/monthly rows
-//   2. Market Analysis     — one chip per module, staleness color
-//   3. Open Positions      — live open/partial trades
-//   4. Performance summary — win rate, profit factor, equity mini-curve
-//
-// Data sources:
-//   goalsApi.progress(profileId)          → goals widget
-//   maApi.getStaleness(profileId)         → MA badge
-//   tradesApi.list(profileId)             → positions + performance
-//   stylesApi.list()                      → style names for goals widget
+// ── Dashboard — Step 12 (enhanced) ───────────────────────────────────────
+// Goals widget spec (pre-implement-phase1.md):
+//   • Style selector (persisted in localStorage per profile)
+//   • ALL 3 periods (daily / weekly / monthly) shown simultaneously
+//   • When trade_count === 0 → greyed "No trades [this period]" row, no bars
+//   • Status badge: ✅ ON TRACK / ⚠️ WARNING (≥75% risk) / 🛑 BLOCKED / 🎯 GOAL HIT
+//   • Override friction: "I understand — trade anyway" when blocked
+// MA widget: HTF/MTF/LTF scores inline with progress bars
+// Performance: Win Rate, Profit Factor, Avg R:R, equity curve
 
 import { useEffect, useState, useMemo, useCallback } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import {
   TrendingUp, TrendingDown, Target, BarChart3, Activity,
   Loader2, RefreshCw, AlertTriangle, ChevronRight,
-  CheckCircle2, Minus, Plus,
+  CheckCircle2, Minus, Plus, ShieldAlert,
+  Zap,
 } from 'lucide-react'
 import { PageHeader }  from '../../components/ui/PageHeader'
 import { StatCard }    from '../../components/ui/StatCard'
@@ -26,7 +24,7 @@ import {
 } from '../../lib/api'
 import type {
   GoalProgressItem, TradingStyle,
-  MAStalenessItem, TradeListItem,
+  MAStalenessItem, TradeListItem, MASessionListItem, MAModule, MABias,
 } from '../../types/api'
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -38,11 +36,6 @@ function pct(v: string | number | null | undefined): number {
 
 function fmt(n: number, dp = 2): string {
   return n.toFixed(dp)
-}
-
-function fmtPct(n: number, dp = 2): string {
-  const sign = n > 0 ? '+' : ''
-  return `${sign}${fmt(n, dp)}%`
 }
 
 function fmtCurrency(n: number, currency = 'USD'): string {
@@ -58,253 +51,404 @@ function fmtCurrency(n: number, currency = 'USD'): string {
 const PERIOD_LABELS: Record<string, string> = {
   daily: 'Daily', weekly: 'Weekly', monthly: 'Monthly',
 }
+const PERIOD_EMPTY_LABEL: Record<string, string> = {
+  daily:   'No trades today',
+  weekly:  'No trades this week',
+  monthly: 'No trades this month',
+}
 const PERIOD_ORDER: Record<string, number> = { daily: 0, weekly: 1, monthly: 2 }
 
-function GoalRow({ item }: { item: GoalProgressItem }) {
-  const pnlPct       = pct(item.pnl_pct)
-  const goalPct      = pct(item.goal_pct)
-  const limitPct     = pct(item.limit_pct)       // negative
-  const goalProgress = Math.min(100, Math.max(0, pct(item.goal_progress_pct)))
-  const riskProgress = Math.min(100, Math.max(0, pct(item.risk_progress_pct)))
+// ── localStorage persistence ──────────────────────────────────────────────
+const LS_STYLE_KEY = (profileId: number) => `atd_goals_style_${profileId}`
+
+function readPersistedStyleId(profileId: number): number | null {
+  try {
+    const v = localStorage.getItem(LS_STYLE_KEY(profileId))
+    return v ? parseInt(v, 10) : null
+  } catch { return null }
+}
+
+function persistStyleId(profileId: number, styleId: number) {
+  try { localStorage.setItem(LS_STYLE_KEY(profileId), String(styleId)) }
+  catch { /* ignore */ }
+}
+
+// ── Single period row ─────────────────────────────────────────────────────
+
+function GoalRow({
+  item,
+  onOverride,
+  overridden,
+}: {
+  item: GoalProgressItem
+  onOverride: (period: string) => void
+  overridden: boolean
+}) {
+  const pnlPct       = parseFloat(item.pnl_pct)
+  const goalPct      = parseFloat(item.goal_pct)
+  const limitPct     = parseFloat(item.limit_pct)        // negative
+  const goalProgress = Math.min(100, Math.max(0, parseFloat(item.goal_progress_pct)))
+  const riskProgress = Math.min(100, Math.max(0, parseFloat(item.risk_progress_pct)))
+
+  // No trades this period → greyed placeholder
+  if (item.trade_count === 0) {
+    return (
+      <div className="flex flex-col gap-1 py-3 border-b border-surface-700 last:border-none opacity-40">
+        <div className="flex items-center justify-between">
+          <span className="text-xs font-medium text-slate-500">{PERIOD_LABELS[item.period] ?? item.period}</span>
+          <span className="text-[10px] text-slate-600 italic">{PERIOD_EMPTY_LABEL[item.period] ?? '— No activity'}</span>
+        </div>
+        {/* Ghost bars */}
+        <div className="h-1 rounded-full bg-surface-700/60" />
+        <div className="h-1 rounded-full bg-surface-700/40" />
+      </div>
+    )
+  }
 
   let status: 'hit' | 'blocked' | 'warning' | 'ok' = 'ok'
-  if (item.goal_hit)           status = 'hit'
-  else if (item.limit_hit)     status = 'blocked'
-  else if (riskProgress >= 75) status = 'warning'
+  if (item.goal_hit)            status = 'hit'
+  else if (item.limit_hit)      status = 'blocked'
+  else if (riskProgress >= 75)  status = 'warning'
 
   const statusBadge = {
-    hit:     <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-emerald-900/40 text-emerald-400 border border-emerald-700/40">✅ HIT</span>,
+    hit:     <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-emerald-900/40 text-emerald-400 border border-emerald-700/40">🎯 HIT</span>,
     blocked: <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-red-900/40 text-red-400 border border-red-700/40">🛑 BLOCKED</span>,
     warning: <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-amber-900/40 text-amber-400 border border-amber-700/40">⚠️ WARNING</span>,
-    ok:      <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-surface-700 text-slate-400 border border-surface-600">ON TRACK</span>,
+    ok:      <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-surface-700 text-slate-400 border border-surface-600">✅ ON TRACK</span>,
   }[status]
 
   return (
     <div className="flex flex-col gap-2 py-3 border-b border-surface-700 last:border-none">
-      {/* Header row */}
+      {/* Period header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <span className="text-xs font-medium text-slate-400">{PERIOD_LABELS[item.period] ?? item.period}</span>
+          <span className="text-xs font-semibold text-slate-300">{PERIOD_LABELS[item.period] ?? item.period}</span>
           {statusBadge}
+          <span className="text-[9px] text-slate-700">{item.trade_count} trade{item.trade_count !== 1 ? 's' : ''}</span>
         </div>
         <span className={`text-sm font-bold tabular-nums ${pnlPct >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-          {fmtPct(pnlPct)}
+          {pnlPct >= 0 ? '+' : ''}{pnlPct.toFixed(2)}%
         </span>
       </div>
 
-      {/* Goal progress bar */}
+      {/* Goal bar */}
       <div>
         <div className="flex items-center justify-between mb-1">
           <span className="text-[10px] text-slate-600">Goal progress</span>
-          <span className="text-[10px] text-slate-500 tabular-nums">{fmt(goalProgress)}% of {fmtPct(goalPct)}</span>
+          <span className="text-[10px] text-slate-500 tabular-nums">{goalProgress.toFixed(0)}% of {goalPct > 0 ? '+' : ''}{goalPct.toFixed(2)}%</span>
         </div>
         <div className="h-1.5 rounded-full bg-surface-700 overflow-hidden">
           <div
-            className={`h-full rounded-full transition-all ${status === 'hit' ? 'bg-emerald-500' : 'bg-brand-500'}`}
+            className={`h-full rounded-full transition-all duration-500 ${status === 'hit' ? 'bg-emerald-500' : 'bg-brand-500'}`}
             style={{ width: `${goalProgress}%` }}
           />
         </div>
       </div>
 
-      {/* Risk / loss-limit bar */}
+      {/* Risk bar */}
       <div>
         <div className="flex items-center justify-between mb-1">
           <span className="text-[10px] text-slate-600">Risk used</span>
           <span className="text-[10px] text-slate-500 tabular-nums">
-            {fmt(riskProgress)}% of {fmtPct(Math.abs(limitPct))} limit
+            {riskProgress.toFixed(0)}% of {Math.abs(limitPct).toFixed(2)}% limit
           </span>
         </div>
         <div className="h-1.5 rounded-full bg-surface-700 overflow-hidden">
           <div
-            className={`h-full rounded-full transition-all ${
-              status === 'blocked' ? 'bg-red-500' : status === 'warning' ? 'bg-amber-500' : 'bg-surface-500'
+            className={`h-full rounded-full transition-all duration-500 ${
+              status === 'blocked' ? 'bg-red-500'
+              : status === 'warning' ? 'bg-amber-500'
+              : riskProgress > 0 ? 'bg-surface-400'
+              : 'bg-surface-600'
             }`}
             style={{ width: `${riskProgress}%` }}
           />
         </div>
       </div>
+
+      {/* Blocked override button */}
+      {status === 'blocked' && !overridden && (
+        <button
+          type="button"
+          onClick={() => onOverride(item.period)}
+          className="text-[10px] text-amber-400 hover:text-amber-300 bg-amber-900/10 border border-amber-800/30 rounded px-2.5 py-1.5 transition-colors text-left"
+        >
+          ⚠️ Limit hit — I understand, let me trade anyway →
+        </button>
+      )}
+      {status === 'blocked' && overridden && (
+        <p className="text-[10px] text-slate-600 italic">Override active — trade carefully.</p>
+      )}
     </div>
   )
 }
 
 function GoalsWidget({ profileId }: { profileId: number }) {
-  const [progress, setProgress]     = useState<GoalProgressItem[]>([])
-  const [styles, setStyles]         = useState<TradingStyle[]>([])
-  const [selectedStyleId, setSelectedStyleId] = useState<number | null>(null)
-  const [loading, setLoading]       = useState(true)
-  const [error, setError]           = useState<string | null>(null)
+  const [progress, setProgress]             = useState<GoalProgressItem[]>([])
+  const [styles, setStyles]                 = useState<TradingStyle[]>([])
+  const [selectedStyleId, setSelectedStyleId] = useState<number | null>(() => readPersistedStyleId(profileId))
+  const [loading, setLoading]               = useState(true)
+  const [error, setError]                   = useState<string | null>(null)
+  // override map: period → overridden (anti-revenge-trade friction)
+  const [overrides, setOverrides]           = useState<Record<string, boolean>>({})
 
   const load = useCallback(async () => {
-    setLoading(true)
-    setError(null)
+    setLoading(true); setError(null)
     try {
-      const [prog, styleList] = await Promise.all([
-        goalsApi.progress(profileId),
-        stylesApi.list(),
-      ])
+      const [prog, styleList] = await Promise.all([goalsApi.progress(profileId), stylesApi.list()])
       setProgress(prog)
       setStyles(styleList)
       setSelectedStyleId((prev) => {
-        if (prev !== null) return prev
+        // Keep persisted value if still valid
+        const ids = new Set(prog.map((p) => p.style_id))
+        if (prev !== null && ids.has(prev)) return prev
+        // Else pick first style that has goals
         if (prog.length > 0) return prog[0].style_id
         if (styleList.length > 0) return styleList[0].id
         return null
       })
-    } catch (e) {
-      setError((e as Error).message)
-    } finally {
-      setLoading(false)
-    }
+    } catch (e) { setError((e as Error).message) }
+    finally { setLoading(false) }
   }, [profileId])
 
   useEffect(() => { void load() }, [load])
 
-  const activeStyleIds = useMemo(
-    () => [...new Set(progress.map((p) => p.style_id))],
-    [progress],
-  )
-  const visibleStyles = styles.filter((s) => activeStyleIds.includes(s.id))
+  // Persist style selection on change
+  const handleStyleSelect = (id: number) => {
+    setSelectedStyleId(id)
+    persistStyleId(profileId, id)
+    setOverrides({})   // reset overrides on style switch
+  }
 
+  const handleOverride = (period: string) => {
+    setOverrides((prev) => ({ ...prev, [period]: true }))
+  }
+
+  // Styles that have at least one goal configured (active)
+  const activeStyleIds = useMemo(() => [...new Set(progress.map((p) => p.style_id))], [progress])
+  const visibleStyles  = styles.filter((s) => activeStyleIds.includes(s.id))
+
+  // All 3 periods for selected style — sorted daily → weekly → monthly
   const filtered = useMemo(() => {
     if (!selectedStyleId) return []
     return [...progress.filter((p) => p.style_id === selectedStyleId)]
       .sort((a, b) => (PERIOD_ORDER[a.period] ?? 99) - (PERIOD_ORDER[b.period] ?? 99))
   }, [progress, selectedStyleId])
 
+  const blockedCount = filtered.filter((i) => i.limit_hit && !overrides[i.period]).length
+  const hitCount     = filtered.filter((i) => i.goal_hit).length
+
   return (
     <div className="rounded-xl bg-surface-800 border border-surface-700 p-5 flex flex-col gap-4">
-      {/* Header */}
+      {/* Widget header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <Target size={14} className="text-brand-400" />
           <h2 className="text-sm font-semibold text-slate-200">Goals</h2>
+          {!loading && blockedCount > 0 && (
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-red-900/30 text-red-400 border border-red-700/40">
+              🛑 {blockedCount} blocked
+            </span>
+          )}
+          {!loading && hitCount > 0 && blockedCount === 0 && (
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-900/30 text-emerald-400 border border-emerald-700/40">
+              🎯 {hitCount} hit
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => void load()}
-            className="text-slate-600 hover:text-slate-400 transition-colors"
-            title="Refresh"
-          >
-            <RefreshCw size={12} />
-          </button>
-          <Link
-            to="/goals"
-            className="text-[10px] text-brand-400 hover:text-brand-300 flex items-center gap-0.5"
-          >
-            Manage <ChevronRight size={10} />
-          </Link>
+          <button type="button" onClick={() => void load()} className="text-slate-600 hover:text-slate-400 transition-colors" title="Refresh"><RefreshCw size={12} /></button>
+          <Link to="/goals" className="text-[10px] text-brand-400 hover:text-brand-300 flex items-center gap-0.5">Manage <ChevronRight size={10} /></Link>
         </div>
       </div>
 
-      {/* Style tabs (only shown when multiple styles have goals) */}
-      {visibleStyles.length > 1 && (
+      {/* Style tabs — only shown when 2+ styles have goals */}
+      {!loading && visibleStyles.length > 1 && (
         <div className="flex gap-1 flex-wrap">
           {visibleStyles.map((s) => (
-            <button
-              key={s.id}
-              type="button"
-              onClick={() => setSelectedStyleId(s.id)}
-              className={`text-[10px] px-2 py-1 rounded-md font-medium transition-colors ${
+            <button key={s.id} type="button" onClick={() => handleStyleSelect(s.id)}
+              className={`text-[10px] px-2.5 py-1 rounded-md font-medium transition-colors ${
                 selectedStyleId === s.id
                   ? 'bg-brand-500/20 text-brand-300 border border-brand-500/30'
                   : 'bg-surface-700 text-slate-500 border border-surface-600 hover:text-slate-300'
-              }`}
-            >
+              }`}>
               {s.display_name}
             </button>
           ))}
         </div>
       )}
 
-      {/* Content */}
       {loading ? (
-        <div className="flex items-center justify-center py-8">
-          <Loader2 size={16} className="text-slate-600 animate-spin" />
-        </div>
+        <div className="flex items-center justify-center py-8"><Loader2 size={16} className="text-slate-600 animate-spin" /></div>
       ) : error ? (
         <div className="text-xs text-red-400 bg-red-900/20 border border-red-800/30 rounded-lg p-3">{error}</div>
       ) : filtered.length === 0 ? (
         <div className="text-center py-8">
           <Target size={20} className="text-slate-700 mx-auto mb-2" />
           <p className="text-xs text-slate-600">No active goals for this style.</p>
-          <Link to="/goals" className="text-[10px] text-brand-400 hover:underline">
-            Set a goal →
-          </Link>
+          <Link to="/goals" className="text-[10px] text-brand-400 hover:underline">Set a goal →</Link>
         </div>
       ) : (
         <div>
           {filtered.map((item) => (
-            <GoalRow key={`${item.style_id}-${item.period}`} item={item} />
+            <GoalRow
+              key={`${item.style_id}-${item.period}`}
+              item={item}
+              onOverride={handleOverride}
+              overridden={overrides[item.period] ?? false}
+            />
           ))}
         </div>
+      )}
+
+      {/* Footer: period date range for first item */}
+      {!loading && filtered.length > 0 && (
+        <p className="text-[9px] text-slate-700 tabular-nums">
+          {filtered[0]?.period_start} → {filtered[filtered.length - 1]?.period_end}
+        </p>
       )}
     </div>
   )
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 2. MARKET ANALYSIS WIDGET
+// 2. MARKET ANALYSIS WIDGET — shows HTF/MTF/LTF scores inline
 // ─────────────────────────────────────────────────────────────────────────────
 
-function StalenessChip({ item }: { item: MAStalenessItem }) {
-  const daysOld = item.days_old
-  const hasData = item.last_analyzed_at !== null
+const BIAS_COLOR: Record<MABias, string> = {
+  bullish: 'text-emerald-400',
+  neutral: 'text-amber-400',
+  bearish: 'text-red-400',
+}
+const BIAS_EMOJI: Record<MABias, string> = { bullish: '🟢', neutral: '🟡', bearish: '🔴' }
 
-  let color = 'text-emerald-400 bg-emerald-900/30 border-emerald-700/40'
-  let dot   = '🟢'
-  if (!hasData) {
-    color = 'text-slate-500 bg-surface-700 border-surface-600'
-    dot   = '⚪'
-  } else if (daysOld !== null && daysOld > 14) {
-    color = 'text-orange-400 bg-orange-900/30 border-orange-700/40'
-    dot   = '🟠'
-  } else if (daysOld !== null && daysOld > 7) {
-    color = 'text-amber-400 bg-amber-900/30 border-amber-700/40'
-    dot   = '🟡'
-  }
+function TFScoreRow({ label, score, bias }: { label: string; score: string | null; bias: MABias | null }) {
+  if (score === null) return null
+  const pctVal = parseFloat(score)
+  const color = bias ? BIAS_COLOR[bias] : 'text-slate-500'
+  const fill  = bias === 'bullish' ? 'bg-emerald-500' : bias === 'bearish' ? 'bg-red-500' : 'bg-amber-400'
+  return (
+    <div className="flex items-center gap-2">
+      <span className="text-[9px] text-slate-600 uppercase tracking-wide w-7 shrink-0">{label}</span>
+      <div className="flex-1 h-1 rounded-full bg-surface-700 overflow-hidden">
+        <div className={`h-full rounded-full ${fill}`} style={{ width: `${pctVal}%` }} />
+      </div>
+      <span className={`text-[10px] font-mono tabular-nums w-7 text-right ${color}`}>{pctVal.toFixed(0)}</span>
+      {bias && <span className="text-[9px]">{BIAS_EMOJI[bias]}</span>}
+    </div>
+  )
+}
 
-  const ageLabel = !hasData
-    ? 'Never'
-    : daysOld === 0
-    ? 'Today'
-    : daysOld === 1
-    ? '1d ago'
-    : `${daysOld}d ago`
+interface MAModuleCardProps {
+  staleness: MAStalenessItem
+  lastSession: MASessionListItem | undefined
+  module: MAModule | undefined
+}
+
+function MAModuleCard({ staleness, lastSession, module }: MAModuleCardProps) {
+  const hasData = staleness.last_analyzed_at !== null
+  const isStale = staleness.is_stale
+  const daysOld = staleness.days_old
+
+  const ageLabel = !hasData ? 'Never' : daysOld === 0 ? 'Today' : daysOld === 1 ? '1d ago' : `${daysOld}d ago`
+  const isDual = module?.is_dual ?? false
+
+  const borderCls = !hasData
+    ? 'border-surface-600'
+    : isStale
+      ? 'border-amber-500/30'
+      : 'border-emerald-500/20'
+
+  const headerDot = !hasData ? '⚪' : isStale ? '🟡' : '🟢'
 
   return (
-    <span
-      className={`inline-flex items-center gap-1 text-[11px] font-medium px-2 py-1 rounded-md border ${color}`}
-    >
-      <span>{dot}</span>
-      <span>{item.module_name}</span>
-      <span className="opacity-60">·</span>
-      <span className="opacity-80">{ageLabel}</span>
-    </span>
+    <div className={`rounded-lg bg-surface-700/40 border ${borderCls} p-3 flex flex-col gap-2`}>
+      {/* Module header */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-1.5">
+          <span className="text-[10px]">{headerDot}</span>
+          <span className="text-xs font-semibold text-slate-200">{staleness.module_name}</span>
+          {isDual && module && (
+            <span className="text-[9px] text-slate-600">· {module.asset_a}/{module.asset_b}</span>
+          )}
+        </div>
+        <span className="text-[9px] text-slate-600 font-mono">{ageLabel}</span>
+      </div>
+
+      {/* Scores — if we have a session */}
+      {lastSession ? (
+        <div className="space-y-1">
+          {isDual ? (
+            <>
+              {module?.asset_a && <p className="text-[9px] text-slate-600 uppercase tracking-wide">{module.asset_a}</p>}
+              <TFScoreRow label="HTF" score={lastSession.score_htf_a} bias={lastSession.bias_htf_a as MABias | null} />
+              <TFScoreRow label="MTF" score={lastSession.score_mtf_a} bias={lastSession.bias_mtf_a as MABias | null} />
+              {module?.asset_b && lastSession.score_htf_b && (
+                <>
+                  <p className="text-[9px] text-slate-600 uppercase tracking-wide mt-1.5">{module.asset_b}</p>
+                  <TFScoreRow label="HTF" score={lastSession.score_htf_b} bias={lastSession.bias_htf_b as MABias | null} />
+                  <TFScoreRow label="MTF" score={lastSession.score_mtf_b} bias={lastSession.bias_mtf_b as MABias | null} />
+                </>
+              )}
+            </>
+          ) : (
+            <>
+              <TFScoreRow label="HTF" score={lastSession.score_htf_a} bias={lastSession.bias_htf_a as MABias | null} />
+              <TFScoreRow label="MTF" score={lastSession.score_mtf_a} bias={lastSession.bias_mtf_a as MABias | null} />
+            </>
+          )}
+        </div>
+      ) : (
+        <div className="flex items-center gap-1.5 text-[10px] text-amber-400/70 bg-amber-900/10 border border-amber-800/20 rounded px-2 py-1.5">
+          <AlertTriangle size={10} className="shrink-0" />
+          No analysis yet — <Link to="/market-analysis/new" className="underline">run analysis</Link>
+        </div>
+      )}
+
+      {/* Stale warning */}
+      {hasData && isStale && (
+        <div className="flex items-center gap-1.5 text-[9px] text-amber-400/70 bg-amber-900/10 border border-amber-800/20 rounded px-2 py-1">
+          <AlertTriangle size={9} className="shrink-0" />
+          Analysis stale — update recommended
+        </div>
+      )}
+    </div>
   )
 }
 
 function MAWidget({ profileId }: { profileId: number }) {
-  const [staleness, setStaleness] = useState<MAStalenessItem[]>([])
-  const [loading, setLoading]     = useState(true)
-  const [error, setError]         = useState<string | null>(null)
+  const [staleness, setStaleness]   = useState<MAStalenessItem[]>([])
+  const [sessions,  setSessions]    = useState<MASessionListItem[]>([])
+  const [modules,   setModules]     = useState<MAModule[]>([])
+  const [loading,   setLoading]     = useState(true)
+  const [error,     setError]       = useState<string | null>(null)
 
   const load = useCallback(async () => {
-    setLoading(true)
-    setError(null)
+    setLoading(true); setError(null)
     try {
-      setStaleness(await maApi.getStaleness(profileId))
-    } catch (e) {
-      setError((e as Error).message)
-    } finally {
-      setLoading(false)
-    }
+      const [stale, sess, mods] = await Promise.all([
+        maApi.getStaleness(profileId),
+        maApi.listSessions(undefined, 10),   // global — no profile filter
+        maApi.listModules(),
+      ])
+      setStaleness(stale)
+      setSessions(sess)
+      setModules(mods)
+    } catch (e) { setError((e as Error).message) }
+    finally { setLoading(false) }
   }, [profileId])
 
   useEffect(() => { void load() }, [load])
 
   const staleCount = staleness.filter((s) => s.is_stale).length
   const neverCount = staleness.filter((s) => s.last_analyzed_at === null).length
+
+  // Last session per module
+  const lastByMod = useMemo(() => {
+    const map: Record<number, MASessionListItem> = {}
+    for (const s of [...sessions].reverse()) map[s.module_id] = s
+    return map
+  }, [sessions])
 
   return (
     <div className="rounded-xl bg-surface-800 border border-surface-700 p-5 flex flex-col gap-4">
@@ -319,36 +463,26 @@ function MAWidget({ profileId }: { profileId: number }) {
           )}
         </div>
         <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => void load()}
-            className="text-slate-600 hover:text-slate-400 transition-colors"
-          >
-            <RefreshCw size={12} />
-          </button>
-          <Link
-            to="/market-analysis"
-            className="text-[10px] text-purple-400 hover:text-purple-300 flex items-center gap-0.5"
-          >
-            View all <ChevronRight size={10} />
-          </Link>
+          <button type="button" onClick={() => void load()} className="text-slate-600 hover:text-slate-400 transition-colors"><RefreshCw size={12} /></button>
+          <Link to="/market-analysis" className="text-[10px] text-purple-400 hover:text-purple-300 flex items-center gap-0.5">Full view <ChevronRight size={10} /></Link>
         </div>
       </div>
 
       {loading ? (
-        <div className="flex items-center justify-center py-6">
-          <Loader2 size={16} className="text-slate-600 animate-spin" />
-        </div>
+        <div className="flex items-center justify-center py-6"><Loader2 size={16} className="text-slate-600 animate-spin" /></div>
       ) : error ? (
         <div className="text-xs text-red-400">{error}</div>
       ) : staleness.length === 0 ? (
         <p className="text-xs text-slate-600 text-center py-4">No modules configured.</p>
       ) : (
-        <div className="flex flex-wrap gap-2">
+        <div className="grid grid-cols-1 gap-3">
           {staleness.map((s) => (
-            <Link key={s.module_id} to="/market-analysis">
-              <StalenessChip item={s} />
-            </Link>
+            <MAModuleCard
+              key={s.module_id}
+              staleness={s}
+              lastSession={lastByMod[s.module_id]}
+              module={modules.find((m) => m.id === s.module_id)}
+            />
           ))}
         </div>
       )}
@@ -358,9 +492,7 @@ function MAWidget({ profileId }: { profileId: number }) {
           <AlertTriangle size={12} className="mt-0.5 shrink-0" />
           <span>
             {neverCount} module{neverCount > 1 ? 's' : ''} never analyzed —{' '}
-            <Link to="/market-analysis/new" className="underline">
-              run analysis →
-            </Link>
+            <Link to="/market-analysis/new" className="underline">run analysis →</Link>
           </span>
         </div>
       )}
@@ -433,10 +565,7 @@ function PositionsWidget({ trades, loading, error }: {
     () => trades.filter((t) => t.status === 'open' || t.status === 'partial'),
     [trades],
   )
-  const pending = useMemo(
-    () => trades.filter((t) => t.status === 'pending'),
-    [trades],
-  )
+  const pending = useMemo(() => trades.filter((t) => t.status === 'pending'), [trades])
 
   return (
     <div className="rounded-xl bg-surface-800 border border-surface-700 p-5 flex flex-col gap-4">
@@ -450,28 +579,20 @@ function PositionsWidget({ trades, loading, error }: {
             </span>
           )}
         </div>
-        <Link
-          to="/trades"
-          className="text-[10px] text-emerald-400 hover:text-emerald-300 flex items-center gap-0.5"
-        >
+        <Link to="/trades" className="text-[10px] text-emerald-400 hover:text-emerald-300 flex items-center gap-0.5">
           Journal <ChevronRight size={10} />
         </Link>
       </div>
 
       {loading ? (
-        <div className="flex items-center justify-center py-8">
-          <Loader2 size={16} className="text-slate-600 animate-spin" />
-        </div>
+        <div className="flex items-center justify-center py-8"><Loader2 size={16} className="text-slate-600 animate-spin" /></div>
       ) : error ? (
         <div className="text-xs text-red-400 bg-red-900/20 border border-red-800/30 rounded-lg p-3">{error}</div>
       ) : open.length === 0 ? (
         <div className="text-center py-8">
           <Minus size={20} className="text-slate-700 mx-auto mb-2" />
           <p className="text-xs text-slate-600">No open positions.</p>
-          <Link
-            to="/trades/new"
-            className="inline-flex items-center gap-1 mt-2 text-[10px] text-emerald-400 hover:underline"
-          >
+          <Link to="/trades/new" className="inline-flex items-center gap-1 mt-2 text-[10px] text-emerald-400 hover:underline">
             <Plus size={10} /> Open a trade
           </Link>
         </div>
@@ -490,33 +611,29 @@ function PositionsWidget({ trades, loading, error }: {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 4. PERFORMANCE WIDGET
+// 4. PERFORMANCE WIDGET — WR & R:R shown from 1 trade
 // ─────────────────────────────────────────────────────────────────────────────
 
 interface PerfStats {
-  winRate:        number | null
+  winRate:        number          // always computed (even N=1)
+  winRateCount:   number          // number of closed trades used
   profitFactor:   number | null
   totalClosedPnl: number
   avgRR:          number | null
   bestTrade:      number | null
   worstTrade:     number | null
-  equity:         number[]   // cumulative P&L of last ≤30 closed trades
+  equity:         number[]
 }
 
-function computePerf(trades: TradeListItem[]): PerfStats {
+function computePerf(trades: TradeListItem[]): PerfStats | null {
   const closed = trades.filter((t) => t.status === 'closed' && t.realized_pnl !== null)
-  if (closed.length === 0) {
-    return {
-      winRate: null, profitFactor: null, totalClosedPnl: 0,
-      avgRR: null, bestTrade: null, worstTrade: null, equity: [],
-    }
-  }
+  if (closed.length === 0) return null
 
   const pnls   = closed.map((t) => pct(t.realized_pnl))
   const wins   = pnls.filter((p) => p > 0)
   const losses = pnls.filter((p) => p <= 0)
 
-  const winRate      = closed.length >= 5 ? (wins.length / closed.length) * 100 : null
+  const winRate      = (wins.length / closed.length) * 100
   const grossWin     = wins.reduce((a, b) => a + b, 0)
   const grossLoss    = Math.abs(losses.reduce((a, b) => a + b, 0))
   const profitFactor = grossLoss > 0 ? grossWin / grossLoss : null
@@ -532,6 +649,7 @@ function computePerf(trades: TradeListItem[]): PerfStats {
 
   return {
     winRate,
+    winRateCount: closed.length,
     profitFactor,
     totalClosedPnl: total,
     avgRR,
@@ -543,11 +661,7 @@ function computePerf(trades: TradeListItem[]): PerfStats {
 
 function MiniEquityCurve({ equity }: { equity: number[] }) {
   if (equity.length < 2) {
-    return (
-      <div className="flex items-center justify-center h-14 text-[10px] text-slate-700">
-        Not enough data
-      </div>
-    )
+    return <div className="flex items-center justify-center h-14 text-[10px] text-slate-700">Not enough data</div>
   }
   const min   = Math.min(...equity)
   const max   = Math.max(...equity)
@@ -573,14 +687,7 @@ function MiniEquityCurve({ equity }: { equity: number[] }) {
         </linearGradient>
       </defs>
       <path d={fillPath} fill="url(#eq-fill)" />
-      <polyline
-        points={points.join(' ')}
-        fill="none"
-        stroke={color}
-        strokeWidth="1.5"
-        strokeLinejoin="round"
-        strokeLinecap="round"
-      />
+      <polyline points={points.join(' ')} fill="none" stroke={color} strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round" />
     </svg>
   )
 }
@@ -592,6 +699,7 @@ function PerformanceWidget({ trades, loading, error }: {
 }) {
   const perf        = useMemo(() => computePerf(trades), [trades])
   const closedCount = trades.filter((t) => t.status === 'closed').length
+  const lowSample   = perf !== null && perf.winRateCount < 5
 
   return (
     <div className="rounded-xl bg-surface-800 border border-surface-700 p-5 flex flex-col gap-4">
@@ -599,67 +707,58 @@ function PerformanceWidget({ trades, loading, error }: {
         <div className="flex items-center gap-2">
           <TrendingUp size={14} className="text-blue-400" />
           <h2 className="text-sm font-semibold text-slate-200">Performance</h2>
-          {!loading && (
-            <span className="text-[10px] text-slate-600">{closedCount} closed</span>
-          )}
+          {!loading && <span className="text-[10px] text-slate-600">{closedCount} closed</span>}
         </div>
-        <Link
-          to="/trades"
-          className="text-[10px] text-blue-400 hover:text-blue-300 flex items-center gap-0.5"
-        >
+        <Link to="/trades" className="text-[10px] text-blue-400 hover:text-blue-300 flex items-center gap-0.5">
           Journal <ChevronRight size={10} />
         </Link>
       </div>
 
       {loading ? (
-        <div className="flex items-center justify-center py-8">
-          <Loader2 size={16} className="text-slate-600 animate-spin" />
-        </div>
+        <div className="flex items-center justify-center py-8"><Loader2 size={16} className="text-slate-600 animate-spin" /></div>
       ) : error ? (
         <div className="text-xs text-red-400">{error}</div>
-      ) : closedCount === 0 ? (
+      ) : perf === null ? (
         <div className="text-center py-8">
           <TrendingUp size={20} className="text-slate-700 mx-auto mb-2" />
           <p className="text-xs text-slate-600">No closed trades yet.</p>
         </div>
       ) : (
         <>
+          {lowSample && (
+            <div className="flex items-center gap-1.5 text-[10px] text-amber-400/80 bg-amber-900/10 border border-amber-800/20 rounded px-2.5 py-1.5">
+              <Zap size={10} />
+              Low sample — N={perf.winRateCount} trade{perf.winRateCount > 1 ? 's' : ''}. Stats are indicative.
+            </div>
+          )}
+
           {/* KPI row */}
           <div className="grid grid-cols-3 gap-3">
             <div className="bg-surface-700/50 rounded-lg px-3 py-2">
               <div className="text-[10px] text-slate-600 uppercase tracking-wide mb-1">Win Rate</div>
-              {perf.winRate !== null ? (
-                <div className={`text-base font-bold tabular-nums ${
-                  perf.winRate >= 55 ? 'text-emerald-400' : perf.winRate >= 45 ? 'text-amber-400' : 'text-red-400'
-                }`}>
-                  {fmt(perf.winRate)}%
-                </div>
-              ) : (
-                <div className="text-sm text-slate-600">N/A<span className="text-[9px] ml-0.5">(min 5)</span></div>
-              )}
+              <div className={`text-base font-bold tabular-nums ${perf.winRate >= 55 ? 'text-emerald-400' : perf.winRate >= 45 ? 'text-amber-400' : 'text-red-400'}`}>
+                {fmt(perf.winRate)}%
+              </div>
+              {lowSample && <div className="text-[9px] text-slate-700 mt-0.5">N={perf.winRateCount}</div>}
             </div>
             <div className="bg-surface-700/50 rounded-lg px-3 py-2">
               <div className="text-[10px] text-slate-600 uppercase tracking-wide mb-1">Profit Factor</div>
               {perf.profitFactor !== null ? (
-                <div className={`text-base font-bold tabular-nums ${
-                  perf.profitFactor >= 1.5 ? 'text-emerald-400' : perf.profitFactor >= 1 ? 'text-amber-400' : 'text-red-400'
-                }`}>
+                <div className={`text-base font-bold tabular-nums ${perf.profitFactor >= 1.5 ? 'text-emerald-400' : perf.profitFactor >= 1 ? 'text-amber-400' : 'text-red-400'}`}>
                   {fmt(perf.profitFactor, 2)}
                 </div>
               ) : (
-                <div className="text-sm text-slate-600">N/A</div>
+                <div className="text-sm text-slate-600">N/A<span className="text-[9px] ml-0.5">(no losses)</span></div>
               )}
             </div>
             <div className="bg-surface-700/50 rounded-lg px-3 py-2">
               <div className="text-[10px] text-slate-600 uppercase tracking-wide mb-1">Avg R:R</div>
               {perf.avgRR !== null ? (
-                <div className={`text-base font-bold tabular-nums ${
-                  perf.avgRR >= 1.5 ? 'text-emerald-400' : perf.avgRR >= 1 ? 'text-amber-400' : 'text-red-400'
-                }`}>
+                <div className={`text-base font-bold tabular-nums ${perf.avgRR >= 1.5 ? 'text-emerald-400' : perf.avgRR >= 1 ? 'text-amber-400' : 'text-red-400'}`}>
                   {fmt(perf.avgRR, 2)}R
                 </div>
               ) : (
-                <div className="text-sm text-slate-600">N/A</div>
+                <div className="text-sm text-slate-600">N/A<span className="text-[9px] ml-0.5">(no losses)</span></div>
               )}
             </div>
           </div>
@@ -668,11 +767,9 @@ function PerformanceWidget({ trades, loading, error }: {
           <div className="bg-surface-700/30 rounded-lg p-3">
             <div className="flex items-center justify-between mb-2">
               <span className="text-[10px] text-slate-600 uppercase tracking-wide">
-                Equity curve — last {Math.min(closedCount, 30)} trades
+                Equity — last {Math.min(closedCount, 30)} trades
               </span>
-              <span className={`text-xs font-semibold tabular-nums ${
-                perf.totalClosedPnl >= 0 ? 'text-emerald-400' : 'text-red-400'
-              }`}>
+              <span className={`text-xs font-semibold tabular-nums ${perf.totalClosedPnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
                 {perf.totalClosedPnl >= 0 ? '+' : ''}{fmtCurrency(perf.totalClosedPnl)}
               </span>
             </div>
@@ -707,48 +804,68 @@ function PerformanceWidget({ trades, loading, error }: {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// TOP KPI BAR
+// TOP KPI BAR — Capital + Portfolio Risk (with available risk + warnings)
 // ─────────────────────────────────────────────────────────────────────────────
 
-function KpiBar({ trades, loading, profileCapital }: {
+function KpiBar({ trades, loading, profile }: {
   trades: TradeListItem[]
   loading: boolean
-  profileCapital: string | null
+  profile: { capital_current: string; capital_start: string; currency: string | null; max_concurrent_risk_pct: string }
 }) {
-  const capital = profileCapital ? parseFloat(profileCapital) : null
+  const capital     = parseFloat(profile.capital_current)
+  const capitalStart = parseFloat(profile.capital_start)
+  const maxRiskPct  = parseFloat(profile.max_concurrent_risk_pct)
+  const currency    = profile.currency ?? 'USD'
 
-  const openTrades = trades.filter((t) => t.status === 'open' || t.status === 'partial')
+  const pnlAmount = capital - capitalStart
+  const pnlPct    = capitalStart > 0 ? (pnlAmount / capitalStart) * 100 : 0
 
+  const openTrades  = trades.filter((t) => t.status === 'open' || t.status === 'partial')
   const closedToday = trades.filter((t) => {
     if (t.status !== 'closed' || !t.closed_at) return false
-    const d   = new Date(t.closed_at)
-    const now = new Date()
-    return d.toDateString() === now.toDateString()
+    return new Date(t.closed_at).toDateString() === new Date().toDateString()
   })
   const todayPnl = closedToday.reduce((sum, t) => sum + pct(t.realized_pnl), 0)
 
-  const totalRisk = openTrades.reduce((sum, t) => sum + pct(t.current_risk ?? t.risk_amount), 0)
-  const riskPct   = capital && capital > 0 ? (totalRisk / capital) * 100 : null
+  const totalRisk     = openTrades.reduce((sum, t) => sum + pct(t.current_risk ?? t.risk_amount), 0)
+  const riskPct       = capital > 0 ? (totalRisk / capital) * 100 : 0
+  const availRiskPct  = Math.max(0, maxRiskPct - riskPct)
+  const availRiskAmt  = capital * (availRiskPct / 100)
+
+  // Risk status
+  const riskExceeded  = riskPct > maxRiskPct
+  const riskWarning   = !riskExceeded && riskPct >= maxRiskPct * 0.75
+  const riskEmoji     = riskExceeded ? '🛑' : riskWarning ? '⚠️' : riskPct > 0 ? '🟡' : '🟢'
+  const riskColor     = riskExceeded ? 'text-red-400' : riskWarning ? 'text-amber-400' : 'text-slate-100'
 
   const closedAll = trades.filter((t) => t.status === 'closed' && t.realized_pnl !== null)
   const wins      = closedAll.filter((t) => pct(t.realized_pnl) > 0)
-  const winRate   = closedAll.length >= 5 ? (wins.length / closedAll.length) * 100 : null
+  const winRate   = closedAll.length > 0 ? (wins.length / closedAll.length) * 100 : null
 
   return (
     <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+      {/* Capital card */}
       <StatCard
-        label="Open Positions"
+        label="Portfolio Balance"
         value={loading
           ? <Loader2 size={18} className="animate-spin text-slate-500" />
-          : openTrades.length
+          : <span className="flex items-baseline gap-1.5">
+              <span className="text-sm font-bold tabular-nums text-slate-100">
+                {capital.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+              </span>
+              <span className="text-xs text-slate-500">{currency}</span>
+            </span>
         }
-        sub={loading ? '' : openTrades.length === 0
-          ? 'No live positions'
-          : `${openTrades.filter((t) => t.status === 'partial').length} partial`
-        }
+        sub={loading ? '' : (
+          <span className={`font-semibold tabular-nums ${pnlAmount >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+            {pnlAmount >= 0 ? '+' : ''}{pnlPct.toFixed(2)}% ({pnlAmount >= 0 ? '+' : ''}{fmtCurrency(pnlAmount, currency)})
+          </span>
+        ) as unknown as string}
         accent="brand"
-        info="Open + partially closed positions."
+        info="Current capital vs starting capital. P&L % = (current − start) / start."
       />
+
+      {/* Today P&L */}
       <StatCard
         label="Today's P&L"
         value={loading
@@ -756,7 +873,7 @@ function KpiBar({ trades, loading, profileCapital }: {
           : closedToday.length === 0
           ? '—'
           : <span className={todayPnl >= 0 ? 'text-emerald-400' : 'text-red-400'}>
-              {todayPnl >= 0 ? '+' : ''}{fmtCurrency(todayPnl)}
+              {todayPnl >= 0 ? '+' : ''}{fmtCurrency(todayPnl, currency)}
             </span>
         }
         sub={loading ? '' : closedToday.length === 0
@@ -766,20 +883,27 @@ function KpiBar({ trades, loading, profileCapital }: {
         accent="bull"
         info="Realized P&L from trades closed today."
       />
+
+      {/* Portfolio Risk — enhanced with available risk */}
       <StatCard
-        label="Portfolio Risk"
+        label={`${riskEmoji} Portfolio Risk`}
         value={loading
           ? <Loader2 size={18} className="animate-spin text-slate-500" />
-          : riskPct !== null
-          ? <span className={riskPct > 5 ? 'text-red-400' : riskPct > 3 ? 'text-amber-400' : 'text-slate-100'}>
-              {fmt(riskPct)}%
-            </span>
-          : openTrades.length === 0 ? '0%' : '—'
+          : <span className={riskColor}>{fmt(riskPct)}% / {fmt(maxRiskPct)}%</span>
         }
-        sub={loading ? '' : `${fmtCurrency(totalRisk)} at risk`}
+        sub={loading ? '' :
+          riskExceeded
+            ? <span className="text-red-400 font-semibold">🛑 LIMIT EXCEEDED — reduce positions</span> as unknown as string
+            : <span className="text-slate-500">
+                Avail: <span className="text-slate-300 font-mono">{fmt(availRiskPct)}%</span>
+                <span className="text-slate-600"> ({fmtCurrency(availRiskAmt, currency)})</span>
+              </span> as unknown as string
+        }
         accent="neutral"
-        info="Sum of current_risk across open positions ÷ capital. Trades at BE show 0 risk."
+        info={`Current risk / max allowed (${fmt(maxRiskPct)}%). Available risk = max − used. Trades at BE count as 0.`}
       />
+
+      {/* Win Rate — shown from 1 trade */}
       <StatCard
         label="Win Rate"
         value={loading
@@ -790,13 +914,35 @@ function KpiBar({ trades, loading, profileCapital }: {
             </span>
           : '—'
         }
-        sub={loading ? '' : closedAll.length < 5
-          ? `${closedAll.length}/5 trades (min 5)`
-          : `${closedAll.length} closed trades`
+        sub={loading ? '' : closedAll.length === 0
+          ? 'No closed trades'
+          : closedAll.length < 5
+            ? `N=${closedAll.length} — low sample`
+            : `${closedAll.length} closed trades`
         }
         accent="bear"
-        info="Shown after 5+ closed trades to avoid statistical noise."
+        info="Win rate from all closed trades. Shown from 1 trade with N= label when below 5 trades."
       />
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Risk exceeded banner (shown above widgets when limit is hit)
+// ─────────────────────────────────────────────────────────────────────────────
+
+function RiskExceededBanner({ riskPct, maxRiskPct }: { riskPct: number; maxRiskPct: number }) {
+  if (riskPct <= maxRiskPct) return null
+  return (
+    <div className="flex items-start gap-3 mb-5 px-4 py-3 rounded-xl bg-red-900/20 border border-red-700/40 text-sm text-red-300">
+      <ShieldAlert size={18} className="shrink-0 mt-0.5 text-red-400" />
+      <div>
+        <p className="font-semibold">🛑 Portfolio risk limit exceeded</p>
+        <p className="text-xs text-red-400/80 mt-0.5">
+          You are at <strong>{fmt(riskPct)}%</strong> risk vs your maximum of <strong>{fmt(maxRiskPct)}%</strong>.
+          You can still open new trades, but consider reducing or closing existing positions first.
+        </p>
+      </div>
     </div>
   )
 }
@@ -808,35 +954,33 @@ function KpiBar({ trades, loading, profileCapital }: {
 export function DashboardPage() {
   const { activeProfile } = useProfile()
 
-  const [trades, setTrades]   = useState<TradeListItem[]>([])
-  const [tLoading, setTLoading] = useState(false)
-  const [tError, setTError]     = useState<string | null>(null)
+  const [trades,    setTrades]    = useState<TradeListItem[]>([])
+  const [tLoading,  setTLoading]  = useState(false)
+  const [tError,    setTError]    = useState<string | null>(null)
 
   const loadTrades = useCallback(async () => {
     if (!activeProfile) return
-    setTLoading(true)
-    setTError(null)
-    try {
-      setTrades(await tradesApi.list(activeProfile.id))
-    } catch (e) {
-      setTError((e as Error).message)
-    } finally {
-      setTLoading(false)
-    }
+    setTLoading(true); setTError(null)
+    try { setTrades(await tradesApi.list(activeProfile.id)) }
+    catch (e) { setTError((e as Error).message) }
+    finally { setTLoading(false) }
   }, [activeProfile])
 
   useEffect(() => { void loadTrades() }, [loadTrades])
+
+  // Compute risk for the banner
+  const openTrades    = trades.filter((t) => t.status === 'open' || t.status === 'partial')
+  const capital       = activeProfile ? parseFloat(activeProfile.capital_current) : 0
+  const maxRiskPct    = activeProfile ? parseFloat(activeProfile.max_concurrent_risk_pct) : 0
+  const totalRisk     = openTrades.reduce((sum, t) => sum + pct(t.current_risk ?? t.risk_amount), 0)
+  const currentRiskPct = capital > 0 ? (totalRisk / capital) * 100 : 0
 
   return (
     <div>
       <PageHeader
         icon="📈"
         title="Dashboard"
-        subtitle={
-          activeProfile
-            ? `Overview for ${activeProfile.name}`
-            : 'Overview of your trading activity'
-        }
+        subtitle={activeProfile ? `Overview for ${activeProfile.name}` : 'Overview of your trading activity'}
         badge="Phase 1"
         badgeVariant="phase"
       />
@@ -845,20 +989,17 @@ export function DashboardPage() {
       {!activeProfile && (
         <div className="rounded-xl bg-surface-800 border border-amber-700/40 p-6 text-center mb-6">
           <p className="text-sm text-amber-400 mb-2">No profile selected.</p>
-          <Link to="/settings/profiles" className="text-xs text-brand-400 underline">
-            Create or select a profile →
-          </Link>
+          <Link to="/settings/profiles" className="text-xs text-brand-400 underline">Create or select a profile →</Link>
         </div>
       )}
 
       {activeProfile && (
         <>
+          {/* ── Risk exceeded banner ─────────────────────────────────────── */}
+          <RiskExceededBanner riskPct={currentRiskPct} maxRiskPct={maxRiskPct} />
+
           {/* ── KPI bar ─────────────────────────────────────────────────── */}
-          <KpiBar
-            trades={trades}
-            loading={tLoading}
-            profileCapital={activeProfile.capital_current}
-          />
+          <KpiBar trades={trades} loading={tLoading} profile={activeProfile} />
 
           {/* ── 2-column widget grid ─────────────────────────────────── */}
           <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">

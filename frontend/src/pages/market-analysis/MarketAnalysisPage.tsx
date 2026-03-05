@@ -314,7 +314,7 @@ export function MarketAnalysisPage() {
       if (activeProfile) {
         const [stale, sess] = await Promise.all([
           maApi.getStaleness(activeProfile.id),
-          maApi.listSessions(activeProfile.id, undefined, 30),
+          maApi.listSessions(undefined, 30),   // global — no profile filter
         ])
         setStaleness(stale)
         setSessions(sess)

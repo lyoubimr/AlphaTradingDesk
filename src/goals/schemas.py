@@ -54,6 +54,7 @@ class GoalProgressItem(BaseModel):
     risk_progress  — pnl_pct / limit_pct × 100 (0–100+% — increases as losses accumulate)
     goal_hit       — True if pnl_pct >= goal_pct
     limit_hit      — True if pnl_pct <= limit_pct
+    trade_count    — number of closed/partial-TP events in the period (0 = no activity)
     """
     style_id: int
     style_name: str
@@ -67,3 +68,4 @@ class GoalProgressItem(BaseModel):
     risk_progress_pct: Decimal  # how far toward the limit (0–100+)
     goal_hit: bool
     limit_hit: bool
+    trade_count: int = 0        # trades (closed + partial TP) in this period

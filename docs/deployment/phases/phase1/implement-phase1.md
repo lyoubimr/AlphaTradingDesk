@@ -1,8 +1,8 @@
 # 🛠️ Phase 1 — Implementation Plan
 
 **Date:** March 1, 2026  
-**Version:** 1.6  
-**Status:** Step 11 DONE — Goals/Performance frontend complete → **Ready for Phase 1 v1.0.0 release**
+**Version:** 1.8  
+**Status:** Step 12 DONE + Market Analysis global session migration → **Ready for Step 13 (Final QA)**
 
 > This document describes **what to build, in what order**.  
 > Each step is a working, testable increment — nothing is left dangling.
@@ -769,7 +769,48 @@ in topbar, and the selection persists across page reloads.
 
 ---
 
-### Step 12 — Frontend: Dashboard (1–2 days)
+### Step 12 — DONE (2026-03-03) — Frontend: Dashboard
+
+**Widgets (all connected to real API, using active profile from ProfileContext):**
+
+1. **Goals widget**
+   - `goalsApi.progress(profileId)` + `stylesApi.list()`
+   - Style tab selector (only shown when multiple styles have active goals)
+   - One `GoalRow` per period (daily / weekly / monthly), sorted
+   - Each row: P&L %, goal progress bar (brand/emerald), risk bar (amber/red)
+   - Status badge: ✅ HIT / 🛑 BLOCKED / ⚠️ WARNING / ON TRACK
+   - Empty state + link to /goals
+
+2. **Market Analysis badge**
+   - `maApi.getStaleness(profileId)`
+   - One chip per module: `[dot] ModuleName · Xd ago`
+   - Dot color: 🟢 fresh / 🟡 >7d / 🟠 >14d / ⚪ never
+   - "stale" count badge in header
+   - Alert when modules never analyzed (link to /market-analysis/new)
+
+3. **Open Positions**
+   - `tradesApi.list(profileId)` filtered to `open` | `partial`
+   - Each row: symbol, direction arrow, entry price, risk $, booked P&L (partial only)
+   - Status badge per row
+   - Clickable → navigates to /trades/:id
+   - Pending LIMIT orders shown as a footer alert (separate from "open" count)
+
+4. **Performance summary**
+   - Computed from `tradesApi.list()` (closed trades, `realized_pnl !== null`)
+   - Win Rate (N/A if < 5 trades), Profit Factor, Avg R:R — all color-coded
+   - Mini equity curve SVG (last 30 closed trades, cumulative P&L line + gradient fill)
+   - Best trade / Worst trade (currency-formatted)
+
+**KPI bar (top, always visible when profile is set):**
+- Open Positions count
+- Today's P&L (sum of `realized_pnl` from trades closed today)
+- Portfolio Risk % (total `risk_amount` open ÷ `capital_current`)
+- Win Rate (requires ≥5 closed trades)
+
+**All widgets:** loading skeleton (spinner), error state, empty state with CTA links.
+
+**Files changed:**
+- `frontend/src/pages/dashboard/DashboardPage.tsx` — fully rewritten (no fake data)
 
 > **⚠️ Plan change (2026-03-02):** Originally Step 9. Moved here so Dashboard
 > widgets can be built against real data (real trades, real analyses, real goals)
@@ -796,6 +837,40 @@ Widgets (all read from API using active profile from ProfileContext):
 4. Performance summary
    - Win rate, profit factor, equity curve (last 30 trades)
 ```
+
+---
+
+### Step 12.1 — DONE (2026-03-03) — Market Analysis: global sessions + frontend refactor
+
+**Context:** Market Analysis sessions are not per-profile — they represent a global market view
+(e.g. "Crypto macro analysis on 2026-03-03"). Filtering by profile was incorrect and has been removed.
+
+**Backend additions:**
+- `GET /api/market-analysis/staleness` — **new global endpoint** — returns last session date per
+  active module regardless of profile. `is_stale = True` if no session or older than 7 days.
+  Used by `MarketAnalysisPage` (overview). Profile-scoped staleness (`/profiles/{id}/market-analysis/staleness`)
+  kept for backwards compatibility (Dashboard badge).
+- `PATCH /api/market-analysis/indicators/{id}` — partial update of UI-text fields
+  (`label`, `question`, `tooltip`, `answer_bullish/partial/bearish`, `default_enabled`).
+  Immutable fields (`key`, `module_id`, `tv_symbol`, `timeframe_level`) are silently ignored.
+  Powers the `/settings/market-analysis` inline editor (Phase 2 backlog, backend ready).
+- `src/market_analysis/schemas.py` — added `IndicatorUpdate` schema
+- `src/market_analysis/service.py` — added `get_staleness_global()` + `patch_indicator()`
+
+**Frontend changes:**
+- `frontend/src/lib/api.ts`:
+  - `maApi.listSessions(moduleId?, limit)` — **profile_id parameter removed** (was always wrong)
+  - `maApi.getStalenessGlobal()` — new, calls `GET /api/market-analysis/staleness`
+  - `maApi.patchIndicator(id, data)` — new, calls `PATCH /api/market-analysis/indicators/{id}`
+  - `maApi.getStaleness(profileId)` — kept as-is for Dashboard badge (profile-scoped)
+- `frontend/src/pages/market-analysis/MarketAnalysisPage.tsx` — updated `listSessions` call
+  from `maApi.listSessions(activeProfile.id, undefined, 30)` → `maApi.listSessions(undefined, 30)`
+- `frontend/src/pages/dashboard/DashboardPage.tsx` — updated `listSessions` call
+  from `maApi.listSessions(profileId, undefined, 10)` → `maApi.listSessions(undefined, 10)`
+
+**Goals page fixes (also 2026-03-03):**
+- `frontend/src/pages/goals/GoalsPage.tsx` — inline editing for goals (upsert + delete flow),
+  fully connected to `goalsApi` (create, update, delete, progress)
 
 ---
 
@@ -1197,6 +1272,8 @@ crontab -e
 - [x] Step 9 — Settings/Profiles page + ProfilePicker
 - [x] Step 10 — Trade form (risk calc, multi-TP, LIMIT lifecycle, expectancy, margin/leverage)
 - [x] Step 11 — Goals page (real backend: create, toggle, live progress, KPIs)
+- [x] Step 12 — Dashboard fully connected (Goals widget, MA badge, Open Positions, Performance)
+- [x] Step 12.1 — Market Analysis global sessions (no profile filter) + PATCH indicator endpoint
 
 ### Quality gates
 
@@ -1213,7 +1290,7 @@ crontab -e
 git status
 
 # Final commit
-git add -A && git commit -m "feat(goals): Step 11 — connect Goals page to real backend"
+git add -A && git commit -m "feat(market-analysis): Step 12.1 — global sessions, PATCH indicator, Goals inline edit"
 
 # Merge to main and tag
 git checkout main

@@ -4,13 +4,15 @@ Market Analysis router — Step 7.
 Routes:
   GET  /api/market-analysis/modules
   GET  /api/market-analysis/modules/{module_id}/indicators
+  PATCH /api/market-analysis/indicators/{id}
   POST /api/market-analysis/sessions
-  GET  /api/market-analysis/sessions
+  GET  /api/market-analysis/sessions              (global — no profile filter required)
   GET  /api/market-analysis/sessions/{session_id}
+  GET  /api/market-analysis/staleness             (global — last session per module)
 
   GET  /api/profiles/{profile_id}/indicator-config
   PUT  /api/profiles/{profile_id}/indicator-config
-  GET  /api/profiles/{profile_id}/market-analysis/staleness
+  GET  /api/profiles/{profile_id}/market-analysis/staleness  (profile-scoped, kept for compat)
 """
 from __future__ import annotations
 
@@ -23,6 +25,7 @@ from src.market_analysis.schemas import (
     IndicatorConfigItem,
     IndicatorConfigOut,
     IndicatorOut,
+    IndicatorUpdate,
     ModuleOut,
     SessionCreate,
     SessionListItem,
@@ -47,6 +50,20 @@ def list_modules(db: Session = Depends(get_db)) -> list:
 def list_indicators(module_id: int, db: Session = Depends(get_db)) -> list:
     """Return all indicators for a given module (read-only catalogue)."""
     return service.list_indicators(db, module_id)
+
+
+@ma_router.patch("/indicators/{indicator_id}", response_model=IndicatorOut)
+def patch_indicator(
+    indicator_id: int,
+    data: IndicatorUpdate,
+    db: Session = Depends(get_db),
+) -> object:
+    """
+    Partial update of UI-text fields for an indicator.
+    Only label, question, tooltip, answer_*, and default_enabled can be changed.
+    Immutable fields (key, module_id, tv_symbol, etc.) are ignored.
+    """
+    return service.patch_indicator(db, indicator_id, data)
 
 
 # ── Sessions ──────────────────────────────────────────────────────────────────
@@ -80,6 +97,16 @@ def list_sessions(
 def get_session(session_id: int, db: Session = Depends(get_db)) -> object:
     """Return a session with all its answers."""
     return service.get_session(db, session_id)
+
+
+@ma_router.get("/staleness", response_model=list[StalenessItem])
+def get_staleness_global(db: Session = Depends(get_db)) -> list:
+    """
+    Global staleness — last analysis date per active module regardless of profile.
+    is_stale = True if no session exists OR last session is older than 7 days.
+    Used on the Market Analysis overview page (not profile-scoped).
+    """
+    return service.get_staleness_global(db)
 
 
 # ── Profile indicator config ──────────────────────────────────────────────────

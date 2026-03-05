@@ -494,6 +494,18 @@ interface ExpectancyPanelProps {
 //   E(R)     = 0.6×2R − 0.4×1R = 1.2 − 0.4 = +0.8R   ✓
 
 function ExpectancyPanel({ calc, totalProfit, pctValid, selectedStrategy, activeProfile, globalWrStats, ccy }: ExpectancyPanelProps) {
+  // ⚠️ All hooks BEFORE early returns (rules of hooks)
+  // Level 3: global = mean of all profiles that have data
+  const globalWr: number | null = useMemo(() => {
+    if (!globalWrStats) return null
+    const withData = globalWrStats.profiles.filter(
+      (p) => p.has_data && p.win_rate_pct != null
+    )
+    if (withData.length === 0) return null
+    const sum = withData.reduce((s, p) => s + (p.win_rate_pct ?? 0), 0)
+    return sum / withData.length / 100   // convert % to ratio
+  }, [globalWrStats])
+
   if (!calc.valid || calc.risk_amount == null || calc.risk_amount <= 0) return null
   if (totalProfit == null || !pctValid) return null
 
@@ -512,18 +524,8 @@ function ExpectancyPanel({ calc, totalProfit, pctValid, selectedStrategy, active
   const profileWins   = activeProfile.win_count
   const hasProfileStats = profileTrades >= MIN_PROFILE_TRADES
 
-  // Level 3: global = mean of all profiles that have data
-  //   computed in front from the WinRateStats response
-  const globalWr: number | null = useMemo(() => {
-    if (!globalWrStats) return null
-    const withData = globalWrStats.profiles.filter(
-      (p) => p.has_data && p.win_rate_pct != null
-    )
-    if (withData.length === 0) return null
-    const sum = withData.reduce((s, p) => s + (p.win_rate_pct ?? 0), 0)
-    return sum / withData.length / 100   // convert % to ratio
-  }, [globalWrStats])
-
+  // Level 3: global win rate — computed from globalWrStats prop (passed from parent)
+  // ⚠️ useMemo was moved to top of function body (before early returns) to satisfy rules-of-hooks
   const hasGlobalStats = globalWr != null
 
   // Pick the best available source
@@ -688,6 +690,9 @@ export function NewTradePage() {
 
   // Global WR stats — for the 3rd-level WR fallback in ExpectancyPanel
   const [globalWrStats, setGlobalWrStats] = useState<WinRateStats | null>(null)
+
+  // Portfolio risk — TODO Phase 2: show risk-exceeded banner on trade form
+  // (state removed for now — will be re-added when the UI uses it)
 
   const [instrument, setInstrument] = useState<Instrument | null>(null)
   const [direction, setDirection]   = useState<'LONG' | 'SHORT'>('LONG')

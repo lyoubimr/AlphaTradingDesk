@@ -4,13 +4,15 @@
 // Layout:
 //   ① KPI bar (active goals, goals hit, avg progress, worst risk)
 //   ② Progress cards — one per active goal (live pnl% vs target/limit)
-//   ③ All goals table — toggle active, see all periods/styles
-//   ④ New Goal modal
+//   ③ All goals table — inline edit target/limit, toggle active, delete
+//   ④ Period Plan explainer (monthly → weekly → daily + post-goal-hit)
+//   ⑤ New/Edit Goal modal (upsert — no "already exists" blocker)
 
 import { useEffect, useState, useCallback } from 'react'
 import {
   Target, Plus, RefreshCw, Loader2, CheckCircle2,
   AlertTriangle, TrendingUp, X, ChevronDown,
+  Pencil, Trash2, Check, Ban,
 } from 'lucide-react'
 import { PageHeader } from '../../components/ui/PageHeader'
 import { StatCard } from '../../components/ui/StatCard'
@@ -33,6 +35,34 @@ const PERIOD_LABELS: Record<string, string> = {
 }
 
 const PERIOD_ORDER: Record<string, number> = { daily: 0, weekly: 1, monthly: 2 }
+
+// ── Goal presets — sensible defaults per period ───────────────────────────
+// goal_pct / limit_pct — typical conservative trading targets.
+interface GoalPreset { label: string; goal: string; limit: string; emoji: string }
+
+const PRESETS: Record<string, GoalPreset[]> = {
+  daily: [
+    { label: 'Conservative', emoji: '🛡️',  goal: '0.5',  limit: '-0.5' },
+    { label: 'Standard',     emoji: '⚖️',  goal: '1.0',  limit: '-1.0' },
+    { label: 'Aggressive',   emoji: '⚡',  goal: '2.0',  limit: '-1.5' },
+  ],
+  weekly: [
+    { label: 'Conservative', emoji: '🛡️',  goal: '1.0',  limit: '-1.5' },
+    { label: 'Standard',     emoji: '⚖️',  goal: '2.5',  limit: '-2.5' },
+    { label: 'Aggressive',   emoji: '⚡',  goal: '5.0',  limit: '-4.0' },
+  ],
+  monthly: [
+    { label: 'Conservative', emoji: '🛡️',  goal: '3.0',  limit: '-5.0' },
+    { label: 'Standard',     emoji: '⚖️',  goal: '7.0',  limit: '-8.0' },
+    { label: 'Aggressive',   emoji: '⚡',  goal: '15.0', limit: '-10.0' },
+  ],
+}
+
+const PERIOD_DESCRIPTIONS: Record<string, string> = {
+  daily:   'One calendar day — resets every midnight. Good for daily loss-limit discipline.',
+  weekly:  'Mon → Sun. Use with a style that generates ≥2–3 trades/week.',
+  monthly: 'First → last day of the month. Best for swing/position traders.',
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ProgressCard — one live goal with P&L bar
@@ -93,7 +123,11 @@ function ProgressCard({ item }: { item: GoalProgressItem }) {
           <p className={`text-xl font-bold tabular-nums ${isPositive ? 'text-emerald-400' : 'text-red-400'}`}>
             {sign}{pnlPct.toFixed(3)}%
           </p>
-          <p className="text-[9px] text-slate-700 mt-0.5">closed + partial profits</p>
+          <p className="text-[9px] text-slate-700 mt-0.5">
+            {item.trade_count > 0
+              ? `${item.trade_count} trade${item.trade_count !== 1 ? 's' : ''} · closed + partial profits`
+              : 'No trades this period yet'}
+          </p>
         </div>
         <div className="text-right">
           <p className="text-[10px] text-slate-600 mb-0.5">Target / Limit</p>
@@ -139,7 +173,7 @@ function ProgressCard({ item }: { item: GoalProgressItem }) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// GoalRow — compact row in the "All Goals" table
+// GoalRow — compact row in the "All Goals" table with inline edit + delete
 // ─────────────────────────────────────────────────────────────────────────────
 
 function GoalRow({
@@ -147,38 +181,157 @@ function GoalRow({
   styleName,
   onToggle,
   toggling,
+  onSave,
+  onDelete,
+  saving,
+  deleting,
 }: {
   goal: GoalOut
   styleName: string
   onToggle: (goal: GoalOut) => void
   toggling: boolean
+  onSave: (goal: GoalOut, goalPct: string, limitPct: string) => Promise<void>
+  onDelete: (goal: GoalOut) => Promise<void>
+  saving: boolean
+  deleting: boolean
 }) {
+  const [editing,  setEditing]  = useState(false)
+  const [goalPct,  setGoalPct]  = useState(parseFloat(goal.goal_pct).toFixed(2))
+  const [limitPct, setLimitPct] = useState(parseFloat(goal.limit_pct).toFixed(2))
+  const [rowErr,   setRowErr]   = useState<string | null>(null)
+
+  const goalNum  = parseFloat(goalPct)
+  const limitNum = parseFloat(limitPct)
+  const goalOk   = !isNaN(goalNum)  && goalNum  > 0
+  const limitOk  = !isNaN(limitNum) && limitNum < 0
+  const canSave  = goalOk && limitOk
+
+  const handleSave = async () => {
+    if (!canSave) return
+    setRowErr(null)
+    try {
+      await onSave(goal, String(goalNum), String(limitNum))
+      setEditing(false)
+    } catch (e: unknown) {
+      setRowErr((e as Error).message)
+    }
+  }
+
+  const handleCancel = () => {
+    setGoalPct(parseFloat(goal.goal_pct).toFixed(2))
+    setLimitPct(parseFloat(goal.limit_pct).toFixed(2))
+    setRowErr(null)
+    setEditing(false)
+  }
+
+  const inlineCls = [
+    'w-24 px-2 py-1 rounded bg-surface-700 border border-surface-600',
+    'text-xs font-mono text-slate-200 placeholder-slate-600',
+    'focus:outline-none focus:border-brand-500/60 transition-colors',
+  ].join(' ')
+
   return (
-    <tr className={`border-b border-surface-700/50 transition-colors ${goal.is_active ? '' : 'opacity-40'}`}>
-      <td className="px-4 py-2.5 text-sm text-slate-200">{styleName}</td>
-      <td className="px-4 py-2.5 text-xs text-slate-400">{PERIOD_LABELS[goal.period] ?? goal.period}</td>
-      <td className="px-4 py-2.5 text-xs font-mono text-emerald-400">+{parseFloat(goal.goal_pct).toFixed(2)}%</td>
-      <td className="px-4 py-2.5 text-xs font-mono text-red-400">{parseFloat(goal.limit_pct).toFixed(2)}%</td>
-      <td className="px-4 py-2.5">
-        <span className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-medium ${
-          goal.is_active
-            ? 'text-emerald-400 bg-emerald-500/10 border border-emerald-500/20'
-            : 'text-slate-600 bg-surface-700 border border-surface-600'
-        }`}>
-          {goal.is_active ? 'Active' : 'Inactive'}
-        </span>
-      </td>
-      <td className="px-4 py-2.5">
-        <button
-          type="button"
-          disabled={toggling}
-          onClick={() => onToggle(goal)}
-          className="text-[10px] text-slate-500 hover:text-slate-300 transition-colors disabled:opacity-40"
-        >
-          {toggling ? <Loader2 size={10} className="animate-spin" /> : goal.is_active ? 'Deactivate' : 'Activate'}
-        </button>
-      </td>
-    </tr>
+    <>
+      <tr className={`border-b border-surface-700/50 transition-colors ${goal.is_active ? '' : 'opacity-40'}`}>
+        <td className="px-4 py-2.5 text-sm text-slate-200">{styleName}</td>
+        <td className="px-4 py-2.5 text-xs text-slate-400">{PERIOD_LABELS[goal.period] ?? goal.period}</td>
+        {editing ? (
+          <>
+            <td className="px-4 py-2.5">
+              <input
+                type="number" step="0.01" min="0.01"
+                value={goalPct}
+                onChange={(e) => setGoalPct(e.target.value)}
+                className={inlineCls + (!goalOk ? ' border-red-500/60' : '')}
+              />
+            </td>
+            <td className="px-4 py-2.5">
+              <input
+                type="number" step="0.01" max="-0.01"
+                value={limitPct}
+                onChange={(e) => setLimitPct(e.target.value)}
+                className={inlineCls + (!limitOk ? ' border-red-500/60' : '')}
+              />
+            </td>
+          </>
+        ) : (
+          <>
+            <td className="px-4 py-2.5 text-xs font-mono text-emerald-400">+{parseFloat(goal.goal_pct).toFixed(2)}%</td>
+            <td className="px-4 py-2.5 text-xs font-mono text-red-400">{parseFloat(goal.limit_pct).toFixed(2)}%</td>
+          </>
+        )}
+        <td className="px-4 py-2.5">
+          <span className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-medium ${
+            goal.is_active
+              ? 'text-emerald-400 bg-emerald-500/10 border border-emerald-500/20'
+              : 'text-slate-600 bg-surface-700 border border-surface-600'
+          }`}>
+            {goal.is_active ? 'Active' : 'Inactive'}
+          </span>
+        </td>
+        <td className="px-4 py-2.5">
+          <div className="flex items-center gap-2">
+            {editing ? (
+              <>
+                <button
+                  type="button"
+                  disabled={!canSave || saving}
+                  onClick={handleSave}
+                  title="Save"
+                  className="text-emerald-400 hover:text-emerald-300 disabled:opacity-40 transition-colors"
+                >
+                  {saving ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleCancel}
+                  title="Cancel"
+                  className="text-slate-500 hover:text-slate-300 transition-colors"
+                >
+                  <Ban size={12} />
+                </button>
+              </>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  onClick={() => setEditing(true)}
+                  title="Edit"
+                  className="text-slate-600 hover:text-brand-400 transition-colors"
+                >
+                  <Pencil size={11} />
+                </button>
+                <button
+                  type="button"
+                  disabled={toggling}
+                  onClick={() => onToggle(goal)}
+                  title={goal.is_active ? 'Deactivate' : 'Activate'}
+                  className="text-[10px] text-slate-500 hover:text-slate-300 transition-colors disabled:opacity-40 whitespace-nowrap"
+                >
+                  {toggling ? <Loader2 size={10} className="animate-spin" /> : goal.is_active ? 'Deactivate' : 'Activate'}
+                </button>
+                <button
+                  type="button"
+                  disabled={deleting}
+                  onClick={() => onDelete(goal)}
+                  title="Delete"
+                  className="text-slate-600 hover:text-red-400 transition-colors disabled:opacity-40"
+                >
+                  {deleting ? <Loader2 size={11} className="animate-spin" /> : <Trash2 size={11} />}
+                </button>
+              </>
+            )}
+          </div>
+        </td>
+      </tr>
+      {rowErr && (
+        <tr className="border-b border-surface-700/30">
+          <td colSpan={6} className="px-4 py-1 text-[10px] text-red-400 bg-red-500/5">
+            ⚠️ {rowErr}
+          </td>
+        </tr>
+      )}
+    </>
   )
 }
 
@@ -217,11 +370,17 @@ function NewGoalModal({
   const goalOk   = !isNaN(goalNum)  && goalNum  >  0
   const limitOk  = !isNaN(limitNum) && limitNum <  0
 
+  // No longer a blocker — POST is an upsert (reactivates + updates values)
   const alreadyExists = existingGoals.some(
     (g) => g.style_id === Number(styleId) && g.period === period,
   )
 
-  const canSubmit = styleId !== '' && goalOk && limitOk && !alreadyExists
+  const canSubmit = styleId !== '' && goalOk && limitOk
+
+  const applyPreset = (p: GoalPreset) => {
+    setGoalPct(p.goal)
+    setLimitPct(p.limit)
+  }
 
   const handleSubmit = async () => {
     if (!canSubmit) return
@@ -289,6 +448,38 @@ function NewGoalModal({
               </button>
             ))}
           </div>
+          {/* Period description */}
+          <p className="text-[10px] text-slate-600 leading-snug">{PERIOD_DESCRIPTIONS[period]}</p>
+        </div>
+
+        {/* Upsert notice — informational only */}
+        {alreadyExists && (
+          <p className="text-[11px] text-sky-400 bg-sky-500/10 border border-sky-500/20 rounded px-3 py-1.5">
+            ℹ️ A goal for this style + period already exists. Saving will update its values and reactivate it.
+          </p>
+        )}
+
+        {/* Quick-fill presets */}
+        <div className="space-y-1.5">
+          <label className="text-xs font-medium text-slate-400">Quick presets</label>
+          <div className="flex gap-2">
+            {(PRESETS[period] ?? []).map((preset) => (
+              <button
+                key={preset.label}
+                type="button"
+                onClick={() => applyPreset(preset)}
+                className={`flex-1 flex flex-col items-center gap-0.5 py-2 rounded-lg border text-[10px] transition-colors ${
+                  goalPct === preset.goal && limitPct === preset.limit
+                    ? 'bg-brand-600/20 border-brand-600/40 text-brand-300'
+                    : 'bg-surface-700 border-surface-600 text-slate-500 hover:text-slate-300 hover:border-surface-500'
+                }`}
+              >
+                <span>{preset.emoji}</span>
+                <span className="font-medium">{preset.label}</span>
+                <span className="font-mono text-emerald-400/70">+{preset.goal}%</span>
+              </button>
+            ))}
+          </div>
         </div>
 
         {/* Goal % + Limit % */}
@@ -332,12 +523,6 @@ function NewGoalModal({
           </div>
         </div>
 
-        {alreadyExists && (
-          <p className="text-[11px] text-amber-400 bg-amber-500/10 border border-amber-500/20 rounded px-3 py-1.5">
-            ⚠️ A goal for this style + period already exists. Toggle it in the table below.
-          </p>
-        )}
-
         {err && (
           <p className="text-[11px] text-red-400 bg-red-500/10 border border-red-500/20 rounded px-3 py-1.5">
             {err}
@@ -355,7 +540,7 @@ function NewGoalModal({
             className="flex-1 atd-btn-primary disabled:opacity-40 disabled:cursor-not-allowed"
           >
             {saving ? <Loader2 size={13} className="animate-spin" /> : <Plus size={13} />}
-            Create
+            {alreadyExists ? 'Update' : 'Create'}
           </button>
         </div>
       </div>
@@ -378,6 +563,8 @@ export function GoalsPage() {
   const [error,           setError]           = useState<string | null>(null)
   const [showModal,       setShowModal]       = useState(false)
   const [toggling,        setToggling]        = useState<number | null>(null)
+  const [saving,          setSaving]          = useState<number | null>(null)
+  const [deleting,        setDeleting]        = useState<number | null>(null)
   const [showAll,         setShowAll]         = useState(false)
 
   // Fetch trading styles once (reference data)
@@ -419,6 +606,38 @@ export function GoalsPage() {
       setError((e as Error).message)
     } finally {
       setToggling(null)
+    }
+  }
+
+  // Inline edit — save new target/limit values
+  async function handleSave(goal: GoalOut, goalPct: string, limitPct: string) {
+    if (!activeProfile) return
+    setSaving(goal.id)
+    try {
+      const updated = await goalsApi.update(activeProfile.id, goal.style_id, goal.period, {
+        goal_pct:  goalPct,
+        limit_pct: limitPct,
+      })
+      setGoals((prev) => prev.map((g) => g.id === goal.id ? updated : g))
+      goalsApi.progress(activeProfile.id).then(setProgress).catch(() => {})
+    } finally {
+      setSaving(null)
+    }
+  }
+
+  // Delete goal permanently
+  async function handleDelete(goal: GoalOut) {
+    if (!activeProfile) return
+    if (!window.confirm(`Delete the ${goal.period} goal for this style? This cannot be undone.`)) return
+    setDeleting(goal.id)
+    try {
+      await goalsApi.delete(activeProfile.id, goal.style_id, goal.period)
+      setGoals((prev) => prev.filter((g) => g.id !== goal.id))
+      goalsApi.progress(activeProfile.id).then(setProgress).catch(() => {})
+    } catch (e: unknown) {
+      setError((e as Error).message)
+    } finally {
+      setDeleting(null)
     }
   }
 
@@ -568,6 +787,7 @@ export function GoalsPage() {
           <div className="mb-2 flex items-center gap-2">
             <Target size={14} className="text-slate-500" />
             <h2 className="text-sm font-medium text-slate-400">All Goals</h2>
+            <span className="text-[10px] text-slate-600">click ✏️ to edit target or limit inline</span>
             {loadingGoals && <Loader2 size={12} className="animate-spin text-slate-600" />}
           </div>
 
@@ -591,7 +811,7 @@ export function GoalsPage() {
                   <table className="w-full text-xs">
                     <thead>
                       <tr className="border-b border-surface-700">
-                        {['Style', 'Period', 'Target', 'Limit', 'Status', ''].map((h, i) => (
+                        {['Style', 'Period', 'Target', 'Limit', 'Status', 'Actions'].map((h, i) => (
                           <th
                             key={i}
                             className="px-4 py-2.5 text-left text-slate-600 font-medium uppercase tracking-wider whitespace-nowrap"
@@ -609,6 +829,10 @@ export function GoalsPage() {
                           styleName={styleMap[goal.style_id] ?? `Style ${goal.style_id}`}
                           onToggle={handleToggle}
                           toggling={toggling === goal.id}
+                          onSave={handleSave}
+                          onDelete={handleDelete}
+                          saving={saving === goal.id}
+                          deleting={deleting === goal.id}
                         />
                       ))}
                     </tbody>
@@ -631,73 +855,119 @@ export function GoalsPage() {
             )}
           </div>
 
-          {/* ── Explanation ───────────────────────────────────────────── */}
-          <div className="rounded-xl bg-surface-800 border border-surface-700 p-5 space-y-5">
-            <p className="text-[10px] uppercase tracking-wider text-slate-600 font-semibold">
-              How goals work
-            </p>
+          {/* ── Period Plan — hierarchy + post-goal-hit guidance ─────── */}
+          <div className="rounded-xl bg-surface-800 border border-surface-700 p-5 space-y-5 mb-6">
+            <div className="flex items-center gap-2">
+              <p className="text-[10px] uppercase tracking-wider text-slate-600 font-semibold">
+                📐 Period Plan — how the 3 periods work together
+              </p>
+            </div>
 
-            {/* Row 1 — Periods */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            {/* Hierarchy diagram */}
+            <div className="flex flex-col md:flex-row items-stretch gap-2">
               {[
                 {
-                  emoji: '📅',
-                  title: 'Daily goal',
-                  desc: 'Resets every calendar day (00:00 → 23:59). Useful for controlling intraday drawdown or locking in a daily profit target before stopping.',
-                },
-                {
-                  emoji: '📆',
-                  title: 'Weekly goal',
-                  desc: 'Covers Monday → Sunday (ISO week). Good for swing traders reviewing at end of week. Resets each Monday.',
-                },
-                {
+                  period: 'monthly',
                   emoji: '🗓️',
-                  title: 'Monthly goal',
-                  desc: 'Covers the 1st → last day of the month. Best for measuring long-term growth vs. your overall risk budget.',
+                  label: 'Monthly',
+                  target: 'e.g. +7%',
+                  color: 'border-brand-500/30 bg-brand-500/5',
+                  desc: 'Your macro target for the month. Sets the overall ambition: how much you want to make (or lose at most) in 4 weeks.',
                 },
-              ].map(({ emoji, title, desc }) => (
-                <div key={title} className="rounded-lg bg-surface-700/40 border border-surface-700 p-3.5 space-y-1.5">
-                  <p className="text-xs font-semibold text-slate-300">{emoji} {title}</p>
-                  <p className="text-[11px] text-slate-500 leading-relaxed">{desc}</p>
+                {
+                  period: 'weekly',
+                  emoji: '📆',
+                  label: 'Weekly',
+                  target: 'e.g. +2%',
+                  color: 'border-sky-500/30 bg-sky-500/5',
+                  desc: 'A milestone within the month. Hitting your weekly goal 3–4× puts you on track for the monthly target.',
+                },
+                {
+                  period: 'daily',
+                  emoji: '📅',
+                  label: 'Daily',
+                  target: 'e.g. +0.5%',
+                  color: 'border-emerald-500/30 bg-emerald-500/5',
+                  desc: 'The smallest unit. Use the daily loss limit as a circuit-breaker: once hit, close the platform for the day.',
+                },
+              ].map(({ emoji, label, target, color, desc }, idx, arr) => (
+                <div key={label} className="flex items-stretch gap-2 flex-1">
+                  <div className={`flex-1 rounded-lg border p-3.5 space-y-1.5 ${color}`}>
+                    <p className="text-xs font-semibold text-slate-200">{emoji} {label}</p>
+                    <p className="text-[10px] font-mono text-slate-400">{target}</p>
+                    <p className="text-[11px] text-slate-500 leading-relaxed">{desc}</p>
+                  </div>
+                  {idx < arr.length - 1 && (
+                    <div className="hidden md:flex items-center text-slate-700 text-lg self-center">→</div>
+                  )}
                 </div>
               ))}
             </div>
 
-            {/* Row 2 — Progress, Limits, Style */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-              <div className="rounded-lg bg-surface-700/40 border border-surface-700 p-3.5 space-y-1.5">
-                <p className="text-xs font-semibold text-slate-300">� P&amp;L calculation</p>
-                <p className="text-[11px] text-slate-500 leading-relaxed">
-                  Progress counts <strong className="text-slate-400">all realized profits and losses</strong> in the current window:
-                </p>
-                <ul className="text-[11px] text-slate-500 space-y-0.5 pl-3 list-disc">
-                  <li><strong className="text-slate-400">Closed trades</strong> — full P&amp;L at close</li>
-                  <li><strong className="text-slate-400">Partial trades</strong> — TP positions already hit (booked profits), even if the trade is still open</li>
-                </ul>
-                <p className="text-[11px] text-slate-500 leading-relaxed">
-                  Still-open unrealized P&amp;L is <strong className="text-slate-400">not</strong> included.
-                </p>
+            {/* Post-goal-hit actions */}
+            <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/5 p-4 space-y-2">
+              <p className="text-xs font-semibold text-emerald-300">✅ What to do when your goal is hit</p>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                {[
+                  {
+                    period: '📅 Daily goal hit',
+                    actions: [
+                      'Option A: Stop trading for the day — lock in the profit.',
+                      'Option B: Continue, but reduce position size to 50%.',
+                      'Your daily limit still applies — a losing streak can still hit the circuit-breaker.',
+                    ],
+                  },
+                  {
+                    period: '📆 Weekly goal hit',
+                    actions: [
+                      'Option A: Stop taking new trades until Monday.',
+                      'Option B: Only manage existing trades (no new entries).',
+                      'Do NOT let a winning week turn into a losing one — protect the weekly P&L.',
+                    ],
+                  },
+                  {
+                    period: '🗓️ Monthly goal hit',
+                    actions: [
+                      'Option A: Go flat — best choice for capital preservation.',
+                      'Option B: Drop to minimal size for the rest of the month.',
+                      'Review your trading journal before setting next month\'s goal.',
+                    ],
+                  },
+                ].map(({ period, actions }) => (
+                  <div key={period} className="space-y-1">
+                    <p className="text-[11px] font-semibold text-slate-300">{period}</p>
+                    <ul className="space-y-0.5 pl-3">
+                      {actions.map((a, i) => (
+                        <li key={i} className="text-[11px] text-slate-500 list-disc">{a}</li>
+                      ))}
+                    </ul>
+                  </div>
+                ))}
               </div>
+            </div>
 
-              <div className="rounded-lg bg-surface-700/40 border border-surface-700 p-3.5 space-y-1.5">
-                <p className="text-xs font-semibold text-slate-300">🛑 Loss limit (circuit-breaker)</p>
-                <p className="text-[11px] text-slate-500 leading-relaxed">
-                  The loss limit is a <strong className="text-red-400">negative %</strong>. When the period P&amp;L drops below it, the card turns red and <em>Limit hit</em> appears.
-                </p>
-                <p className="text-[11px] text-slate-500 leading-relaxed">
-                  Example: limit = −2% → if you lose more than 2% of your capital this week, you're over limit. Use it as a signal to <strong className="text-slate-400">stop trading for the period</strong>.
-                </p>
-              </div>
+            {/* Loss limit */}
+            <div className="rounded-lg border border-red-500/20 bg-red-500/5 p-4 space-y-2">
+              <p className="text-xs font-semibold text-red-300">🛑 When your loss limit is hit — stop immediately</p>
+              <p className="text-[11px] text-slate-500 leading-relaxed">
+                The loss limit is a <strong className="text-red-400">circuit-breaker</strong>, not a suggestion.
+                When the "Limit hit" badge appears on a progress card, close all pending orders and stop taking new trades for that period.
+                Continuing to trade after a limit hit is the fastest path to catastrophic drawdown.
+              </p>
+              <p className="text-[11px] text-slate-500">
+                Example: daily limit = −1% → you lost 1% today. Close the platform, review your trades tomorrow.
+                The weekly and monthly limits still accumulate — your daily losses count toward them.
+              </p>
+            </div>
 
-              <div className="rounded-lg bg-surface-700/40 border border-surface-700 p-3.5 space-y-1.5">
-                <p className="text-xs font-semibold text-slate-300">🏷️ Trading style &amp; goals</p>
-                <p className="text-[11px] text-slate-500 leading-relaxed">
-                  Each goal is tagged to a <strong className="text-slate-400">trading style</strong> (e.g. Scalp, Swing, Position) to help you organize targets by strategy.
-                </p>
-                <p className="text-[11px] text-slate-500 leading-relaxed">
-                  In Phase 1 the style is <strong className="text-slate-400">organizational only</strong> — P&amp;L is summed across all trades in the period, regardless of which style they used. Per-style filtering comes in a future phase.
-                </p>
-              </div>
+            {/* Style note */}
+            <div className="rounded-lg border border-surface-700 bg-surface-700/30 p-3.5 space-y-1">
+              <p className="text-[11px] font-semibold text-slate-400">🏷️ Trading style tag</p>
+              <p className="text-[11px] text-slate-500 leading-relaxed">
+                The trading style tag is <strong className="text-slate-400">organizational only</strong> in Phase 1 — it helps you label your plan,
+                but P&amp;L progress counts <em>all</em> closed trades for the profile regardless of style.
+                Per-style breakdown comes in a later phase.
+              </p>
             </div>
           </div>
         </>
@@ -711,7 +981,15 @@ export function GoalsPage() {
           existingGoals={goals}
           onClose={() => setShowModal(false)}
           onCreated={(g) => {
-            setGoals((prev) => [...prev, g])
+            // Upsert: replace if exists (same style+period), otherwise append
+            setGoals((prev) => {
+              const idx = prev.findIndex(
+                (x) => x.style_id === g.style_id && x.period === g.period,
+              )
+              return idx >= 0
+                ? prev.map((x, i) => i === idx ? g : x)
+                : [...prev, g]
+            })
             setShowModal(false)
             goalsApi.progress(activeProfile.id).then(setProgress).catch(() => {})
           }}
@@ -720,3 +998,4 @@ export function GoalsPage() {
     </div>
   )
 }
+

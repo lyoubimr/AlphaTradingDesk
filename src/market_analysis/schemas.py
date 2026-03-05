@@ -58,6 +58,22 @@ class IndicatorOut(BaseModel):
     sort_order: int
 
 
+class IndicatorUpdate(BaseModel):
+    """
+    Partial update for PATCH /api/market-analysis/indicators/{id}.
+    Only UI-text fields are patchable.
+    Immutable fields (key, module_id, asset_target, tv_symbol, tv_timeframe,
+    timeframe_level, sort_order) are rejected silently — not in this schema.
+    """
+    label: str | None = Field(default=None, min_length=1, max_length=200)
+    question: str | None = Field(default=None, min_length=1)
+    tooltip: str | None = None   # explicitly None = clear tooltip
+    answer_bullish: str | None = Field(default=None, min_length=1, max_length=200)
+    answer_partial: str | None = Field(default=None, min_length=1, max_length=200)
+    answer_bearish: str | None = Field(default=None, min_length=1, max_length=200)
+    default_enabled: bool | None = None
+
+
 # ── Indicator config (per-profile toggles) ────────────────────────────────────
 
 class IndicatorConfigItem(BaseModel):

@@ -50,6 +50,87 @@ html, body, #root {
 ::-webkit-scrollbar-thumb { background: var(--color-surface-500); border-radius: 99px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--color-brand-500); }
 
+/* ══════════════════════════════════════════════════════════════════════════
+   THEMES — applied via data-theme="<name>" on <html>
+   Default (no attribute) = Indigo Night (original)
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* ── 1. Emerald Oasis (green brand, deep teal surfaces) ─────────────────── */
+[data-theme="emerald"] {
+  --color-brand-50:  #ecfdf5;
+  --color-brand-100: #d1fae5;
+  --color-brand-200: #a7f3d0;
+  --color-brand-400: #34d399;
+  --color-brand-500: #10b981;
+  --color-brand-600: #059669;
+  --color-brand-700: #047857;
+  --color-brand-900: #022c22;
+  --color-surface-950: #010d0a;
+  --color-surface-900: #071610;
+  --color-surface-800: #0d231a;
+  --color-surface-700: #132e22;
+  --color-surface-600: #1a3b2c;
+  --color-surface-500: #254d39;
+  --color-surface-400: #366650;
+}
+
+/* ── 2. Amber Desert (golden brand, warm dark surfaces) ─────────────────── */
+[data-theme="amber"] {
+  --color-brand-50:  #fffbeb;
+  --color-brand-100: #fef3c7;
+  --color-brand-200: #fde68a;
+  --color-brand-400: #fbbf24;
+  --color-brand-500: #f59e0b;
+  --color-brand-600: #d97706;
+  --color-brand-700: #b45309;
+  --color-brand-900: #3b1a02;
+  --color-surface-950: #0d0900;
+  --color-surface-900: #180e00;
+  --color-surface-800: #241500;
+  --color-surface-700: #2f1c00;
+  --color-surface-600: #3d2500;
+  --color-surface-500: #4f3000;
+  --color-surface-400: #6b4210;
+}
+
+/* ── 3. Rose Blaze (pink-rose brand, near-black surfaces) ───────────────── */
+[data-theme="rose"] {
+  --color-brand-50:  #fff1f2;
+  --color-brand-100: #ffe4e6;
+  --color-brand-200: #fecdd3;
+  --color-brand-400: #fb7185;
+  --color-brand-500: #f43f5e;
+  --color-brand-600: #e11d48;
+  --color-brand-700: #be123c;
+  --color-brand-900: #4c0519;
+  --color-surface-950: #0e0007;
+  --color-surface-900: #180010;
+  --color-surface-800: #220018;
+  --color-surface-700: #2c0020;
+  --color-surface-600: #3a0029;
+  --color-surface-500: #4d0037;
+  --color-surface-400: #6b0050;
+}
+
+/* ── 4. Cyan Terminal (cyan-sky brand, true-black terminal surfaces) ─────── */
+[data-theme="cyan"] {
+  --color-brand-50:  #ecfeff;
+  --color-brand-100: #cffafe;
+  --color-brand-200: #a5f3fc;
+  --color-brand-400: #22d3ee;
+  --color-brand-500: #06b6d4;
+  --color-brand-600: #0891b2;
+  --color-brand-700: #0e7490;
+  --color-brand-900: #082f49;
+  --color-surface-950: #000508;
+  --color-surface-900: #030d14;
+  --color-surface-800: #071520;
+  --color-surface-700: #0b1e2d;
+  --color-surface-600: #102739;
+  --color-surface-500: #163349;
+  --color-surface-400: #1e4660;
+}
+
 /* ── Utility button classes ─────────────────────────────────────────────── */
 .atd-btn-primary {
   display: inline-flex;
