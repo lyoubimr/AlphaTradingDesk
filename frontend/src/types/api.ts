@@ -286,6 +286,7 @@ export interface GoalProgressItem {
   trade_count: number         // 0 = no activity this period → show "No trades" row
   // v2 fields
   avg_r: string | null
+  avg_r_min: string | null        // goal minimum Avg R (copied from ProfileGoal)
   avg_r_hit: boolean | null
   max_trades_hit: boolean | null
   period_type: 'outcome' | 'process'
@@ -302,16 +303,25 @@ export interface GoalProgressItem {
 // ── Goal Overrides ────────────────────────────────────────────────────────
 
 export interface GoalOverrideCreate {
-  goal_id: number
-  reason_text: string   // min 20 chars
+  style_id?: number | null
+  period: GoalPeriod
+  period_start: string         // ISO date "2026-03-01"
+  reason_text: string          // min 20 chars
+  pnl_pct_at_override?: string | null
+  open_risk_pct?: string | null
+  acknowledged?: boolean
 }
 
 export interface GoalOverrideOut {
   id: number
   profile_id: number
-  goal_id: number
+  period: string
+  period_start: string         // ISO date
+  pnl_pct_at_override: string | null
+  open_risk_pct: string | null
   reason_text: string
-  created_at: string
+  acknowledged: boolean
+  overridden_at: string        // ISO datetime
 }
 
 // ── Stats / Win-rate ──────────────────────────────────────────────────────

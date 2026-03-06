@@ -20,10 +20,10 @@ import { PageHeader }  from '../../components/ui/PageHeader'
 import { StatCard }    from '../../components/ui/StatCard'
 import { useProfile }  from '../../context/ProfileContext'
 import {
-  goalsApi, stylesApi, maApi, tradesApi,
+  goalsApi, maApi, tradesApi,
 } from '../../lib/api'
 import type {
-  GoalProgressItem, TradingStyle,
+  GoalProgressItem,
   MAStalenessItem, TradeListItem, MASessionListItem, MAModule, MABias,
 } from '../../types/api'
 
@@ -57,21 +57,6 @@ const PERIOD_EMPTY_LABEL: Record<string, string> = {
   monthly: 'No trades this month',
 }
 const PERIOD_ORDER: Record<string, number> = { daily: 0, weekly: 1, monthly: 2 }
-
-// ── localStorage persistence ──────────────────────────────────────────────
-const LS_STYLE_KEY = (profileId: number) => `atd_goals_style_${profileId}`
-
-function readPersistedStyleId(profileId: number): number | null {
-  try {
-    const v = localStorage.getItem(LS_STYLE_KEY(profileId))
-    return v ? parseInt(v, 10) : null
-  } catch { return null }
-}
-
-function persistStyleId(profileId: number, styleId: number) {
-  try { localStorage.setItem(LS_STYLE_KEY(profileId), String(styleId)) }
-  catch { /* ignore */ }
-}
 
 // ── Single period row ─────────────────────────────────────────────────────
 
@@ -184,56 +169,32 @@ function GoalRow({
 }
 
 function GoalsWidget({ profileId }: { profileId: number }) {
-  const [progress, setProgress]             = useState<GoalProgressItem[]>([])
-  const [styles, setStyles]                 = useState<TradingStyle[]>([])
-  const [selectedStyleId, setSelectedStyleId] = useState<number | null>(() => readPersistedStyleId(profileId))
-  const [loading, setLoading]               = useState(true)
-  const [error, setError]                   = useState<string | null>(null)
+  const [progress, setProgress]   = useState<GoalProgressItem[]>([])
+  const [loading, setLoading]     = useState(true)
+  const [error, setError]         = useState<string | null>(null)
   // override map: period → overridden (anti-revenge-trade friction)
-  const [overrides, setOverrides]           = useState<Record<string, boolean>>({})
+  const [overrides, setOverrides] = useState<Record<string, boolean>>({})
 
   const load = useCallback(async () => {
     setLoading(true); setError(null)
     try {
-      const [prog, styleList] = await Promise.all([goalsApi.progress(profileId), stylesApi.list()])
+      const prog = await goalsApi.progress(profileId)
       setProgress(prog)
-      setStyles(styleList)
-      setSelectedStyleId((prev) => {
-        // Keep persisted value if still valid
-        const ids = new Set(prog.map((p) => p.style_id))
-        if (prev !== null && ids.has(prev)) return prev
-        // Else pick first style that has goals
-        if (prog.length > 0) return prog[0].style_id
-        if (styleList.length > 0) return styleList[0].id
-        return null
-      })
     } catch (e) { setError((e as Error).message) }
     finally { setLoading(false) }
   }, [profileId])
 
   useEffect(() => { void load() }, [load])
 
-  // Persist style selection on change
-  const handleStyleSelect = (id: number) => {
-    setSelectedStyleId(id)
-    persistStyleId(profileId, id)
-    setOverrides({})   // reset overrides on style switch
-  }
-
   const handleOverride = (period: string) => {
     setOverrides((prev) => ({ ...prev, [period]: true }))
   }
 
-  // Styles that have at least one goal configured (active)
-  const activeStyleIds = useMemo(() => [...new Set(progress.map((p) => p.style_id))], [progress])
-  const visibleStyles  = styles.filter((s) => activeStyleIds.includes(s.id))
-
-  // All 3 periods for selected style — sorted daily → weekly → monthly
-  const filtered = useMemo(() => {
-    if (!selectedStyleId) return []
-    return [...progress.filter((p) => p.style_id === selectedStyleId)]
-      .sort((a, b) => (PERIOD_ORDER[a.period] ?? 99) - (PERIOD_ORDER[b.period] ?? 99))
-  }, [progress, selectedStyleId])
+  // Global goals (style_id = null) sorted daily → weekly → monthly
+  const filtered = useMemo(() =>
+    [...progress].sort((a, b) => (PERIOD_ORDER[a.period] ?? 99) - (PERIOD_ORDER[b.period] ?? 99)),
+    [progress],
+  )
 
   const blockedCount = filtered.filter((i) => i.limit_hit && !overrides[i.period]).length
   const hitCount     = filtered.filter((i) => i.goal_hit).length
@@ -262,21 +223,7 @@ function GoalsWidget({ profileId }: { profileId: number }) {
         </div>
       </div>
 
-      {/* Style tabs — only shown when 2+ styles have goals */}
-      {!loading && visibleStyles.length > 1 && (
-        <div className="flex gap-1 flex-wrap">
-          {visibleStyles.map((s) => (
-            <button key={s.id} type="button" onClick={() => handleStyleSelect(s.id)}
-              className={`text-[10px] px-2.5 py-1 rounded-md font-medium transition-colors ${
-                selectedStyleId === s.id
-                  ? 'bg-brand-500/20 text-brand-300 border border-brand-500/30'
-                  : 'bg-surface-700 text-slate-500 border border-surface-600 hover:text-slate-300'
-              }`}>
-              {s.display_name}
-            </button>
-          ))}
-        </div>
-      )}
+      {/* Style tabs — removed: goals are now global (style_id = null) */}
 
       {loading ? (
         <div className="flex items-center justify-center py-8"><Loader2 size={16} className="text-slate-600 animate-spin" /></div>
@@ -292,7 +239,7 @@ function GoalsWidget({ profileId }: { profileId: number }) {
         <div>
           {filtered.map((item) => (
             <GoalRow
-              key={`${item.style_id}-${item.period}`}
+              key={`${item.goal_id}-${item.period}`}
               item={item}
               onOverride={handleOverride}
               overridden={overrides[item.period] ?? false}

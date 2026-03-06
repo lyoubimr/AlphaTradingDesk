@@ -182,14 +182,14 @@ export const goalsApi = {
       body: JSON.stringify(data),
     }),
 
-  update: (profileId: number, styleId: number, period: string, data: GoalUpdate): Promise<GoalOut> =>
-    request(`/profiles/${profileId}/goals/${styleId}/${period}`, {
+  update: (profileId: number, goalId: number, data: GoalUpdate): Promise<GoalOut> =>
+    request(`/profiles/${profileId}/goals/${goalId}`, {
       method: 'PUT',
       body: JSON.stringify(data),
     }),
 
-  delete: (profileId: number, styleId: number, period: string): Promise<void> =>
-    request(`/profiles/${profileId}/goals/${styleId}/${period}`, { method: 'DELETE' }),
+  delete: (profileId: number, goalId: number): Promise<void> =>
+    request(`/profiles/${profileId}/goals/${goalId}`, { method: 'DELETE' }),
 
   progress: (profileId: number): Promise<GoalProgressItem[]> =>
     request(`/profiles/${profileId}/goals/progress`),

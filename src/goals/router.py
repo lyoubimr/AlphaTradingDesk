@@ -2,14 +2,15 @@
 Goals router — nested under /api/profiles/{profile_id}/goals.
 
 Routes:
-  GET    /api/profiles/{id}/goals                        → list all goals
-  POST   /api/profiles/{id}/goals                        → create or upsert a goal
-  PUT    /api/profiles/{id}/goals/{style_id}/{period}    → update a goal
-  DELETE /api/profiles/{id}/goals/{style_id}/{period}    → delete a goal
-  GET    /api/profiles/{id}/goals/progress               → computed progress
+  GET    /api/profiles/{id}/goals               → list all goals (with style_name)
+  POST   /api/profiles/{id}/goals               → create a single goal
+  POST   /api/profiles/{id}/goals/matrix        → create up to 3 goals at once
+  PUT    /api/profiles/{id}/goals/{goal_id}     → update a goal by id
+  DELETE /api/profiles/{id}/goals/{goal_id}     → delete a goal by id
+  GET    /api/profiles/{id}/goals/progress      → computed real-time progress
 
-  POST   /api/profiles/{id}/goal-overrides               → log a circuit-breaker override
-  GET    /api/profiles/{id}/goal-overrides               → override history
+  POST   /api/profiles/{id}/goal-overrides      → log a circuit-breaker override
+  GET    /api/profiles/{id}/goal-overrides       → override history
 """
 from __future__ import annotations
 
@@ -20,6 +21,7 @@ from src.core.deps import get_db
 from src.goals import service
 from src.goals.schemas import (
     GoalCreate,
+    GoalMatrixCreate,
     GoalOut,
     GoalOverrideCreate,
     GoalOverrideOut,
@@ -46,30 +48,41 @@ def create_goal(
     data: GoalCreate,
     db: Session = Depends(get_db),
 ) -> object:
-    """Create a new goal, or upsert if one already exists for the same style+period."""
     return service.create_goal(db, profile_id, data)
 
 
-@router.put("/goals/{style_id}/{period}", response_model=GoalOut)
+@router.post("/goals/matrix", response_model=list[GoalOut], status_code=status.HTTP_201_CREATED)
+def create_goal_matrix(
+    profile_id: int,
+    data: GoalMatrixCreate,
+    db: Session = Depends(get_db),
+) -> list:
+    """Create up to 3 goals at once (daily/weekly/monthly) for one style. Upserts existing."""
+    result = service.create_goal_matrix(db, profile_id, data)
+    db.commit()
+    return result
+
+
+@router.put("/goals/{goal_id}", response_model=GoalOut)
 def update_goal(
     profile_id: int,
-    style_id: int,
-    period: str,
+    goal_id: int,
     data: GoalUpdate,
     db: Session = Depends(get_db),
 ) -> object:
-    return service.update_goal(db, profile_id, style_id, period, data)
+    result = service.update_goal(db, profile_id, goal_id, data)
+    db.commit()
+    return result
 
 
-@router.delete("/goals/{style_id}/{period}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/goals/{goal_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_goal(
     profile_id: int,
-    style_id: int,
-    period: str,
+    goal_id: int,
     db: Session = Depends(get_db),
 ) -> Response:
-    """Permanently delete a goal."""
-    service.delete_goal(db, profile_id, style_id, period)
+    service.delete_goal(db, profile_id, goal_id)
+    db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -86,11 +99,9 @@ def create_override(
     data: GoalOverrideCreate,
     db: Session = Depends(get_db),
 ) -> object:
-    """Log a circuit-breaker override. reason_text is mandatory (min 20 chars)."""
     return service.create_override(db, profile_id, data)
 
 
 @router.get("/goal-overrides", response_model=list[GoalOverrideOut])
 def list_overrides(profile_id: int, db: Session = Depends(get_db)) -> list:
-    """Return override history for a profile (newest first)."""
     return service.list_overrides(db, profile_id)

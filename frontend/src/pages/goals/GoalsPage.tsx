@@ -34,13 +34,34 @@ const PERIOD_ORDER: Record<string, number> = { daily: 0, weekly: 1, monthly: 2 }
 // ProgressCard
 // ─────────────────────────────────────────────────────────────────────────────
 
-function ProgressCard({ item }: { item: GoalProgressItem }) {
+function fmtAmount(pctVal: number, capital: number, currency: string, signed = false): string {
+  const amount = (capital * Math.abs(pctVal)) / 100
+  const formatted = new Intl.NumberFormat('en-US', {
+    style: 'currency', currency: currency || 'USD', maximumFractionDigits: 0,
+  }).format(amount)
+  if (!signed) return formatted
+  return pctVal < 0 ? `-${formatted}` : `+${formatted}`
+}
+
+function ProgressCard({
+  item,
+  capital,
+  currency,
+}: {
+  item: GoalProgressItem
+  capital: number
+  currency: string
+}) {
   const pnlPct       = pct(item.pnl_pct)
   const goalPct      = pct(item.goal_pct)
   const limitPct     = pct(item.limit_pct)
   const goalProgress = Math.min(100, Math.max(0, pct(item.goal_progress_pct)))
   const riskProgress = Math.min(100, Math.max(0, pct(item.risk_progress_pct)))
   const isPositive   = pnlPct >= 0
+
+  // Avg R — no bar, just badge
+  const avgRCurrent = item.avg_r != null && !isNaN(parseFloat(item.avg_r)) ? parseFloat(item.avg_r) : null
+  const avgRMin     = item.avg_r_min != null && !isNaN(parseFloat(item.avg_r_min)) ? parseFloat(item.avg_r_min) : null
 
   let barColor = 'bg-brand-500'
   if (item.goal_hit)           barColor = 'bg-emerald-500'
@@ -89,6 +110,9 @@ function ProgressCard({ item }: { item: GoalProgressItem }) {
           <p className={`text-xl font-bold tabular-nums ${isPositive ? 'text-emerald-400' : 'text-red-400'}`}>
             {isPositive ? '+' : ''}{pnlPct.toFixed(3)}%
           </p>
+          <p className={`text-[10px] font-mono italic mt-0.5 ${isPositive ? 'text-emerald-600' : 'text-red-600'}`}>
+            {fmtAmount(pnlPct, capital, currency, true)}
+          </p>
           <p className="text-[9px] text-slate-700 mt-0.5">
             {item.trade_count > 0
               ? `${item.trade_count} trade${item.trade_count !== 1 ? 's' : ''}`
@@ -102,23 +126,13 @@ function ProgressCard({ item }: { item: GoalProgressItem }) {
             {' / '}
             <span className="text-red-500">{limitPct.toFixed(2)}%</span>
           </p>
+          <p className="text-[10px] font-mono italic text-slate-600 mt-0.5">
+            <span className="text-emerald-700">+{fmtAmount(goalPct, capital, currency)}</span>
+            {' / '}
+            <span className="text-red-700">-{fmtAmount(limitPct, capital, currency)}</span>
+          </p>
         </div>
       </div>
-
-      {/* Avg R row (process goals) */}
-      {item.avg_r != null && !isNaN(parseFloat(item.avg_r)) && (
-        <div className="flex items-center justify-between text-[10px] rounded-lg border border-surface-600 bg-surface-700/40 px-3 py-1.5">
-          <span className="text-slate-500">Avg R</span>
-          <span className={`font-mono font-semibold ${
-            item.avg_r_hit === true ? 'text-emerald-400' :
-            item.avg_r_hit === false ? 'text-amber-400' : 'text-slate-300'
-          }`}>
-            {parseFloat(item.avg_r).toFixed(2)}R
-            {item.avg_r_hit === true && ' ✓'}
-            {item.avg_r_hit === false && ' ↓'}
-          </span>
-        </div>
-      )}
 
       {/* Goal progress */}
       <div>
@@ -131,7 +145,7 @@ function ProgressCard({ item }: { item: GoalProgressItem }) {
         </div>
       </div>
 
-      {/* Risk usage */}
+      {/* Loss limit usage — always shown (process goals too: loss is loss) */}
       <div>
         <div className="flex justify-between text-[10px] text-slate-600 mb-1">
           <span>Loss limit usage</span>
@@ -145,7 +159,39 @@ function ProgressCard({ item }: { item: GoalProgressItem }) {
             style={{ width: `${riskProgress}%` }}
           />
         </div>
+        {item.period_type === 'process' && riskProgress > 0 && (
+          <p className="text-[9px] text-slate-700 italic mt-0.5">
+            Process goal — limit hit doesn't block trading, but monitor your drawdown.
+          </p>
+        )}
       </div>
+
+      {/* Avg R badge — last, only if goal has avg_r_min or trades have avg_r */}
+      {(avgRCurrent != null || avgRMin != null) && (
+        <div className="flex items-center justify-between pt-0.5 border-t border-surface-700/60">
+          <span className="text-[10px] text-slate-600">Avg R</span>
+          <div className="flex items-center gap-1.5">
+            {avgRMin != null && (
+              <span className="text-[10px] font-mono text-violet-400/60 border border-violet-500/20 bg-violet-500/5 px-1.5 py-0.5 rounded">
+                goal ≥ {avgRMin.toFixed(1)}R
+              </span>
+            )}
+            <span className={`text-[11px] font-mono font-semibold px-2 py-0.5 rounded-full border ${
+              item.avg_r_hit === true
+                ? 'text-emerald-300 bg-emerald-500/10 border-emerald-500/25'
+                : item.avg_r_hit === false
+                  ? 'text-amber-300 bg-amber-500/10 border-amber-500/25'
+                  : avgRCurrent != null && avgRCurrent < 0
+                    ? 'text-red-300 bg-red-500/10 border-red-500/20'
+                    : 'text-violet-300 bg-violet-500/10 border-violet-500/20'
+            }`}>
+              {avgRCurrent != null ? avgRCurrent.toFixed(2) + 'R' : '—'}
+              {item.avg_r_hit === true  && ' ✓'}
+              {item.avg_r_hit === false && ' ↓'}
+            </span>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -323,12 +369,14 @@ export function GoalsPage() {
           value={isLoading ? '…' : avgProgress != null ? `${avgProgress}%` : '—'}
           sub="toward targets"
           accent="neutral"
+          info="Average % progression toward each active goal's target for the current period. 100% = goal reached. Computed across all active goals (daily + weekly + monthly)."
         />
         <StatCard
           label="Worst Risk"
           value={isLoading ? '…' : worstRisk != null ? `${worstRisk}%` : '—'}
           sub={limitsHit > 0 ? `⚠️ ${limitsHit} limit(s) hit` : 'of limit consumed'}
           accent={limitsHit > 0 || Number(worstRisk) >= 75 ? 'bear' : 'neutral'}
+          info="Highest loss limit consumption across all active goals. Shows how close you are to hitting your worst drawdown limit. 75%+ = warning zone, 100% = limit hit → stop trading that period."
         />
       </div>
 
@@ -371,7 +419,12 @@ export function GoalsPage() {
           {sortedProgress.length > 0 && (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-8">
               {sortedProgress.map((item) => (
-                <ProgressCard key={`${item.goal_id}`} item={item} />
+                <ProgressCard
+                  key={`${item.goal_id}`}
+                  item={item}
+                  capital={parseFloat(activeProfile.capital_current)}
+                  currency={activeProfile.currency ?? 'USD'}
+                />
               ))}
             </div>
           )}

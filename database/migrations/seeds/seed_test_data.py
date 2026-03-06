@@ -623,53 +623,41 @@ def seed_cfd_profile(session) -> Profile:
 
 # ── Goals ─────────────────────────────────────────────────────────────────────
 
-def seed_goals(session, profile: Profile, style_names: list[str]) -> None:
+def seed_goals(session, profile: Profile) -> None:
     """
-    Insert goals for a profile covering all combinations:
-      - daily / weekly / monthly periods + outcome vs process types
-      - multiple trading styles
-      - mix of active / inactive, avg_r_min, max_trades
+    Insert GLOBAL goals (style_id=None) for a profile.
+
+    Global = applies to all trading styles — the new default after step14 migration.
+
+    Goals created per profile:
+      - daily   outcome  active   → +0.5% / -0.3%
+      - weekly  outcome  active   → +2.0% / -1.0%
+      - monthly outcome  active   → +6.0% / -3.0%
+      - daily   process  active   → avg_R ≥ 2.0, max 3 trades/day
+      - monthly outcome  inactive → +10% / -5% (stretch goal, dashboard off)
+
+    All style_id=None  →  global / all-styles goal (new design post step14).
 
     Exercises: goal_progress_pct, risk_progress_pct, goal_hit, limit_hit,
-               avg_r_hit, max_trades_hit, period_type badge.
+               avg_r_hit, max_trades_hit, period_type badge, inactive badge.
     """
-    # (style_name, period, goal_pct, limit_pct, is_active, period_type, avg_r_min, max_trades)
-    goal_templates: list[tuple] = []
-    for style_name in style_names:
-        style = session.query(TradingStyle).filter(TradingStyle.name == style_name).first()
-        if not style:
-            continue
-        goal_templates += [
-            # (style_id, period, goal_pct, limit_pct, is_active, period_type, avg_r_min, max_trades)
-            (style.id, "daily",   Decimal("0.50"),  Decimal("-0.30"), True,  "outcome", None,           None),
-            (style.id, "weekly",  Decimal("2.00"),  Decimal("-1.00"), True,  "outcome", Decimal("1.50"), None),
-            (style.id, "monthly", Decimal("6.00"),  Decimal("-3.00"), True,  "outcome", Decimal("1.50"), None),
-        ]
+    # (period, goal_pct, limit_pct, is_active, period_type, avg_r_min, max_trades)
+    goal_templates: list[tuple] = [
+        # ── Outcome goals ──────────────────────────────────────────────────────
+        ("daily",   Decimal("0.50"),  Decimal("-0.30"), True,  "outcome", None,           None),
+        ("weekly",  Decimal("2.00"),  Decimal("-1.00"), True,  "outcome", None,           None),
+        ("monthly", Decimal("6.00"),  Decimal("-3.00"), True,  "outcome", None,           None),
+        # ── Process goal — quality control (daily avg-R discipline) ───────────
+        ("daily",   Decimal("0.50"),  Decimal("-0.50"), True,  "process", Decimal("2.00"), 3),
+        # ── Process goal — weekly quality (max 10 trades / week) ──────────────
+        ("weekly",  Decimal("2.00"),  Decimal("-1.00"), True,  "process", Decimal("1.50"), 10),
+    ]
 
-    # Process + review goals on a different style (no UNIQUE conflict)
-    if style_names:
-        extra_style = session.query(TradingStyle).filter(
-            TradingStyle.name.notin_(style_names)
-        ).first()
-        if extra_style:
-            goal_templates += [
-                # inactive outcome goal (high ambition, off by default)
-                (extra_style.id, "monthly", Decimal("10.00"), Decimal("-5.00"), False, "outcome", None,           None),
-                # process goal — tracks avg R and max trades per day
-                (extra_style.id, "daily",   Decimal("0.50"),  Decimal("-0.50"), True,  "process", Decimal("2.00"), 3),
-                # review goal — weekly recap discipline
-                (extra_style.id, "weekly",  Decimal("1.00"),  Decimal("-2.00"), True,  "review",  None,            None),
-            ]
-
-    seen: set[tuple] = set()
-    for style_id, period, goal_pct, limit_pct, is_active, period_type, avg_r_min, max_trades in goal_templates:
-        key = (profile.id, style_id, period)
-        if key in seen:
-            continue
-        seen.add(key)
+    count = 0
+    for period, goal_pct, limit_pct, is_active, period_type, avg_r_min, max_trades in goal_templates:
         session.add(ProfileGoal(
             profile_id=profile.id,
-            style_id=style_id,
+            style_id=None,          # ← global goal (all styles)
             period=period,
             goal_pct=goal_pct,
             limit_pct=limit_pct,
@@ -679,9 +667,10 @@ def seed_goals(session, profile: Profile, style_names: list[str]) -> None:
             max_trades=max_trades,
             show_on_dashboard=is_active,
         ))
+        count += 1
 
     session.flush()
-    logger.info("Goals seeded for profile %s — %d goals", profile.name, len(seen))
+    logger.info("Goals seeded for profile %s — %d global goals (style_id=None)", profile.name, count)
 
 
 # ── Market Analysis sessions ───────────────────────────────────────────────────
@@ -1183,17 +1172,17 @@ def run_test_seed() -> None:
 
             # ── Crypto profile — profitable ──────────────────────────────────
             crypto_profile = seed_crypto_profile(session)
-            seed_goals(session, crypto_profile, ["swing", "day_trading"])
+            seed_goals(session, crypto_profile)
             seed_market_analysis(session, crypto_profile, "Crypto")
 
             # ── CFD profile — mildly profitable ─────────────────────────────
             cfd_profile = seed_cfd_profile(session)
-            seed_goals(session, cfd_profile, ["swing"])
+            seed_goals(session, cfd_profile)
             seed_market_analysis(session, cfd_profile, "Gold")
 
             # ── Losing profile — in drawdown (circuit-breaker testing) ──────
             losing_profile = seed_losing_profile(session)
-            seed_goals(session, losing_profile, ["swing", "scalping"])
+            seed_goals(session, losing_profile)
             seed_market_analysis(session, losing_profile, "Crypto")
 
             session.commit()

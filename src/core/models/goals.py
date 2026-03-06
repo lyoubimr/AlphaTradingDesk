@@ -29,11 +29,12 @@ from src.core.database import Base
 class ProfileGoal(Base):
     __tablename__ = "profile_goals"
     __table_args__ = (
-        UniqueConstraint("profile_id", "style_id", "period"),
+        # Partial unique indexes are handled in DB via migration (step14).
+        # SQLAlchemy model reflects the logical constraint only — no duplicate UniqueConstraint here.
         CheckConstraint("goal_pct > 0", name="ck_profile_goals_goal_pct_positive"),
         CheckConstraint("limit_pct < 0", name="ck_profile_goals_limit_pct_negative"),
         CheckConstraint(
-            "period_type IN ('outcome', 'process', 'review')",
+            "period_type IN ('outcome', 'process')",
             name="ck_profile_goals_period_type",
         ),
         Index("idx_profile_goals_profile", "profile_id"),
@@ -43,8 +44,9 @@ class ProfileGoal(Base):
     profile_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("profiles.id", ondelete="CASCADE"), nullable=False
     )
-    style_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("trading_styles.id", ondelete="CASCADE"), nullable=False
+    # NULL = global goal (all styles) — set via step14 migration
+    style_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("trading_styles.id", ondelete="CASCADE"), nullable=True
     )
     period: Mapped[str] = mapped_column(String(20), nullable=False)  # daily/weekly/monthly
     goal_pct: Mapped[Decimal] = mapped_column(Numeric(6, 2), nullable=False)
@@ -56,7 +58,7 @@ class ProfileGoal(Base):
     max_trades: Mapped[int | None] = mapped_column(Integer, nullable=True)
     period_type: Mapped[str] = mapped_column(
         String(20), nullable=False, default="outcome"
-    )  # 'outcome' | 'process' | 'review'
+    )  # 'outcome' | 'process'
     show_on_dashboard: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=True
     )
@@ -70,7 +72,7 @@ class ProfileGoal(Base):
 
     # Relationships
     profile: Mapped[Profile] = relationship(back_populates="profile_goals")  # type: ignore[name-defined]
-    style: Mapped[TradingStyle] = relationship(back_populates="profile_goals")  # type: ignore[name-defined]
+    style: Mapped[TradingStyle | None] = relationship(back_populates="profile_goals")  # type: ignore[name-defined]
 
 
 class GoalProgressLog(Base):
