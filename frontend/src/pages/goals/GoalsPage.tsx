@@ -139,6 +139,21 @@ function ProgressCard({ item }: { item: GoalProgressItem }) {
         </div>
       </div>
 
+      {/* v2 Avg R row */}
+      {item.avg_r !== null && (
+        <div className="flex items-center justify-between text-[10px] rounded-lg border border-surface-600 bg-surface-700/40 px-3 py-1.5">
+          <span className="text-slate-500">Avg R-multiple</span>
+          <span className={`font-mono font-semibold ${
+            item.avg_r_hit === true ? 'text-emerald-400' :
+            item.avg_r_hit === false ? 'text-amber-400' : 'text-slate-300'
+          }`}>
+            {parseFloat(item.avg_r).toFixed(2)}R
+            {item.avg_r_hit === true && ' ✓'}
+            {item.avg_r_hit === false && ' (below min)'}
+          </span>
+        </div>
+      )}
+
       {/* Goal progress bar */}
       <div>
         <div className="flex justify-between text-[10px] text-slate-600 mb-1">
@@ -235,6 +250,18 @@ function GoalRow({
       <tr className={`border-b border-surface-700/50 transition-colors ${goal.is_active ? '' : 'opacity-40'}`}>
         <td className="px-4 py-2.5 text-sm text-slate-200">{styleName}</td>
         <td className="px-4 py-2.5 text-xs text-slate-400">{PERIOD_LABELS[goal.period] ?? goal.period}</td>
+        {/* v2 period_type badge */}
+        <td className="px-4 py-2.5">
+          <span className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-medium ${
+            goal.period_type === 'process'
+              ? 'text-sky-400 bg-sky-500/10 border border-sky-500/20'
+              : goal.period_type === 'review'
+                ? 'text-violet-400 bg-violet-500/10 border border-violet-500/20'
+                : 'text-slate-500 bg-surface-700 border border-surface-600'
+          }`}>
+            {goal.period_type ?? 'outcome'}
+          </span>
+        </td>
         {editing ? (
           <>
             <td className="px-4 py-2.5">
@@ -260,6 +287,10 @@ function GoalRow({
             <td className="px-4 py-2.5 text-xs font-mono text-red-400">{parseFloat(goal.limit_pct).toFixed(2)}%</td>
           </>
         )}
+        {/* v2 avg_r_min */}
+        <td className="px-4 py-2.5 text-xs font-mono text-slate-500">
+          {goal.avg_r_min ? `${parseFloat(goal.avg_r_min).toFixed(2)}R` : '—'}
+        </td>
         <td className="px-4 py-2.5">
           <span className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-medium ${
             goal.is_active
@@ -326,7 +357,7 @@ function GoalRow({
       </tr>
       {rowErr && (
         <tr className="border-b border-surface-700/30">
-          <td colSpan={6} className="px-4 py-1 text-[10px] text-red-400 bg-red-500/5">
+          <td colSpan={8} className="px-4 py-1 text-[10px] text-red-400 bg-red-500/5">
             ⚠️ {rowErr}
           </td>
         </tr>
@@ -811,7 +842,7 @@ export function GoalsPage() {
                   <table className="w-full text-xs">
                     <thead>
                       <tr className="border-b border-surface-700">
-                        {['Style', 'Period', 'Target', 'Limit', 'Status', 'Actions'].map((h, i) => (
+                        {['Style', 'Period', 'Type', 'Target', 'Limit', 'Avg R Min', 'Status', 'Actions'].map((h, i) => (
                           <th
                             key={i}
                             className="px-4 py-2.5 text-left text-slate-600 font-medium uppercase tracking-wider whitespace-nowrap"

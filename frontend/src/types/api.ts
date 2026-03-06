@@ -237,6 +237,11 @@ export interface GoalOut {
   goal_pct: string    // Decimal as string
   limit_pct: string   // Decimal as string (negative)
   is_active: boolean
+  // v2 fields
+  avg_r_min: string | null
+  max_trades: number | null
+  period_type: 'outcome' | 'process' | 'review'
+  show_on_dashboard: boolean
 }
 
 export interface GoalCreate {
@@ -245,12 +250,22 @@ export interface GoalCreate {
   goal_pct: string    // positive, e.g. "1.5"
   limit_pct: string   // negative, e.g. "-1.5"
   is_active?: boolean
+  // v2 fields
+  avg_r_min?: string | null
+  max_trades?: number | null
+  period_type?: 'outcome' | 'process' | 'review'
+  show_on_dashboard?: boolean
 }
 
 export interface GoalUpdate {
   goal_pct?: string | null
   limit_pct?: string | null
   is_active?: boolean | null
+  // v2 fields
+  avg_r_min?: string | null
+  max_trades?: number | null
+  period_type?: 'outcome' | 'process' | 'review' | null
+  show_on_dashboard?: boolean | null
 }
 
 export interface GoalProgressItem {
@@ -267,6 +282,27 @@ export interface GoalProgressItem {
   goal_hit: boolean
   limit_hit: boolean
   trade_count: number         // 0 = no activity this period → show "No trades" row
+  // v2 fields
+  avg_r: string | null
+  avg_r_hit: boolean | null
+  max_trades_hit: boolean | null
+  period_type: 'outcome' | 'process' | 'review'
+  show_on_dashboard: boolean
+}
+
+// ── Goal Overrides ────────────────────────────────────────────────────────
+
+export interface GoalOverrideCreate {
+  goal_id: number
+  reason_text: string   // min 20 chars
+}
+
+export interface GoalOverrideOut {
+  id: number
+  profile_id: number
+  goal_id: number
+  reason_text: string
+  created_at: string
 }
 
 // ── Stats / Win-rate ──────────────────────────────────────────────────────
@@ -314,6 +350,7 @@ export interface MAIndicator {
   tv_symbol: string
   tv_timeframe: string
   timeframe_level: TFLevel
+  score_block: 'trend' | 'momentum' | 'participation'  // v2
   question: string
   tooltip: string | null
   answer_bullish: string
@@ -384,6 +421,18 @@ export interface MASessionOut {
   bias_htf_b: MABias | null
   bias_mtf_b: MABias | null
   bias_ltf_b: MABias | null
+  // v2 decomposed scores — Asset A
+  score_trend_a: string | null
+  score_momentum_a: string | null
+  score_participation_a: string | null
+  score_composite_a: string | null
+  bias_composite_a: MABias | null
+  // v2 decomposed scores — Asset B
+  score_trend_b: string | null
+  score_momentum_b: string | null
+  score_participation_b: string | null
+  score_composite_b: string | null
+  bias_composite_b: MABias | null
   notes: string | null
   analyzed_at: string
   created_at: string
@@ -402,6 +451,11 @@ export interface MASessionListItem {
   score_mtf_b: string | null
   bias_htf_b: MABias | null
   bias_mtf_b: MABias | null
+  // v2 composite (slim — block scores not in list item)
+  score_composite_a: string | null
+  bias_composite_a: MABias | null
+  score_composite_b: string | null
+  bias_composite_b: MABias | null
   notes: string | null
   analyzed_at: string
 }
@@ -412,4 +466,15 @@ export interface MAStalenessItem {
   last_analyzed_at: string | null
   days_old: number | null
   is_stale: boolean
+}
+
+// ── Trade Conclusion (v2) ─────────────────────────────────────────────────
+
+export interface MATradeConclusion {
+  emoji: string       // "🟢" | "⚠️" | "🔴" | "⚡" | "🟡"
+  label: string       // "Trend Following — Full Size"
+  detail: string      // 1-sentence explanation
+  trade_types: string[]
+  size_advice: string // "normal (100%)" | "reduced (50%)"
+  color: 'green' | 'amber' | 'red' | 'neutral'
 }

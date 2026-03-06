@@ -5,6 +5,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import App from '../App'
+import { ThemeProvider } from '../context/ThemeContext'
 
 // Mock fetch so health + profiles API calls don't fail in jsdom
 beforeEach(() => {
@@ -31,15 +32,17 @@ beforeEach(() => {
   )
 })
 
-// Helper: render App inside MemoryRouter with a given initial path
+// Helper: render App inside MemoryRouter+ThemeProvider with a given initial path
 function renderAt(path: string) {
   return render(
-    <MemoryRouter
-      initialEntries={[path]}
-      future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
-    >
-      <App />
-    </MemoryRouter>,
+    <ThemeProvider>
+      <MemoryRouter
+        initialEntries={[path]}
+        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+      >
+        <App />
+      </MemoryRouter>
+    </ThemeProvider>,
   )
 }
 

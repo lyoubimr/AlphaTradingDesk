@@ -10,9 +10,9 @@ import type {
   Strategy, StrategyCreate,
   WinRateStats,
   TradingStyle,
-  GoalOut, GoalCreate, GoalUpdate, GoalProgressItem,
+  GoalOut, GoalCreate, GoalUpdate, GoalProgressItem, GoalOverrideCreate, GoalOverrideOut,
   MAModule, MAIndicator, MAIndicatorConfig, MAIndicatorConfigOut, MAIndicatorUpdate,
-  MASessionCreate, MASessionOut, MASessionListItem, MAStalenessItem,
+  MASessionCreate, MASessionOut, MASessionListItem, MAStalenessItem, MATradeConclusion,
 } from '../types/api'
 
 const BASE = '/api'
@@ -193,6 +193,17 @@ export const goalsApi = {
 
   progress: (profileId: number): Promise<GoalProgressItem[]> =>
     request(`/profiles/${profileId}/goals/progress`),
+
+  /** POST — log a circuit-breaker override (reason_text ≥ 20 chars) */
+  createOverride: (profileId: number, data: GoalOverrideCreate): Promise<GoalOverrideOut> =>
+    request(`/profiles/${profileId}/goal-overrides`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  /** GET — override history for a profile (newest first) */
+  listOverrides: (profileId: number): Promise<GoalOverrideOut[]> =>
+    request(`/profiles/${profileId}/goal-overrides`),
 }
 
 // ── Market Analysis ───────────────────────────────────────────────────────
@@ -216,6 +227,14 @@ export const maApi = {
   /** GET /api/market-analysis/sessions/{id} */
   getSession: (sessionId: number): Promise<MASessionOut> =>
     request(`/market-analysis/sessions/${sessionId}`),
+
+  /** GET /api/market-analysis/sessions/{id}/conclusion — v2 trade recommendation */
+  getConclusion: (sessionId: number): Promise<MATradeConclusion> =>
+    request(`/market-analysis/sessions/${sessionId}/conclusion`),
+
+  /** GET /api/market-analysis/modules/{id}/thresholds — v2 bias thresholds from DB */
+  getThresholds: (moduleId: number): Promise<{ bullish: number; bearish: number }> =>
+    request(`/market-analysis/modules/${moduleId}/thresholds`),
 
   /** POST /api/market-analysis/sessions */
   createSession: (data: MASessionCreate): Promise<MASessionOut> =>

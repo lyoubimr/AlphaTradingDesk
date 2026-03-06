@@ -90,6 +90,7 @@ class TradingStyle(Base):
     # Relationships
     profile_goals: Mapped[list[ProfileGoal]] = relationship(back_populates="style")  # type: ignore[name-defined]
     goal_progress_logs: Mapped[list[GoalProgressLog]] = relationship(back_populates="style")  # type: ignore[name-defined]
+    goal_override_logs: Mapped[list[GoalOverrideLog]] = relationship(back_populates="style")  # type: ignore[name-defined]
 
 
 class Profile(Base):
@@ -161,6 +162,7 @@ class Profile(Base):
     performance_snapshots: Mapped[list[PerformanceSnapshot]] = relationship(back_populates="profile")  # type: ignore[name-defined]
     profile_goals: Mapped[list[ProfileGoal]] = relationship(back_populates="profile")  # type: ignore[name-defined]
     goal_progress_logs: Mapped[list[GoalProgressLog]] = relationship(back_populates="profile")  # type: ignore[name-defined]
+    goal_override_logs: Mapped[list[GoalOverrideLog]] = relationship(back_populates="profile")  # type: ignore[name-defined]
     note_templates: Mapped[list[NoteTemplate]] = relationship(back_populates="profile")  # type: ignore[name-defined]
     user_preferences: Mapped[UserPreferences | None] = relationship(back_populates="profile")  # type: ignore[name-defined]
     market_analysis_sessions: Mapped[list[MarketAnalysisSession]] = relationship(back_populates="profile")  # type: ignore[name-defined]
@@ -171,7 +173,7 @@ class Profile(Base):
 
 
 # Forward-reference imports (resolved at runtime, avoid circular imports)
-from src.core.models.goals import GoalProgressLog, ProfileGoal  # noqa: E402
+from src.core.models.goals import GoalOverrideLog, GoalProgressLog, ProfileGoal  # noqa: E402
 from src.core.models.journal import NoteTemplate, PerformanceSnapshot  # noqa: E402
 from src.core.models.market_analysis import (  # noqa: E402
     MarketAnalysisConfig,

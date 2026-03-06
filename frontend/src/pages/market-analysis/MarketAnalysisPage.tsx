@@ -13,13 +13,13 @@ import {
   Plus, RefreshCw, Loader2, AlertTriangle,
   CheckCircle2, Clock, BarChart2,
   TrendingUp, TrendingDown, Minus, Activity,
-  ChevronRight,
+  ChevronRight, Zap,
 } from 'lucide-react'
 import { PageHeader }  from '../../components/ui/PageHeader'
 import { StatCard }    from '../../components/ui/StatCard'
 import { useProfile }  from '../../context/ProfileContext'
 import { maApi }       from '../../lib/api'
-import type { MAModule, MASessionListItem, MAStalenessItem, MABias } from '../../types/api'
+import type { MAModule, MASessionListItem, MAStalenessItem, MABias, MATradeConclusion } from '../../types/api'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -136,6 +136,33 @@ function FreshnessPill({ item }: { item: MAStalenessItem | undefined }) {
   )
 }
 
+// ── v2 Trade Conclusion badge ─────────────────────────────────────────────
+
+function ConclusionBadge({ conclusion }: { conclusion: MATradeConclusion | null }) {
+  if (!conclusion) return null
+  const colorMap: Record<string, { bg: string; border: string; text: string }> = {
+    green:   { bg: 'bg-emerald-500/10', border: 'border-emerald-500/25', text: 'text-emerald-300' },
+    amber:   { bg: 'bg-amber-500/10',   border: 'border-amber-500/25',   text: 'text-amber-300'   },
+    red:     { bg: 'bg-red-500/10',     border: 'border-red-500/25',     text: 'text-red-300'     },
+    neutral: { bg: 'bg-surface-700',    border: 'border-surface-600',    text: 'text-slate-400'   },
+  }
+  const { bg, border, text } = colorMap[conclusion.color] ?? colorMap.neutral
+  return (
+    <div className={`rounded-xl border px-3 py-2 ${bg} ${border}`}>
+      <div className="flex items-center gap-2">
+        <span className="text-sm leading-none">{conclusion.emoji}</span>
+        <div className="flex-1 min-w-0">
+          <p className={`text-[10px] font-semibold leading-tight truncate ${text}`}>{conclusion.label}</p>
+          <p className="text-[9px] text-slate-600 mt-0.5 leading-tight line-clamp-2">{conclusion.detail}</p>
+        </div>
+      </div>
+      <p className="text-[9px] text-slate-700 mt-1.5">
+        Size: <span className="text-slate-500">{conclusion.size_advice}</span>
+      </p>
+    </div>
+  )
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // ModuleCard
 // ─────────────────────────────────────────────────────────────────────────────
@@ -150,8 +177,25 @@ function ModuleCard({
 }) {
   const isStale   = !staleness?.last_analyzed_at || staleness.is_stale
   const isNever   = !staleness?.last_analyzed_at
-  const mainBias  = (last?.bias_htf_a ?? null) as MABias | null
-  const mainScore = last?.score_htf_a ?? null
+  const mainBias  = (last?.bias_composite_a ?? last?.bias_htf_a ?? null) as MABias | null
+  const mainScore = last?.score_composite_a ?? last?.score_htf_a ?? null
+
+  const [conclusion, setConclusion] = useState<MATradeConclusion | null>(null)
+
+  // Derive whether we have a v2 session to fetch a conclusion for
+  const lastId  = last?.id ?? null
+  const hasV2   = !!last?.score_composite_a
+
+  useEffect(() => {
+    if (!lastId || !hasV2) {
+      // Schedule state reset outside the synchronous effect body
+      const timer = setTimeout(() => setConclusion(null), 0)
+      return () => clearTimeout(timer)
+    }
+    let cancelled = false
+    maApi.getConclusion(lastId).then((c) => { if (!cancelled) setConclusion(c) }).catch(() => {})
+    return () => { cancelled = true }
+  }, [lastId, hasV2])
 
   const borderCls = isNever
     ? 'border-surface-700 hover:border-surface-600'
@@ -189,6 +233,9 @@ function ModuleCard({
 
       {/* Freshness */}
       <FreshnessPill item={staleness} />
+
+      {/* v2 Trade Conclusion */}
+      {conclusion && <ConclusionBadge conclusion={conclusion} />}
 
       {/* Last scores */}
       {last ? (
@@ -274,6 +321,16 @@ function HistoryRow({ s, modules }: { s: MASessionListItem; modules: MAModule[] 
           <ScoreBar score={s.score_mtf_a} bias={s.bias_mtf_a as MABias | null} />
           <BiasBadge bias={s.bias_mtf_a as MABias | null} xs />
         </div>
+      </td>
+      {/* v2 composite */}
+      <td className="px-4 py-3">
+        {s.score_composite_a != null ? (
+          <div className="flex items-center gap-1.5">
+            <Zap size={9} className="text-brand-400 shrink-0" />
+            <ScoreBar score={s.score_composite_a} bias={s.bias_composite_a as MABias | null} />
+            <BiasBadge bias={s.bias_composite_a as MABias | null} xs />
+          </div>
+        ) : <span className="text-slate-700 text-[10px]">—</span>}
       </td>
       <td className="px-4 py-3">
         {s.score_htf_b != null ? (
@@ -510,7 +567,7 @@ export function MarketAnalysisPage() {
                 <table className="w-full">
                   <thead>
                     <tr className="border-b border-surface-700 bg-surface-800/80">
-                      {['Date', 'Module', 'HTF Score', 'MTF Score', 'Dual HTF', 'Notes'].map((h) => (
+                      {['Date', 'Module', 'HTF Score', 'MTF Score', 'Composite ⚡', 'Dual HTF', 'Notes'].map((h) => (
                         <th key={h} className="px-4 py-3 text-left text-[10px] font-semibold text-slate-600 uppercase tracking-wider whitespace-nowrap">
                           {h}
                         </th>
@@ -527,10 +584,12 @@ export function MarketAnalysisPage() {
 
           {/* Legend */}
           <div className="flex items-center gap-4 text-[10px] text-slate-600 px-1">
-            <span>Score legend:</span>
+            <span>Score legend (v1 HTF/MTF):</span>
             <span className="text-red-400">▌ 0–39 Bearish</span>
             <span className="text-amber-400">▌ 40–60 Neutral</span>
             <span className="text-emerald-400">▌ 61–100 Bullish</span>
+            <span className="text-slate-700">·</span>
+            <span className="text-brand-400">⚡ Composite v2: ≤34 Bear · 35–64 Neutral · ≥65 Bull</span>
           </div>
         </>
       )}

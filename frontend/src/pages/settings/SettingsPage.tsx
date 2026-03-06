@@ -157,6 +157,25 @@ export function SettingsPage() {
           </div>
         </SettingsSection>
 
+        {/* ── Goals config ─────────────────────────────────────────────── */}
+        <SettingsSection
+          icon={<Info size={16} />}
+          title="Goals"
+          description="Manage outcome, process, and review goals per trading style"
+        >
+          <SettingRow label="Goal types"       value="outcome · process · review" info="Outcome: P&L target. Process: discipline (avg R + trade count). Review: periodic recap cadence." />
+          <SettingRow label="v2 fields"        value="avg_r_min · max_trades"     info="Process goals can define a minimum avg R-multiple and a max trades per period." />
+          <SettingRow label="Dashboard cards"  value="Configurable per goal"      info="Each goal can opt in/out of the dashboard progress card via show_on_dashboard." />
+          <div className="pt-2">
+            <Link
+              to="/settings/goals"
+              className="inline-flex items-center gap-1.5 text-xs text-brand-400 hover:text-brand-300 transition-colors underline underline-offset-2"
+            >
+              Open Goals Manager →
+            </Link>
+          </div>
+        </SettingsSection>
+
         {/* ── Notifications ───────────────────────────────────────────── */}
         <SettingsSection
           icon={<Bell size={16} />}

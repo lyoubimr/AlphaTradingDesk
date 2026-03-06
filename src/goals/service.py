@@ -6,10 +6,14 @@ Progress is computed on request (no background job in Phase 1):
   - sums realized_pnl (closed) + closed-position pnl (partial) / capital_current → pnl_pct
   - compares against goal_pct and limit_pct
   - periods with goal_pct=0 AND limit_pct=0 are skipped (not a valid goal)
+  - circuit breaker (limit_hit) ONLY fires when period_type == 'outcome'
 
 P&L sources:
   • status='closed'  → Trade.realized_pnl    (full trade closed, filtered by closed_at)
   • status='partial' → sum(Position.realized_pnl WHERE exit_date in window)  (partial TP hit)
+
+avg_r computation (v2):
+  • avg_r = mean(realized_pnl / risk_amount) for closed trades in window where risk_amount > 0
 """
 from __future__ import annotations
 
@@ -17,13 +21,17 @@ from datetime import date, datetime, timedelta
 from decimal import Decimal
 
 from fastapi import HTTPException, status
-from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from src.core.models.broker import Profile, TradingStyle
-from src.core.models.goals import ProfileGoal
+from src.core.models.goals import GoalOverrideLog, ProfileGoal
 from src.core.models.trade import Position, Trade
-from src.goals.schemas import GoalCreate, GoalProgressItem, GoalUpdate
+from src.goals.schemas import (
+    GoalCreate,
+    GoalOverrideCreate,
+    GoalProgressItem,
+    GoalUpdate,
+)
 
 # ── Internal helpers ──────────────────────────────────────────────────────────
 
@@ -91,30 +99,31 @@ def _period_window(period: str, ref: date) -> tuple[date, date]:
     raise ValueError(f"Unknown period: {period}")
 
 
-def _compute_pnl_pct_and_count(
+def _compute_pnl_pct_count_and_avg_r(
     db: Session,
     profile_id: int,
     capital: Decimal,
     period_start: date,
     period_end: date,
-) -> tuple[Decimal, int]:
+) -> tuple[Decimal, int, Decimal | None]:
     """
-    Sum all realized P&L within [period_start, period_end] for a profile
-    and count the number of trade events (closed trades + partial-TP positions).
+    Sum all realized P&L within [period_start, period_end] for a profile,
+    count trade events, and compute average R-multiple.
 
-    Returns (pnl_pct, trade_count):
+    Returns (pnl_pct, trade_count, avg_r):
       - pnl_pct    — % of capital_current (Decimal, 4 decimal places)
-      - trade_count — int (0 means no activity this period → show greyed row in UI)
+      - trade_count — int (0 means no activity this period)
+      - avg_r       — mean(realized_pnl / risk_amount) across closed trades, None if no trades
     """
     if capital == 0:
-        return Decimal("0.0000"), 0
+        return Decimal("0.0000"), 0, None
 
     start_dt = datetime(period_start.year, period_start.month, period_start.day, 0, 0, 0)
     end_dt   = datetime(period_end.year,   period_end.month,   period_end.day,   23, 59, 59)
 
     # ① Fully closed trades in window
     closed_rows = (
-        db.query(Trade.realized_pnl)
+        db.query(Trade.realized_pnl, Trade.risk_amount)
         .filter(
             Trade.profile_id == profile_id,
             Trade.status == "closed",
@@ -126,7 +135,6 @@ def _compute_pnl_pct_and_count(
     closed_sum = sum((r[0] or Decimal("0")) for r in closed_rows)
 
     # ② Partial-TP profits — positions closed within the window
-    #    belonging to a trade that is still 'partial'.
     partial_rows = (
         db.query(Position.realized_pnl)
         .join(Trade, Position.trade_id == Trade.id)
@@ -144,10 +152,33 @@ def _compute_pnl_pct_and_count(
     trade_count = len(closed_rows) + len(partial_rows)
     total_pnl = Decimal(str(closed_sum)) + Decimal(str(partial_sum))
     pnl_pct = (total_pnl / capital * 100).quantize(Decimal("0.0001"))
-    return pnl_pct, trade_count
+
+    # avg_r — computed only from fully closed trades with risk_amount > 0
+    r_multiples: list[Decimal] = []
+    for pnl, risk in closed_rows:
+        if risk and risk > 0 and pnl is not None:
+            r_multiples.append((Decimal(str(pnl)) / Decimal(str(risk))).quantize(Decimal("0.01")))
+
+    avg_r: Decimal | None = None
+    if r_multiples:
+        avg_r = (sum(r_multiples, Decimal("0")) / len(r_multiples)).quantize(Decimal("0.01"))
+
+    return pnl_pct, trade_count, avg_r
 
 
-# Keep old name as alias for backward compatibility (used nowhere else but safer)
+def _compute_pnl_pct_and_count(
+    db: Session,
+    profile_id: int,
+    capital: Decimal,
+    period_start: date,
+    period_end: date,
+) -> tuple[Decimal, int]:
+    pnl, count, _ = _compute_pnl_pct_count_and_avg_r(
+        db, profile_id, capital, period_start, period_end
+    )
+    return pnl, count
+
+
 def _compute_pnl_pct(
     db: Session,
     profile_id: int,
@@ -178,7 +209,7 @@ def create_goal(db: Session, profile_id: int, data: GoalCreate) -> ProfileGoal:
     (profile_id, style_id, period) tuple.
 
     If an existing goal is found (active or inactive):
-      - update goal_pct, limit_pct with the new values
+      - update goal_pct, limit_pct, and v2 fields with the new values
       - re-activate it (is_active=True)
     This prevents the UI from being blocked by a previously deactivated goal.
     """
@@ -195,13 +226,14 @@ def create_goal(db: Session, profile_id: int, data: GoalCreate) -> ProfileGoal:
         .first()
     )
     if existing:
-        # Upsert: update values + reactivate
-        existing.goal_pct = data.goal_pct
-        existing.limit_pct = data.limit_pct
-        existing.is_active = True
-        db.commit()
-        db.refresh(existing)
-        return existing
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"A goal already exists for profile={profile_id}, "
+                f"style={data.style_id}, period={data.period}. "
+                "Use PUT to update it."
+            ),
+        )
 
     goal = ProfileGoal(
         profile_id=profile_id,
@@ -210,6 +242,10 @@ def create_goal(db: Session, profile_id: int, data: GoalCreate) -> ProfileGoal:
         goal_pct=data.goal_pct,
         limit_pct=data.limit_pct,
         is_active=data.is_active,
+        avg_r_min=data.avg_r_min,
+        max_trades=data.max_trades,
+        period_type=data.period_type,
+        show_on_dashboard=data.show_on_dashboard,
     )
     db.add(goal)
     db.commit()
@@ -250,6 +286,7 @@ def get_progress(db: Session, profile_id: int) -> list[GoalProgressItem]:
       2. Sum realized_pnl of closed trades in that window
       3. Express as % of profile.capital_current
       4. Compute goal_progress_pct and risk_progress_pct
+      5. Compute avg_r if avg_r_min is set
     """
     profile = _get_profile_or_404(db, profile_id)
 
@@ -265,7 +302,7 @@ def get_progress(db: Session, profile_id: int) -> list[GoalProgressItem]:
     for goal in active_goals:
         period_start, period_end = _period_window(goal.period, today)
 
-        pnl_pct, trade_count = _compute_pnl_pct_and_count(
+        pnl_pct, trade_count, avg_r = _compute_pnl_pct_count_and_avg_r(
             db,
             profile_id,
             profile.capital_current,
@@ -280,17 +317,31 @@ def get_progress(db: Session, profile_id: int) -> list[GoalProgressItem]:
             else Decimal("0.00")
         )
 
-        # Progress toward risk limit (0–100+% scale: 100% = limit breached).
-        # Both pnl_pct and limit_pct are negative when losing, so the ratio is positive.
-        # When pnl_pct is positive (profit) the ratio would be negative → clamp to 0:
-        # there is zero risk-limit consumption when you're in profit.
-        if goal.limit_pct != 0 and pnl_pct < 0:
+        # Progress toward risk limit.
+        # Circuit breaker ONLY fires for period_type == 'outcome'.
+        if goal.period_type == "outcome" and goal.limit_pct != 0 and pnl_pct < 0:
             risk_progress = max(
                 Decimal("0.00"),
                 (pnl_pct / goal.limit_pct * 100).quantize(Decimal("0.01")),
             )
         else:
             risk_progress = Decimal("0.00")
+
+        # limit_hit only meaningful for 'outcome' goals
+        limit_hit = (
+            pnl_pct <= goal.limit_pct
+            if goal.period_type == "outcome"
+            else False
+        )
+
+        # avg_r checks
+        avg_r_hit: bool | None = None
+        if goal.avg_r_min is not None and avg_r is not None:
+            avg_r_hit = avg_r >= goal.avg_r_min
+
+        max_trades_hit: bool | None = None
+        if goal.max_trades is not None:
+            max_trades_hit = trade_count >= goal.max_trades
 
         items.append(
             GoalProgressItem(
@@ -305,9 +356,50 @@ def get_progress(db: Session, profile_id: int) -> list[GoalProgressItem]:
                 goal_progress_pct=goal_progress,
                 risk_progress_pct=risk_progress,
                 goal_hit=pnl_pct >= goal.goal_pct,
-                limit_hit=pnl_pct <= goal.limit_pct,
+                limit_hit=limit_hit,
                 trade_count=trade_count,
+                avg_r=avg_r,
+                avg_r_hit=avg_r_hit,
+                max_trades_hit=max_trades_hit,
+                period_type=goal.period_type,
+                show_on_dashboard=goal.show_on_dashboard,
             )
         )
 
     return items
+
+
+# ── Goal Override Log ─────────────────────────────────────────────────────────
+
+def create_override(
+    db: Session, profile_id: int, data: GoalOverrideCreate
+) -> GoalOverrideLog:
+    """Log a circuit-breaker override. Reason text is mandatory (min 20 chars — enforced by schema)."""
+    _get_profile_or_404(db, profile_id)
+    _get_style_or_422(db, data.style_id)
+
+    override = GoalOverrideLog(
+        profile_id=profile_id,
+        style_id=data.style_id,
+        period=data.period,
+        period_start=data.period_start,
+        pnl_pct_at_override=data.pnl_pct_at_override,
+        open_risk_pct=data.open_risk_pct,
+        reason_text=data.reason_text,
+        acknowledged=data.acknowledged,
+    )
+    db.add(override)
+    db.commit()
+    db.refresh(override)
+    return override
+
+
+def list_overrides(db: Session, profile_id: int) -> list[GoalOverrideLog]:
+    """Return override history for a profile, newest first."""
+    _get_profile_or_404(db, profile_id)
+    return (
+        db.query(GoalOverrideLog)
+        .filter(GoalOverrideLog.profile_id == profile_id)
+        .order_by(GoalOverrideLog.overridden_at.desc())
+        .all()
+    )

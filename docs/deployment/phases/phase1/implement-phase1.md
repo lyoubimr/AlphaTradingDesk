@@ -1,8 +1,8 @@
 # 🛠️ Phase 1 — Implementation Plan
 
 **Date:** March 1, 2026  
-**Version:** 1.8  
-**Status:** Step 12 DONE + Market Analysis global session migration → **Ready for Step 13 (Final QA)**
+**Version:** 1.9  
+**Status:** Step 13 IN PROGRESS — Goals v2 + MA v2 + Settings → Deploy Dell ce weekend
 
 > This document describes **what to build, in what order**.  
 > Each step is a working, testable increment — nothing is left dangling.
@@ -874,13 +874,300 @@ Widgets (all read from API using active profile from ProfileContext):
 
 ---
 
-### Step 13 — Final QA pass (1 day)
+### Step 13 — Goals v2 + MA v2 + Settings + QA (2026-03-06→08)
+
+> **Objectif :** tout finir avant le deploy Dell ce weekend.
+> Décisions actées lors du design review du 2026-03-06 (voir `custom/plan_integration_goals_v2.md` + `custom/plan_integration_ma_v2.md`).
+
+---
+
+#### 13-A — DB Migrations (Alembic)
+
+**A1 — `profile_goals` v2 :**
+```sql
+ALTER TABLE profile_goals
+  ADD COLUMN avg_r_min         DECIMAL(4,2),      -- NULL = pas de target R (ex: 1.3)
+  ADD COLUMN max_trades        INT,               -- NULL = illimité (ex: 6/semaine)
+  ADD COLUMN period_type       VARCHAR(20) NOT NULL DEFAULT 'outcome',
+  -- 'outcome' → P&L + circuit breaker actif
+  -- 'process' → pas de P&L target, juste review (ex: daily pour swing)
+  -- 'review'  → affiché en lecture seule, pas de circuit breaker
+  ADD COLUMN show_on_dashboard BOOLEAN NOT NULL DEFAULT TRUE;
+```
+
+**A2 — `goal_override_log` (nouvelle table) :**
+```sql
+CREATE TABLE goal_override_log (
+    id                   BIGSERIAL PRIMARY KEY,
+    profile_id           BIGINT NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+    style_id             BIGINT NOT NULL REFERENCES trading_styles(id),
+    period               VARCHAR(20) NOT NULL,
+    period_start         DATE NOT NULL,
+    pnl_pct_at_override  DECIMAL(10,4),
+    open_risk_pct        DECIMAL(6,2),
+    reason_text          TEXT NOT NULL,           -- obligatoire
+    acknowledged         BOOLEAN NOT NULL DEFAULT TRUE,
+    overridden_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+```
+
+**A3 — `market_analysis_indicators` : champ `score_block` :**
+```sql
+ALTER TABLE market_analysis_indicators
+  ADD COLUMN score_block VARCHAR(20) NOT NULL DEFAULT 'trend';
+  -- 'trend' | 'momentum' | 'participation'
+```
+
+**A4 — `market_analysis_sessions` : scores décomposés :**
+```sql
+ALTER TABLE market_analysis_sessions
+  ADD COLUMN score_trend_a          DECIMAL(5,2),
+  ADD COLUMN score_momentum_a       DECIMAL(5,2),
+  ADD COLUMN score_participation_a  DECIMAL(5,2),
+  ADD COLUMN score_composite_a      DECIMAL(5,2),   -- 0–100, weighted final
+  ADD COLUMN bias_composite_a       VARCHAR(10),    -- 'bullish'|'neutral'|'bearish'
+  ADD COLUMN score_trend_b          DECIMAL(5,2),
+  ADD COLUMN score_momentum_b       DECIMAL(5,2),
+  ADD COLUMN score_participation_b  DECIMAL(5,2),
+  ADD COLUMN score_composite_b      DECIMAL(5,2),
+  ADD COLUMN bias_composite_b       VARCHAR(10);
+-- Anciennes colonnes score_htf/mtf/ltf_a/b conservées (compat descendante)
+-- Sessions v2 détectées par : score_trend_a IS NOT NULL
+```
+
+---
+
+#### 13-B — Backend Goals v2
+
+**B1 — `src/goals/schemas.py` :**
+- `GoalCreate` / `GoalUpdate` : ajouter `avg_r_min`, `max_trades`, `period_type`, `show_on_dashboard`
+- `GoalProgressItem` : ajouter `avg_r`, `avg_r_hit`, `max_trades_hit`, `period_type`, `show_on_dashboard`
+
+**B2 — `src/goals/service.py` :**
+- `compute_progress()` : calculer `avg_r` depuis `positions.realized_pnl / trades.risk_amount` sur la période
+- Circuit breaker : ne s'active QUE si `period_type == 'outcome'` (pas pour `'process'` ni `'review'`)
+- `avg_r_hit = avg_r >= avg_r_min` si `avg_r_min` défini
+
+**B3 — `src/goals/router.py` :**
+- `POST /api/profiles/{id}/goal-overrides` — log override (texte obligatoire)
+- `GET  /api/profiles/{id}/goal-overrides` — historique des overrides
+
+---
+
+#### 13-C — Backend MA v2
+
+**C1 — `database/migrations/seeds/seed_market_analysis.py` :**
+- Ajouter `score_block` à chaque indicateur (voir mapping dans `custom/plan_integration_ma_v2.md`)
+- `alts_htf_1w_others` → `score_block = 'participation'`, `default_enabled = False` (redondant avec TOTAL2)
+
+**C2 — `src/market_analysis/service.py` :**
+- `compute_decomposed_scores(answers)` → renvoie `score_trend`, `score_momentum`, `score_participation`, `score_composite`, `bias_composite`
+- Weights : HTF=0.6 / MTF=0.3 / LTF=0.1 (par indicateur) × bloc : Trend=0.45 / Momentum=0.30 / Participation=0.25
+- Thresholds : ≥65 = bullish | ≤34 = bearish | reste = neutral
+- `create_session()` : appeler `compute_decomposed_scores()` et peupler les nouvelles colonnes
+
+**C3 — `src/market_analysis/schemas.py` :**
+- `SessionCreate` / `SessionOut` / `SessionListItem` : exposer les nouvelles colonnes
+
+**C4 — Conclusions trade-type (`trade_conclusion`) :**
+- Fonction `get_trade_conclusion(score_trend, score_momentum, score_participation, bias_composite)` → renvoie un objet `TradeConclusion`
+- Endpoint `GET /api/market-analysis/sessions/{id}/conclusion`
+- Voir logique complète dans §13-D
+
+---
+
+#### 13-D — Logique "Trade Conclusion" (cœur de la valeur)
+
+> Traduit les 3 scores + composite en recommandation actionnable pour le trade.
+
+```python
+# Règles de conclusion (en ordre de priorité)
+
+def get_trade_conclusion(trend, momentum, participation, bias) -> TradeConclusion:
+    """
+    trend, momentum, participation : float 0–100
+    bias : 'bullish' | 'neutral' | 'bearish'
+    """
+
+    # 🔴 RISK-OFF — ne pas trader long
+    if bias == 'bearish' and participation < 40:
+        return TradeConclusion(
+            emoji="🔴",
+            label="Risk-Off — No Longs",
+            detail="USDT.D rising + weak participation. BTC longs not recommended.",
+            trade_types=[],
+            size_advice="cash or short only",
+            color="red",
+        )
+
+    # 🔴 LATE STAGE — momentum diverge du trend
+    if trend >= 65 and momentum < 40:
+        return TradeConclusion(
+            emoji="⚠️",
+            label="Late Stage / Exhaustion",
+            detail="Trend strong but momentum fading. Reduce size, take early TPs.",
+            trade_types=["swing_short_term"],
+            size_advice="reduced (50%)",
+            color="amber",
+        )
+
+    # 🟢 FULL TREND — tout aligné
+    if trend >= 65 and momentum >= 60 and participation >= 55 and bias == 'bullish':
+        return TradeConclusion(
+            emoji="🟢",
+            label="Trend Following — Full Size",
+            detail="All factors aligned. Swing longs, high R:R setups, normal size.",
+            trade_types=["swing", "position"],
+            size_advice="normal (100%)",
+            color="green",
+        )
+
+    # 🟡 WAIT FOR CONFIRMATION — trend fort mais momentum/participation faible
+    if trend >= 55 and (momentum < 50 or participation < 50):
+        return TradeConclusion(
+            emoji="🟡",
+            label="Wait for Confirmation",
+            detail="Trend present but momentum or participation not confirming. Reduce size or wait.",
+            trade_types=["swing_careful"],
+            size_advice="reduced (50–75%)",
+            color="amber",
+        )
+
+    # ⚡ DAY TRADE ONLY — momentum fort mais trend faible
+    if momentum >= 60 and trend < 50:
+        return TradeConclusion(
+            emoji="⚡",
+            label="Day Trade Only",
+            detail="Short-term momentum only. No swing positions. Quick exits.",
+            trade_types=["day_trading"],
+            size_advice="reduced (50%)",
+            color="amber",
+        )
+
+    # 🟡 NEUTRAL — rien d'exceptionnel
+    return TradeConclusion(
+        emoji="🟡",
+        label="Neutral — Selective",
+        detail="Mixed signals. Only A+ setups, reduced size.",
+        trade_types=["day_trading", "swing_careful"],
+        size_advice="reduced (50%)",
+        color="neutral",
+    )
+```
+
+**Schéma `TradeConclusion` (Pydantic) :**
+```python
+class TradeConclusion(BaseModel):
+    emoji: str                   # "🟢" | "⚠️" | "🔴" | "⚡" | "🟡"
+    label: str                   # "Trend Following — Full Size"
+    detail: str                  # explication 1 phrase
+    trade_types: list[str]       # ["swing", "position"] — styles recommandés
+    size_advice: str             # "normal (100%)" | "reduced (50%)"
+    color: str                   # "green" | "amber" | "red" | "neutral"
+```
+
+---
+
+#### 13-E — Frontend Goals v2
+
+**E1 — `GoalsPage.tsx` — enrichissements :**
+- `ProgressCard` : afficher `avg_r` bar + `avg_r_min` target (si défini)
+- `ProgressCard` : afficher `trade_count / max_trades` badge (si défini)
+- Période `period_type = 'process'` → style visuel différent (pas de progress bar P&L, message "Focus on process today")
+- Période `period_type = 'review'` → grisé, pas de circuit breaker
+
+**E2 — `NewTradePage.tsx` — override dialog v2 :**
+```
+🛑 WEEKLY LOSS LIMIT REACHED (-X.X% / -X.X%)
+
+Why are you overriding this limit?
+[ textarea — obligatoire, min 20 chars ]
+
+☐ I acknowledge I am violating my risk plan
+
+[Cancel]     [Override & Log →]
+```
+→ Appelle `POST /api/profiles/{id}/goal-overrides`
+
+**E3 — `GoalsPage.tsx` — section "Override History" :**
+- Table : Date | Period | Style | P&L at override | Reason
+- Accessible en bas de la page Goals
+
+---
+
+#### 13-F — Frontend MA v2
+
+**F1 — `NewAnalysisPage.tsx` — groupement visuel :**
+- Questions regroupées par bloc (Trend / Momentum / Participation)
+- Progress bar par bloc à la fin du questionnaire (calculée en frontend depuis les réponses + `score_block`)
+
+**F2 — `NewAnalysisPage.tsx` — Summary screen v2 :**
+```
+📊 TREND/STRUCTURE    ████████░░ 79%  🟢 Bullish
+⚡ MOMENTUM/VOLUME    ██████░░░░ 58%  🟡 Neutral
+🔄 PARTICIPATION      ████░░░░░░ 44%  🟡 Neutral
+━━━━━━━━━━━━━━━━━━━━━━━
+🎯 COMPOSITE          ███████░░░ 64%  🟡 NEUTRAL
+
+[Conclusion card]
+🟡 Wait for Confirmation
+"Trend present but momentum not confirming. Reduce size or wait."
+Styles recommandés : Swing careful · Day Trade
+Size advice : 50–75%
+```
+
+**F3 — `MarketAnalysisPage.tsx` — conclusion par module :**
+- Chaque module card affiche la `TradeConclusion` de la dernière session
+- Badge coloré + label + size advice
+
+**F4 — `DashboardPage.tsx` — MAWidget conclusion :**
+- Conclusion courte (emoji + label) sur chaque module card
+
+---
+
+#### 13-G — Settings pages
+
+**G1 — `/settings/goals` (nouvelle page `GoalsSettingsPage.tsx`) :**
+- Affiche la matrice Période × Style
+- Permet de configurer `period_type` par combinaison (outcome / process / review)
+- Permet de toggle `show_on_dashboard`
+- Permet de définir `avg_r_min` et `max_trades` par goal
+
+**G2 — `SettingsPage.tsx` — navigation :**
+- Section "Trading" → Goals Settings
+- Section "Market Analysis" → MA Settings (déjà existant)
+- Structure claire avec icônes
+
+**G3 — `/settings/market-analysis` (existant, enrichir) :**
+- Déjà existant : `MarketAnalysisSettingsPage.tsx`
+- Ajouter : affichage du `score_block` par indicateur (Trend/Momentum/Participation)
+- Toggle `default_enabled` déjà fonctionnel
+
+---
+
+#### 13-H — QA final (checklist complète)
 
 ```
-- End-to-end: open trade → partial close → full close → goals updated → analysis stale
-- Cross-feature: analysis bias → trade form badge → adjusted risk% → goals updated
-- Mobile layout check (responsive)
-- No hardcoded values (all from DB / config)
+Backend :
+  [ ] make lint — ruff + mypy pass (0 errors)
+  [ ] make test — pytest all green
+  [ ] Alembic upgrade head — pas d'erreur
+  [ ] seed_market_analysis.py — score_block reclassifié sur tous les indicateurs
+
+Frontend :
+  [ ] make lint-fe — eslint 0 erreurs
+  [ ] vitest run — all tests pass
+  [ ] TSC --noEmit — 0 erreurs
+
+End-to-end :
+  [ ] Créer profil → ouvrir trade → partial close → full close → goal progress mis à jour
+  [ ] Goal atteint → badge 🎯 sur Dashboard
+  [ ] Limit hit → dialog override v2 → log visible dans Override History
+  [ ] Nouvelle analyse MA → scores décomposés → conclusion affichée sur /market-analysis
+  [ ] Dashboard MAWidget → conclusion badge par module
+  [ ] Settings Goals → changer period_type daily Swing → 'process' → plus de circuit breaker
+  [ ] Settings MA → toggle indicateur → plus affiché dans NewAnalysisPage
+  [ ] Mobile layout : Dashboard, Goals, MarketAnalysis (responsive)
 ```
 
 ---

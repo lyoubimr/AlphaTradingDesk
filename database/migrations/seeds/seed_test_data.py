@@ -30,6 +30,7 @@ from src.core.models.broker import Broker, Instrument, Profile, TradingStyle
 from src.core.models.goals import ProfileGoal
 from src.core.models.market_analysis import (
     MarketAnalysisAnswer,
+    MarketAnalysisConfig,
     MarketAnalysisIndicator,
     MarketAnalysisModule,
     MarketAnalysisSession,
@@ -46,8 +47,9 @@ logger = logging.getLogger(__name__)
 SessionLocal = get_session_factory()
 
 # ── Profile names — used to detect existing data and clean up ─────────────────
-CRYPTO_PROFILE_NAME = "🧪 Crypto Trader (Test)"
-CFD_PROFILE_NAME    = "🧪 CFD Trader (Test)"
+CRYPTO_PROFILE_NAME  = "🧪 Crypto Trader (Test)"
+CFD_PROFILE_NAME     = "🧪 CFD Trader (Test)"
+LOSING_PROFILE_NAME  = "🧪 Drawdown Trader (Test)"
 
 
 def _clean_existing(session) -> None:
@@ -59,7 +61,7 @@ def _clean_existing(session) -> None:
       MA answers → MA sessions → goals → positions → trades → strategies
     The profile row is then reset to its initial values (capital, counters…).
     """
-    for name in (CRYPTO_PROFILE_NAME, CFD_PROFILE_NAME):
+    for name in (CRYPTO_PROFILE_NAME, CFD_PROFILE_NAME, LOSING_PROFILE_NAME):
         p = session.query(Profile).filter(Profile.name == name).first()
         if not p:
             continue
@@ -624,34 +626,47 @@ def seed_cfd_profile(session) -> Profile:
 def seed_goals(session, profile: Profile, style_names: list[str]) -> None:
     """
     Insert goals for a profile covering all combinations:
-      - daily / weekly / monthly periods
+      - daily / weekly / monthly periods + outcome vs process types
       - multiple trading styles
-      - mix of active / inactive
+      - mix of active / inactive, avg_r_min, max_trades
 
-    Exercises: goal_progress_pct, risk_progress_pct, goal_hit, limit_hit.
+    Exercises: goal_progress_pct, risk_progress_pct, goal_hit, limit_hit,
+               avg_r_hit, max_trades_hit, period_type badge.
     """
-    goals: list[tuple] = []
-    # (style_name, period, goal_pct, limit_pct, is_active)
+    # (style_name, period, goal_pct, limit_pct, is_active, period_type, avg_r_min, max_trades)
+    goal_templates: list[tuple] = []
     for style_name in style_names:
         style = session.query(TradingStyle).filter(TradingStyle.name == style_name).first()
         if not style:
             continue
-        goals += [
-            (style.id, "daily",   Decimal("0.50"),  Decimal("-0.30"), True),
-            (style.id, "weekly",  Decimal("2.00"),  Decimal("-1.00"), True),
-            (style.id, "monthly", Decimal("6.00"),  Decimal("-3.00"), True),
+        goal_templates += [
+            # (style_id, period, goal_pct, limit_pct, is_active, period_type, avg_r_min, max_trades)
+            (style.id, "daily",   Decimal("0.50"),  Decimal("-0.30"), True,  "outcome", None,           None),
+            (style.id, "weekly",  Decimal("2.00"),  Decimal("-1.00"), True,  "outcome", Decimal("1.50"), None),
+            (style.id, "monthly", Decimal("6.00"),  Decimal("-3.00"), True,  "outcome", Decimal("1.50"), None),
         ]
 
-    # Add one inactive goal using a style NOT in the list, to avoid unique conflicts
-    # This tests the inactive-goal filter in the UI
-    if len(style_names) > 0:
+    # Process + review goals on a different style (no UNIQUE conflict)
+    if style_names:
         extra_style = session.query(TradingStyle).filter(
             TradingStyle.name.notin_(style_names)
         ).first()
         if extra_style:
-            goals.append((extra_style.id, "monthly", Decimal("10.00"), Decimal("-5.00"), False))
+            goal_templates += [
+                # inactive outcome goal (high ambition, off by default)
+                (extra_style.id, "monthly", Decimal("10.00"), Decimal("-5.00"), False, "outcome", None,           None),
+                # process goal — tracks avg R and max trades per day
+                (extra_style.id, "daily",   Decimal("0.50"),  Decimal("-0.50"), True,  "process", Decimal("2.00"), 3),
+                # review goal — weekly recap discipline
+                (extra_style.id, "weekly",  Decimal("1.00"),  Decimal("-2.00"), True,  "review",  None,            None),
+            ]
 
-    for style_id, period, goal_pct, limit_pct, is_active in goals:
+    seen: set[tuple] = set()
+    for style_id, period, goal_pct, limit_pct, is_active, period_type, avg_r_min, max_trades in goal_templates:
+        key = (profile.id, style_id, period)
+        if key in seen:
+            continue
+        seen.add(key)
         session.add(ProfileGoal(
             profile_id=profile.id,
             style_id=style_id,
@@ -659,10 +674,14 @@ def seed_goals(session, profile: Profile, style_names: list[str]) -> None:
             goal_pct=goal_pct,
             limit_pct=limit_pct,
             is_active=is_active,
+            period_type=period_type,
+            avg_r_min=avg_r_min,
+            max_trades=max_trades,
+            show_on_dashboard=is_active,
         ))
 
     session.flush()
-    logger.info("Goals seeded for profile %s — %d goals", profile.name, len(goals))
+    logger.info("Goals seeded for profile %s — %d goals", profile.name, len(seen))
 
 
 # ── Market Analysis sessions ───────────────────────────────────────────────────
@@ -673,37 +692,69 @@ def _make_session(
     module: MarketAnalysisModule,
     indicators: list[MarketAnalysisIndicator],
     analyzed_at: datetime,
-    scores: dict[str, int],   # indicator.key → score (+1 bull / -1 bear / 0 neutral)
+    scores: dict[str, int],   # indicator.key → answer score: 2=bullish / 1=neutral / 0=bearish
     notes: str | None = None,
 ) -> MarketAnalysisSession:
     """
     Insert one MarketAnalysisSession + all answers.
 
-    scores dict maps indicator key → integer score:
-      +1 = bullish answer, 0 = neutral/partial, -1 = bearish
-    Missing keys default to 0 (neutral).
-    """
-    # Compute per-timeframe scores from answers
-    htf_inds = [i for i in indicators if i.timeframe_level == "htf"]
-    mtf_inds = [i for i in indicators if i.timeframe_level == "mtf"]
-    ltf_inds = [i for i in indicators if i.timeframe_level == "ltf"]
+    scores dict maps indicator key → integer answer score:
+      2 = bullish  (+2 pts)
+      1 = neutral  (+1 pt)
+      0 = bearish  (0 pts)
+    Missing keys default to 1 (neutral).
 
-    def _avg(inds: list) -> Decimal | None:
+    Session scores are computed as:
+      score_pct = sum(answer_scores) / (count × 2) × 100  →  0–100
+    """
+    # ── Helper: compute pct score for a subset of indicators ──────────────
+    def _score_pct(inds: list) -> Decimal | None:
         if not inds:
             return None
-        total = sum(scores.get(i.key, 0) for i in inds)
-        return Decimal(str(round(total / len(inds), 2)))
+        total = sum(scores.get(i.key, 1) for i in inds)
+        return Decimal(str(round(total / (len(inds) * 2) * 100, 2)))
 
-    htf_score = _avg(htf_inds)
-    mtf_score = _avg(mtf_inds)
-    ltf_score = _avg(ltf_inds) if ltf_inds else None
-
-    bias_map = {1: "bullish", -1: "bearish", 0: "neutral"}
-
-    def _bias(score: Decimal | None) -> str | None:
-        if score is None:
+    def _bias_from_pct(pct: Decimal | None) -> str | None:
+        if pct is None:
             return None
-        return "bullish" if score > 0 else ("bearish" if score < 0 else "neutral")
+        if pct > Decimal("60"):
+            return "bullish"
+        if pct < Decimal("40"):
+            return "bearish"
+        return "neutral"
+
+    # v1 TF scores
+    htf_score = _score_pct([i for i in indicators if i.timeframe_level == "htf"])
+    mtf_score = _score_pct([i for i in indicators if i.timeframe_level == "mtf"])
+    ltf_score = _score_pct([i for i in indicators if i.timeframe_level == "ltf"])
+
+    # v2 block scores (using score_block field, fallback to htf for legacy)
+    def _block_pct(block: str) -> Decimal | None:
+        block_inds = [i for i in indicators if getattr(i, "score_block", None) == block]
+        return _score_pct(block_inds)
+
+    trend_score         = _block_pct("trend")
+    momentum_score      = _block_pct("momentum")
+    participation_score = _block_pct("participation")
+
+    # composite = weighted avg of available blocks
+    WEIGHTS = {"trend": Decimal("0.45"), "momentum": Decimal("0.30"), "participation": Decimal("0.25")}
+    available = {b: s for b, s in [("trend", trend_score), ("momentum", momentum_score), ("participation", participation_score)] if s is not None}
+    if available:
+        total_w = sum(WEIGHTS[b] for b in available)
+        composite = sum(available[b] * WEIGHTS[b] for b in available) / total_w
+        composite = composite.quantize(Decimal("0.01"))
+    else:
+        composite = htf_score  # fallback
+
+    def _bias_v2(pct: Decimal | None) -> str | None:
+        if pct is None:
+            return None
+        if pct >= Decimal("65"):
+            return "bullish"
+        if pct <= Decimal("34"):
+            return "bearish"
+        return "neutral"
 
     ms = MarketAnalysisSession(
         profile_id=profile_id,
@@ -711,9 +762,14 @@ def _make_session(
         score_htf_a=htf_score,
         score_mtf_a=mtf_score,
         score_ltf_a=ltf_score,
-        bias_htf_a=_bias(htf_score),
-        bias_mtf_a=_bias(mtf_score),
-        bias_ltf_a=_bias(ltf_score),
+        bias_htf_a=_bias_from_pct(htf_score),
+        bias_mtf_a=_bias_from_pct(mtf_score),
+        bias_ltf_a=_bias_from_pct(ltf_score),
+        score_trend_a=trend_score,
+        score_momentum_a=momentum_score,
+        score_participation_a=participation_score,
+        score_composite_a=composite,
+        bias_composite_a=_bias_v2(composite),
         notes=notes,
         analyzed_at=analyzed_at,
         created_at=analyzed_at,
@@ -722,13 +778,13 @@ def _make_session(
     session.flush()
 
     for ind in indicators:
-        sc = scores.get(ind.key, 0)
-        if sc > 0:
-            answer_label = ind.answer_bullish
-        elif sc < 0:
-            answer_label = ind.answer_bearish
+        sc = scores.get(ind.key, 1)   # default neutral (1)
+        if sc == 2:
+            answer_label = ind.answer_bullish or "Bullish"
+        elif sc == 0:
+            answer_label = ind.answer_bearish or "Bearish"
         else:
-            answer_label = ind.answer_partial
+            answer_label = ind.answer_partial or "Neutral"
         session.add(MarketAnalysisAnswer(
             session_id=ms.id,
             indicator_id=ind.id,
@@ -769,12 +825,12 @@ def seed_market_analysis(session, profile: Profile, module_name: str) -> None:
     _make_session(
         session, profile.id, module, indicators,
         analyzed_at=now - timedelta(hours=2),
-        scores={k: 1 for k in keys},   # all bullish
+        scores={k: 2 for k in keys},   # all bullish (score=2 → 100%)
         notes="Structure bullish across all timeframes. Clear trend continuation.",
     )
 
-    # ── Session 2: Stale — mixed ──────────────────────────────────────────────
-    mixed = {k: (1 if i % 2 == 0 else -1) for i, k in enumerate(keys)}
+    # ── Session 2: Stale — mixed neutral (~50%) ───────────────────────────────
+    mixed = {k: (2 if i % 2 == 0 else 0) for i, k in enumerate(keys)}
     _make_session(
         session, profile.id, module, indicators,
         analyzed_at=now - timedelta(days=2, hours=4),
@@ -782,11 +838,11 @@ def seed_market_analysis(session, profile: Profile, module_name: str) -> None:
         notes="Mixed signals. HTF bullish but MTF shows distribution. Wait for confirmation.",
     )
 
-    # ── Session 3: Old — bear ─────────────────────────────────────────────────
+    # ── Session 3: Old — bear (score=0 → 0%) ─────────────────────────────────
     _make_session(
         session, profile.id, module, indicators,
         analyzed_at=now - timedelta(days=8),
-        scores={k: -1 for k in keys},   # all bearish
+        scores={k: 0 for k in keys},   # all bearish (score=0 → 0%)
         notes="Bearish breakdown. Avoid longs until structure repairs.",
     )
 
@@ -799,26 +855,351 @@ def seed_market_analysis(session, profile: Profile, module_name: str) -> None:
 
 # ── Orchestrator ──────────────────────────────────────────────────────────────
 
+def seed_losing_profile(session) -> Profile:
+    """
+    Profile in heavy drawdown — used to test loss display, circuit-breaker,
+    limit_hit badge, and negative P&L rendering.
+    """
+    broker   = _get_broker(session, "Kraken")
+    btc_inst = _get_instrument(session, "PF_XBTUSD")
+    eth_inst = _get_instrument(session, "PF_ETHUSD")
+    sol_inst = _get_instrument(session, "PF_SOLUSD")
+
+    profile = session.query(Profile).filter(Profile.name == LOSING_PROFILE_NAME).first()
+    if profile:
+        profile.broker_id               = broker.id
+        profile.market_type             = "Crypto"
+        profile.capital_start           = Decimal("8000.00")
+        profile.capital_current         = Decimal("6840.00")  # -14.5%
+        profile.currency                = "USD"
+        profile.risk_percentage_default = Decimal("2.00")
+        profile.max_concurrent_risk_pct = Decimal("6.00")
+        profile.trades_count            = 7
+        profile.win_count               = 2
+    else:
+        profile = Profile(
+            name=LOSING_PROFILE_NAME,
+            broker_id=broker.id,
+            market_type="Crypto",
+            capital_start=Decimal("8000.00"),
+            capital_current=Decimal("6840.00"),
+            currency="USD",
+            risk_percentage_default=Decimal("2.00"),
+            max_concurrent_risk_pct=Decimal("6.00"),
+            trades_count=7,
+            win_count=2,
+            status="active",
+        )
+        session.add(profile)
+    session.flush()
+
+    now = datetime.now(tz=timezone.utc)
+    strat = Strategy(
+        profile_id=profile.id,
+        name="Breakout",
+        description="Breakout entries — currently underperforming",
+    )
+    session.add(strat)
+    session.flush()
+
+    # Trade 1: CLOSED LOSS — large
+    t1 = Trade(
+        profile_id=profile.id,
+        instrument_id=btc_inst.id,
+        strategy_id=strat.id,
+        pair="PF_XBTUSD",
+        direction="long",
+        order_type="MARKET",
+        asset_class="Crypto",
+        analyzed_timeframe="1d",
+        entry_price=Decimal("92000.00"),
+        entry_date=now - timedelta(days=20),
+        stop_loss=Decimal("89500.00"),
+        nb_take_profits=1,
+        risk_amount=Decimal("320.00"),
+        potential_profit=Decimal("640.00"),
+        status="closed",
+        current_risk=Decimal("0.00"),
+        realized_pnl=Decimal("-320.00"),
+        notes="Fakeout breakout. SL hit immediately.",
+        confidence_score=55,
+        closed_at=now - timedelta(days=19),
+    )
+    session.add(t1)
+    session.flush()
+    session.add(Position(trade_id=t1.id, position_number=1,
+                         take_profit_price=Decimal("97000.00"),
+                         lot_percentage=Decimal("100"), status="closed",
+                         exit_price=Decimal("89500.00"),
+                         exit_date=now - timedelta(days=19),
+                         realized_pnl=Decimal("-320.00")))
+
+    # Trade 2: CLOSED LOSS
+    t2 = Trade(
+        profile_id=profile.id,
+        instrument_id=eth_inst.id,
+        strategy_id=strat.id,
+        pair="PF_ETHUSD",
+        direction="long",
+        order_type="MARKET",
+        asset_class="Crypto",
+        analyzed_timeframe="4h",
+        entry_price=Decimal("3100.00"),
+        entry_date=now - timedelta(days=17),
+        stop_loss=Decimal("2980.00"),
+        nb_take_profits=1,
+        risk_amount=Decimal("160.00"),
+        potential_profit=Decimal("300.00"),
+        status="closed",
+        current_risk=Decimal("0.00"),
+        realized_pnl=Decimal("-160.00"),
+        notes="ETH weakness persisted. Structure not confirmed before entry.",
+        confidence_score=50,
+        closed_at=now - timedelta(days=15),
+    )
+    session.add(t2)
+    session.flush()
+    session.add(Position(trade_id=t2.id, position_number=1,
+                         take_profit_price=Decimal("3400.00"),
+                         lot_percentage=Decimal("100"), status="closed",
+                         exit_price=Decimal("2980.00"),
+                         exit_date=now - timedelta(days=15),
+                         realized_pnl=Decimal("-160.00")))
+
+    # Trade 3: CLOSED WIN (small)
+    t3 = Trade(
+        profile_id=profile.id,
+        instrument_id=sol_inst.id,
+        strategy_id=strat.id,
+        pair="PF_SOLUSD",
+        direction="long",
+        order_type="MARKET",
+        asset_class="Crypto",
+        analyzed_timeframe="4h",
+        entry_price=Decimal("140.00"),
+        entry_date=now - timedelta(days=14),
+        stop_loss=Decimal("133.00"),
+        nb_take_profits=1,
+        risk_amount=Decimal("160.00"),
+        potential_profit=Decimal("240.00"),
+        status="closed",
+        current_risk=Decimal("0.00"),
+        realized_pnl=Decimal("120.00"),
+        notes="Partial win. Exited early at 1:0.75R, missed the full move.",
+        confidence_score=65,
+        closed_at=now - timedelta(days=12),
+    )
+    session.add(t3)
+    session.flush()
+    session.add(Position(trade_id=t3.id, position_number=1,
+                         take_profit_price=Decimal("155.00"),
+                         lot_percentage=Decimal("100"), status="closed",
+                         exit_price=Decimal("150.50"),
+                         exit_date=now - timedelta(days=12),
+                         realized_pnl=Decimal("120.00")))
+
+    # Trade 4: CLOSED LOSS — second large loss this week (circuit-breaker scenario)
+    t4 = Trade(
+        profile_id=profile.id,
+        instrument_id=btc_inst.id,
+        strategy_id=strat.id,
+        pair="PF_XBTUSD",
+        direction="short",
+        order_type="MARKET",
+        asset_class="Crypto",
+        analyzed_timeframe="1d",
+        entry_price=Decimal("88500.00"),
+        entry_date=now - timedelta(days=6),
+        stop_loss=Decimal("90800.00"),
+        nb_take_profits=1,
+        risk_amount=Decimal("320.00"),
+        potential_profit=Decimal("500.00"),
+        status="closed",
+        current_risk=Decimal("0.00"),
+        realized_pnl=Decimal("-320.00"),
+        notes="Counter-trend short failed. Market resumed uptrend.",
+        confidence_score=48,
+        closed_at=now - timedelta(days=5),
+    )
+    session.add(t4)
+    session.flush()
+    session.add(Position(trade_id=t4.id, position_number=1,
+                         take_profit_price=Decimal("84000.00"),
+                         lot_percentage=Decimal("100"), status="closed",
+                         exit_price=Decimal("90800.00"),
+                         exit_date=now - timedelta(days=5),
+                         realized_pnl=Decimal("-320.00")))
+
+    # Trade 5: CLOSED LOSS — this week (triggers weekly limit_hit)
+    t5 = Trade(
+        profile_id=profile.id,
+        instrument_id=eth_inst.id,
+        strategy_id=strat.id,
+        pair="PF_ETHUSD",
+        direction="short",
+        order_type="MARKET",
+        asset_class="Crypto",
+        analyzed_timeframe="4h",
+        entry_price=Decimal("2850.00"),
+        entry_date=now - timedelta(days=3),
+        stop_loss=Decimal("2950.00"),
+        nb_take_profits=1,
+        risk_amount=Decimal("160.00"),
+        potential_profit=Decimal("280.00"),
+        status="closed",
+        current_risk=Decimal("0.00"),
+        realized_pnl=Decimal("-160.00"),
+        notes="Failed breakdown. News catalyst reversed the move.",
+        confidence_score=52,
+        closed_at=now - timedelta(days=2),
+    )
+    session.add(t5)
+    session.flush()
+    session.add(Position(trade_id=t5.id, position_number=1,
+                         take_profit_price=Decimal("2600.00"),
+                         lot_percentage=Decimal("100"), status="closed",
+                         exit_price=Decimal("2950.00"),
+                         exit_date=now - timedelta(days=2),
+                         realized_pnl=Decimal("-160.00")))
+
+    # Trade 6: CLOSED WIN — today (small recovery)
+    t6 = Trade(
+        profile_id=profile.id,
+        instrument_id=btc_inst.id,
+        strategy_id=strat.id,
+        pair="PF_XBTUSD",
+        direction="long",
+        order_type="MARKET",
+        asset_class="Crypto",
+        analyzed_timeframe="1h",
+        entry_price=Decimal("87000.00"),
+        entry_date=now - timedelta(hours=6),
+        stop_loss=Decimal("86200.00"),
+        nb_take_profits=1,
+        risk_amount=Decimal("160.00"),
+        potential_profit=Decimal("240.00"),
+        status="closed",
+        current_risk=Decimal("0.00"),
+        realized_pnl=Decimal("200.00"),
+        notes="LTF structure trade. Took partial profits early.",
+        confidence_score=72,
+        closed_at=now - timedelta(hours=2),
+    )
+    session.add(t6)
+    session.flush()
+    session.add(Position(trade_id=t6.id, position_number=1,
+                         take_profit_price=Decimal("88500.00"),
+                         lot_percentage=Decimal("100"), status="closed",
+                         exit_price=Decimal("88250.00"),
+                         exit_date=now - timedelta(hours=2),
+                         realized_pnl=Decimal("200.00")))
+
+    # Trade 7: OPEN — current risk exposed
+    t7 = Trade(
+        profile_id=profile.id,
+        instrument_id=sol_inst.id,
+        strategy_id=strat.id,
+        pair="PF_SOLUSD",
+        direction="long",
+        order_type="MARKET",
+        asset_class="Crypto",
+        analyzed_timeframe="4h",
+        entry_price=Decimal("145.00"),
+        entry_date=now - timedelta(hours=1),
+        stop_loss=Decimal("139.00"),
+        nb_take_profits=2,
+        risk_amount=Decimal("160.00"),
+        potential_profit=Decimal("350.00"),
+        status="open",
+        current_risk=Decimal("160.00"),
+        realized_pnl=None,
+        notes="Trying again on SOL. Tighter SL this time.",
+        confidence_score=60,
+    )
+    session.add(t7)
+    session.flush()
+    session.add(Position(trade_id=t7.id, position_number=1,
+                         take_profit_price=Decimal("153.00"),
+                         lot_percentage=Decimal("60"), status="open"))
+    session.add(Position(trade_id=t7.id, position_number=2,
+                         take_profit_price=Decimal("162.00"),
+                         lot_percentage=Decimal("40"), status="open"))
+
+    session.flush()
+    logger.info("Losing profile seeded: %s (id=%d) — 7 trades", profile.name, profile.id)
+    return profile
+
+
+def seed_ma_configs(session) -> None:
+    """
+    Seed global market_analysis_configs with v2 thresholds.
+    One global row (module_id=NULL, profile_id=NULL) + one per module override.
+    Idempotent: checks for existing rows before inserting.
+    """
+    # Global default thresholds — check before inserting (no reliable unique constraint)
+    global_cfg = session.query(MarketAnalysisConfig).filter(
+        MarketAnalysisConfig.module_id.is_(None),
+        MarketAnalysisConfig.profile_id.is_(None),
+    ).first()
+    if not global_cfg:
+        session.add(MarketAnalysisConfig(
+            module_id=None,
+            profile_id=None,
+            score_thresholds={"bullish": 65, "bearish": 34},
+            risk_multipliers={"full": 1.0, "reduced": 0.5, "avoid": 0.0},
+        ))
+        session.flush()
+
+    # Per-module override: Gold uses slightly more lenient thresholds
+    gold_module = session.query(MarketAnalysisModule).filter(
+        MarketAnalysisModule.name == "Gold"
+    ).first()
+    if gold_module:
+        existing = session.query(MarketAnalysisConfig).filter(
+            MarketAnalysisConfig.module_id == gold_module.id,
+            MarketAnalysisConfig.profile_id.is_(None),
+        ).first()
+        if not existing:
+            session.add(MarketAnalysisConfig(
+                module_id=gold_module.id,
+                profile_id=None,
+                score_thresholds={"bullish": 62, "bearish": 37},
+                risk_multipliers={"full": 1.0, "reduced": 0.5, "avoid": 0.0},
+            ))
+            session.flush()
+
+    session.flush()
+    logger.info("MA configs seeded — global thresholds + Gold override")
+
+
 def run_test_seed() -> None:
     logger.info("=== Starting test data seed ===")
     with SessionLocal() as session:
         try:
             _clean_existing(session)
 
-            # ── Crypto profile ──────────────────────────────────────────────
+            # ── MA configs (thresholds stored in DB — no hardcoded values) ──
+            seed_ma_configs(session)
+
+            # ── Crypto profile — profitable ──────────────────────────────────
             crypto_profile = seed_crypto_profile(session)
             seed_goals(session, crypto_profile, ["swing", "day_trading"])
             seed_market_analysis(session, crypto_profile, "Crypto")
 
-            # ── CFD profile ─────────────────────────────────────────────────
+            # ── CFD profile — mildly profitable ─────────────────────────────
             cfd_profile = seed_cfd_profile(session)
             seed_goals(session, cfd_profile, ["swing"])
             seed_market_analysis(session, cfd_profile, "Gold")
 
+            # ── Losing profile — in drawdown (circuit-breaker testing) ──────
+            losing_profile = seed_losing_profile(session)
+            seed_goals(session, losing_profile, ["swing", "scalping"])
+            seed_market_analysis(session, losing_profile, "Crypto")
+
             session.commit()
             logger.info(
-                "=== Test data seed complete — crypto id=%d, cfd id=%d ===",
-                crypto_profile.id, cfd_profile.id,
+                "=== Test data seed complete — crypto id=%d, cfd id=%d, losing id=%d ===",
+                crypto_profile.id, cfd_profile.id, losing_profile.id,
             )
         except Exception:
             session.rollback()

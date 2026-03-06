@@ -318,5 +318,8 @@ class TestGoalProgress:
             "pnl_pct", "goal_pct", "limit_pct",
             "goal_progress_pct", "risk_progress_pct",
             "goal_hit", "limit_hit",
+            # v2 fields
+            "trade_count", "avg_r", "avg_r_hit",
+            "max_trades_hit", "period_type", "show_on_dashboard",
         }
         assert set(item.keys()) == expected_keys

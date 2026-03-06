@@ -11,8 +11,6 @@ other tooling work without a live database.
 """
 from __future__ import annotations
 
-from typing import Optional
-
 from sqlalchemy import Engine, create_engine
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
@@ -40,7 +38,7 @@ class Base(DeclarativeBase):
 # This lets Alembic CLI, tests, and other tooling import models without
 # requiring an active DB connection.
 
-_engine: Optional[Engine] = None
+_engine: Engine | None = None
 
 
 def get_engine() -> Engine:

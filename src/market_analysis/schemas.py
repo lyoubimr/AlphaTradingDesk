@@ -49,6 +49,7 @@ class IndicatorOut(BaseModel):
     tv_symbol: str
     tv_timeframe: str
     timeframe_level: str       # 'htf', 'mtf', 'ltf'
+    score_block: str           # 'trend' | 'momentum' | 'participation'
     question: str
     tooltip: str | None
     answer_bullish: str
@@ -140,6 +141,20 @@ class SessionOut(BaseModel):
     bias_mtf_b: str | None
     bias_ltf_b: str | None
 
+    # v2 decomposed scores — asset A
+    score_trend_a: Decimal | None = None
+    score_momentum_a: Decimal | None = None
+    score_participation_a: Decimal | None = None
+    score_composite_a: Decimal | None = None
+    bias_composite_a: str | None = None
+
+    # v2 decomposed scores — asset B
+    score_trend_b: Decimal | None = None
+    score_momentum_b: Decimal | None = None
+    score_participation_b: Decimal | None = None
+    score_composite_b: Decimal | None = None
+    bias_composite_b: str | None = None
+
     notes: str | None
     analyzed_at: datetime
     created_at: datetime
@@ -162,6 +177,11 @@ class SessionListItem(BaseModel):
     score_mtf_b: Decimal | None
     bias_htf_b: str | None
     bias_mtf_b: str | None
+    # v2 decomposed scores (slim — composite only)
+    score_composite_a: Decimal | None = None
+    bias_composite_a: str | None = None
+    score_composite_b: Decimal | None = None
+    bias_composite_b: str | None = None
     notes: str | None
     analyzed_at: datetime
 
@@ -175,3 +195,18 @@ class StalenessItem(BaseModel):
     last_analyzed_at: datetime | None
     days_old: int | None      # None if no session exists yet
     is_stale: bool            # True if days_old > 7 (or no session at all)
+
+
+# ── Trade Conclusion (v2) ─────────────────────────────────────────────────────
+
+class TradeConclusion(BaseModel):
+    """
+    Actionable trade recommendation derived from decomposed MA scores.
+    Returned by GET /api/market-analysis/sessions/{id}/conclusion.
+    """
+    emoji: str                   # "🟢" | "⚠️" | "🔴" | "⚡" | "🟡"
+    label: str                   # "Trend Following — Full Size"
+    detail: str                  # 1-sentence explanation
+    trade_types: list[str]       # e.g. ["swing", "position"]
+    size_advice: str             # "normal (100%)" | "reduced (50%)"
+    color: str                   # "green" | "amber" | "red" | "neutral"

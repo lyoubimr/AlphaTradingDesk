@@ -25,6 +25,29 @@ psycopg.connect(raw).close()
 done
 echo "✅ PostgreSQL ready."
 
+echo "🔄 Checking DB state…"
+# Detect false stamp: alembic_version exists but actual tables do not.
+# This can happen when the DB was stamped manually without running migrations.
+TABLE_EXISTS=$(python -c "
+import os, psycopg
+raw = os.environ.get('DATABASE_URL', '').replace('postgresql+psycopg://', 'postgresql://')
+with psycopg.connect(raw) as conn:
+    cur = conn.execute(\"SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='public' AND table_name='profiles'\")
+    print(cur.fetchone()[0])
+" 2>/dev/null || echo "0")
+
+if [ "$TABLE_EXISTS" = "0" ]; then
+  echo "⚠️  Tables missing — clearing false stamp and running full migration…"
+  python -c "
+import os, psycopg
+raw = os.environ.get('DATABASE_URL', '').replace('postgresql+psycopg://', 'postgresql://')
+with psycopg.connect(raw) as conn:
+    conn.execute('DELETE FROM alembic_version')
+    conn.commit()
+print('Stamp cleared.')
+" 2>/dev/null || true
+fi
+
 echo "🔄 Running Alembic migrations…"
 alembic upgrade head
 echo "✅ Migrations done."

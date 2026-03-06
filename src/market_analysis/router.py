@@ -1,5 +1,5 @@
 """
-Market Analysis router — Step 7.
+Market Analysis router — Step 7 / Step 13-B (v2 conclusion).
 
 Routes:
   GET  /api/market-analysis/modules
@@ -8,6 +8,7 @@ Routes:
   POST /api/market-analysis/sessions
   GET  /api/market-analysis/sessions              (global — no profile filter required)
   GET  /api/market-analysis/sessions/{session_id}
+  GET  /api/market-analysis/sessions/{session_id}/conclusion  ← v2
   GET  /api/market-analysis/staleness             (global — last session per module)
 
   GET  /api/profiles/{profile_id}/indicator-config
@@ -31,6 +32,7 @@ from src.market_analysis.schemas import (
     SessionListItem,
     SessionOut,
     StalenessItem,
+    TradeConclusion,
 )
 
 # Two routers: one for /market-analysis, one for /profiles (extended)
@@ -50,6 +52,13 @@ def list_modules(db: Session = Depends(get_db)) -> list:
 def list_indicators(module_id: int, db: Session = Depends(get_db)) -> list:
     """Return all indicators for a given module (read-only catalogue)."""
     return service.list_indicators(db, module_id)
+
+
+@ma_router.get("/modules/{module_id}/thresholds")
+def get_module_thresholds(module_id: int, db: Session = Depends(get_db)) -> dict:
+    """Return v2 score thresholds for a module (from DB, not hardcoded)."""
+    bullish, bearish = service.get_thresholds_public(db, module_id)
+    return {"bullish": int(bullish), "bearish": int(bearish)}
 
 
 @ma_router.patch("/indicators/{indicator_id}", response_model=IndicatorOut)
@@ -97,6 +106,19 @@ def list_sessions(
 def get_session(session_id: int, db: Session = Depends(get_db)) -> object:
     """Return a session with all its answers."""
     return service.get_session(db, session_id)
+
+
+@ma_router.get("/sessions/{session_id}/conclusion", response_model=TradeConclusion)
+def get_conclusion(session_id: int, db: Session = Depends(get_db)) -> object:
+    """
+    Return an actionable trade conclusion derived from the v2 decomposed scores
+    of the specified session.
+
+    Requires score_composite_a to be populated (sessions created after Step 13
+    migration). Returns 404 if the session doesn't exist, 422 if v2 scores are
+    not available (old session without decomposed scoring).
+    """
+    return service.get_session_conclusion(db, session_id)
 
 
 @ma_router.get("/staleness", response_model=list[StalenessItem])

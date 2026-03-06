@@ -53,7 +53,8 @@ class TestListBrokers:
         assert "ActiveBroker" in names
         assert "InactiveBroker" not in names
 
-    def test_returns_empty_list_when_no_brokers(self, client: TestClient):
+    def test_returns_empty_list_when_no_brokers(self, client: TestClient, db_session: Session):
+        # db_session provides an isolated, empty transaction — no seeded brokers visible
         resp = client.get("/api/brokers")
         assert resp.status_code == 200
         assert resp.json() == []

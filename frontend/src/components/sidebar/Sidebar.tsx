@@ -86,6 +86,11 @@ const NAV_GROUPS: NavGroup[] = [
         icon: <Users size={16} />,
       },
       {
+        to: '/settings/goals',
+        label: 'Goals Settings',
+        icon: <Target size={16} />,
+      },
+      {
         to: '/settings/market-analysis',
         label: 'Indicator Editor',
         icon: <SlidersHorizontal size={16} />,

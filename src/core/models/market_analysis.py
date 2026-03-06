@@ -86,6 +86,9 @@ class MarketAnalysisIndicator(Base):
     answer_partial: Mapped[str] = mapped_column(String(200), nullable=False)
     answer_bearish: Mapped[str] = mapped_column(String(200), nullable=False)
     default_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # v2: which scoring block this indicator belongs to
+    # 'trend' | 'momentum' | 'participation'
+    score_block: Mapped[str] = mapped_column(String(20), nullable=False, default="trend")
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
 
     # Relationships
@@ -158,6 +161,21 @@ class MarketAnalysisSession(Base):
     bias_htf_b: Mapped[str | None] = mapped_column(String(10))
     bias_mtf_b: Mapped[str | None] = mapped_column(String(10))
     bias_ltf_b: Mapped[str | None] = mapped_column(String(10))
+
+    # v2: decomposed block scores — Asset A
+    # Detected as v2 session when score_trend_a IS NOT NULL
+    score_trend_a: Mapped[Decimal | None] = mapped_column(Numeric(5, 2))
+    score_momentum_a: Mapped[Decimal | None] = mapped_column(Numeric(5, 2))
+    score_participation_a: Mapped[Decimal | None] = mapped_column(Numeric(5, 2))
+    score_composite_a: Mapped[Decimal | None] = mapped_column(Numeric(5, 2))
+    bias_composite_a: Mapped[str | None] = mapped_column(String(10))
+
+    # v2: decomposed block scores — Asset B (NULL for single-asset modules)
+    score_trend_b: Mapped[Decimal | None] = mapped_column(Numeric(5, 2))
+    score_momentum_b: Mapped[Decimal | None] = mapped_column(Numeric(5, 2))
+    score_participation_b: Mapped[Decimal | None] = mapped_column(Numeric(5, 2))
+    score_composite_b: Mapped[Decimal | None] = mapped_column(Numeric(5, 2))
+    bias_composite_b: Mapped[str | None] = mapped_column(String(10))
 
     # News intelligence context (NULL if not fetched)
     news_sentiment: Mapped[str | None] = mapped_column(String(10))

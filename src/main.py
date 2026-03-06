@@ -4,7 +4,8 @@ AlphaTradingDesk — FastAPI application entry point
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from src.brokers.router import router as brokers_router, styles_router
+from src.brokers.router import router as brokers_router
+from src.brokers.router import styles_router
 from src.core.config import settings
 from src.goals.router import router as goals_router
 from src.market_analysis.router import ma_router, profiles_ma_router

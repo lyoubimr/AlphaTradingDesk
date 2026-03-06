@@ -16,14 +16,14 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 import {
   ArrowLeft, ArrowRight, CheckCircle2, Save, Loader2,
   TrendingUp, TrendingDown, Minus, ExternalLink, ChevronDown,
-  Zap, BarChart2,
+  Zap, BarChart2, TrendingUp as TrendIcon,
 } from 'lucide-react'
 import { PageHeader } from '../../components/ui/PageHeader'
 import { useProfile } from '../../context/ProfileContext'
 import { maApi } from '../../lib/api'
 import type {
   MAModule, MAIndicator,
-  MAAnswerIn, MABias,
+  MAAnswerIn, MABias, MASessionOut, MATradeConclusion,
 } from '../../types/api'
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -82,6 +82,32 @@ function biasFromPct(pct: number | null): MABias | null {
   if (pct === null) return null
   if (pct > 60) return 'bullish'
   if (pct < 40) return 'bearish'
+  return 'neutral'
+}
+
+// v2: compute block score (Trend / Momentum / Participation) client-side preview
+function blockScorePct(
+  answers: DraftAnswer[],
+  indicators: MAIndicator[],
+  block: 'trend' | 'momentum' | 'participation',
+  side: 'a' | 'b',
+): number | null {
+  const targets = side === 'a' ? ['a', 'single'] : ['b']
+  const relevant = indicators.filter(
+    (i) => i.score_block === block && targets.includes(i.asset_target),
+  )
+  if (relevant.length === 0) return null
+  const total = relevant.reduce((sum, ind) => {
+    const a = answers.find((x) => x.indicator_id === ind.id)
+    return sum + (a ? a.score : 0)
+  }, 0)
+  return Math.round((total / (relevant.length * 2)) * 100)
+}
+
+function biasV2(pct: number | null, bullish = 65, bearish = 34): MABias | null {
+  if (pct === null) return null
+  if (pct >= bullish) return 'bullish'
+  if (pct <= bearish) return 'bearish'
   return 'neutral'
 }
 
@@ -508,7 +534,7 @@ function StepAnswerIndicators({
 // ─────────────────────────────────────────────────────────────────────────────
 
 function StepSummary({
-  module, indicators, answers, notes, onNotes, saving, onBack, onSave,
+  module, indicators, answers, notes, onNotes, saving, onBack, onSave, savedSession, conclusion, thresholds,
 }: {
   module: MAModule
   indicators: MAIndicator[]
@@ -518,6 +544,9 @@ function StepSummary({
   saving: boolean
   onBack: () => void
   onSave: () => void
+  savedSession: MASessionOut | null
+  conclusion: MATradeConclusion | null
+  thresholds: { bullish: number; bearish: number }
 }) {
   const tfs = TF_ORDER.filter((tf) => indicators.some((i) => i.timeframe_level === tf))
 
@@ -527,10 +556,43 @@ function StepSummary({
     pctB:  module.is_dual ? scorePct(answers, indicators, tf, 'b') : null,
   }))
 
-  // Overall dominant bias
+  // v2 block scores
+  const blocks = (['trend', 'momentum', 'participation'] as const).map((block) => ({
+    block,
+    pctA: blockScorePct(answers, indicators, block, 'a'),
+    pctB: module.is_dual ? blockScorePct(answers, indicators, block, 'b') : null,
+  }))
+  const BLOCK_META: Record<string, { label: string; icon: string }> = {
+    trend:         { label: 'Trend',         icon: '📈' },
+    momentum:      { label: 'Momentum',      icon: '⚡' },
+    participation: { label: 'Participation', icon: '🧑‍🤝‍🧑' },
+  }
+
+  // Overall dominant bias (v1 HTF avg — for display)
   const allPcts = scores.flatMap((s) => [s.pctA, s.pctB]).filter((p): p is number => p !== null)
   const avgPct  = allPcts.length ? Math.round(allPcts.reduce((s, v) => s + v, 0) / allPcts.length) : null
   const overallBias = biasFromPct(avgPct)
+
+  // v2 composite preview
+  const WEIGHTS = { trend: 0.45, momentum: 0.30, participation: 0.25 }
+  const blockScoresA = blocks.map((b) => b.pctA).filter((p): p is number => p !== null)
+  const validBlocks = blocks.filter((b) => b.pctA !== null)
+  const totalWeight = validBlocks.reduce((s, b) => s + WEIGHTS[b.block], 0)
+  const compositeA = totalWeight > 0
+    ? Math.round(validBlocks.reduce((s, b) => s + b.pctA! * WEIGHTS[b.block], 0) / totalWeight)
+    : null
+  const compositeBiasA = biasV2(compositeA, thresholds.bullish, thresholds.bearish)
+
+  // conclusion color map
+  const conclusionColorMap: Record<string, { bg: string; border: string; text: string }> = {
+    green:   { bg: 'bg-emerald-500/10', border: 'border-emerald-500/25', text: 'text-emerald-300' },
+    amber:   { bg: 'bg-amber-500/10',   border: 'border-amber-500/25',   text: 'text-amber-300'   },
+    red:     { bg: 'bg-red-500/10',     border: 'border-red-500/25',     text: 'text-red-300'     },
+    neutral: { bg: 'bg-surface-700',    border: 'border-surface-600',    text: 'text-slate-400'   },
+  }
+
+  // Suppress unused variable warning
+  void blockScoresA
 
   return (
     <div className="space-y-6">
@@ -546,12 +608,69 @@ function StepSummary({
             </div>
           </div>
           <div className="flex items-center gap-3">
-            <ScoreRing pct={avgPct} bias={overallBias} size={58} />
-            <BiasBadgeLg bias={overallBias} />
+            <ScoreRing pct={compositeA ?? avgPct} bias={compositeBiasA ?? overallBias} size={58} />
+            <BiasBadgeLg bias={compositeBiasA ?? overallBias} />
           </div>
         </div>
 
         <div className="h-px bg-surface-700" />
+
+        {/* v2 block scores */}
+        {blocks.some((b) => b.pctA !== null) && (
+          <>
+            <div className="flex items-center gap-2 mb-2">
+              <TrendIcon size={11} className="text-brand-400" />
+              <p className="text-[10px] uppercase tracking-wider font-semibold text-brand-400">
+                Decomposed Scores (v2)
+              </p>
+              {compositeA !== null && (
+                <span className={`ml-auto text-[10px] font-mono font-semibold ${
+                  compositeBiasA === 'bullish' ? 'text-emerald-400'
+                  : compositeBiasA === 'bearish' ? 'text-red-400' : 'text-amber-400'
+                }`}>
+                  Composite: {compositeA}%
+                </span>
+              )}
+            </div>
+            <div className="grid grid-cols-3 gap-2">
+              {blocks.map(({ block, pctA, pctB }) => {
+                const meta = BLOCK_META[block]
+                const bias = biasV2(pctA, thresholds.bullish, thresholds.bearish)
+                const biasB = module.is_dual && pctB !== null ? biasV2(pctB, thresholds.bullish, thresholds.bearish) : null
+                const fillA = bias === 'bullish' ? 'bg-emerald-500' : bias === 'bearish' ? 'bg-red-500' : 'bg-amber-400'
+                const fillB = biasB === 'bullish' ? 'bg-emerald-500' : biasB === 'bearish' ? 'bg-red-500' : 'bg-amber-400'
+                return (
+                  <div key={block} className="rounded-xl border border-surface-600 bg-surface-700/30 p-3 space-y-2">
+                    <p className="text-[10px] font-semibold text-slate-400">{meta.icon} {meta.label}</p>
+                    {pctA !== null ? (
+                      <div className="space-y-1">
+                        {module.is_dual && <p className="text-[9px] text-slate-600">{module.asset_a ?? 'A'}</p>}
+                        <div className="h-1.5 rounded-full bg-surface-700 overflow-hidden">
+                          <div className={`h-full rounded-full ${fillA}`} style={{ width: `${pctA}%` }} />
+                        </div>
+                        <p className={`text-xs font-bold font-mono tabular-nums ${
+                          bias === 'bullish' ? 'text-emerald-400' : bias === 'bearish' ? 'text-red-400' : 'text-amber-400'
+                        }`}>{pctA}%</p>
+                      </div>
+                    ) : <p className="text-[10px] text-slate-700">—</p>}
+                    {module.is_dual && pctB !== null && (
+                      <div className="space-y-1 pt-1 border-t border-surface-600/60">
+                        <p className="text-[9px] text-slate-600">{module.asset_b ?? 'B'}</p>
+                        <div className="h-1.5 rounded-full bg-surface-700 overflow-hidden">
+                          <div className={`h-full rounded-full ${fillB}`} style={{ width: `${pctB}%` }} />
+                        </div>
+                        <p className={`text-xs font-bold font-mono tabular-nums ${
+                          biasB === 'bullish' ? 'text-emerald-400' : biasB === 'bearish' ? 'text-red-400' : 'text-amber-400'
+                        }`}>{pctB}%</p>
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+            <div className="h-px bg-surface-700" />
+          </>
+        )}
 
         {/* Per-TF breakdown */}
         <div className="space-y-5">
@@ -601,41 +720,78 @@ function StepSummary({
           <span className="pt-2 text-red-400">▌ 0–39 Bearish</span>
           <span className="pt-2 text-amber-400">▌ 40–60 Neutral</span>
           <span className="pt-2 text-emerald-400">▌ 61–100 Bullish</span>
+          <span className="pt-2 text-brand-400">
+            ⚡ v2 Composite: ≤{thresholds.bearish} / {thresholds.bearish + 1}–{thresholds.bullish - 1} / ≥{thresholds.bullish}
+          </span>
         </div>
       </div>
 
+      {/* Trade conclusion — shown after save */}
+      {savedSession && conclusion && (() => {
+        const { bg, border, text } = conclusionColorMap[conclusion.color] ?? conclusionColorMap.neutral
+        return (
+          <div className={`rounded-2xl border p-5 space-y-3 ${bg} ${border}`}>
+            <div className="flex items-center gap-3">
+              <span className="text-2xl">{conclusion.emoji}</span>
+              <div>
+                <p className={`text-sm font-bold ${text}`}>{conclusion.label}</p>
+                <p className="text-[11px] text-slate-500 mt-0.5">{conclusion.detail}</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-4 text-[10px]">
+              <span className="text-slate-500">Position size:</span>
+              <span className={`font-semibold ${text}`}>{conclusion.size_advice}</span>
+              {conclusion.trade_types.length > 0 && (
+                <>
+                  <span className="text-slate-700">·</span>
+                  <span className="text-slate-500">{conclusion.trade_types.join(' · ')}</span>
+                </>
+              )}
+            </div>
+          </div>
+        )
+      })()}
+
       {/* Notes */}
-      <div className="space-y-1.5">
-        <label className="text-xs font-medium text-slate-400">
-          Notes <span className="text-slate-700">(optional)</span>
-        </label>
-        <textarea
-          rows={3}
-          placeholder="Context, market events, confluences, observations…"
-          value={notes}
-          onChange={(e) => onNotes(e.target.value)}
-          className="w-full px-3 py-2.5 rounded-xl bg-surface-700 border border-surface-600 text-sm
-            text-slate-200 placeholder-slate-600 leading-relaxed
-            focus:outline-none focus:border-brand-500/60 focus:ring-1 focus:ring-brand-500/30
-            transition-colors resize-none"
-        />
-      </div>
+      {!savedSession && (
+        <div className="space-y-1.5">
+          <label className="text-xs font-medium text-slate-400">
+            Notes <span className="text-slate-700">(optional)</span>
+          </label>
+          <textarea
+            rows={3}
+            placeholder="Context, market events, confluences, observations…"
+            value={notes}
+            onChange={(e) => onNotes(e.target.value)}
+            className="w-full px-3 py-2.5 rounded-xl bg-surface-700 border border-surface-600 text-sm
+              text-slate-200 placeholder-slate-600 leading-relaxed
+              focus:outline-none focus:border-brand-500/60 focus:ring-1 focus:ring-brand-500/30
+              transition-colors resize-none"
+          />
+        </div>
+      )}
 
       {/* Footer nav */}
       <div className="flex items-center justify-between pt-4 border-t border-surface-700">
-        <button type="button" onClick={onBack} className="atd-btn-ghost" disabled={saving}>
+        <button type="button" onClick={onBack} className="atd-btn-ghost" disabled={saving || !!savedSession}>
           <ArrowLeft size={14} /> Back
         </button>
-        <button
-          type="button"
-          onClick={onSave}
-          disabled={saving}
-          className="atd-btn-primary disabled:opacity-40 disabled:cursor-not-allowed"
-        >
-          {saving
-            ? <><Loader2 size={14} className="animate-spin" /> Saving…</>
-            : <><Save size={14} /> Save Analysis</>}
-        </button>
+        {savedSession ? (
+          <a href="/market-analysis" className="atd-btn-primary">
+            <CheckCircle2 size={14} /> Done — Back to Analysis
+          </a>
+        ) : (
+          <button
+            type="button"
+            onClick={onSave}
+            disabled={saving}
+            className="atd-btn-primary disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            {saving
+              ? <><Loader2 size={14} className="animate-spin" /> Saving…</>
+              : <><Save size={14} /> Save Analysis</>}
+          </button>
+        )}
       </div>
     </div>
   )
@@ -652,15 +808,18 @@ export function NewAnalysisPage() {
 
   const preselectedId = searchParams.get('module') ? Number(searchParams.get('module')) : null
 
-  const [step,       setStep]       = useState<1 | 2 | 3>(preselectedId ? 2 : 1)
-  const [modules,    setModules]    = useState<MAModule[]>([])
-  const [selectedId, setSelectedId] = useState<number | null>(preselectedId)
-  const [indicators, setIndicators] = useState<MAIndicator[]>([])
-  const [answers,    setAnswers]    = useState<DraftAnswer[]>([])
-  const [notes,      setNotes]      = useState('')
-  const [loading,    setLoading]    = useState(false)
-  const [saving,     setSaving]     = useState(false)
-  const [error,      setError]      = useState<string | null>(null)
+  const [step,          setStep]          = useState<1 | 2 | 3>(preselectedId ? 2 : 1)
+  const [modules,       setModules]       = useState<MAModule[]>([])
+  const [selectedId,    setSelectedId]    = useState<number | null>(preselectedId)
+  const [indicators,    setIndicators]    = useState<MAIndicator[]>([])
+  const [answers,       setAnswers]       = useState<DraftAnswer[]>([])
+  const [notes,         setNotes]         = useState('')
+  const [loading,       setLoading]       = useState(false)
+  const [saving,        setSaving]        = useState(false)
+  const [error,         setError]         = useState<string | null>(null)
+  const [savedSession,  setSavedSession]  = useState<MASessionOut | null>(null)
+  const [conclusion,    setConclusion]    = useState<MATradeConclusion | null>(null)
+  const [thresholds,    setThresholds]    = useState<{ bullish: number; bearish: number }>({ bullish: 65, bearish: 34 })
 
   // Load modules once
   useEffect(() => {
@@ -672,10 +831,12 @@ export function NewAnalysisPage() {
     if (!activeProfile) return
     setLoading(true); setError(null)
     try {
-      const [inds, cfg] = await Promise.all([
+      const [inds, cfg, thr] = await Promise.all([
         maApi.listIndicators(moduleId),
         maApi.getIndicatorConfig(activeProfile.id),
+        maApi.getThresholds(moduleId),
       ])
+      setThresholds(thr)
       const cfgMap: Record<number, boolean> = {}
       for (const c of cfg.configs) cfgMap[c.indicator_id] = c.enabled
       const activeInds = inds.filter((i) =>
@@ -709,13 +870,22 @@ export function NewAnalysisPage() {
         score:        a.score,
         answer_label: a.answer_label,
       }))
-      await maApi.createSession({
+      const session = await maApi.createSession({
         profile_id: activeProfile.id,
         module_id:  selectedId,
         answers:    payload,
         notes:      notes.trim() || null,
       })
-      navigate('/market-analysis')
+      setSavedSession(session)
+      // Load v2 conclusion if composite score is available
+      if (session.score_composite_a != null) {
+        try {
+          const c = await maApi.getConclusion(session.id)
+          setConclusion(c)
+        } catch {
+          // non-fatal: conclusion widget won't show
+        }
+      }
     } catch (e: unknown) {
       setError((e as Error).message)
     } finally {
@@ -794,6 +964,9 @@ export function NewAnalysisPage() {
               saving={saving}
               onBack={() => setStep(2)}
               onSave={handleSave}
+              savedSession={savedSession}
+              conclusion={conclusion}
+              thresholds={thresholds}
             />
           )}
         </>

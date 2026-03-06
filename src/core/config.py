@@ -29,7 +29,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=_ENV_FILE,
         env_file_encoding="utf-8",
-        env_file_required=False,  # prod containers have no .env file — that's fine
+        env_file_required=False,  # type: ignore[typeddict-unknown-key]  # prod containers have no .env file — that's fine
         extra="ignore",
     )
 

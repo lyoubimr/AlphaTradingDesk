@@ -40,6 +40,7 @@ from sqlalchemy.orm import Session, joinedload
 from src.core.models.broker import Instrument, Profile
 from src.core.models.trade import Position, Strategy, Trade
 from src.trades.schemas import (
+    PositionIn,
     TradeClose,
     TradeListItem,
     TradeOpen,
@@ -47,7 +48,6 @@ from src.trades.schemas import (
     TradePartialClose,
     TradeSizeResult,
     TradeUpdate,
-    PositionIn,
 )
 
 # -- Constants -----------------------------------------------------------------
@@ -200,7 +200,7 @@ def _compute_potential_profit(
     Use the best (highest-numbered) TP to estimate max potential profit.
     profit = units_or_lots x |best_tp - entry_price|
     """
-    best_tp = max(data.positions, key=lambda p: p.position_number)
+    best_tp = max(data.positions, key=lambda p: (p.position_number or 0))
     distance = abs(best_tp.take_profit_price - data.entry_price)
     return (size_info.units_or_lots * distance).quantize(Decimal("0.01"))
 
@@ -351,7 +351,7 @@ def list_trades(
     pair: str | None = None,
     offset: int = 0,
     limit: int = 50,
-) -> list[Trade]:
+) -> list[TradeListItem]:
     """
     Return trades (most recent first) with optional filters.
     Eagerly loads instrument + positions so display_name and booked_pnl are available.
@@ -442,8 +442,9 @@ def update_trade(db: Session, trade_id: int, data: TradeUpdate) -> TradeOut:
 
     # ── Amend entry (pending-only) ─────────────────────────────────────────
     if amend_entry:
-        new_entry = data.entry_price
-        sl = data.stop_loss if data.stop_loss is not None else trade.stop_loss
+        assert data.entry_price is not None  # amend_entry flag guarantees this
+        new_entry: Decimal = data.entry_price
+        sl: Decimal = data.stop_loss if data.stop_loss is not None else trade.stop_loss
 
         # Validate SL direction against the new entry
         if trade.direction == "long" and sl >= new_entry:
@@ -471,7 +472,7 @@ def update_trade(db: Session, trade_id: int, data: TradeUpdate) -> TradeOut:
             dummy = TradeOpen(
                 profile_id=trade.profile_id,
                 pair=trade.pair,
-                direction=trade.direction,
+                direction=trade.direction,  # type: ignore[arg-type]
                 entry_price=new_entry,
                 stop_loss=sl,
                 asset_class=trade.asset_class,
@@ -496,8 +497,10 @@ def update_trade(db: Session, trade_id: int, data: TradeUpdate) -> TradeOut:
 
     # ── Amend positions (pending-only) ────────────────────────────────────
     if amend_positions:
+        assert data.amend_positions is not None  # narrowed by amend_positions guard
+        new_positions: list[PositionIn] = data.amend_positions
         # Validate lot sum
-        total_pct = sum(p.lot_percentage for p in data.amend_positions)  # type: ignore[union-attr]
+        total_pct = sum(p.lot_percentage for p in new_positions)
         if total_pct != Decimal("100"):
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -510,7 +513,6 @@ def update_trade(db: Session, trade_id: int, data: TradeUpdate) -> TradeOut:
         db.flush()
 
         entry = trade.entry_price
-        new_positions = data.amend_positions  # type: ignore[union-attr]
         for idx, pos_in in enumerate(new_positions, start=1):
             if pos_in.position_number is None:
                 pos_in.position_number = idx
@@ -525,7 +527,7 @@ def update_trade(db: Session, trade_id: int, data: TradeUpdate) -> TradeOut:
         trade.nb_take_profits = len(new_positions)
 
         # Recompute potential_profit from new TPs
-        best_tp = max(new_positions, key=lambda p: p.position_number)
+        best_tp = max(new_positions, key=lambda p: (p.position_number or 0))
         price_dist = abs(trade.entry_price - trade.stop_loss)
         if price_dist > 0:
             total_units = trade.risk_amount / price_dist
