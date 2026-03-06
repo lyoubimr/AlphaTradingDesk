@@ -232,7 +232,8 @@ export type GoalPeriod = 'daily' | 'weekly' | 'monthly'
 export interface GoalOut {
   id: number
   profile_id: number
-  style_id: number
+  style_id: number | null   // null = global (all styles)
+  style_name: string | null // resolved by backend
   period: GoalPeriod
   goal_pct: string    // Decimal as string
   limit_pct: string   // Decimal as string (negative)
@@ -240,12 +241,12 @@ export interface GoalOut {
   // v2 fields
   avg_r_min: string | null
   max_trades: number | null
-  period_type: 'outcome' | 'process' | 'review'
+  period_type: 'outcome' | 'process'
   show_on_dashboard: boolean
 }
 
 export interface GoalCreate {
-  style_id: number
+  style_id?: number | null   // null = global
   period: GoalPeriod
   goal_pct: string    // positive, e.g. "1.5"
   limit_pct: string   // negative, e.g. "-1.5"
@@ -253,7 +254,7 @@ export interface GoalCreate {
   // v2 fields
   avg_r_min?: string | null
   max_trades?: number | null
-  period_type?: 'outcome' | 'process' | 'review'
+  period_type?: 'outcome' | 'process'
   show_on_dashboard?: boolean
 }
 
@@ -264,13 +265,14 @@ export interface GoalUpdate {
   // v2 fields
   avg_r_min?: string | null
   max_trades?: number | null
-  period_type?: 'outcome' | 'process' | 'review' | null
+  period_type?: 'outcome' | 'process' | null
   show_on_dashboard?: boolean | null
 }
 
 export interface GoalProgressItem {
-  style_id: number
-  style_name: string
+  goal_id: number
+  style_id: number | null
+  style_name: string | null
   period: string
   period_start: string   // ISO date
   period_end: string     // ISO date
@@ -286,8 +288,15 @@ export interface GoalProgressItem {
   avg_r: string | null
   avg_r_hit: boolean | null
   max_trades_hit: boolean | null
-  period_type: 'outcome' | 'process' | 'review'
+  period_type: 'outcome' | 'process'
   show_on_dashboard: boolean
+  trades?: Array<{
+    id: number
+    pair: string
+    direction: string
+    realized_pnl: number
+    closed_at: string | null
+  }>
 }
 
 // ── Goal Overrides ────────────────────────────────────────────────────────

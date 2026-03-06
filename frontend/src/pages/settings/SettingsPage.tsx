@@ -161,10 +161,10 @@ export function SettingsPage() {
         <SettingsSection
           icon={<Info size={16} />}
           title="Goals"
-          description="Manage outcome, process, and review goals per trading style"
+          description="Global P&L targets and discipline limits across all trading styles"
         >
-          <SettingRow label="Goal types"       value="outcome · process · review" info="Outcome: P&L target. Process: discipline (avg R + trade count). Review: periodic recap cadence." />
-          <SettingRow label="v2 fields"        value="avg_r_min · max_trades"     info="Process goals can define a minimum avg R-multiple and a max trades per period." />
+          <SettingRow label="Goal types"       value="outcome · process"          info="Outcome: % gain target + loss circuit-breaker. Process: avg R-multiple + optional max trades per period." />
+          <SettingRow label="Scope"            value="Global (all styles)"        info="Goals apply to all trades of the profile, regardless of trading style." />
           <SettingRow label="Dashboard cards"  value="Configurable per goal"      info="Each goal can opt in/out of the dashboard progress card via show_on_dashboard." />
           <div className="pt-2">
             <Link
