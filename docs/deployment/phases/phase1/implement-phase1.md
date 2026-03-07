@@ -1,9 +1,9 @@
 # 🛠️ Phase 1 — Implementation Plan
 
 **Date:** March 1, 2026  
-**Updated:** March 6, 2026  
-**Version:** 2.5  
-**Status:** Step 13-A/B/C/D/E DONE → Next: Step 13-F (MA v2 frontend) → Step 13-G (Strategy module) → Step 13-H (Dashboard polish) → Step 13-I (QA) → v1.0.0
+**Updated:** March 7, 2026  
+**Version:** 2.6  
+**Status:** Step 13-A/B/C/D/E + bugfixes DONE → Next: Step 13-F (MA v2 frontend) → 13-G → 13-H → 13-I → v1.0.0
 
 > This document describes **what to build, in what order**.  
 > Each step is a working, testable increment — nothing is left dangling.
@@ -144,7 +144,73 @@ LIMIT:  pending → open → partial → closed
 - `fmtAmount(signed=true)` — P&L shows +/- prefix on currency amounts
 - Target/Limit row: `+$410` green / `-$205` red — visually clear
 
-**Trade form (NewTradePage.tsx) — completed:**
+### Bugfix batch — DONE (2026-03-07) — Trade PnL + Goals service + Tests
+
+#### 🐛 initial_stop_loss bug (PnL = 0 on BE trades)
+
+**Root cause:** When a trade moves to Break-Even, `stop_loss = entry_price`. The backend
+`_position_pnl()` was computing `price_dist = entry - stop_loss = 0`, leading to
+`units = risk / 0 = ∞` or divide-by-zero → PnL always 0 for all subsequent TP closures.
+
+**Fix:**
+- `initial_stop_loss` column (added in migration `63f9f74ede34`) now used for all unit calculations
+- `src/trades/service.py` — `_position_pnl` uses `trade.initial_stop_loss` (set once at open, never changed)
+- `src/trades/schemas.py` — `TradeOut` + `TradeListItem` expose `initial_stop_loss`
+- `frontend/src/types/api.ts` — `initial_stop_loss: string` added to `TradeListItem`
+- `frontend/src/pages/trades/TradeDetailPage.tsx` — PnL preview + R:R use `initial_stop_loss`
+- `database/migrations/seeds/seed_test_data.py` — ETH (2050) and EURUSD (1.08700) BE trades now have correct `initial_stop_loss`
+
+**Rule:** `initial_stop_loss` is set once at `open_trade` and **never updated**. Always use it
+(not `stop_loss`) for unit/lot size and PnL calculations.
+
+#### 🐛 direction uppercase in API responses
+
+**Root cause:** DB stores `direction` lowercase (`"long"/"short"`); frontend compares `"LONG"/"SHORT"`.
+This caused all direction checks in PnL preview to silently evaluate the wrong branch.
+
+**Fix:**
+- `src/trades/schemas.py` — `model_validator(mode="after")` in `TradeOut` + `TradeListItem` uppercases `direction` before returning
+- `tests/test_trades.py` — assertion updated to `"LONG"` / `"SHORT"`
+
+#### 🐛 goals/service.py — Strategy.style_id AttributeError
+
+**Root cause:** Old dead code in `_compute_period_data()` tried to join `Strategy` on `style_id`
+which was removed from the model in Step 13-A (all goals are now global, `style_id=NULL`).
+
+**Fix:**
+- `src/goals/service.py` — removed the two `if style_id is not None` branches that referenced
+  `Strategy.style_id` — replaced with a simple direct query (all trades of the profile)
+- The `style_id` parameter is preserved for API compatibility but is now a no-op (always `NULL`)
+
+#### 🐛 src/main.py — OSError on pytest macOS (uploads_dir)
+
+**Root cause:** `uploads_dir` defaults to `/app/uploads` (Docker path). `os.makedirs()` at module
+level raised `OSError: Read-only file system` when running pytest locally on macOS.
+
+**Fix:**
+- `src/main.py` — wrapped `os.makedirs` in try/except; falls back to `$TMPDIR/atd_uploads`
+  when the configured path is inaccessible
+
+#### 🧪 Test suite — 118/118 passing (was 7 failing)
+
+| Test file | Fixed |
+|-----------|-------|
+| `tests/test_goals.py` | `_make_closed_trade` missing `initial_stop_loss` → `NotNullViolation` |
+| `tests/test_goals.py` | `TestUpdateGoal` used old URL `PUT .../goals/{style_id}/{period}` → 404; updated to `PUT .../goals/{goal_id}` |
+| `tests/test_goals.py` | `test_inactive_goals_excluded` used old PUT URL → updated |
+| `tests/test_goals.py` | `test_progress_response_shape` expected_keys outdated → added `goal_id`, `avg_r_min`, `trades` |
+
+#### 🧹 Code quality (2026-03-07)
+
+- `ruff check --fix` → 10 auto-fixed (unused imports + unsorted import blocks)
+- `ruff format` → 34 files reformatted
+- `mypy src/` → **0 errors** (35 source files)
+- `eslint .` → **0 warnings/errors**
+- `tsc --noEmit` → **0 type errors**
+- vitest → **8/8 passing**
+- pytest → **118/118 passing**
+
+
 - Fixed Fractional position sizing (Crypto: units, CFD: lots)
 - Multi-TP presets (1–4 TPs, Smart Scale / Balanced / Aggressive / Conservative / Profit Max)
 - SL direction validation (LONG: SL < entry, SHORT: SL > entry)

@@ -222,3 +222,8 @@ __marimo__/
 
 #custom
 custom/
+
+# Uploaded files — user content, never committed
+# Keep the directory structure via uploads/.gitkeep only
+uploads/*
+!uploads/.gitkeep

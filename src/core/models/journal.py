@@ -1,6 +1,7 @@
 """
 Journal models: performance_snapshots, note_templates.
 """
+
 from __future__ import annotations
 
 from datetime import date, datetime

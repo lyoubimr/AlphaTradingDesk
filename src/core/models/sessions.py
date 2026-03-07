@@ -4,6 +4,7 @@ Session catalog and user preferences models.
 `Session` = trading session catalog (Asia / London / New York / etc.)
 `UserPreferences` = per-profile UI & display settings
 """
+
 from __future__ import annotations
 
 from datetime import datetime, time
@@ -28,6 +29,7 @@ from src.core.database import Base
 
 class TradingSession(Base):
     """Trading session catalog — all times in UTC."""
+
     __tablename__ = "sessions"
     __table_args__ = (UniqueConstraint("name"),)
 
@@ -55,9 +57,7 @@ class UserPreferences(Base):
         nullable=False,
         unique=True,
     )
-    timezone: Mapped[str] = mapped_column(
-        String(50), nullable=False, default="UTC"
-    )
+    timezone: Mapped[str] = mapped_column(String(50), nullable=False, default="UTC")
     # Ordered list of timeframes shown in trade form dropdown
     analyzed_tf_list: Mapped[dict] = mapped_column(
         JSONB,
@@ -65,9 +65,7 @@ class UserPreferences(Base):
         server_default='["15m","1h","4h","1d","1w"]',
     )
     # Quick-access flag — mirrors news_provider_config.enabled
-    news_intelligence_enabled: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, default=False
-    )
+    news_intelligence_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     last_style: Mapped[str | None] = mapped_column(String(20))
     last_period: Mapped[str | None] = mapped_column(String(20))
     updated_at: Mapped[datetime] = mapped_column(

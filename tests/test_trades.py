@@ -11,23 +11,29 @@ Integration tests for Trade Journal API — Step 6.
 
   POST   /api/brokers/{id}/instruments   ← custom instrument creation
 """
+
 from __future__ import annotations
 
 from datetime import datetime
 from decimal import Decimal
 
-import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from src.core.models.broker import Broker, Instrument, Profile
-from src.core.models.trade import Position, Strategy, Trade
-
+from src.core.models.trade import Strategy
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
+
 def _make_broker(db: Session, *, name: str = "TestBroker", market_type: str = "Crypto") -> Broker:
-    b = Broker(name=name, market_type=market_type, default_currency="USD", is_predefined=True, status="active")
+    b = Broker(
+        name=name,
+        market_type=market_type,
+        default_currency="USD",
+        is_predefined=True,
+        status="active",
+    )
     db.add(b)
     db.flush()
     return b
@@ -112,6 +118,7 @@ def _open_payload(
 
 # ── Tests: POST /api/brokers/{id}/instruments ─────────────────────────────────
 
+
 class TestCreateInstrument:
     def test_creates_custom_instrument(self, client: TestClient, db_session: Session):
         broker = _make_broker(db_session, name="CustomBroker")
@@ -155,6 +162,7 @@ class TestCreateInstrument:
 
 # ── Tests: POST /api/trades (open) ────────────────────────────────────────────
 
+
 class TestOpenTrade:
     def test_opens_crypto_trade(self, client: TestClient, db_session: Session):
         broker = _make_broker(db_session, name="KrakenOpen")
@@ -167,7 +175,7 @@ class TestOpenTrade:
         data = resp.json()
         assert data["status"] == "open"
         assert data["profile_id"] == profile.id
-        assert data["direction"] == "long"
+        assert data["direction"] == "LONG"  # API always returns uppercase direction
         assert len(data["positions"]) == 1
         assert data["positions"][0]["status"] == "open"
 
@@ -200,7 +208,9 @@ class TestOpenTrade:
         inst = _make_instrument(db_session, broker)
         profile = _make_profile(db_session, broker, capital=Decimal("10000"))
 
-        resp = client.post("/api/trades", json=_open_payload(profile, inst, entry="50000", sl="49000"))
+        resp = client.post(
+            "/api/trades", json=_open_payload(profile, inst, entry="50000", sl="49000")
+        )
 
         assert Decimal(resp.json()["size_info"]["units_or_lots"]) == Decimal("0.20000000")
 
@@ -282,6 +292,7 @@ class TestOpenTrade:
 
 # ── Tests: GET /api/trades ────────────────────────────────────────────────────
 
+
 class TestListTrades:
     def test_returns_trades(self, client: TestClient, db_session: Session):
         broker = _make_broker(db_session, name="ListBroker")
@@ -344,6 +355,7 @@ class TestListTrades:
 
 # ── Tests: GET /api/trades/{id} ───────────────────────────────────────────────
 
+
 class TestGetTrade:
     def test_returns_trade_detail(self, client: TestClient, db_session: Session):
         broker = _make_broker(db_session, name="DetailBroker")
@@ -364,6 +376,7 @@ class TestGetTrade:
 
 
 # ── Tests: PUT /api/trades/{id} ───────────────────────────────────────────────
+
 
 class TestUpdateTrade:
     def test_updates_stop_loss(self, client: TestClient, db_session: Session):
@@ -406,13 +419,16 @@ class TestUpdateTrade:
 
 # ── Tests: POST /api/trades/{id}/close ────────────────────────────────────────
 
+
 class TestFullClose:
     def test_closes_trade_and_computes_pnl(self, client: TestClient, db_session: Session):
         broker = _make_broker(db_session, name="CloseBroker")
         inst = _make_instrument(db_session, broker)
         profile = _make_profile(db_session, broker, capital=Decimal("10000"))
 
-        r = client.post("/api/trades", json=_open_payload(profile, inst, entry="50000", sl="49000", tp1="52000"))
+        r = client.post(
+            "/api/trades", json=_open_payload(profile, inst, entry="50000", sl="49000", tp1="52000")
+        )
         trade_id = r.json()["id"]
 
         resp = client.post(f"/api/trades/{trade_id}/close", json={"exit_price": "52000"})
@@ -470,7 +486,9 @@ class TestFullClose:
         assert strategy.trades_count == 1
         assert strategy.win_count == 1
 
-    def test_strategy_win_count_not_incremented_on_loss(self, client: TestClient, db_session: Session):
+    def test_strategy_win_count_not_incremented_on_loss(
+        self, client: TestClient, db_session: Session
+    ):
         broker = _make_broker(db_session, name="LossBroker")
         inst = _make_instrument(db_session, broker)
         profile = _make_profile(db_session, broker)
@@ -507,6 +525,7 @@ class TestFullClose:
 
 
 # ── Tests: POST /api/trades/{id}/partial ─────────────────────────────────────
+
 
 class TestPartialClose:
     def _open_3tp(self, client: TestClient, profile: Profile, inst: Instrument) -> dict:
@@ -575,7 +594,9 @@ class TestPartialClose:
         assert new_risk < original_risk
         assert new_risk > 0
 
-    def test_cannot_partially_close_same_position_twice(self, client: TestClient, db_session: Session):
+    def test_cannot_partially_close_same_position_twice(
+        self, client: TestClient, db_session: Session
+    ):
         broker = _make_broker(db_session, name="DoublePartialBroker")
         inst = _make_instrument(db_session, broker)
         profile = _make_profile(db_session, broker)
@@ -634,6 +655,7 @@ class TestPartialClose:
 
 # ── Tests: DELETE /api/trades/{id} ────────────────────────────────────────────
 
+
 class TestDeleteTrade:
     def test_soft_deletes_open_trade(self, client: TestClient, db_session: Session):
         broker = _make_broker(db_session, name="DelBroker")
@@ -671,11 +693,13 @@ class TestDeleteTrade:
 
 # ── Tests: CFD margin warning ─────────────────────────────────────────────────
 
+
 class TestCFDMarginWarning:
     def test_margin_warning_present_for_cfd(self, client: TestClient, db_session: Session):
         broker = _make_broker(db_session, name="VantageCFD", market_type="CFD")
         inst = _make_instrument(
-            db_session, broker,
+            db_session,
+            broker,
             symbol="XAUUSD",
             asset_class="Commodities",
             tick_value=Decimal("0.01"),

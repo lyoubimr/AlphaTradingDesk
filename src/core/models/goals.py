@@ -1,6 +1,7 @@
 """
 Goals models: profile_goals, goal_progress_log, goal_override_log.
 """
+
 from __future__ import annotations
 
 from datetime import date, datetime
@@ -18,7 +19,6 @@ from sqlalchemy import (
     Numeric,
     String,
     Text,
-    UniqueConstraint,
     func,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -59,9 +59,7 @@ class ProfileGoal(Base):
     period_type: Mapped[str] = mapped_column(
         String(20), nullable=False, default="outcome"
     )  # 'outcome' | 'process'
-    show_on_dashboard: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, default=True
-    )
+    show_on_dashboard: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, server_default=func.now()
@@ -100,9 +98,7 @@ class GoalProgressLog(Base):
     goal_hit: Mapped[bool] = mapped_column(Boolean, default=False)
     limit_hit: Mapped[bool] = mapped_column(Boolean, default=False)
     # Phase 2+ — stored as 1.0 (neutral) until VI module is active
-    vi_multiplier: Mapped[Decimal] = mapped_column(
-        Numeric(5, 3), default=Decimal("1.0")
-    )
+    vi_multiplier: Mapped[Decimal] = mapped_column(Numeric(5, 3), default=Decimal("1.0"))
     adjusted_goal: Mapped[Decimal | None] = mapped_column(Numeric(6, 2))
     adjusted_limit: Mapped[Decimal | None] = mapped_column(Numeric(6, 2))
     snapshot_at: Mapped[datetime] = mapped_column(
@@ -116,10 +112,9 @@ class GoalProgressLog(Base):
 
 class GoalOverrideLog(Base):
     """Audit log for circuit-breaker overrides — requires a mandatory written reason."""
+
     __tablename__ = "goal_override_log"
-    __table_args__ = (
-        Index("idx_goal_override_log_profile", "profile_id", "overridden_at"),
-    )
+    __table_args__ = (Index("idx_goal_override_log_profile", "profile_id", "overridden_at"),)
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     profile_id: Mapped[int] = mapped_column(

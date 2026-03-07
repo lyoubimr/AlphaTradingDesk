@@ -18,6 +18,8 @@ export interface Profile {
   // ALL closed trades of this profile, regardless of strategy.
   trades_count: number
   win_count: number
+  // WR counting threshold — trades with abs(pnl%) < this are excluded from WR stats
+  min_pnl_pct_for_stats: string
   description: string | null
   notes: string | null
   status: 'active' | 'archived' | 'deleted'
@@ -31,6 +33,7 @@ export interface ProfileCreate {
   capital_start: string
   risk_percentage_default?: string
   max_concurrent_risk_pct?: string
+  min_pnl_pct_for_stats?: string
   description?: string | null
   notes?: string | null
 }
@@ -44,6 +47,7 @@ export interface ProfileUpdate {
   capital_current?: string
   risk_percentage_default?: string
   max_concurrent_risk_pct?: string
+  min_pnl_pct_for_stats?: string
   description?: string | null
   notes?: string | null
   status?: 'active' | 'archived' | 'deleted'
@@ -128,6 +132,8 @@ export interface TradeListItem {
   entry_price: string
   entry_date: string | null
   stop_loss: string
+  /** Original SL at trade open — NEVER changes after BE move. Use for PnL calc. */
+  initial_stop_loss: string
   nb_take_profits: number
   risk_amount: string
   potential_profit: string | null
@@ -199,8 +205,10 @@ export interface Strategy {
   profile_id: number
   name: string
   description: string | null
+  rules: string | null
   emoji: string | null
   color: string | null
+  image_url: string | null
   status: string
   trades_count: number
   win_count: number
@@ -210,8 +218,21 @@ export interface Strategy {
 export interface StrategyCreate {
   name: string
   description?: string | null
+  rules?: string | null
   emoji?: string | null
   color?: string | null
+  image_url?: string | null
+}
+
+export interface StrategyUpdate {
+  name?: string
+  description?: string | null
+  rules?: string | null
+  emoji?: string | null
+  color?: string | null
+  image_url?: string | null
+  min_trades_for_stats?: number
+  status?: 'active' | 'archived'
 }
 
 // ── Trading Styles ────────────────────────────────────────────────────────

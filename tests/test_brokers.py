@@ -3,6 +3,7 @@ Integration tests for GET /api/brokers and GET /api/brokers/{id}/instruments.
 
 Brokers are read-only reference data — no create/update/delete endpoints.
 """
+
 from __future__ import annotations
 
 from fastapi.testclient import TestClient
@@ -10,8 +11,8 @@ from sqlalchemy.orm import Session
 
 from src.core.models.broker import Broker, Instrument
 
-
 # ── Helpers ───────────────────────────────────────────────────────────────────
+
 
 def _make_broker(db: Session, *, name: str, market_type: str, status: str = "active") -> Broker:
     broker = Broker(
@@ -26,7 +27,9 @@ def _make_broker(db: Session, *, name: str, market_type: str, status: str = "act
     return broker
 
 
-def _make_instrument(db: Session, broker: Broker, *, symbol: str, active: bool = True) -> Instrument:
+def _make_instrument(
+    db: Session, broker: Broker, *, symbol: str, active: bool = True
+) -> Instrument:
     instrument = Instrument(
         broker_id=broker.id,
         symbol=symbol,
@@ -40,6 +43,7 @@ def _make_instrument(db: Session, broker: Broker, *, symbol: str, active: bool =
 
 
 # ── Tests: GET /api/brokers ───────────────────────────────────────────────────
+
 
 class TestListBrokers:
     def test_returns_only_active_brokers(self, client: TestClient, db_session: Session):
@@ -66,10 +70,18 @@ class TestListBrokers:
 
         assert resp.status_code == 200
         broker = next(b for b in resp.json() if b["name"] == "ShapeBroker")
-        assert set(broker.keys()) == {"id", "name", "market_type", "default_currency", "is_predefined", "status"}
+        assert set(broker.keys()) == {
+            "id",
+            "name",
+            "market_type",
+            "default_currency",
+            "is_predefined",
+            "status",
+        }
 
 
 # ── Tests: GET /api/brokers/{id}/instruments ──────────────────────────────────
+
 
 class TestListInstruments:
     def test_returns_active_instruments_for_broker(self, client: TestClient, db_session: Session):

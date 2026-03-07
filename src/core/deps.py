@@ -1,6 +1,7 @@
 """
 FastAPI dependencies — shared across all routers.
 """
+
 from __future__ import annotations
 
 from collections.abc import Generator

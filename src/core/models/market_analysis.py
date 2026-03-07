@@ -5,6 +5,7 @@ Market analysis models:
   market_analysis_answers, news_provider_config,
   weekly_events, market_analysis_configs.
 """
+
 from __future__ import annotations
 
 from datetime import date, datetime
@@ -47,12 +48,8 @@ class MarketAnalysisModule(Base):
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
 
     # Relationships
-    indicators: Mapped[list[MarketAnalysisIndicator]] = relationship(
-        back_populates="module"
-    )
-    sessions: Mapped[list[MarketAnalysisSession]] = relationship(
-        back_populates="module"
-    )
+    indicators: Mapped[list[MarketAnalysisIndicator]] = relationship(back_populates="module")
+    sessions: Mapped[list[MarketAnalysisSession]] = relationship(back_populates="module")
     market_analysis_configs: Mapped[list[MarketAnalysisConfig]] = relationship(
         back_populates="module"
     )
@@ -93,12 +90,8 @@ class MarketAnalysisIndicator(Base):
 
     # Relationships
     module: Mapped[MarketAnalysisModule] = relationship(back_populates="indicators")
-    profile_configs: Mapped[list[ProfileIndicatorConfig]] = relationship(
-        back_populates="indicator"
-    )
-    answers: Mapped[list[MarketAnalysisAnswer]] = relationship(
-        back_populates="indicator"
-    )
+    profile_configs: Mapped[list[ProfileIndicatorConfig]] = relationship(back_populates="indicator")
+    answers: Mapped[list[MarketAnalysisAnswer]] = relationship(back_populates="indicator")
 
 
 class ProfileIndicatorConfig(Base):
@@ -121,13 +114,12 @@ class ProfileIndicatorConfig(Base):
 
     # Relationships
     profile: Mapped[Profile] = relationship(back_populates="profile_indicator_configs")  # type: ignore[name-defined]
-    indicator: Mapped[MarketAnalysisIndicator] = relationship(
-        back_populates="profile_configs"
-    )
+    indicator: Mapped[MarketAnalysisIndicator] = relationship(back_populates="profile_configs")
 
 
 class MarketAnalysisSession(Base):
     """One completed analysis session — stores 3-TF scores for up to 2 assets."""
+
     __tablename__ = "market_analysis_sessions"
     __table_args__ = (
         Index(
@@ -234,6 +226,7 @@ class MarketAnalysisAnswer(Base):
 
 class NewsProviderConfig(Base):
     """Per-profile AI news provider config — API key stored AES-256 encrypted."""
+
     __tablename__ = "news_provider_config"
     __table_args__ = (UniqueConstraint("profile_id"),)
 
@@ -244,20 +237,14 @@ class NewsProviderConfig(Base):
         nullable=False,
         unique=True,
     )
-    provider: Mapped[str] = mapped_column(
-        String(20), nullable=False, default="perplexity"
-    )
-    model: Mapped[str] = mapped_column(
-        String(40), nullable=False, default="sonar-pro"
-    )
+    provider: Mapped[str] = mapped_column(String(20), nullable=False, default="perplexity")
+    model: Mapped[str] = mapped_column(String(40), nullable=False, default="sonar-pro")
     # AES-256 ciphertext — NULL until key is configured
     api_key_encrypted: Mapped[bytes | None] = mapped_column(LargeBinary)
     api_key_iv: Mapped[bytes | None] = mapped_column(LargeBinary)
     prompt_template: Mapped[str] = mapped_column(Text, nullable=False)
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    max_fetches_per_day: Mapped[int] = mapped_column(
-        Integer, nullable=False, default=10
-    )
+    max_fetches_per_day: Mapped[int] = mapped_column(Integer, nullable=False, default=10)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
@@ -271,11 +258,10 @@ class NewsProviderConfig(Base):
 
 class WeeklyEvent(Base):
     """Macro economic events entered weekly — displayed as warnings on trade form."""
+
     __tablename__ = "weekly_events"
     __table_args__ = (
-        CheckConstraint(
-            "impact IN ('high', 'medium', 'low')", name="ck_weekly_events_impact"
-        ),
+        CheckConstraint("impact IN ('high', 'medium', 'low')", name="ck_weekly_events_impact"),
         Index("idx_weekly_events_profile_week", "profile_id", "week_start"),
         Index("idx_weekly_events_date_impact", "event_date", "impact"),
     )
@@ -290,9 +276,7 @@ class WeeklyEvent(Base):
     title: Mapped[str] = mapped_column(Text, nullable=False)
     impact: Mapped[str] = mapped_column(String(10), nullable=False, default="medium")
     # e.g. '{"crypto","gold"}', '{"all"}'
-    asset_scope: Mapped[list] = mapped_column(
-        ARRAY(Text), nullable=False, server_default='{"all"}'
-    )
+    asset_scope: Mapped[list] = mapped_column(ARRAY(Text), nullable=False, server_default='{"all"}')
     note: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
@@ -304,6 +288,7 @@ class WeeklyEvent(Base):
 
 class MarketAnalysisConfig(Base):
     """Score thresholds and risk multipliers per module — global or per-profile."""
+
     __tablename__ = "market_analysis_configs"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)

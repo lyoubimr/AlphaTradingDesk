@@ -5,6 +5,7 @@ Covers: list, create, get by id, partial update, soft-delete,
         validation (broker/market_type mismatch, inactive broker),
         and error cases (404).
 """
+
 from __future__ import annotations
 
 from fastapi.testclient import TestClient
@@ -12,8 +13,8 @@ from sqlalchemy.orm import Session
 
 from src.core.models.broker import Broker
 
-
 # ── Helpers ───────────────────────────────────────────────────────────────────
+
 
 def _make_broker(
     db: Session,
@@ -47,6 +48,7 @@ def _profile_payload(**overrides) -> dict:
 
 # ── Tests: GET /api/profiles ──────────────────────────────────────────────────
 
+
 class TestListProfiles:
     def test_returns_empty_list_initially(self, client: TestClient):
         resp = client.get("/api/profiles")
@@ -65,6 +67,7 @@ class TestListProfiles:
 
 
 # ── Tests: POST /api/profiles ─────────────────────────────────────────────────
+
 
 class TestCreateProfile:
     def test_creates_profile_with_minimal_fields(self, client: TestClient):
@@ -90,7 +93,9 @@ class TestCreateProfile:
         assert resp.status_code == 201
         assert resp.json()["risk_percentage_default"] == "2.00"
 
-    def test_creates_profile_linked_to_matching_broker(self, client: TestClient, db_session: Session):
+    def test_creates_profile_linked_to_matching_broker(
+        self, client: TestClient, db_session: Session
+    ):
         broker = _make_broker(db_session, name="KrakenTest", market_type="Crypto")
 
         resp = client.post(
@@ -101,7 +106,9 @@ class TestCreateProfile:
         assert resp.status_code == 201
         assert resp.json()["broker_id"] == broker.id
 
-    def test_rejects_mismatched_broker_and_market_type(self, client: TestClient, db_session: Session):
+    def test_rejects_mismatched_broker_and_market_type(
+        self, client: TestClient, db_session: Session
+    ):
         cfd_broker = _make_broker(db_session, name="VantageTest", market_type="CFD")
 
         resp = client.post(
@@ -143,6 +150,7 @@ class TestCreateProfile:
 
 # ── Tests: GET /api/profiles/{id} ─────────────────────────────────────────────
 
+
 class TestGetProfile:
     def test_returns_profile_by_id(self, client: TestClient):
         create_resp = client.post("/api/profiles", json=_profile_payload(name="GetMe"))
@@ -161,6 +169,7 @@ class TestGetProfile:
 
 
 # ── Tests: PUT /api/profiles/{id} ─────────────────────────────────────────────
+
 
 class TestUpdateProfile:
     def test_partial_update_name(self, client: TestClient):
@@ -213,6 +222,7 @@ class TestUpdateProfile:
 
 
 # ── Tests: DELETE /api/profiles/{id} ─────────────────────────────────────────
+
 
 class TestDeleteProfile:
     def test_soft_delete_returns_204(self, client: TestClient):

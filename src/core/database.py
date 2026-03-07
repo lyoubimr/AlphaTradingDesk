@@ -9,6 +9,7 @@ accessed via `get_engine()`.  This means importing this module (or any model)
 never opens a DB connection, which lets Alembic CLI, pytest collection, and
 other tooling work without a live database.
 """
+
 from __future__ import annotations
 
 from sqlalchemy import Engine, create_engine
@@ -30,6 +31,7 @@ def _normalise_db_url(url: str) -> str:
 
 class Base(DeclarativeBase):
     """Single declarative base shared by all SQLAlchemy models."""
+
     pass
 
 
@@ -47,7 +49,7 @@ def get_engine() -> Engine:
     if _engine is None:
         _engine = create_engine(
             _normalise_db_url(settings.database_url),
-            pool_pre_ping=True,   # drops stale connections before use
+            pool_pre_ping=True,  # drops stale connections before use
             pool_size=10,
             max_overflow=20,
         )

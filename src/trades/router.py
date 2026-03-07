@@ -13,6 +13,7 @@ Routes:
   POST   /api/trades/{id}/cancel      ← cancel pending LIMIT order (no capital/WR impact)
   DELETE /api/trades/{id}             ← physical delete (pending/open/partial/cancelled only)
 """
+
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Query, status
@@ -46,7 +47,9 @@ def open_trade(data: TradeOpen, db: Session = Depends(get_db)) -> object:
 @router.get("", response_model=list[TradeListItem])
 def list_trades(
     profile_id: int | None = Query(default=None, description="Filter by profile"),
-    trade_status: str | None = Query(default=None, alias="status", description="open | partial | closed"),
+    trade_status: str | None = Query(
+        default=None, alias="status", description="open | partial | closed"
+    ),
     pair: str | None = Query(default=None, description="Partial match on pair symbol"),
     offset: int = Query(default=0, ge=0),
     limit: int = Query(default=50, ge=1, le=200),

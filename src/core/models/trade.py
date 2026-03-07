@@ -1,6 +1,7 @@
 """
 Trade-related models: strategies, tags, trades, positions, trade_tags.
 """
+
 from __future__ import annotations
 
 from datetime import datetime
@@ -46,6 +47,7 @@ class Strategy(Base):
     rules: Mapped[str | None] = mapped_column(Text)
     color: Mapped[str | None] = mapped_column(String(7))
     emoji: Mapped[str | None] = mapped_column(String(10))
+    image_url: Mapped[str | None] = mapped_column(String(500))
     status: Mapped[str] = mapped_column(String(50), nullable=False, default="active")
 
     # Stats — updated atomically on trade close
@@ -92,15 +94,12 @@ class Tag(Base):
 class Trade(Base):
     __tablename__ = "trades"
     __table_args__ = (
+        CheckConstraint("direction IN ('long', 'short')", name="ck_trades_direction"),
         CheckConstraint(
-            "direction IN ('long', 'short')", name="ck_trades_direction"
+            "status IN ('pending', 'open', 'partial', 'closed', 'cancelled')",
+            name="ck_trades_status",
         ),
-        CheckConstraint(
-            "status IN ('pending', 'open', 'partial', 'closed', 'cancelled')", name="ck_trades_status"
-        ),
-        CheckConstraint(
-            "order_type IN ('MARKET', 'LIMIT')", name="ck_trades_order_type"
-        ),
+        CheckConstraint("order_type IN ('MARKET', 'LIMIT')", name="ck_trades_order_type"),
         CheckConstraint("risk_amount > 0", name="ck_trades_risk_amount_positive"),
         CheckConstraint("potential_profit > 0", name="ck_trades_potential_profit_positive"),
         CheckConstraint(
@@ -113,8 +112,7 @@ class Trade(Base):
             name="ck_trades_nb_tp_range",
         ),
         CheckConstraint(
-            "confidence_score IS NULL OR "
-            "(confidence_score >= 0 AND confidence_score <= 100)",
+            "confidence_score IS NULL OR " "(confidence_score >= 0 AND confidence_score <= 100)",
             name="ck_trades_confidence_score_range",
         ),
         Index("idx_trades_profile_created", "profile_id", "created_at"),
@@ -149,6 +147,10 @@ class Trade(Base):
 
     # Risk management
     stop_loss: Mapped[Decimal] = mapped_column(Numeric(20, 8), nullable=False)
+    # initial_stop_loss is set ONCE at trade open and NEVER changes.
+    # stop_loss may later move to BE; initial_stop_loss always holds the original
+    # distance used for unit/lot sizing and PnL computation.
+    initial_stop_loss: Mapped[Decimal] = mapped_column(Numeric(20, 8), nullable=False)
     nb_take_profits: Mapped[int] = mapped_column(Integer, nullable=False, default=3)
 
     # Risk calculations
@@ -212,19 +214,16 @@ class Trade(Base):
 
 class Position(Base):
     """One TP target per position (up to 3 per trade)."""
+
     __tablename__ = "positions"
     __table_args__ = (
         UniqueConstraint("trade_id", "position_number"),
-        CheckConstraint(
-            "position_number IN (1, 2, 3)", name="ck_positions_number_range"
-        ),
+        CheckConstraint("position_number IN (1, 2, 3)", name="ck_positions_number_range"),
         CheckConstraint(
             "lot_percentage > 0 AND lot_percentage <= 100",
             name="ck_positions_lot_pct_range",
         ),
-        CheckConstraint(
-            "status IN ('open', 'closed', 'cancelled')", name="ck_positions_status"
-        ),
+        CheckConstraint("status IN ('open', 'closed', 'cancelled')", name="ck_positions_status"),
         CheckConstraint(
             "(status = 'closed' AND exit_price IS NOT NULL) OR "
             "(status != 'closed' AND exit_price IS NULL)",

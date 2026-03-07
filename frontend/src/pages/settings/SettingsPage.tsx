@@ -1,5 +1,5 @@
 // ── Settings page ──────────────────────────────────────────────────────────
-import { User, Database, Bell, Shield, Info, Palette } from 'lucide-react'
+import { User, Database, Bell, Shield, Info, Palette, BarChart2 } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { PageHeader } from '../../components/ui/PageHeader'
 import { Badge } from '../../components/ui/Badge'
@@ -153,6 +153,25 @@ export function SettingsPage() {
               className="inline-flex items-center gap-1.5 text-xs text-brand-400 hover:text-brand-300 transition-colors underline underline-offset-2"
             >
               Open Indicator Editor →
+            </Link>
+          </div>
+        </SettingsSection>
+
+        {/* ── Strategies ───────────────────────────────────────────────── */}
+        <SettingsSection
+          icon={<BarChart2 size={16} />}
+          title="Strategies"
+          description="Define trading strategies and track their win rate automatically"
+        >
+          <SettingRow label="WR threshold"   value="min_trades_for_stats"  info="Win rate is shown as N/A until a strategy has enough trades." />
+          <SettingRow label="BE filter"      value="min_pnl_pct_for_stats" info="Scratch/break-even trades (abs PnL% below threshold) are excluded from WR stats." />
+          <SettingRow label="Image support"  value="URL (upload Phase 2+)" info="Paste any image URL — TradingView screenshot, Imgur, etc." />
+          <div className="pt-2">
+            <Link
+              to="/settings/strategies"
+              className="inline-flex items-center gap-1.5 text-xs text-brand-400 hover:text-brand-300 transition-colors underline underline-offset-2"
+            >
+              Open Strategies Manager →
             </Link>
           </div>
         </SettingsSection>

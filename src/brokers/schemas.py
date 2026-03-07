@@ -1,6 +1,7 @@
 """
 Pydantic schemas for brokers, instruments, and trading styles (read-only reference data).
 """
+
 from __future__ import annotations
 
 from decimal import Decimal
@@ -21,6 +22,7 @@ class TradingStyleOut(BaseModel):
 
 class InstrumentCreate(BaseModel):
     """Body for POST /api/brokers/{id}/instruments — add a custom instrument."""
+
     symbol: str = Field(..., min_length=1, max_length=30)
     display_name: str = Field(..., min_length=1, max_length=100)
     asset_class: str = Field(..., min_length=1, max_length=50)

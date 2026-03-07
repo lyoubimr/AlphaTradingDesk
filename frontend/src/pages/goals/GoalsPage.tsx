@@ -369,14 +369,12 @@ export function GoalsPage() {
           value={isLoading ? '…' : avgProgress != null ? `${avgProgress}%` : '—'}
           sub="toward targets"
           accent="neutral"
-          info="Average % progression toward each active goal's target for the current period. 100% = goal reached. Computed across all active goals (daily + weekly + monthly)."
         />
         <StatCard
           label="Worst Risk"
           value={isLoading ? '…' : worstRisk != null ? `${worstRisk}%` : '—'}
           sub={limitsHit > 0 ? `⚠️ ${limitsHit} limit(s) hit` : 'of limit consumed'}
           accent={limitsHit > 0 || Number(worstRisk) >= 75 ? 'bear' : 'neutral'}
-          info="Highest loss limit consumption across all active goals. Shows how close you are to hitting your worst drawdown limit. 75%+ = warning zone, 100% = limit hit → stop trading that period."
         />
       </div>
 

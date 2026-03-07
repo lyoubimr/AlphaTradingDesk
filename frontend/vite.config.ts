@@ -32,6 +32,11 @@ export default defineConfig({
         changeOrigin: true,
         // No rewrite — backend routes are already prefixed with /api
       },
+      // Proxy /uploads/* to backend StaticFiles mount
+      '/uploads': {
+        target: API_TARGET,
+        changeOrigin: true,
+      },
     },
   },
 })

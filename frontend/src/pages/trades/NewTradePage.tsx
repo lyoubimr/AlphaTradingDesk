@@ -1015,19 +1015,37 @@ export function NewTradePage() {
     const pct  = Number(tp.pct) || 0
     // Quantity allocated to this TP (units for Crypto, lots for CFD)
     const qty  = calc.lot_size != null ? calc.lot_size * (pct / 100) : null
-    // Est. profit = qty × |tp - entry|
-    const profit = (qty == null || tpN == null || entryNum == null) ? null
+
+    // ── Direction validation: TP must be on the profit side ──────────────
+    // LONG  → TP must be ABOVE entry (tpN > entry)
+    // SHORT → TP must be BELOW entry (tpN < entry)
+    const tpSideOk: boolean = tpN == null || entryNum == null
+      ? true   // no value yet → don't show error
+      : direction === 'LONG'
+        ? tpN > entryNum
+        : tpN < entryNum
+
+    // Est. profit: only positive when TP is on the correct side.
+    // If TP is on wrong side the formula would still produce a positive number
+    // (Math.abs) — so we gate it behind tpSideOk.
+    const profit = (qty == null || tpN == null || entryNum == null || !tpSideOk) ? null
       : qty * Math.abs(tpN - entryNum)
+
     // R:R = |tp - entry| / |entry - sl|
-    const rr = (tpN == null || slDistancePts == null || slDistancePts === 0 || entryNum == null) ? null
+    const rr = (tpN == null || slDistancePts == null || slDistancePts === 0 || entryNum == null || !tpSideOk) ? null
       : Math.abs(tpN - entryNum) / slDistancePts
-    return { profit, rr, qty }
-  }), [calc, tps, entryNum, slDistancePts])
+
+    return { profit, rr, qty, tpSideOk }
+  }), [calc, tps, entryNum, slDistancePts, direction])
+
+  // Any TP on the wrong side → totalProfit is null (block expectancy + submit)
+  const tpSideErrors = tpMetrics.some((m) => !m.tpSideOk)
 
   const totalProfit = useMemo(() => {
     if (tpMetrics.length === 0 || tpMetrics.some((t) => t.profit == null)) return null
+    if (tpSideErrors) return null
     return tpMetrics.reduce((s, t) => s + (t.profit ?? 0), 0)
-  }, [tpMetrics])
+  }, [tpMetrics, tpSideErrors])
 
   // ── TP helpers ────────────────────────────────────────────────────────────
   const applyPreset = useCallback((label: string, count: number) => {
@@ -1107,7 +1125,7 @@ export function NewTradePage() {
   )
 
   const autoSession = detectSession()
-  const isFormValid = !!instrument && pctValid && !slSideError
+  const isFormValid = !!instrument && pctValid && !slSideError && !tpSideErrors
 
   // ─────────────────────────────────────────────────────────────────────────
   // Render
@@ -1575,27 +1593,45 @@ export function NewTradePage() {
                 : m.rr >= 1 ? 'text-amber-400'
                 :              'text-red-400'
 
+              // TP side error: value entered but on wrong side of entry
+              const tpNum = tp.price ? Number(tp.price) : null
+              const showTpSideErr = tpNum != null && entryNum != null && !m.tpSideOk
+
               return (
-                <div key={i} className="grid items-center gap-2"
-                  style={{ gridTemplateColumns: '2.5rem 1fr 5rem 1.5rem 6rem 5rem 8rem' }}>
-                  <span className="text-[11px] text-slate-400 font-bold">TP{i + 1}</span>
-                  <input required type="number" step="any" min="0" value={tp.price}
-                    onChange={(e) => setTpPrice(i, e.target.value)} placeholder="Price"
-                    className={cn(inputCls, tp.price && m?.rr != null && m.rr >= 2 ? 'border-emerald-500/30' : '')} />
-                  <input required type="number" step="1" min="1" max="100"
-                    value={tp.pct} onChange={(e) => setTpPct(i, e.target.value)}
-                    placeholder="%" className={inputCls} />
-                  <span className="text-[10px] text-slate-600 text-center">%</span>
-                  {/* Quantity per TP: units (Crypto) or lots (CFD) */}
-                  <span className="text-[11px] font-mono text-slate-400 truncate">
-                    {m.qty != null ? fmt(m.qty, isCFD ? 2 : 4) : '—'}
-                  </span>
-                  <span className={cn('text-xs font-mono font-bold text-center', rrCls)}>
-                    {m?.rr != null ? `${m.rr.toFixed(2)}R` : '—'}
-                  </span>
-                  <span className={cn('text-xs font-mono font-bold text-right', m?.profit != null ? 'text-emerald-400' : 'text-slate-600')}>
-                    {m?.profit != null ? `+${fmt(m.profit)} ${ccy}` : '—'}
-                  </span>
+                <div key={i} className="space-y-0.5">
+                  <div className="grid items-center gap-2"
+                    style={{ gridTemplateColumns: '2.5rem 1fr 5rem 1.5rem 6rem 5rem 8rem' }}>
+                    <span className="text-[11px] text-slate-400 font-bold">TP{i + 1}</span>
+                    <input required type="number" step="any" min="0" value={tp.price}
+                      onChange={(e) => setTpPrice(i, e.target.value)} placeholder="Price"
+                      className={cn(
+                        inputCls,
+                        showTpSideErr
+                          ? 'border-red-500/60 bg-red-500/5'
+                          : tp.price && m?.rr != null && m.rr >= 2 ? 'border-emerald-500/30' : ''
+                      )} />
+                    <input required type="number" step="1" min="1" max="100"
+                      value={tp.pct} onChange={(e) => setTpPct(i, e.target.value)}
+                      placeholder="%" className={inputCls} />
+                    <span className="text-[10px] text-slate-600 text-center">%</span>
+                    {/* Quantity per TP: units (Crypto) or lots (CFD) */}
+                    <span className="text-[11px] font-mono text-slate-400 truncate">
+                      {m.qty != null ? fmt(m.qty, isCFD ? 2 : 4) : '—'}
+                    </span>
+                    <span className={cn('text-xs font-mono font-bold text-center', rrCls)}>
+                      {m?.rr != null ? `${m.rr.toFixed(2)}R` : '—'}
+                    </span>
+                    <span className={cn('text-xs font-mono font-bold text-right', m?.profit != null ? 'text-emerald-400' : 'text-slate-600')}>
+                      {m?.profit != null ? `+${fmt(m.profit)} ${ccy}` : '—'}
+                    </span>
+                  </div>
+                  {/* TP direction error */}
+                  {showTpSideErr && (
+                    <p className="text-[10px] text-red-400 flex items-center gap-1 pl-9">
+                      <AlertTriangle size={10} />
+                      TP{i + 1} must be {direction === 'LONG' ? 'above' : 'below'} entry ({entry}) for a {direction} trade
+                    </p>
+                  )}
                 </div>
               )
             })}
@@ -1632,6 +1668,17 @@ export function NewTradePage() {
         </Section>
 
         {/* ══════════════ 6. SETUP TAGS, NOTES & SESSION ═════════════════ */}
+        {/* ExpectancyPanel sits here — between TP section and setup tags    */}
+        <ExpectancyPanel
+          calc={calc}
+          totalProfit={totalProfit}
+          pctValid={pctValid}
+          selectedStrategy={strategies.find((s) => s.id === strategyId) ?? null}
+          activeProfile={activeProfile}
+          globalWrStats={globalWrStats}
+          ccy={ccy}
+        />
+
         <Section icon="📝" title="Setup tags, notes & session">
 
           {/* Setup tags — distinct from strategy! */}
@@ -1700,26 +1747,6 @@ export function NewTradePage() {
             )}
           </div>
         </Section>
-
-        {/* ═══════════════════════ 7. EXPECTANCY ════════════════════════ */}
-        {/* Shown only when all numbers are present: risk amount, TPs all filled, R:R valid.   */}
-        {/* Formula: Expectancy = (Win Rate × Avg Win) − (Loss Rate × Avg Loss)               */}
-        {/* Here Avg Win  = totalProfit (expected, split across TPs)                          */}
-        {/*      Avg Loss = risk_amount                                                        */}
-        {/* Win Rate source: selected strategy (if ≥ min_trades) or profile default (60%).    */}
-        {/* 🔴 < 0  → Negative — review the trade                                            */}
-        {/* 🟡 0–0.5× risk → Marginal — borderline                                           */}
-        {/* 🟢 0.5–1× risk → Good                                                             */}
-        {/* 💎 > 1× risk   → Excellent                                                        */}
-        <ExpectancyPanel
-          calc={calc}
-          totalProfit={totalProfit}
-          pctValid={pctValid}
-          selectedStrategy={strategies.find((s) => s.id === strategyId) ?? null}
-          activeProfile={activeProfile}
-          globalWrStats={globalWrStats}
-          ccy={ccy}
-        />
 
         {/* Form actions */}
         <div className="flex items-center justify-between pt-2 pb-4 border-t border-surface-700">

@@ -3,9 +3,10 @@ Integration tests for Goals & Risk Limits API.
 
   GET    /api/profiles/{id}/goals
   POST   /api/profiles/{id}/goals
-  PUT    /api/profiles/{id}/goals/{style_id}/{period}
+  PUT    /api/profiles/{id}/goals/{goal_id}
   GET    /api/profiles/{id}/goals/progress
 """
+
 from __future__ import annotations
 
 from datetime import datetime
@@ -17,8 +18,8 @@ from sqlalchemy.orm import Session
 from src.core.models.broker import Profile, TradingStyle
 from src.core.models.trade import Trade
 
-
 # ── Helpers ───────────────────────────────────────────────────────────────────
+
 
 def _make_profile(db: Session, *, name: str = "Test Profile") -> Profile:
     p = Profile(
@@ -57,6 +58,7 @@ def _make_closed_trade(
         entry_price=Decimal("50000"),
         entry_date=datetime.utcnow(),
         stop_loss=Decimal("49000"),
+        initial_stop_loss=Decimal("49000"),  # required NOT NULL — original SL
         nb_take_profits=1,
         risk_amount=Decimal("200"),
         potential_profit=Decimal("400"),
@@ -76,6 +78,7 @@ def _goal_payload(**overrides) -> dict:
 
 
 # ── Tests: GET /api/profiles/{id}/goals ──────────────────────────────────────
+
 
 class TestListGoals:
     def test_returns_empty_list_initially(self, client: TestClient, db_session: Session):
@@ -103,6 +106,7 @@ class TestListGoals:
 
 
 # ── Tests: POST /api/profiles/{id}/goals ─────────────────────────────────────
+
 
 class TestCreateGoal:
     def test_creates_goal_successfully(self, client: TestClient, db_session: Session):
@@ -174,19 +178,21 @@ class TestCreateGoal:
         assert resp.status_code == 404
 
 
-# ── Tests: PUT /api/profiles/{id}/goals/{style_id}/{period} ──────────────────
+# ── Tests: PUT /api/profiles/{id}/goals/{goal_id} ────────────────────────────
+
 
 class TestUpdateGoal:
     def test_updates_goal_pct(self, client: TestClient, db_session: Session):
         profile = _make_profile(db_session)
         style = _make_style(db_session, name="day_upd")
 
-        client.post(
+        create_resp = client.post(
             f"/api/profiles/{profile.id}/goals",
             json=_goal_payload(style_id=style.id, period="monthly"),
         )
+        goal_id = create_resp.json()["id"]
         resp = client.put(
-            f"/api/profiles/{profile.id}/goals/{style.id}/monthly",
+            f"/api/profiles/{profile.id}/goals/{goal_id}",
             json={"goal_pct": "3.5"},
         )
 
@@ -199,12 +205,13 @@ class TestUpdateGoal:
         profile = _make_profile(db_session)
         style = _make_style(db_session, name="day_deact")
 
-        client.post(
+        create_resp = client.post(
             f"/api/profiles/{profile.id}/goals",
             json=_goal_payload(style_id=style.id, period="daily"),
         )
+        goal_id = create_resp.json()["id"]
         resp = client.put(
-            f"/api/profiles/{profile.id}/goals/{style.id}/daily",
+            f"/api/profiles/{profile.id}/goals/{goal_id}",
             json={"is_active": False},
         )
 
@@ -214,13 +221,14 @@ class TestUpdateGoal:
     def test_returns_404_for_nonexistent_goal(self, client: TestClient, db_session: Session):
         profile = _make_profile(db_session)
         resp = client.put(
-            f"/api/profiles/{profile.id}/goals/9999/daily",
+            f"/api/profiles/{profile.id}/goals/9999",
             json={"goal_pct": "2.0"},
         )
         assert resp.status_code == 404
 
 
 # ── Tests: GET /api/profiles/{id}/goals/progress ─────────────────────────────
+
 
 class TestGoalProgress:
     def test_returns_empty_when_no_active_goals(self, client: TestClient, db_session: Session):
@@ -281,9 +289,7 @@ class TestGoalProgress:
         assert items[0]["limit_hit"] is True
         assert items[0]["goal_hit"] is False
 
-    def test_inactive_goals_excluded_from_progress(
-        self, client: TestClient, db_session: Session
-    ):
+    def test_inactive_goals_excluded_from_progress(self, client: TestClient, db_session: Session):
         profile = _make_profile(db_session)
         style = _make_style(db_session, name="prog_inactive")
 
@@ -291,9 +297,10 @@ class TestGoalProgress:
             f"/api/profiles/{profile.id}/goals",
             json=_goal_payload(style_id=style.id, period="daily"),
         )
-        # Deactivate the goal
+        goal_id = create_resp.json()["id"]
+        # Deactivate the goal using the correct goal_id-based URL
         client.put(
-            f"/api/profiles/{profile.id}/goals/{style.id}/daily",
+            f"/api/profiles/{profile.id}/goals/{goal_id}",
             json={"is_active": False},
         )
 
@@ -313,13 +320,27 @@ class TestGoalProgress:
         assert resp.status_code == 200
         item = resp.json()[0]
         expected_keys = {
-            "style_id", "style_name", "period",
-            "period_start", "period_end",
-            "pnl_pct", "goal_pct", "limit_pct",
-            "goal_progress_pct", "risk_progress_pct",
-            "goal_hit", "limit_hit",
+            "goal_id",
+            "style_id",
+            "style_name",
+            "period",
+            "period_start",
+            "period_end",
+            "pnl_pct",
+            "goal_pct",
+            "limit_pct",
+            "goal_progress_pct",
+            "risk_progress_pct",
+            "goal_hit",
+            "limit_hit",
             # v2 fields
-            "trade_count", "avg_r", "avg_r_hit",
-            "max_trades_hit", "period_type", "show_on_dashboard",
+            "trade_count",
+            "avg_r",
+            "avg_r_min",
+            "avg_r_hit",
+            "max_trades_hit",
+            "period_type",
+            "show_on_dashboard",
+            "trades",
         }
         assert set(item.keys()) == expected_keys

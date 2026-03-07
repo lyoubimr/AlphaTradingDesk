@@ -8,12 +8,13 @@ Key design decisions (Step 14):
   - circuit breaker (limit_hit) fires for period_type == 'outcome' only
   - avg_r computed from closed trades with risk_amount > 0
 """
+
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 
-from fastapi import HTTPException, status
+from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from src.core.models.broker import Profile, TradingStyle
@@ -29,6 +30,7 @@ from src.goals.schemas import (
 
 # ── Internal helpers ──────────────────────────────────────────────────────────
 
+
 def _get_profile_or_404(db: Session, profile_id: int) -> Profile:
     profile = db.query(Profile).filter(Profile.id == profile_id).first()
     if not profile:
@@ -37,10 +39,14 @@ def _get_profile_or_404(db: Session, profile_id: int) -> Profile:
 
 
 def _get_goal_by_id_or_404(db: Session, profile_id: int, goal_id: int) -> ProfileGoal:
-    goal = db.query(ProfileGoal).filter(
-        ProfileGoal.id == goal_id,
-        ProfileGoal.profile_id == profile_id,
-    ).first()
+    goal = (
+        db.query(ProfileGoal)
+        .filter(
+            ProfileGoal.id == goal_id,
+            ProfileGoal.profile_id == profile_id,
+        )
+        .first()
+    )
     if not goal:
         raise HTTPException(status_code=404, detail=f"Goal {goal_id} not found.")
     return goal
@@ -65,8 +71,8 @@ def _period_window(period: str, ref: date) -> tuple[date, date]:
     if period == "daily":
         return ref, ref
     if period == "weekly":
-        start = ref - timedelta(days=ref.weekday())   # Monday
-        return start, start + timedelta(days=6)       # Sunday
+        start = ref - timedelta(days=ref.weekday())  # Monday
+        return start, start + timedelta(days=6)  # Sunday
     if period == "monthly":
         start = ref.replace(day=1)
         if ref.month == 12:
@@ -88,8 +94,9 @@ def _compute_period_data(
     """
     Compute P&L for a period.
 
-    style_id = None → all trades of the profile
-    style_id = X    → only trades where trade.strategy.style_id == X
+    All goals are now global (style_id = NULL) → always queries ALL trades of the
+    profile. The style_id parameter is kept for API compatibility but ignored
+    (Strategy has no style_id column — that design was dropped in Step 13-A).
 
     Returns (pnl_pct, trade_count, avg_r, trades_list)
     """
@@ -97,26 +104,24 @@ def _compute_period_data(
         return Decimal("0.0000"), 0, None, []
 
     start_dt = datetime(period_start.year, period_start.month, period_start.day, 0, 0, 0)
-    end_dt   = datetime(period_end.year,   period_end.month,   period_end.day,   23, 59, 59)
+    end_dt = datetime(period_end.year, period_end.month, period_end.day, 23, 59, 59)
 
-    # Base query for closed trades in window
-    closed_q = db.query(Trade).filter(
-        Trade.profile_id == profile_id,
-        Trade.status == "closed",
-        Trade.closed_at >= start_dt,
-        Trade.closed_at <= end_dt,
-    )
-    if style_id is not None:
-        from src.core.models.trade import Strategy  # avoid circular at module level
-        closed_q = closed_q.join(Strategy, Trade.strategy_id == Strategy.id).filter(
-            Strategy.style_id == style_id
+    # All closed trades of the profile in the window (global — no style filter)
+    closed_trades = (
+        db.query(Trade)
+        .filter(
+            Trade.profile_id == profile_id,
+            Trade.status == "closed",
+            Trade.closed_at >= start_dt,
+            Trade.closed_at <= end_dt,
         )
-    closed_trades = closed_q.all()
+        .all()
+    )
 
     closed_sum = sum((t.realized_pnl or Decimal("0")) for t in closed_trades)
 
-    # Partial-TP positions in window
-    partial_q = (
+    # Partial-TP positions in window (booked PnL from still-open trades)
+    partial_positions = (
         db.query(Position)
         .join(Trade, Position.trade_id == Trade.id)
         .filter(
@@ -126,13 +131,7 @@ def _compute_period_data(
             Position.exit_date >= start_dt,
             Position.exit_date <= end_dt,
         )
-    )
-    if style_id is not None:
-        from src.core.models.trade import Strategy
-        partial_q = partial_q.join(Strategy, Trade.strategy_id == Strategy.id).filter(
-            Strategy.style_id == style_id
-        )
-    partial_positions = partial_q.all()
+    ).all()
     partial_sum = sum((p.realized_pnl or Decimal("0")) for p in partial_positions)
 
     trade_count = len(closed_trades) + len(partial_positions)
@@ -144,7 +143,9 @@ def _compute_period_data(
     for t in closed_trades:
         if t.risk_amount and t.risk_amount > 0 and t.realized_pnl is not None:
             r_multiples.append(
-                (Decimal(str(t.realized_pnl)) / Decimal(str(t.risk_amount))).quantize(Decimal("0.01"))
+                (Decimal(str(t.realized_pnl)) / Decimal(str(t.risk_amount))).quantize(
+                    Decimal("0.01")
+                )
             )
     avg_r: Decimal | None = None
     if r_multiples:
@@ -170,6 +171,7 @@ def _compute_period_data(
 
 
 # ── Public service functions ──────────────────────────────────────────────────
+
 
 def get_goals(db: Session, profile_id: int) -> list[dict]:
     """Return all goals with style_name populated."""
@@ -352,14 +354,18 @@ def get_progress(db: Session, profile_id: int) -> list[GoalProgressItem]:
     for goal in active_goals:
         period_start, period_end = _period_window(goal.period, today)
         pnl_pct, trade_count, avg_r, trades_list = _compute_period_data(
-            db, profile_id, goal.style_id,
+            db,
+            profile_id,
+            goal.style_id,
             profile.capital_current,
-            period_start, period_end,
+            period_start,
+            period_end,
         )
 
         goal_progress = (
             (pnl_pct / goal.goal_pct * 100).quantize(Decimal("0.01"))
-            if goal.goal_pct != 0 else Decimal("0.00")
+            if goal.goal_pct != 0
+            else Decimal("0.00")
         )
 
         # risk_progress is always computed from P&L — regardless of period_type.
@@ -376,34 +382,37 @@ def get_progress(db: Session, profile_id: int) -> list[GoalProgressItem]:
         avg_r_hit = (avg_r >= goal.avg_r_min) if goal.avg_r_min and avg_r else None
         max_trades_hit = (trade_count >= goal.max_trades) if goal.max_trades else None
 
-        items.append(GoalProgressItem(
-            goal_id=goal.id,
-            style_id=goal.style_id,
-            style_name=_style_name(db, goal.style_id),
-            period=goal.period,
-            period_start=period_start.isoformat(),
-            period_end=period_end.isoformat(),
-            pnl_pct=pnl_pct,
-            goal_pct=goal.goal_pct,
-            limit_pct=goal.limit_pct,
-            goal_progress_pct=goal_progress,
-            risk_progress_pct=risk_progress,
-            goal_hit=pnl_pct >= goal.goal_pct,
-            limit_hit=limit_hit,
-            trade_count=trade_count,
-            avg_r=avg_r,
-            avg_r_min=goal.avg_r_min,
-            avg_r_hit=avg_r_hit,
-            max_trades_hit=max_trades_hit,
-            period_type=goal.period_type,
-            show_on_dashboard=goal.show_on_dashboard,
-            trades=trades_list,
-        ))
+        items.append(
+            GoalProgressItem(
+                goal_id=goal.id,
+                style_id=goal.style_id,
+                style_name=_style_name(db, goal.style_id),
+                period=goal.period,
+                period_start=period_start.isoformat(),
+                period_end=period_end.isoformat(),
+                pnl_pct=pnl_pct,
+                goal_pct=goal.goal_pct,
+                limit_pct=goal.limit_pct,
+                goal_progress_pct=goal_progress,
+                risk_progress_pct=risk_progress,
+                goal_hit=pnl_pct >= goal.goal_pct,
+                limit_hit=limit_hit,
+                trade_count=trade_count,
+                avg_r=avg_r,
+                avg_r_min=goal.avg_r_min,
+                avg_r_hit=avg_r_hit,
+                max_trades_hit=max_trades_hit,
+                period_type=goal.period_type,
+                show_on_dashboard=goal.show_on_dashboard,
+                trades=trades_list,
+            )
+        )
 
     return items
 
 
 # ── Goal Override Log ─────────────────────────────────────────────────────────
+
 
 def create_override(db: Session, profile_id: int, data: GoalOverrideCreate) -> GoalOverrideLog:
     _get_profile_or_404(db, profile_id)

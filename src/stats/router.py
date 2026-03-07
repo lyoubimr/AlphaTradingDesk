@@ -23,6 +23,7 @@ Usage:
   GET /api/stats/winrate              → all active profiles
   GET /api/stats/winrate?profile_id=3 → profile 3 only
 """
+
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Query
@@ -74,4 +75,3 @@ def get_winrate_stats(
         )
 
     return WinRateStats(profiles=result)
-

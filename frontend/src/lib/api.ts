@@ -7,7 +7,7 @@ import type {
   Profile, ProfileCreate, ProfileUpdate,
   Broker, Instrument,
   TradeOpen, TradeClose, TradePartialClose, TradeUpdate, TradeListItem, TradeOut,
-  Strategy, StrategyCreate,
+  Strategy, StrategyCreate, StrategyUpdate,
   WinRateStats,
   TradingStyle,
   GoalOut, GoalCreate, GoalUpdate, GoalProgressItem, GoalOverrideCreate, GoalOverrideOut,
@@ -97,8 +97,19 @@ export const strategiesApi = {
       body: JSON.stringify(data),
     }),
 
+  update: (profileId: number, strategyId: number, data: StrategyUpdate): Promise<Strategy> =>
+    request(`/profiles/${profileId}/strategies/${strategyId}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+
   delete: (profileId: number, strategyId: number): Promise<void> =>
     request(`/profiles/${profileId}/strategies/${strategyId}`, { method: 'DELETE' }),
+
+  // Image upload is done directly with fetch + FormData (multipart) in the component.
+  // deleteImage uses JSON (no file), so it goes through the normal request helper.
+  deleteImage: (profileId: number, strategyId: number): Promise<Strategy> =>
+    request(`/profiles/${profileId}/strategies/${strategyId}/image`, { method: 'DELETE' }),
 }
 
 // ── Trades ────────────────────────────────────────────────────────────────

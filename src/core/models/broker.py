@@ -4,6 +4,7 @@ Broker-related models: brokers, instruments, trading_styles, profiles.
 profiles references brokers (optional FK) and is referenced by almost
 every other table — it is defined here to keep FK dependencies clear.
 """
+
 from __future__ import annotations
 
 from datetime import datetime
@@ -47,9 +48,7 @@ class Broker(Base):
 
 class Instrument(Base):
     __tablename__ = "instruments"
-    __table_args__ = (
-        UniqueConstraint("broker_id", "symbol"),
-    )
+    __table_args__ = (UniqueConstraint("broker_id", "symbol"),)
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     broker_id: Mapped[int] = mapped_column(
@@ -141,6 +140,13 @@ class Profile(Base):
     trades_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     win_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
+    # WR counting threshold (global for this profile)
+    # Trades with abs(pnl_pct) < this value are excluded from WR stats.
+    # Default 0.1% — filters out scratch/break-even trades.
+    min_pnl_pct_for_stats: Mapped[Decimal] = mapped_column(
+        Numeric(5, 3), nullable=False, default=Decimal("0.100")
+    )
+
     # Metadata
     description: Mapped[str | None] = mapped_column(Text)
     notes: Mapped[str | None] = mapped_column(Text)
@@ -159,17 +165,25 @@ class Profile(Base):
     trades: Mapped[list[Trade]] = relationship(back_populates="profile")  # type: ignore[name-defined]
     strategies: Mapped[list[Strategy]] = relationship(back_populates="profile")  # type: ignore[name-defined]
     tags: Mapped[list[Tag]] = relationship(back_populates="profile")  # type: ignore[name-defined]
-    performance_snapshots: Mapped[list[PerformanceSnapshot]] = relationship(back_populates="profile")  # type: ignore[name-defined]
+    performance_snapshots: Mapped[list[PerformanceSnapshot]] = relationship(
+        back_populates="profile"
+    )  # type: ignore[name-defined]
     profile_goals: Mapped[list[ProfileGoal]] = relationship(back_populates="profile")  # type: ignore[name-defined]
     goal_progress_logs: Mapped[list[GoalProgressLog]] = relationship(back_populates="profile")  # type: ignore[name-defined]
     goal_override_logs: Mapped[list[GoalOverrideLog]] = relationship(back_populates="profile")  # type: ignore[name-defined]
     note_templates: Mapped[list[NoteTemplate]] = relationship(back_populates="profile")  # type: ignore[name-defined]
     user_preferences: Mapped[UserPreferences | None] = relationship(back_populates="profile")  # type: ignore[name-defined]
-    market_analysis_sessions: Mapped[list[MarketAnalysisSession]] = relationship(back_populates="profile")  # type: ignore[name-defined]
-    profile_indicator_configs: Mapped[list[ProfileIndicatorConfig]] = relationship(back_populates="profile")  # type: ignore[name-defined]
+    market_analysis_sessions: Mapped[list[MarketAnalysisSession]] = relationship(
+        back_populates="profile"
+    )  # type: ignore[name-defined]
+    profile_indicator_configs: Mapped[list[ProfileIndicatorConfig]] = relationship(
+        back_populates="profile"
+    )  # type: ignore[name-defined]
     news_provider_config: Mapped[NewsProviderConfig | None] = relationship(back_populates="profile")  # type: ignore[name-defined]
     weekly_events: Mapped[list[WeeklyEvent]] = relationship(back_populates="profile")  # type: ignore[name-defined]
-    market_analysis_configs: Mapped[list[MarketAnalysisConfig]] = relationship(back_populates="profile")  # type: ignore[name-defined]
+    market_analysis_configs: Mapped[list[MarketAnalysisConfig]] = relationship(
+        back_populates="profile"
+    )  # type: ignore[name-defined]
 
 
 # Forward-reference imports (resolved at runtime, avoid circular imports)

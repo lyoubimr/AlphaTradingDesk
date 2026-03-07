@@ -2,11 +2,39 @@
 import { useEffect, useState } from 'react'
 import { Bell, TrendingUp } from 'lucide-react'
 import { ProfilePicker } from './ProfilePicker'
+import { useProfile } from '../../context/ProfileContext'
 import { statsApi } from '../../lib/api'
 import type { WinRateStats } from '../../types/api'
 
 interface TopbarProps {
   currentTime?: string
+}
+
+// ── Capital + PnL chip ────────────────────────────────────────────────────
+// Shows active profile's current capital and overall PnL% inline in the topbar.
+// Renders nothing if no active profile.
+function CapitalChip() {
+  const { activeProfile } = useProfile()
+  if (!activeProfile) return null
+
+  const capital    = parseFloat(activeProfile.capital_current)
+  const start      = parseFloat(activeProfile.capital_start)
+  const pnlPct     = start > 0 ? ((capital - start) / start) * 100 : 0
+  const pnlPos     = pnlPct >= 0
+  const currency   = activeProfile.currency ?? 'USD'
+
+  const capitalFmt = capital.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })
+
+  return (
+    <div className="hidden sm:flex items-center gap-2 px-3 py-1 rounded-lg bg-surface-800 border border-surface-700 text-xs tabular-nums">
+      <span className="text-slate-300 font-mono font-semibold">{capitalFmt}</span>
+      <span className="text-slate-600 text-[10px]">{currency}</span>
+      <span className="text-slate-700">·</span>
+      <span className={pnlPos ? 'text-emerald-400 font-semibold' : 'text-red-400 font-semibold'}>
+        {pnlPos ? '+' : ''}{pnlPct.toFixed(2)}%
+      </span>
+    </div>
+  )
 }
 
 // ── Global WR pill ────────────────────────────────────────────────────────
@@ -57,9 +85,10 @@ export function Topbar({ currentTime }: TopbarProps) {
       bg-surface-900 border-b border-surface-800
       sticky top-0 z-40
     ">
-      {/* ── Left: profile picker ───────────────────────────────────── */}
+      {/* ── Left: profile picker + capital chip ───────────────────────── */}
       <div className="flex items-center gap-3">
         <ProfilePicker />
+        <CapitalChip />
       </div>
 
       {/* ── Right: WR pill + market pills + clock + actions ────────── */}

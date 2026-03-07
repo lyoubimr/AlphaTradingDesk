@@ -15,6 +15,7 @@ In Docker (prod), no .env file is present → env vars come from the container
 environment only (docker-compose env_file / Kubernetes secrets / etc.).
 env_file_required=False ensures the app starts cleanly without a file.
 """
+
 import os
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -42,6 +43,10 @@ class Settings(BaseSettings):
 
     # App
     environment: str = "development"
+
+    # Uploads — absolute path to the uploads directory
+    # In Docker: mount a named volume here so uploads survive container restarts
+    uploads_dir: str = "/app/uploads"
 
     # CORS — comma-separated list of allowed origins
     # Override via ALLOWED_ORIGINS env var for any deployment

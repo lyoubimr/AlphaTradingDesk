@@ -1,8 +1,12 @@
 """
 AlphaTradingDesk — FastAPI application entry point
 """
+
+import os
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from src.brokers.router import router as brokers_router
 from src.brokers.router import styles_router
@@ -26,6 +30,21 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ── Static files — uploaded images ────────────────────────────────
+# Mount BEFORE api routers so /uploads/* is served directly.
+# In Docker: uploads_dir is a named volume → survives container restarts.
+_uploads_dir = settings.uploads_dir
+try:
+    os.makedirs(_uploads_dir, exist_ok=True)
+except OSError:
+    # Fallback to a local directory when the configured path is read-only
+    # (e.g. pytest on macOS where /app doesn't exist outside Docker).
+    import tempfile
+
+    _uploads_dir = os.path.join(tempfile.gettempdir(), "atd_uploads")
+    os.makedirs(_uploads_dir, exist_ok=True)
+app.mount("/uploads", StaticFiles(directory=_uploads_dir), name="uploads")
 
 # ── API routers ───────────────────────────────────────────────────
 API_PREFIX = "/api"

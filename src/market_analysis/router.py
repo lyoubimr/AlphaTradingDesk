@@ -15,6 +15,7 @@ Routes:
   PUT  /api/profiles/{profile_id}/indicator-config
   GET  /api/profiles/{profile_id}/market-analysis/staleness  (profile-scoped, kept for compat)
 """
+
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Query, status
@@ -41,6 +42,7 @@ profiles_ma_router = APIRouter(prefix="/profiles", tags=["market-analysis"])
 
 
 # ── Modules ───────────────────────────────────────────────────────────────────
+
 
 @ma_router.get("/modules", response_model=list[ModuleOut])
 def list_modules(db: Session = Depends(get_db)) -> list:
@@ -77,6 +79,7 @@ def patch_indicator(
 
 # ── Sessions ──────────────────────────────────────────────────────────────────
 
+
 @ma_router.post(
     "/sessions",
     response_model=SessionOut,
@@ -99,7 +102,9 @@ def list_sessions(
     db: Session = Depends(get_db),
 ) -> list:
     """Return analysis history (most recent first)."""
-    return service.list_sessions(db, profile_id=profile_id, module_id=module_id, offset=offset, limit=limit)
+    return service.list_sessions(
+        db, profile_id=profile_id, module_id=module_id, offset=offset, limit=limit
+    )
 
 
 @ma_router.get("/sessions/{session_id}", response_model=SessionOut)
@@ -133,6 +138,7 @@ def get_staleness_global(db: Session = Depends(get_db)) -> list:
 
 # ── Profile indicator config ──────────────────────────────────────────────────
 
+
 @profiles_ma_router.get(
     "/{profile_id}/indicator-config",
     response_model=IndicatorConfigOut,
@@ -164,6 +170,7 @@ def save_indicator_config(
 
 
 # ── Staleness ─────────────────────────────────────────────────────────────────
+
 
 @profiles_ma_router.get(
     "/{profile_id}/market-analysis/staleness",

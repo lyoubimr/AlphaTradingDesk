@@ -12,6 +12,7 @@ import { SettingsPage } from './pages/settings/SettingsPage'
 import { ProfilesPage } from './pages/settings/ProfilesPage'
 import { MarketAnalysisSettingsPage } from './pages/settings/MarketAnalysisSettingsPage'
 import { GoalsSettingsPage } from './pages/settings/GoalsSettingsPage'
+import { StrategiesSettingsPage } from './pages/settings/StrategiesSettingsPage'
 
 export default function App() {
   return (
@@ -30,6 +31,7 @@ export default function App() {
         <Route path="/settings/profiles" element={<ProfilesPage />} />
         <Route path="/settings/market-analysis" element={<MarketAnalysisSettingsPage />} />
         <Route path="/settings/goals" element={<GoalsSettingsPage />} />
+        <Route path="/settings/strategies" element={<StrategiesSettingsPage />} />
       </Route>
     </Routes>
   )

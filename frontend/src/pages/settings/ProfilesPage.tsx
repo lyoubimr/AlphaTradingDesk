@@ -108,17 +108,22 @@ function ProfileCard({ profile, isActive, onSelect, onEdit, onDelete }: ProfileC
       {isActive && (
         <span className="absolute top-3 right-3 flex items-center gap-1 text-[10px] font-semibold text-brand-300 bg-brand-600/20 border border-brand-600/30 px-2 py-0.5 rounded-full">
           <CheckCircle2 size={10} />
-          Active
+          Selected
         </span>
       )}
 
       {/* Header */}
       <div className="flex items-start gap-3 pr-20">
         <div className={cn(
-          'w-9 h-9 rounded-lg flex items-center justify-center shrink-0 text-sm font-bold',
+          'w-9 h-9 rounded-lg flex items-center justify-center shrink-0 text-sm font-bold select-none',
           isActive ? 'bg-brand-600/30 text-brand-300' : 'bg-surface-700 text-slate-400',
         )}>
-          {profile.name.charAt(0).toUpperCase()}
+          {/* Use Array.from to handle emoji names correctly (multi-byte chars) */}
+          {(() => {
+            const first = Array.from(profile.name)[0] ?? '?'
+            // If it's a plain ASCII letter, uppercase it; otherwise render as-is (emoji)
+            return /^[a-zA-Z]$/.test(first) ? first.toUpperCase() : first
+          })()}
         </div>
         <div className="min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
@@ -147,8 +152,9 @@ function ProfileCard({ profile, isActive, onSelect, onEdit, onDelete }: ProfileC
           value={`${pnlPositive ? '+' : ''}${pnlPct}%`}
           valueClass={pnlPositive ? 'text-green-400' : 'text-red-400'}
         />
-        <Stat label="Risk %" value={`${profile.risk_percentage_default}%`} />
+        <Stat label="Risk/trade" value={`${profile.risk_percentage_default}%`} />
         <Stat label="Max conc." value={`${profile.max_concurrent_risk_pct}%`} />
+        <StatBE profile={profile} />
       </div>
 
       {/* Actions — shown on hover */}
@@ -188,7 +194,20 @@ function Stat({
   )
 }
 
-// ── Profile Form Modal ────────────────────────────────────────────────────
+// BE filter stat — shows % + currency amount on a second line
+function StatBE({ profile }: { profile: Profile }) {
+  const pct = parseFloat(profile.min_pnl_pct_for_stats)
+  const amount = parseFloat(profile.capital_current) * (pct / 100)
+  const currency = profile.currency ?? 'USD'
+  const fmt = new Intl.NumberFormat(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  return (
+    <div>
+      <p className="text-[10px] text-slate-600 uppercase tracking-wider">BE filter</p>
+      <p className="text-xs font-mono font-medium mt-0.5 text-slate-400">{pct.toFixed(3)}%</p>
+      <p className="text-[10px] font-mono text-slate-600 leading-none mt-0.5">±{fmt.format(amount)} {currency}</p>
+    </div>
+  )
+}
 
 interface ProfileFormData {
   name: string
@@ -198,6 +217,7 @@ interface ProfileFormData {
   capital_start: string
   risk_percentage_default: string
   max_concurrent_risk_pct: string
+  min_pnl_pct_for_stats: string
   description: string
 }
 
@@ -209,6 +229,7 @@ const EMPTY_FORM: ProfileFormData = {
   capital_start: '',
   risk_percentage_default: '2.0',
   max_concurrent_risk_pct: '2.0',
+  min_pnl_pct_for_stats: '0.1',
   description: '',
 }
 
@@ -221,6 +242,7 @@ function profileToForm(p: Profile): ProfileFormData {
     capital_start: p.capital_start,
     risk_percentage_default: p.risk_percentage_default,
     max_concurrent_risk_pct: p.max_concurrent_risk_pct,
+    min_pnl_pct_for_stats: p.min_pnl_pct_for_stats,
     description: p.description ?? '',
   }
 }
@@ -284,6 +306,7 @@ function ProfileModal({ profile, brokers, onClose, onSaved }: ProfileModalProps)
           capital_start: form.capital_start,
           risk_percentage_default: form.risk_percentage_default,
           max_concurrent_risk_pct: form.max_concurrent_risk_pct,
+          min_pnl_pct_for_stats: form.min_pnl_pct_for_stats,
           description: form.description || null,
         }
         await profilesApi.update(profile.id, update)
@@ -296,6 +319,7 @@ function ProfileModal({ profile, brokers, onClose, onSaved }: ProfileModalProps)
           capital_start: form.capital_start,
           risk_percentage_default: form.risk_percentage_default,
           max_concurrent_risk_pct: form.max_concurrent_risk_pct,
+          min_pnl_pct_for_stats: form.min_pnl_pct_for_stats,
           description: form.description || null,
         }
         await profilesApi.create(create)
@@ -461,6 +485,26 @@ function ProfileModal({ profile, brokers, onClose, onSaved }: ProfileModalProps)
               />
             </Field>
           </div>
+
+          {/* Break-even filter */}
+          <Field label={<>Break-even filter % <Tooltip text="Trades with abs(PnL%) below this threshold are excluded from win-rate stats on all strategies. Default: 0.1%. Helps filter out scratch/break-even trades that distort your edge stats." /></>}>
+            <div className="flex items-center gap-2">
+              <input
+                type="number"
+                step="0.001"
+                min="0"
+                max="5"
+                value={form.min_pnl_pct_for_stats}
+                onChange={(e) => set('min_pnl_pct_for_stats', e.target.value)}
+                className={inputCls}
+                placeholder="0.1"
+              />
+              <span className="text-xs text-slate-500 shrink-0">%</span>
+            </div>
+            <p className="text-[10px] text-slate-600 mt-1">
+              e.g. 0.1% means trades closing within ±0.1% of entry are excluded from WR stats (treated as break-even).
+            </p>
+          </Field>
 
           {/* Description */}
           <Field label="Description">

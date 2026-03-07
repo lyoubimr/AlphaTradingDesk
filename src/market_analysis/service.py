@@ -23,6 +23,7 @@ Staleness:
   Computed on request — last session per module, compared to now().
   is_stale = days_old > 7 OR no session exists.
 """
+
 from __future__ import annotations
 
 from datetime import UTC, datetime
@@ -67,6 +68,7 @@ _DEFAULT_BEARISH_THRESHOLD = Decimal("34")
 
 
 # ── Internal helpers ──────────────────────────────────────────────────────────
+
 
 def _get_profile_or_404(db: Session, profile_id: int) -> Profile:
     p = db.query(Profile).filter(Profile.id == profile_id).first()
@@ -136,7 +138,11 @@ def _get_thresholds(db: Session, module_id: int) -> tuple[Decimal, Decimal]:
     return _DEFAULT_BULLISH_THRESHOLD, _DEFAULT_BEARISH_THRESHOLD
 
 
-def _bias_v2(score_pct: Decimal, bullish: Decimal = _DEFAULT_BULLISH_THRESHOLD, bearish: Decimal = _DEFAULT_BEARISH_THRESHOLD) -> str:
+def _bias_v2(
+    score_pct: Decimal,
+    bullish: Decimal = _DEFAULT_BULLISH_THRESHOLD,
+    bearish: Decimal = _DEFAULT_BEARISH_THRESHOLD,
+) -> str:
     if score_pct >= bullish:
         return "bullish"
     if score_pct <= bearish:
@@ -257,7 +263,9 @@ def _compute_scores(
         if not scores:
             return None, None
         total_weight = sum(_BLOCK_WEIGHTS[b] for b in scores)
-        composite = sum((scores[b] * _BLOCK_WEIGHTS[b] for b in scores), Decimal("0")) / total_weight
+        composite = (
+            sum((scores[b] * _BLOCK_WEIGHTS[b] for b in scores), Decimal("0")) / total_weight
+        )
         composite = composite.quantize(Decimal("0.01"))
         return composite, _bias_v2(composite, bullish_threshold, bearish_threshold)
 
@@ -301,6 +309,7 @@ def _compute_scores(
 
 # ── Trade Conclusion logic ────────────────────────────────────────────────────
 
+
 def get_trade_conclusion(
     trend: Decimal,
     momentum: Decimal,
@@ -342,7 +351,12 @@ def get_trade_conclusion(
         )
 
     # 3. Full Trend — everything aligned
-    if trend >= Decimal("65") and momentum >= Decimal("60") and participation >= Decimal("55") and bias == "bullish":
+    if (
+        trend >= Decimal("65")
+        and momentum >= Decimal("60")
+        and participation >= Decimal("55")
+        and bias == "bullish"
+    ):
         return TradeConclusion(
             emoji="🟢",
             label="Trend Following — Full Size",
@@ -387,6 +401,7 @@ def get_trade_conclusion(
 
 # ── Public service functions ──────────────────────────────────────────────────
 
+
 def list_modules(db: Session) -> list[MarketAnalysisModule]:
     return (
         db.query(MarketAnalysisModule)
@@ -409,9 +424,9 @@ def list_indicators(db: Session, module_id: int) -> list[MarketAnalysisIndicator
 def patch_indicator(
     db: Session, indicator_id: int, data: IndicatorUpdate
 ) -> MarketAnalysisIndicator:
-    ind = db.query(MarketAnalysisIndicator).filter(
-        MarketAnalysisIndicator.id == indicator_id
-    ).first()
+    ind = (
+        db.query(MarketAnalysisIndicator).filter(MarketAnalysisIndicator.id == indicator_id).first()
+    )
     if not ind:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -425,9 +440,7 @@ def patch_indicator(
     return ind
 
 
-def get_indicator_config(
-    db: Session, profile_id: int
-) -> tuple[int, list[IndicatorConfigItem]]:
+def get_indicator_config(db: Session, profile_id: int) -> tuple[int, list[IndicatorConfigItem]]:
     _get_profile_or_404(db, profile_id)
     all_indicators = (
         db.query(MarketAnalysisIndicator)
@@ -507,7 +520,9 @@ def create_session(db: Session, data: SessionCreate) -> MarketAnalysisSession:
 
     enabled_ids = _get_enabled_indicator_ids(db, data.profile_id, data.module_id)
     bullish_t, bearish_t = _get_thresholds(db, data.module_id)
-    scores = _compute_scores(module, indicators_by_id, data.answers, enabled_ids, bullish_t, bearish_t)
+    scores = _compute_scores(
+        module, indicators_by_id, data.answers, enabled_ids, bullish_t, bearish_t
+    )
 
     session = MarketAnalysisSession(
         profile_id=data.profile_id,
@@ -546,12 +561,7 @@ def list_sessions(
         q = q.filter(MarketAnalysisSession.profile_id == profile_id)
     if module_id is not None:
         q = q.filter(MarketAnalysisSession.module_id == module_id)
-    return (
-        q.order_by(MarketAnalysisSession.analyzed_at.desc())
-        .offset(offset)
-        .limit(limit)
-        .all()
-    )
+    return q.order_by(MarketAnalysisSession.analyzed_at.desc()).offset(offset).limit(limit).all()
 
 
 def get_session(db: Session, session_id: int) -> MarketAnalysisSession:
@@ -659,4 +669,3 @@ def get_staleness_global(db: Session) -> list[StalenessItem]:
         )
         result.append(_staleness_item(mod, last_session, now))
     return result
-

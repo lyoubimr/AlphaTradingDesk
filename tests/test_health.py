@@ -1,6 +1,7 @@
 """
 Health check test — verifies the /health endpoint returns 200
 """
+
 from fastapi.testclient import TestClient
 
 from src.main import app

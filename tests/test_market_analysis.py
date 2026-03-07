@@ -10,6 +10,7 @@ Integration tests for Market Analysis API — Step 7.
   PUT  /api/profiles/{id}/indicator-config
   GET  /api/profiles/{id}/market-analysis/staleness
 """
+
 from __future__ import annotations
 
 import pytest
@@ -23,6 +24,7 @@ from src.core.models.market_analysis import (
 )
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
+
 
 def _make_module(
     db: Session,
@@ -128,6 +130,7 @@ def _session_payload(
 
 # ── Tests: GET /api/market-analysis/modules ───────────────────────────────────
 
+
 class TestListModules:
     def test_returns_active_modules(self, client: TestClient, db_session: Session):
         _make_module(db_session, name="ActiveMod")
@@ -151,6 +154,7 @@ class TestListModules:
 
 
 # ── Tests: GET /api/market-analysis/modules/{id}/indicators ──────────────────
+
 
 class TestListIndicators:
     def test_returns_indicators_for_module(self, client: TestClient, db_session: Session):
@@ -185,20 +189,29 @@ class TestListIndicators:
         resp = client.get(f"/api/market-analysis/modules/{mod.id}/indicators")
         ind = resp.json()[0]
         for field in (
-            "id", "module_id", "key", "label", "asset_target",
-            "tv_symbol", "tv_timeframe", "timeframe_level",
-            "question", "answer_bullish", "answer_partial", "answer_bearish",
-            "default_enabled", "sort_order",
+            "id",
+            "module_id",
+            "key",
+            "label",
+            "asset_target",
+            "tv_symbol",
+            "tv_timeframe",
+            "timeframe_level",
+            "question",
+            "answer_bullish",
+            "answer_partial",
+            "answer_bearish",
+            "default_enabled",
+            "sort_order",
         ):
             assert field in ind, f"Missing field: {field}"
 
 
 # ── Tests: GET /api/profiles/{id}/indicator-config ───────────────────────────
 
+
 class TestGetIndicatorConfig:
-    def test_returns_all_indicators_with_defaults(
-        self, client: TestClient, db_session: Session
-    ):
+    def test_returns_all_indicators_with_defaults(self, client: TestClient, db_session: Session):
         broker = _make_broker(db_session, name="ConfigBroker1")
         profile = _make_profile(db_session, broker)
         mod = _make_module(db_session, name="ConfigMod1")
@@ -220,6 +233,7 @@ class TestGetIndicatorConfig:
 
 
 # ── Tests: PUT /api/profiles/{id}/indicator-config ───────────────────────────
+
 
 class TestSaveIndicatorConfig:
     def test_saves_toggle_overrides(self, client: TestClient, db_session: Session):
@@ -273,13 +287,23 @@ class TestSaveIndicatorConfig:
 
 # ── Tests: POST /api/market-analysis/sessions ─────────────────────────────────
 
+
 class TestCreateSession:
     def test_creates_session_single_asset(self, client: TestClient, db_session: Session):
         broker = _make_broker(db_session, name="SessionBroker1")
         profile = _make_profile(db_session, broker)
         mod = _make_module(db_session, name="SingleMod1", is_dual=False, asset_a="Gold")
-        i1 = _make_indicator(db_session, mod, key="s1_htf", timeframe_level="htf", asset_target="single")
-        i2 = _make_indicator(db_session, mod, key="s1_mtf", timeframe_level="mtf", asset_target="single", sort_order=2)
+        i1 = _make_indicator(
+            db_session, mod, key="s1_htf", timeframe_level="htf", asset_target="single"
+        )
+        i2 = _make_indicator(
+            db_session,
+            mod,
+            key="s1_mtf",
+            timeframe_level="mtf",
+            asset_target="single",
+            sort_order=2,
+        )
 
         resp = client.post(
             "/api/market-analysis/sessions",
@@ -296,8 +320,22 @@ class TestCreateSession:
         broker = _make_broker(db_session, name="ScoreBroker")
         profile = _make_profile(db_session, broker)
         mod = _make_module(db_session, name="ScoreMod", is_dual=False)
-        i1 = _make_indicator(db_session, mod, key="sc_htf1", timeframe_level="htf", asset_target="single", sort_order=1)
-        i2 = _make_indicator(db_session, mod, key="sc_htf2", timeframe_level="htf", asset_target="single", sort_order=2)
+        i1 = _make_indicator(
+            db_session,
+            mod,
+            key="sc_htf1",
+            timeframe_level="htf",
+            asset_target="single",
+            sort_order=1,
+        )
+        i2 = _make_indicator(
+            db_session,
+            mod,
+            key="sc_htf2",
+            timeframe_level="htf",
+            asset_target="single",
+            sort_order=2,
+        )
 
         resp = client.post(
             "/api/market-analysis/sessions",
@@ -311,7 +349,9 @@ class TestCreateSession:
         broker = _make_broker(db_session, name="BearishBroker")
         profile = _make_profile(db_session, broker)
         mod = _make_module(db_session, name="BearishMod", is_dual=False)
-        i1 = _make_indicator(db_session, mod, key="bear_htf", timeframe_level="htf", asset_target="single")
+        i1 = _make_indicator(
+            db_session, mod, key="bear_htf", timeframe_level="htf", asset_target="single"
+        )
 
         resp = client.post(
             "/api/market-analysis/sessions",
@@ -326,7 +366,9 @@ class TestCreateSession:
         broker = _make_broker(db_session, name="NeutralBroker")
         profile = _make_profile(db_session, broker)
         mod = _make_module(db_session, name="NeutralMod", is_dual=False)
-        i1 = _make_indicator(db_session, mod, key="neut_htf", timeframe_level="htf", asset_target="single")
+        i1 = _make_indicator(
+            db_session, mod, key="neut_htf", timeframe_level="htf", asset_target="single"
+        )
 
         resp = client.post(
             "/api/market-analysis/sessions",
@@ -336,9 +378,7 @@ class TestCreateSession:
         assert float(data["score_htf_a"]) == pytest.approx(50.0)
         assert data["bias_htf_a"] == "neutral"
 
-    def test_dual_module_computes_a_and_b_scores(
-        self, client: TestClient, db_session: Session
-    ):
+    def test_dual_module_computes_a_and_b_scores(self, client: TestClient, db_session: Session):
         """Dual module: asset_target 'a' → score_htf_a; 'b' → score_htf_b"""
         broker = _make_broker(db_session, name="DualBroker")
         profile = _make_profile(db_session, broker)
@@ -349,8 +389,12 @@ class TestCreateSession:
             asset_a="BTC",
             asset_b="Alts",
         )
-        ia = _make_indicator(db_session, mod, key="dual_a_htf", asset_target="a", timeframe_level="htf", sort_order=1)
-        ib = _make_indicator(db_session, mod, key="dual_b_htf", asset_target="b", timeframe_level="htf", sort_order=2)
+        ia = _make_indicator(
+            db_session, mod, key="dual_a_htf", asset_target="a", timeframe_level="htf", sort_order=1
+        )
+        ib = _make_indicator(
+            db_session, mod, key="dual_b_htf", asset_target="b", timeframe_level="htf", sort_order=2
+        )
 
         resp = client.post(
             "/api/market-analysis/sessions",
@@ -369,9 +413,7 @@ class TestCreateSession:
         assert float(data["score_htf_b"]) == pytest.approx(0.0)
         assert data["bias_htf_b"] == "bearish"
 
-    def test_disabled_indicator_excluded_from_score(
-        self, client: TestClient, db_session: Session
-    ):
+    def test_disabled_indicator_excluded_from_score(self, client: TestClient, db_session: Session):
         """
         2 HTF indicators: i1 default_enabled=True, i2 default_enabled=False.
         Only i1 counts toward the score.
@@ -381,8 +423,17 @@ class TestCreateSession:
         broker = _make_broker(db_session, name="DisabledBroker")
         profile = _make_profile(db_session, broker)
         mod = _make_module(db_session, name="DisabledMod", is_dual=False)
-        i1 = _make_indicator(db_session, mod, key="dis_on",  default_enabled=True,  timeframe_level="htf", sort_order=1)
-        i2 = _make_indicator(db_session, mod, key="dis_off", default_enabled=False, timeframe_level="htf", sort_order=2)
+        i1 = _make_indicator(
+            db_session, mod, key="dis_on", default_enabled=True, timeframe_level="htf", sort_order=1
+        )
+        i2 = _make_indicator(
+            db_session,
+            mod,
+            key="dis_off",
+            default_enabled=False,
+            timeframe_level="htf",
+            sort_order=2,
+        )
 
         resp = client.post(
             "/api/market-analysis/sessions",
@@ -427,9 +478,7 @@ class TestCreateSession:
         )
         assert resp.status_code == 404
 
-    def test_rejects_indicator_from_wrong_module(
-        self, client: TestClient, db_session: Session
-    ):
+    def test_rejects_indicator_from_wrong_module(self, client: TestClient, db_session: Session):
         broker = _make_broker(db_session, name="WrongModBroker")
         profile = _make_profile(db_session, broker)
         mod_a = _make_module(db_session, name="WrongModA")
@@ -440,23 +489,39 @@ class TestCreateSession:
             "/api/market-analysis/sessions",
             json={
                 "profile_id": profile.id,
-                "module_id": mod_a.id,          # session is for mod_a
+                "module_id": mod_a.id,  # session is for mod_a
                 "answers": [
-                    {"indicator_id": ind_b.id, "score": 2, "answer_label": "YES"},  # but ind belongs to mod_b
+                    {
+                        "indicator_id": ind_b.id,
+                        "score": 2,
+                        "answer_label": "YES",
+                    },  # but ind belongs to mod_b
                 ],
             },
         )
         assert resp.status_code == 422
 
-    def test_mtf_score_computed_separately_from_htf(
-        self, client: TestClient, db_session: Session
-    ):
+    def test_mtf_score_computed_separately_from_htf(self, client: TestClient, db_session: Session):
         """HTF bullish (score=2) + MTF bearish (score=0) → separate scores"""
         broker = _make_broker(db_session, name="TFBroker")
         profile = _make_profile(db_session, broker)
         mod = _make_module(db_session, name="TFMod", is_dual=False)
-        htf = _make_indicator(db_session, mod, key="tf_htf", timeframe_level="htf", asset_target="single", sort_order=1)
-        mtf = _make_indicator(db_session, mod, key="tf_mtf", timeframe_level="mtf", asset_target="single", sort_order=2)
+        htf = _make_indicator(
+            db_session,
+            mod,
+            key="tf_htf",
+            timeframe_level="htf",
+            asset_target="single",
+            sort_order=1,
+        )
+        mtf = _make_indicator(
+            db_session,
+            mod,
+            key="tf_mtf",
+            timeframe_level="mtf",
+            asset_target="single",
+            sort_order=2,
+        )
 
         resp = client.post(
             "/api/market-analysis/sessions",
@@ -477,6 +542,7 @@ class TestCreateSession:
 
 
 # ── Tests: GET /api/market-analysis/sessions ──────────────────────────────────
+
 
 class TestListSessions:
     def test_returns_sessions(self, client: TestClient, db_session: Session):
@@ -532,6 +598,7 @@ class TestListSessions:
 
 # ── Tests: GET /api/market-analysis/sessions/{id} ────────────────────────────
 
+
 class TestGetSession:
     def test_returns_session_with_answers(self, client: TestClient, db_session: Session):
         broker = _make_broker(db_session, name="DetailBroker")
@@ -540,7 +607,9 @@ class TestGetSession:
         i1 = _make_indicator(db_session, mod, key="det_i1", sort_order=1)
         i2 = _make_indicator(db_session, mod, key="det_i2", sort_order=2)
 
-        r = client.post("/api/market-analysis/sessions", json=_session_payload(profile, mod, [i1, i2]))
+        r = client.post(
+            "/api/market-analysis/sessions", json=_session_payload(profile, mod, [i1, i2])
+        )
         session_id = r.json()["id"]
 
         resp = client.get(f"/api/market-analysis/sessions/{session_id}")
@@ -555,6 +624,7 @@ class TestGetSession:
 
 # ── Tests: GET /api/profiles/{id}/market-analysis/staleness ──────────────────
 
+
 class TestStaleness:
     def test_is_stale_when_no_sessions(self, client: TestClient, db_session: Session):
         broker = _make_broker(db_session, name="StaleBroker1")
@@ -563,9 +633,7 @@ class TestStaleness:
 
         resp = client.get(f"/api/profiles/{profile.id}/market-analysis/staleness")
         assert resp.status_code == 200
-        stale = next(
-            (m for m in resp.json() if m["module_name"] == "StaleModNoSession"), None
-        )
+        stale = next((m for m in resp.json() if m["module_name"] == "StaleModNoSession"), None)
         assert stale is not None
         assert stale["is_stale"] is True
         assert stale["days_old"] is None
@@ -588,9 +656,7 @@ class TestStaleness:
         resp = client.get("/api/profiles/99999/market-analysis/staleness")
         assert resp.status_code == 404
 
-    def test_returns_entry_for_each_active_module(
-        self, client: TestClient, db_session: Session
-    ):
+    def test_returns_entry_for_each_active_module(self, client: TestClient, db_session: Session):
         broker = _make_broker(db_session, name="AllModBroker")
         profile = _make_profile(db_session, broker)
         _make_module(db_session, name="AllModA")

@@ -18,6 +18,7 @@ Win-rate architecture — three independent levels:
     Scope  : average of each profile's individual win rate
     Not stored anywhere — derived on the fly
 """
+
 from __future__ import annotations
 
 from pydantic import BaseModel
@@ -30,12 +31,13 @@ class ProfileWinRate(BaseModel):
     These counters are updated atomically on every trade close, regardless of
     whether the trade had a strategy assigned.
     """
+
     profile_id: int
     profile_name: str
-    trades_total: int                   # profiles.trades_count
-    wins_total: int                     # profiles.win_count
-    win_rate_pct: float | None          # None → min_trades threshold not reached yet
-    has_data: bool                      # True when trades_total >= MIN_TRADES_THRESHOLD
+    trades_total: int  # profiles.trades_count
+    wins_total: int  # profiles.win_count
+    win_rate_pct: float | None  # None → min_trades threshold not reached yet
+    has_data: bool  # True when trades_total >= MIN_TRADES_THRESHOLD
 
 
 # Minimum closed trades before a profile's WR is considered reliable.
@@ -52,4 +54,5 @@ class WinRateStats(BaseModel):
         global_wr = mean(p.win_rate_pct for p in profiles if p.has_data)
     This avoids double-computing and keeps the contract simple.
     """
+
     profiles: list[ProfileWinRate]

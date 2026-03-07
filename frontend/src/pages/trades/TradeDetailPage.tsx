@@ -129,7 +129,8 @@ function EditTradeModal({ trade, onClose, onSuccess }: {
   const slWrong   = slNum != null && ((isLong && slNum >= effectiveEntry) || (!isLong && slNum <= effectiveEntry))
 
   const riskOrig    = parseFloat(trade.risk_amount)
-  const slDistOrig  = Math.abs(parseFloat(trade.entry_price) - parseFloat(trade.stop_loss))
+  // Use initial_stop_loss so unit calculation is correct after BE move
+  const slDistOrig  = Math.abs(parseFloat(trade.entry_price) - parseFloat(trade.initial_stop_loss ?? trade.stop_loss))
   const units       = slDistOrig > 0 ? riskOrig / slDistOrig : 0
   const newRisk     = slDist != null && slDist > 0 && !isPending ? units * slDist : null
   const riskChanged = newRisk != null && Math.abs(newRisk - riskOrig) > 0.001
@@ -375,9 +376,46 @@ function CloseAllModal({ trade, onClose, onSuccess }: {
         <div className="space-y-1">
           <p className="text-xs text-slate-500">This will close ALL open positions at the exit price.</p>
           <div className="rounded-lg bg-surface-700/60 px-3 py-2 text-xs text-slate-400 space-y-0.5">
-            <div className="flex justify-between"><span>Entry</span><span className="font-mono">{fmt(trade.entry_price)}</span></div>
-            <div className="flex justify-between"><span>Stop loss</span><span className="font-mono text-red-400">{fmt(trade.stop_loss)}</span></div>
-            <div className="flex justify-between"><span>Risk</span><span className="font-mono text-red-400">−{fmt(trade.risk_amount)}</span></div>
+            <div className="flex justify-between">
+              <span>Entry</span>
+              <span className="font-mono">{fmt(trade.entry_price)}</span>
+            </div>
+            <div className="flex justify-between">
+              <span>Stop loss</span>
+              <span className="font-mono text-red-400">{fmt(trade.stop_loss, 4)}</span>
+            </div>
+            {/* Always show initial risk */}
+            <div className="flex justify-between">
+              <span>Initial risk</span>
+              <span className="font-mono text-red-400">−{fmt(trade.risk_amount)}</span>
+            </div>
+            {/* Always show current risk — especially important at BE (= 0) */}
+            {trade.current_risk != null && (
+              <div className="flex justify-between">
+                <span>Current risk</span>
+                <span className={cn(
+                  'font-mono font-semibold',
+                  parseFloat(trade.current_risk) === 0
+                    ? 'text-emerald-400'
+                    : parseFloat(trade.current_risk) < parseFloat(trade.risk_amount)
+                      ? 'text-amber-400'
+                      : 'text-red-400',
+                )}>
+                  {parseFloat(trade.current_risk) === 0
+                    ? '0,00 ✓ at BE'
+                    : `−${fmt(trade.current_risk)}`}
+                </span>
+              </div>
+            )}
+            {/* Booked P&L from already-closed positions */}
+            {trade.booked_pnl != null && parseFloat(trade.booked_pnl) !== 0 && (
+              <div className="flex justify-between border-t border-surface-600/60 pt-0.5 mt-0.5">
+                <span>Booked P&L</span>
+                <span className={cn('font-mono font-semibold', parseFloat(trade.booked_pnl) >= 0 ? 'text-emerald-400' : 'text-red-400')}>
+                  {parseFloat(trade.booked_pnl) >= 0 ? '+' : ''}{fmt(trade.booked_pnl)}
+                </span>
+              </div>
+            )}
           </div>
         </div>
 
@@ -396,25 +434,51 @@ function CloseAllModal({ trade, onClose, onSuccess }: {
           </div>
         </div>
 
-        {/* Quick P&L preview */}
+        {/* Quick P&L preview — only remaining open positions */}
         {exitPrice && !isNaN(Number(exitPrice)) && (() => {
-          const entry  = parseFloat(trade.entry_price)
-          const exit_  = Number(exitPrice)
-          const risk   = parseFloat(trade.risk_amount)
-          const dist   = Math.abs(entry - parseFloat(trade.stop_loss))
-          const units  = dist > 0 ? risk / dist : 0
-          const diff   = trade.direction === 'LONG' ? exit_ - entry : entry - exit_
-          const pnl    = units * diff
-          const isPos  = pnl >= 0
+          const entry   = parseFloat(trade.entry_price)
+          const exit_   = Number(exitPrice)
+          const risk    = parseFloat(trade.risk_amount)
+          // Use initial_stop_loss so price_dist is never 0 after BE move
+          const refSl   = parseFloat(trade.initial_stop_loss ?? trade.stop_loss)
+          const dist    = Math.abs(entry - refSl)
+          if (dist === 0) return null   // can't compute — initial_sl == entry (bad seed data)
+
+          const totalUnits = risk / dist
+
+          // Only count positions still open — closed ones are already booked
+          const openPositions = trade.positions.filter((p) => p.status === 'open')
+          const openPct = openPositions.reduce((s, p) => s + parseFloat(p.lot_percentage), 0)
+          const remainingUnits = totalUnits * (openPct / 100)
+
+          const diff  = trade.direction === 'LONG' ? exit_ - entry : entry - exit_
+          const pnl   = remainingUnits * diff
+
+          // Add already-booked PnL from closed positions
+          const booked = trade.booked_pnl ? parseFloat(trade.booked_pnl) : 0
+          const totalEstPnl = pnl + booked
+          const isPos = totalEstPnl >= 0
           return (
-            <div className={cn(
-              'rounded-lg px-3 py-2 text-xs flex items-center justify-between',
-              isPos ? 'bg-emerald-500/10 border border-emerald-500/30' : 'bg-red-500/10 border border-red-500/30',
-            )}>
-              <span className="text-slate-400">Est. P&L</span>
-              <span className={cn('font-mono font-bold', isPos ? 'text-emerald-300' : 'text-red-400')}>
-                {isPos ? '+' : ''}{pnl.toFixed(2)}
-              </span>
+            <div className="space-y-1">
+              {booked !== 0 && (
+                <div className="rounded-lg px-3 py-1.5 text-xs flex items-center justify-between bg-surface-700/60 border border-surface-600">
+                  <span className="text-slate-500">Remaining ({openPct.toFixed(0)}% of position)</span>
+                  <span className={cn('font-mono font-semibold', pnl >= 0 ? 'text-emerald-400' : 'text-red-400')}>
+                    {pnl >= 0 ? '+' : ''}{pnl.toFixed(2)}
+                  </span>
+                </div>
+              )}
+              <div className={cn(
+                'rounded-lg px-3 py-2 text-xs flex items-center justify-between',
+                isPos ? 'bg-emerald-500/10 border border-emerald-500/30' : 'bg-red-500/10 border border-red-500/30',
+              )}>
+                <span className="text-slate-400">
+                  {booked !== 0 ? 'Total Est. P&L (incl. booked)' : 'Est. P&L'}
+                </span>
+                <span className={cn('font-mono font-bold', isPos ? 'text-emerald-300' : 'text-red-400')}>
+                  {isPos ? '+' : ''}{totalEstPnl.toFixed(2)}
+                </span>
+              </div>
             </div>
           )
         })()}
@@ -493,6 +557,20 @@ function PartialCloseModal({ trade, positionNumber, onClose, onSuccess }: {
               <span>Allocation</span>
               <span className="font-mono">{pos.lot_percentage}%</span>
             </div>
+            {(() => {
+              const entry  = parseFloat(trade.entry_price)
+              const refSl  = parseFloat(trade.initial_stop_loss ?? trade.stop_loss)
+              const dist   = Math.abs(entry - refSl)
+              if (dist === 0) return null
+              const totalUnits = parseFloat(trade.risk_amount) / dist
+              const posUnits   = totalUnits * (parseFloat(pos.lot_percentage) / 100)
+              return (
+                <div className="flex justify-between">
+                  <span>Quantity</span>
+                  <span className="font-mono text-slate-300">{posUnits.toFixed(6)}</span>
+                </div>
+              )
+            })()}
           </div>
         )}
 
@@ -510,6 +588,31 @@ function PartialCloseModal({ trade, positionNumber, onClose, onSuccess }: {
             </span>
           </div>
         </div>
+
+        {/* P&L preview for this TP slice */}
+        {exitPrice && !isNaN(Number(exitPrice)) && pos && (() => {
+          const entry    = parseFloat(trade.entry_price)
+          const exit_    = Number(exitPrice)
+          const refSl    = parseFloat(trade.initial_stop_loss ?? trade.stop_loss)
+          const dist     = Math.abs(entry - refSl)
+          if (dist === 0) return null
+          const totalUnits = parseFloat(trade.risk_amount) / dist
+          const posUnits   = totalUnits * (parseFloat(pos.lot_percentage) / 100)
+          const diff       = trade.direction === 'LONG' ? exit_ - entry : entry - exit_
+          const pnl        = posUnits * diff
+          const isPos      = pnl >= 0
+          return (
+            <div className={cn(
+              'rounded-lg px-3 py-2 text-xs flex items-center justify-between',
+              isPos ? 'bg-emerald-500/10 border border-emerald-500/30' : 'bg-red-500/10 border border-red-500/30',
+            )}>
+              <span className="text-slate-400">Est. P&L (TP{positionNumber})</span>
+              <span className={cn('font-mono font-bold', isPos ? 'text-emerald-300' : 'text-red-400')}>
+                {isPos ? '+' : ''}{pnl.toFixed(2)}
+              </span>
+            </div>
+          )
+        })()}
 
         {/* Move SL to breakeven */}
         <label className="flex items-center gap-2.5 cursor-pointer group">
@@ -954,7 +1057,8 @@ export function TradeDetailPage() {
                 const posNum    = pos.position_number
                 const tpNum     = parseFloat(pos.take_profit_price)
                 const entryP    = parseFloat(trade.entry_price)
-                const slP       = parseFloat(trade.stop_loss)
+                // Use initial_stop_loss for R:R — current stop_loss may be at BE
+                const slP       = parseFloat(trade.initial_stop_loss ?? trade.stop_loss)
                 const slDistP   = Math.abs(entryP - slP)
                 const tpDistP   = Math.abs(tpNum - entryP)
                 const rr        = slDistP > 0 ? tpDistP / slDistP : null
@@ -962,47 +1066,73 @@ export function TradeDetailPage() {
                 const isHit     = pos.status === 'closed' || pos.status === 'partial'
                 const canClose  = isActive && isOpen
 
+                // Remaining units for this position (displayed as % of total)
+                const lotPct    = parseFloat(pos.lot_percentage)
+                // Units = total_units × lot_pct/100
+                const totalUnits = slDistP > 0 ? parseFloat(trade.risk_amount) / slDistP : 0
+                const posUnits  = totalUnits * (lotPct / 100)
+
                 return (
-                  <div key={pos.id} className={cn('px-5 py-3 flex items-center justify-between gap-3', isHit && 'opacity-60')}>
-                    <div className="flex items-center gap-3 min-w-0">
-                      <span className={cn(
-                        'shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold border',
-                        isHit ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-400'
-                        : isOpen ? 'bg-brand-500/20 border-brand-500/40 text-brand-300'
-                        : 'bg-surface-700 border-surface-600 text-slate-500',
-                      )}>
-                        {posNum}
-                      </span>
-                      <div className="min-w-0">
-                        <p className="text-xs font-mono font-medium text-slate-200">{fmt(pos.take_profit_price, 4)}</p>
-                        <p className="text-[10px] text-slate-500">
-                          {pos.lot_percentage}% · {rr != null ? `${rr.toFixed(2)}R` : '—'}
-                          {isHit && pos.exit_price && (
-                            <span className="text-emerald-400 ml-1.5">✓ {fmt(pos.exit_price, 4)}</span>
-                          )}
-                        </p>
+                  <div key={pos.id} className={cn('px-5 py-3', isHit && 'opacity-60')}>
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <span className={cn(
+                          'shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold border',
+                          isHit ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-400'
+                          : isOpen ? 'bg-brand-500/20 border-brand-500/40 text-brand-300'
+                          : 'bg-surface-700 border-surface-600 text-slate-500',
+                        )}>
+                          {posNum}
+                        </span>
+                        <div className="min-w-0">
+                          <p className="text-xs font-mono font-medium text-slate-200">{fmt(pos.take_profit_price, 4)}</p>
+                          <p className="text-[10px] text-slate-500">
+                            {lotPct}% · {rr != null ? `${rr.toFixed(2)}R` : '—'}
+                            {isHit && pos.exit_price && (
+                              <span className="text-emerald-400 ml-1.5">✓ {fmt(pos.exit_price, 4)}</span>
+                            )}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        {pos.realized_pnl != null && (
+                          <span className={cn(
+                            'text-xs font-mono font-bold',
+                            parseFloat(pos.realized_pnl) > 0 ? 'text-emerald-400'
+                            : parseFloat(pos.realized_pnl) < 0 ? 'text-red-400'
+                            : 'text-amber-400/80',   // exactly 0 = BE close
+                          )}>
+                            {parseFloat(pos.realized_pnl) > 0 ? '+' : ''}{fmt(pos.realized_pnl)}
+                            {parseFloat(pos.realized_pnl) === 0 && <span className="ml-1 text-[9px] opacity-60">(BE)</span>}
+                          </span>
+                        )}
+                        {canClose && (
+                          <button
+                            type="button"
+                            onClick={() => setPartialTpId(pos.position_number)}
+                            className="px-2.5 py-1 rounded-lg bg-brand-600/15 border border-brand-500/30 text-[10px] text-brand-400 hover:bg-brand-600/25 transition-colors font-medium"
+                          >
+                            Book TP{posNum}
+                          </button>
+                        )}
                       </div>
                     </div>
-
-                    <div className="flex items-center gap-2">
-                      {pos.realized_pnl != null && (
-                        <span className={cn(
-                          'text-xs font-mono font-bold',
-                          parseFloat(pos.realized_pnl) >= 0 ? 'text-emerald-400' : 'text-red-400',
-                        )}>
-                          {parseFloat(pos.realized_pnl) >= 0 ? '+' : ''}{fmt(pos.realized_pnl)}
+                    {/* Units row — open: qty to be booked · closed: qty that was booked */}
+                    {totalUnits > 0 && (
+                      <div className="ml-9 mt-1 flex items-center gap-3 text-[10px] text-slate-600">
+                        <span>
+                          Qty: <span className={cn('font-mono', isOpen ? 'text-slate-400' : 'text-slate-500')}>{posUnits.toFixed(6)}</span>
                         </span>
-                      )}
-                      {canClose && (
-                        <button
-                          type="button"
-                          onClick={() => setPartialTpId(pos.position_number)}
-                          className="px-2.5 py-1 rounded-lg bg-brand-600/15 border border-brand-500/30 text-[10px] text-brand-400 hover:bg-brand-600/25 transition-colors font-medium"
-                        >
-                          Book TP{posNum}
-                        </button>
-                      )}
-                    </div>
+                        <span className="text-slate-700">·</span>
+                        <span>
+                          Alloc: <span className={cn('font-mono', isOpen ? 'text-slate-400' : 'text-slate-500')}>{lotPct}%</span>
+                        </span>
+                        {slDistP === 0 && (
+                          <span className="text-amber-500/70">⚠ initial SL = entry — qty unavailable</span>
+                        )}
+                      </div>
+                    )}
                   </div>
                 )
               })}

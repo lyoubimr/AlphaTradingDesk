@@ -131,6 +131,7 @@ def _make_trade(
     confidence_score: int | None,
     session_tag: str | None,
     analyzed_timeframe: str | None,
+    initial_stop_loss: Decimal | None = None,
 ) -> Trade:
     return Trade(
         profile_id=profile_id,
@@ -144,6 +145,9 @@ def _make_trade(
         entry_price=entry_price,
         entry_date=entry_date,
         stop_loss=stop_loss,
+        # initial_stop_loss = original SL, never changes after BE move.
+        # Falls back to stop_loss if not explicitly provided (correct for most test trades).
+        initial_stop_loss=initial_stop_loss if initial_stop_loss is not None else stop_loss,
         nb_take_profits=1,          # updated per trade below
         risk_amount=risk_amount,
         potential_profit=potential_profit,
@@ -225,6 +229,7 @@ def seed_crypto_profile(session) -> Profile:
         entry_price=Decimal("86500.00"),
         entry_date=now - timedelta(hours=5),
         stop_loss=Decimal("85200.00"),
+        initial_stop_loss=Decimal("85200.00"),
         nb_take_profits=2,
         risk_amount=Decimal("100.00"),
         potential_profit=Decimal("310.00"),
@@ -244,8 +249,8 @@ def seed_crypto_profile(session) -> Profile:
     ])
 
     # ── Trade 2: PARTIAL — ETH Long, TP1 hit + BE moved ───────────────────────
-    # This is the trade that tests the BE bug fix:
-    # current_risk must be 0, not the original risk_amount
+    # stop_loss == entry_price (BE) but initial_stop_loss holds the ORIGINAL SL
+    # so that _position_pnl can compute units correctly (price_dist > 0).
     t2 = Trade(
         profile_id=profile.id,
         instrument_id=eth_inst.id,
@@ -257,7 +262,8 @@ def seed_crypto_profile(session) -> Profile:
         analyzed_timeframe="1d",
         entry_price=Decimal("2200.00"),
         entry_date=now - timedelta(days=2),
-        stop_loss=Decimal("2200.00"),   # ← SL at entry = BE already moved
+        stop_loss=Decimal("2200.00"),           # ← SL moved to BE
+        initial_stop_loss=Decimal("2050.00"),   # ← original SL at trade open
         nb_take_profits=3,
         risk_amount=Decimal("100.00"),
         potential_profit=Decimal("250.00"),
@@ -292,6 +298,7 @@ def seed_crypto_profile(session) -> Profile:
         entry_price=Decimal("145.00"),
         entry_date=now - timedelta(days=5),
         stop_loss=Decimal("138.00"),
+        initial_stop_loss=Decimal("138.00"),
         nb_take_profits=1,
         risk_amount=Decimal("100.00"),
         potential_profit=Decimal("200.00"),
@@ -323,6 +330,7 @@ def seed_crypto_profile(session) -> Profile:
         entry_price=Decimal("89000.00"),
         entry_date=now - timedelta(days=8),
         stop_loss=Decimal("90200.00"),
+        initial_stop_loss=Decimal("90200.00"),
         nb_take_profits=1,
         risk_amount=Decimal("100.00"),
         potential_profit=Decimal("180.00"),
@@ -354,6 +362,7 @@ def seed_crypto_profile(session) -> Profile:
         entry_price=Decimal("2500.00"),
         entry_date=now - timedelta(days=12),
         stop_loss=Decimal("2580.00"),
+        initial_stop_loss=Decimal("2580.00"),
         nb_take_profits=1,
         risk_amount=Decimal("100.00"),
         potential_profit=Decimal("175.00"),
@@ -385,6 +394,7 @@ def seed_crypto_profile(session) -> Profile:
         entry_price=Decimal("84000.00"),
         entry_date=now - timedelta(hours=1),
         stop_loss=Decimal("82500.00"),
+        initial_stop_loss=Decimal("82500.00"),
         nb_take_profits=1,
         risk_amount=Decimal("100.00"),
         potential_profit=Decimal("200.00"),
@@ -472,6 +482,7 @@ def seed_cfd_profile(session) -> Profile:
         entry_price=Decimal("2650.00"),
         entry_date=now - timedelta(hours=3),
         stop_loss=Decimal("2638.00"),
+        initial_stop_loss=Decimal("2638.00"),
         nb_take_profits=2,
         risk_amount=Decimal("50.00"),
         potential_profit=Decimal("120.00"),
@@ -502,7 +513,8 @@ def seed_cfd_profile(session) -> Profile:
         analyzed_timeframe="15m",
         entry_price=Decimal("1.08500"),
         entry_date=now - timedelta(days=1),
-        stop_loss=Decimal("1.08500"),   # SL at entry = BE
+        stop_loss=Decimal("1.08500"),           # SL moved to BE
+        initial_stop_loss=Decimal("1.08700"),   # original SL at trade open
         nb_take_profits=2,
         risk_amount=Decimal("50.00"),
         potential_profit=Decimal("100.00"),
@@ -536,6 +548,7 @@ def seed_cfd_profile(session) -> Profile:
         entry_price=Decimal("2610.00"),
         entry_date=now - timedelta(days=4),
         stop_loss=Decimal("2598.00"),
+        initial_stop_loss=Decimal("2598.00"),
         nb_take_profits=1,
         risk_amount=Decimal("50.00"),
         potential_profit=Decimal("100.00"),
@@ -567,6 +580,7 @@ def seed_cfd_profile(session) -> Profile:
         entry_price=Decimal("1.09200"),
         entry_date=now - timedelta(days=6),
         stop_loss=Decimal("1.09000"),
+        initial_stop_loss=Decimal("1.09000"),
         nb_take_profits=1,
         risk_amount=Decimal("50.00"),
         potential_profit=Decimal("80.00"),
@@ -598,6 +612,7 @@ def seed_cfd_profile(session) -> Profile:
         entry_price=Decimal("2695.00"),
         entry_date=now - timedelta(days=9),
         stop_loss=Decimal("2706.00"),
+        initial_stop_loss=Decimal("2706.00"),
         nb_take_profits=1,
         risk_amount=Decimal("50.00"),
         potential_profit=Decimal("125.00"),
@@ -904,6 +919,7 @@ def seed_losing_profile(session) -> Profile:
         entry_price=Decimal("92000.00"),
         entry_date=now - timedelta(days=20),
         stop_loss=Decimal("89500.00"),
+        initial_stop_loss=Decimal("89500.00"),
         nb_take_profits=1,
         risk_amount=Decimal("320.00"),
         potential_profit=Decimal("640.00"),
@@ -936,6 +952,7 @@ def seed_losing_profile(session) -> Profile:
         entry_price=Decimal("3100.00"),
         entry_date=now - timedelta(days=17),
         stop_loss=Decimal("2980.00"),
+        initial_stop_loss=Decimal("2980.00"),
         nb_take_profits=1,
         risk_amount=Decimal("160.00"),
         potential_profit=Decimal("300.00"),
@@ -968,6 +985,7 @@ def seed_losing_profile(session) -> Profile:
         entry_price=Decimal("140.00"),
         entry_date=now - timedelta(days=14),
         stop_loss=Decimal("133.00"),
+        initial_stop_loss=Decimal("133.00"),
         nb_take_profits=1,
         risk_amount=Decimal("160.00"),
         potential_profit=Decimal("240.00"),
@@ -1000,6 +1018,7 @@ def seed_losing_profile(session) -> Profile:
         entry_price=Decimal("88500.00"),
         entry_date=now - timedelta(days=6),
         stop_loss=Decimal("90800.00"),
+        initial_stop_loss=Decimal("90800.00"),
         nb_take_profits=1,
         risk_amount=Decimal("320.00"),
         potential_profit=Decimal("500.00"),
@@ -1032,6 +1051,7 @@ def seed_losing_profile(session) -> Profile:
         entry_price=Decimal("2850.00"),
         entry_date=now - timedelta(days=3),
         stop_loss=Decimal("2950.00"),
+        initial_stop_loss=Decimal("2950.00"),
         nb_take_profits=1,
         risk_amount=Decimal("160.00"),
         potential_profit=Decimal("280.00"),
@@ -1064,6 +1084,7 @@ def seed_losing_profile(session) -> Profile:
         entry_price=Decimal("87000.00"),
         entry_date=now - timedelta(hours=6),
         stop_loss=Decimal("86200.00"),
+        initial_stop_loss=Decimal("86200.00"),
         nb_take_profits=1,
         risk_amount=Decimal("160.00"),
         potential_profit=Decimal("240.00"),
@@ -1096,6 +1117,7 @@ def seed_losing_profile(session) -> Profile:
         entry_price=Decimal("145.00"),
         entry_date=now - timedelta(hours=1),
         stop_loss=Decimal("139.00"),
+        initial_stop_loss=Decimal("139.00"),
         nb_take_profits=2,
         risk_amount=Decimal("160.00"),
         potential_profit=Decimal("350.00"),

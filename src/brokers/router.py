@@ -7,6 +7,7 @@ Routes:
   POST   /api/brokers/{broker_id}/instruments  → add a custom instrument
   GET    /api/trading-styles                   → list all trading styles (for goals)
 """
+
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, status

@@ -11,6 +11,7 @@ TradeOut        — full trade response (includes positions)
 TradeListItem   — slim version for the journal list
 TradeSizeResult — computed position-size helper (embedded in TradeOut)
 """
+
 from __future__ import annotations
 
 from datetime import datetime
@@ -27,13 +28,15 @@ Period = Literal["daily", "weekly", "monthly"]
 
 # ── Position schemas ───────────────────────────────────────────────────────────
 
+
 class PositionIn(BaseModel):
     """One TP target supplied when opening a trade (1–4 positions).
-    
+
     position_number is optional: if omitted the backend auto-assigns
     based on list order (1-based).  Kept for backward-compat if a
     caller supplies it explicitly.
     """
+
     position_number: int | None = Field(default=None, ge=1, le=4)
     take_profit_price: Decimal = Field(..., gt=0)
     lot_percentage: Decimal = Field(..., gt=0, le=100)
@@ -55,6 +58,7 @@ class PositionOut(BaseModel):
 
 # ── Trade open ────────────────────────────────────────────────────────────────
 
+
 class TradeOpen(BaseModel):
     """
     Body for POST /api/trades.
@@ -63,16 +67,17 @@ class TradeOpen(BaseModel):
     from the profile's capital_current + risk_percentage_default and the
     instrument's tick_value (CFD) or the price distance (Crypto).
     """
+
     profile_id: int
-    instrument_id: int | None = None    # None → free-text pair allowed
+    instrument_id: int | None = None  # None → free-text pair allowed
     pair: str = Field(..., min_length=1, max_length=20)
     direction: Direction
-    order_type: OrderType = "MARKET"    # MARKET → opens as 'open'; LIMIT → opens as 'pending'
+    order_type: OrderType = "MARKET"  # MARKET → opens as 'open'; LIMIT → opens as 'pending'
     asset_class: str | None = Field(default=None, max_length=50)
     analyzed_timeframe: str | None = Field(default=None, max_length=10)
 
     entry_price: Decimal = Field(..., gt=0)
-    entry_date: datetime | None = None   # if None → backend uses utcnow()
+    entry_date: datetime | None = None  # if None → backend uses utcnow()
     stop_loss: Decimal = Field(..., gt=0)
 
     positions: list[PositionIn] = Field(..., min_length=1, max_length=4)
@@ -105,9 +110,7 @@ class TradeOpen(BaseModel):
         # 3. Lot sum
         total = sum(p.lot_percentage for p in self.positions)
         if total != Decimal("100"):
-            raise ValueError(
-                f"lot_percentage across all positions must sum to 100, got {total}."
-            )
+            raise ValueError(f"lot_percentage across all positions must sum to 100, got {total}.")
 
         # 4. Unique position numbers
         nums = [p.position_number for p in self.positions]
@@ -125,6 +128,7 @@ class TradeOpen(BaseModel):
 
 # ── Trade update ──────────────────────────────────────────────────────────────
 
+
 class TradeUpdate(BaseModel):
     """
     PUT /api/trades/{id} — partial update, only sent fields are changed.
@@ -140,6 +144,7 @@ class TradeUpdate(BaseModel):
     The backend will raise 422 if entry_price / amend_positions are sent
     for a trade that is already 'open', 'partial', or 'closed'.
     """
+
     stop_loss: Decimal | None = Field(default=None, gt=0)
     strategy_id: int | None = None
     notes: str | None = None
@@ -149,28 +154,33 @@ class TradeUpdate(BaseModel):
 
     # ── pending-only amendments ───────────────────────────────────────────
     entry_price: Decimal | None = Field(default=None, gt=0)
-    amend_positions: list[PositionIn] | None = None   # replaces ALL positions if set
+    amend_positions: list[PositionIn] | None = None  # replaces ALL positions if set
 
 
 # ── Full close ────────────────────────────────────────────────────────────────
 
+
 class TradeClose(BaseModel):
     """POST /api/trades/{id}/close — close all remaining open positions."""
+
     exit_price: Decimal = Field(..., gt=0)
-    closed_at: datetime | None = None   # defaults to now()
+    closed_at: datetime | None = None  # defaults to now()
 
 
 # ── Partial close ─────────────────────────────────────────────────────────────
 
+
 class TradePartialClose(BaseModel):
     """POST /api/trades/{id}/partial — close one TP position."""
+
     position_number: int = Field(..., ge=1, le=3)
     exit_price: Decimal = Field(..., gt=0)
-    exit_date: datetime | None = None   # defaults to now()
-    move_to_be: bool = False            # if True → SL moves to entry_price
+    exit_date: datetime | None = None  # defaults to now()
+    move_to_be: bool = False  # if True → SL moves to entry_price
 
 
 # ── Computed size helper (embedded in TradeOut) ───────────────────────────────
+
 
 class TradeSizeResult(BaseModel):
     """
@@ -183,17 +193,20 @@ class TradeSizeResult(BaseModel):
         lots  = risk_amount / (abs(entry_price - stop_loss) × tick_value)
         margin_warning = True if capital_current < safe_margin
     """
+
     risk_amount: Decimal
-    units_or_lots: Decimal          # units for Crypto, lots for CFD
-    market_type: str                # 'Crypto' or 'CFD'
-    margin_warning: bool = False    # CFD only — safe_margin check
-    safe_margin: Decimal | None = None   # CFD only
+    units_or_lots: Decimal  # units for Crypto, lots for CFD
+    market_type: str  # 'Crypto' or 'CFD'
+    margin_warning: bool = False  # CFD only — safe_margin check
+    safe_margin: Decimal | None = None  # CFD only
 
 
 # ── Response schemas ──────────────────────────────────────────────────────────
 
+
 class TradeOut(BaseModel):
     """Full trade detail — returned after open / close / partial / GET by id."""
+
     model_config = ConfigDict(from_attributes=True)
 
     id: int
@@ -201,20 +214,27 @@ class TradeOut(BaseModel):
     instrument_id: int | None
     strategy_id: int | None
     pair: str
-    instrument_display_name: str | None = None  # from instrument.display_name, None for free-text pairs
-    direction: str
+    instrument_display_name: str | None = (
+        None  # from instrument.display_name, None for free-text pairs
+    )
+    direction: str  # always uppercased by model_post_init → 'LONG' | 'SHORT'
     order_type: str
     asset_class: str | None
     analyzed_timeframe: str | None
     entry_price: Decimal
     entry_date: datetime
     stop_loss: Decimal
+    # initial_stop_loss = original SL at trade open (never changes after BE move)
+    initial_stop_loss: Decimal
     nb_take_profits: int
     risk_amount: Decimal
     potential_profit: Decimal
     current_risk: Decimal | None
     status: str
     realized_pnl: Decimal | None
+    # Sum of realized_pnl from already-closed positions (partial trades).
+    # Populated by _trade_to_out — not a DB column.
+    booked_pnl: Decimal | None = None
     session_tag: str | None
     notes: str | None
     confidence_score: int | None
@@ -227,24 +247,38 @@ class TradeOut(BaseModel):
     # Computed on open — not stored, re-attached by the service
     size_info: TradeSizeResult | None = None
 
+    @model_validator(mode="after")
+    def normalise_direction_out(self) -> TradeOut:
+        """Guarantee direction is always uppercase in API responses.
+
+        The DB stores 'long' / 'short' (normalised at write time).
+        All frontend comparisons rely on 'LONG' / 'SHORT', so we
+        normalise here once instead of scattering .toUpperCase() on the client.
+        """
+        self.direction = self.direction.upper()
+        return self
+
 
 class TradeListItem(BaseModel):
     """Slim response for GET /api/trades (journal list)."""
+
     model_config = ConfigDict(from_attributes=True)
 
     id: int
     profile_id: int
     pair: str
     instrument_display_name: str | None = None  # populated by list_trades service
-    direction: str
+    direction: str  # always uppercased by model_post_init → 'LONG' | 'SHORT'
     order_type: str
     entry_price: Decimal
     entry_date: datetime
     stop_loss: Decimal
+    # initial_stop_loss = original SL at trade open — used for PnL preview on frontend
+    initial_stop_loss: Decimal
     nb_take_profits: int
     risk_amount: Decimal
     potential_profit: Decimal
-    current_risk: Decimal | None   # 0 after BE move, None for pending LIMIT orders
+    current_risk: Decimal | None  # 0 after BE move, None for pending LIMIT orders
     status: str
     realized_pnl: Decimal | None
     # Sum of realized_pnl across all already-closed positions (for partial trades).
@@ -252,3 +286,13 @@ class TradeListItem(BaseModel):
     booked_pnl: Decimal | None = None
     closed_at: datetime | None
     created_at: datetime
+
+    @model_validator(mode="after")
+    def normalise_direction_list(self) -> TradeListItem:
+        """Guarantee direction is always uppercase in API responses.
+
+        The DB stores 'long' / 'short' (normalised at write time).
+        All frontend comparisons rely on 'LONG' / 'SHORT'.
+        """
+        self.direction = self.direction.upper()
+        return self

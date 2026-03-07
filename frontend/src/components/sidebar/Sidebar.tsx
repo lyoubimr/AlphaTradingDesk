@@ -11,6 +11,7 @@ import {
   Activity,
   Users,
   SlidersHorizontal,
+  Crosshair,
 } from 'lucide-react'
 import { cn } from '../../lib/cn'
 import { Badge } from '../ui/Badge'
@@ -89,6 +90,11 @@ const NAV_GROUPS: NavGroup[] = [
         to: '/settings/goals',
         label: 'Goals Settings',
         icon: <Target size={16} />,
+      },
+      {
+        to: '/settings/strategies',
+        label: 'Strategies',
+        icon: <Crosshair size={16} />,
       },
       {
         to: '/settings/market-analysis',

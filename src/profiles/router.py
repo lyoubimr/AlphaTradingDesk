@@ -8,13 +8,17 @@ Routes:
   PUT    /api/profiles/{id}         → update profile (partial — only provided fields)
   DELETE /api/profiles/{id}         → soft-delete (status = 'deleted')
 
-  GET    /api/profiles/{id}/strategies   → list strategies for profile
-  POST   /api/profiles/{id}/strategies   → create strategy for profile
-  DELETE /api/profiles/{id}/strategies/{sid} → delete strategy
+  GET    /api/profiles/{id}/strategies                      → list strategies for profile
+  POST   /api/profiles/{id}/strategies                      → create strategy for profile
+  PUT    /api/profiles/{id}/strategies/{sid}                → update strategy fields
+  DELETE /api/profiles/{id}/strategies/{sid}                → soft-delete strategy
+  POST   /api/profiles/{id}/strategies/{sid}/image          → upload strategy image (multipart)
+  DELETE /api/profiles/{id}/strategies/{sid}/image          → remove strategy image
 """
+
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, File, UploadFile, status
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
@@ -26,6 +30,7 @@ from src.profiles.schemas import (
     ProfileUpdate,
     StrategyCreate,
     StrategyOut,
+    StrategyUpdate,
 )
 
 router = APIRouter(prefix="/profiles", tags=["profiles"])
@@ -63,6 +68,7 @@ def delete_profile(profile_id: int, db: Session = Depends(get_db)) -> Response:
 
 # ── Strategies ────────────────────────────────────────────────────────────────
 
+
 @router.get("/{profile_id}/strategies", response_model=list[StrategyOut])
 def list_strategies(profile_id: int, db: Session = Depends(get_db)) -> list:
     """List all active strategies for a profile."""
@@ -96,3 +102,44 @@ def delete_strategy(
     """Soft-delete a strategy (sets status = 'archived')."""
     service.delete_strategy(db, profile_id, strategy_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.put(
+    "/{profile_id}/strategies/{strategy_id}",
+    response_model=StrategyOut,
+)
+def update_strategy(
+    profile_id: int,
+    strategy_id: int,
+    data: StrategyUpdate,
+    db: Session = Depends(get_db),
+) -> object:
+    """Update strategy fields (name, description, rules, emoji, color, image_url)."""
+    return service.update_strategy(db, profile_id, strategy_id, data)
+
+
+@router.post(
+    "/{profile_id}/strategies/{strategy_id}/image",
+    response_model=StrategyOut,
+)
+def upload_strategy_image(
+    profile_id: int,
+    strategy_id: int,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+) -> object:
+    """Upload an image for a strategy. Stores the file and sets image_url."""
+    return service.upload_strategy_image(db, profile_id, strategy_id, file)
+
+
+@router.delete(
+    "/{profile_id}/strategies/{strategy_id}/image",
+    response_model=StrategyOut,
+)
+def delete_strategy_image(
+    profile_id: int,
+    strategy_id: int,
+    db: Session = Depends(get_db),
+) -> object:
+    """Remove the strategy image (deletes file, sets image_url = null)."""
+    return service.delete_strategy_image(db, profile_id, strategy_id)

@@ -29,6 +29,7 @@ Full close flow:
 
 Capital is ALWAYS updated in the same DB transaction as trade close.
 """
+
 from __future__ import annotations
 
 from datetime import datetime
@@ -55,12 +56,13 @@ from src.trades.schemas import (
 # CFD: safe_margin = (lots x contract_size x entry_price / max_leverage) x MARGIN_SAFETY_FACTOR
 # We flag a warning when capital_current < safe_margin.
 MARGIN_SAFETY_FACTOR = Decimal("2.5")
-DEFAULT_CFD_CONTRACT_SIZE = Decimal("100000")   # standard lot; overridden by instrument if set
-DEFAULT_CFD_MAX_LEVERAGE = 100                  # conservative fallback
-DEFAULT_CRYPTO_MAX_LEVERAGE = 10                # conservative fallback
+DEFAULT_CFD_CONTRACT_SIZE = Decimal("100000")  # standard lot; overridden by instrument if set
+DEFAULT_CFD_MAX_LEVERAGE = 100  # conservative fallback
+DEFAULT_CRYPTO_MAX_LEVERAGE = 10  # conservative fallback
 
 
 # -- Internal helpers ----------------------------------------------------------
+
 
 def _get_profile_or_404(db: Session, profile_id: int) -> Profile:
     p = db.query(Profile).filter(Profile.id == profile_id).first()
@@ -151,7 +153,7 @@ def _compute_size_info(
     Determine market_type from the profile and dispatch to the right formula.
     Returns a TradeSizeResult with units_or_lots and optional margin_warning.
     """
-    market_type = profile.market_type   # 'Crypto' or 'CFD'
+    market_type = profile.market_type  # 'Crypto' or 'CFD'
 
     if market_type == "Crypto":
         units = _compute_size_crypto(risk_amount, data.entry_price, data.stop_loss)
@@ -162,11 +164,7 @@ def _compute_size_info(
         )
 
     # -- CFD ------------------------------------------------------------------
-    tick_value = (
-        instrument.tick_value
-        if instrument and instrument.tick_value
-        else Decimal("1")
-    )
+    tick_value = instrument.tick_value if instrument and instrument.tick_value else Decimal("1")
     lots = _compute_size_cfd(risk_amount, data.entry_price, data.stop_loss, tick_value)
 
     # Margin check
@@ -176,7 +174,9 @@ def _compute_size_info(
         else DEFAULT_CFD_MAX_LEVERAGE
     )
     safe_margin = (
-        lots * DEFAULT_CFD_CONTRACT_SIZE * data.entry_price
+        lots
+        * DEFAULT_CFD_CONTRACT_SIZE
+        * data.entry_price
         / Decimal(str(max_lev))
         * MARGIN_SAFETY_FACTOR
     ).quantize(Decimal("0.01"))
@@ -214,9 +214,20 @@ def _position_pnl(
     Compute realized PnL for a single position at exit_price.
 
     pnl = (exit_price - entry_price) x direction_sign x units_per_position
-    units_per_position = (risk_amount / price_dist) x (lot_pct / 100)
+    units_per_position = (risk_amount / initial_price_dist) x (lot_pct / 100)
+
+    Uses initial_stop_loss (never changes) instead of current stop_loss
+    so that PnL is always correct even after the SL is moved to BE.
+    If initial_stop_loss is somehow unavailable (legacy rows backfilled at
+    entry_price), fall back to stop_loss to avoid a zero-division crash.
     """
-    price_dist = abs(trade.entry_price - trade.stop_loss)
+    # Prefer initial_stop_loss; fall back to stop_loss for safety
+    reference_sl = (
+        trade.initial_stop_loss
+        if hasattr(trade, "initial_stop_loss") and trade.initial_stop_loss is not None
+        else trade.stop_loss
+    )
+    price_dist = abs(trade.entry_price - reference_sl)
     if price_dist == 0:
         return Decimal("0")
 
@@ -248,6 +259,8 @@ def _trade_to_out(trade: Trade, size_info: TradeSizeResult | None = None) -> Tra
     """
     Convert a Trade ORM object to a TradeOut schema.
     Resolves instrument_display_name from the instrument relationship if loaded.
+    Also computes booked_pnl (sum of closed-position PnLs) so the detail page
+    can show already-booked PnL for partial trades — same logic as list_trades.
     """
     out = TradeOut.model_validate(trade)
     # Populate display name — trade.instrument must be eagerly loaded before calling this.
@@ -255,10 +268,18 @@ def _trade_to_out(trade: Trade, size_info: TradeSizeResult | None = None) -> Tra
         out.instrument_display_name = trade.instrument.display_name
     if size_info is not None:
         out.size_info = size_info
+    # Compute booked_pnl from closed positions (populated for partial + closed trades)
+    booked = sum(
+        (p.realized_pnl for p in trade.positions if p.realized_pnl is not None),
+        Decimal("0.00"),
+    )
+    out.booked_pnl = booked if booked != Decimal("0.00") else None
     return out
 
 
-def _reload_and_out(db: Session, trade_id: int, size_info: TradeSizeResult | None = None) -> TradeOut:
+def _reload_and_out(
+    db: Session, trade_id: int, size_info: TradeSizeResult | None = None
+) -> TradeOut:
     """
     Reload a trade fresh from DB with joinedload (instrument + positions),
     then convert to TradeOut. Use this after any commit() to ensure the
@@ -274,6 +295,7 @@ def _attach_size_info(trade: Trade, size_info: TradeSizeResult) -> TradeOut:
 
 
 # -- Public service functions --------------------------------------------------
+
 
 def open_trade(db: Session, data: TradeOpen) -> TradeOut:
     """
@@ -307,14 +329,14 @@ def open_trade(db: Session, data: TradeOpen) -> TradeOut:
         pair=data.pair,
         direction=data.direction,
         order_type=data.order_type,
-        asset_class=(
-            data.asset_class
-            or (instrument.asset_class if instrument else None)
-        ),
+        asset_class=(data.asset_class or (instrument.asset_class if instrument else None)),
         analyzed_timeframe=data.analyzed_timeframe,
         entry_price=data.entry_price,
         entry_date=data.entry_date or datetime.utcnow(),
         stop_loss=data.stop_loss,
+        # initial_stop_loss is set ONCE here and never changed.
+        # Used by _position_pnl so that moving SL to BE doesn't zero out PnL.
+        initial_stop_loss=data.stop_loss,
         nb_take_profits=len(data.positions),
         risk_amount=risk_amount,
         potential_profit=potential_profit,
@@ -356,10 +378,7 @@ def list_trades(
     Return trades (most recent first) with optional filters.
     Eagerly loads instrument + positions so display_name and booked_pnl are available.
     """
-    q = (
-        db.query(Trade)
-        .options(joinedload(Trade.instrument), joinedload(Trade.positions))
-    )
+    q = db.query(Trade).options(joinedload(Trade.instrument), joinedload(Trade.positions))
 
     if profile_id is not None:
         q = q.filter(Trade.profile_id == profile_id)
@@ -368,12 +387,7 @@ def list_trades(
     if pair is not None:
         q = q.filter(Trade.pair.ilike(f"%{pair}%"))
 
-    trades = (
-        q.order_by(Trade.entry_date.desc())
-        .offset(offset)
-        .limit(limit)
-        .all()
-    )
+    trades = q.order_by(Trade.entry_date.desc()).offset(offset).limit(limit).all()
 
     items = []
     for t in trades:
@@ -381,10 +395,13 @@ def list_trades(
         if t.instrument is not None:
             item.instrument_display_name = t.instrument.display_name
         # booked_pnl: sum of realized_pnl from all closed positions (for partial trades)
-        item.booked_pnl = sum(
-            (p.realized_pnl for p in t.positions if p.realized_pnl is not None),
-            Decimal("0.00"),
-        ) or None
+        item.booked_pnl = (
+            sum(
+                (p.realized_pnl for p in t.positions if p.realized_pnl is not None),
+                Decimal("0.00"),
+            )
+            or None
+        )
         items.append(item)
     return items
 
@@ -431,7 +448,14 @@ def update_trade(db: Session, trade_id: int, data: TradeUpdate) -> TradeOut:
         )
 
     # ── Apply simple scalar fields ────────────────────────────────────────
-    simple_fields = {"stop_loss", "strategy_id", "notes", "confidence_score", "session_tag", "analyzed_timeframe"}
+    simple_fields = {
+        "stop_loss",
+        "strategy_id",
+        "notes",
+        "confidence_score",
+        "session_tag",
+        "analyzed_timeframe",
+    }
     for field in simple_fields:
         if field in data.model_fields_set:
             setattr(trade, field, getattr(data, field))
@@ -466,7 +490,8 @@ def update_trade(db: Session, trade_id: int, data: TradeUpdate) -> TradeOut:
         if profile:
             instrument = (
                 db.query(Instrument).filter(Instrument.id == trade.instrument_id).first()
-                if trade.instrument_id else None
+                if trade.instrument_id
+                else None
             )
             # Rebuild a minimal TradeOpen-like object for _compute_size_info
             dummy = TradeOpen(
@@ -580,10 +605,13 @@ def partial_close(db: Session, trade_id: int, data: TradePartialClose) -> TradeO
     Close one TP position.
 
     1. Find the open position by position_number
-    2. Compute PnL for that slice
+    2. Compute PnL for that slice (using initial_stop_loss for unit calculation)
     3. If move_to_be=True -> SL = entry_price, current_risk = 0
     4. Else -> recalculate current_risk from remaining open positions
-    5. trade.status = 'partial'
+    5a. If there are still open positions → trade.status = 'partial'
+    5b. If ALL positions are now closed → auto-transition to full close:
+        sum all position PnLs, update trade.realized_pnl, update profile capital,
+        update strategy stats, set trade.status = 'closed'.
     6. Commit
     """
     trade = _get_trade_or_404(db, trade_id)
@@ -623,7 +651,40 @@ def partial_close(db: Session, trade_id: int, data: TradePartialClose) -> TradeO
     else:
         trade.current_risk = _recalculate_current_risk(trade, db)
 
-    trade.status = "partial"
+    # ── Auto-close when all positions are now closed ─────────────────────
+    # After marking this position closed, check if any remain open.
+    remaining_open = [p for p in trade.positions if p.status == "open"]
+
+    if not remaining_open:
+        # All TPs hit — finalize the trade exactly like full_close
+        total_pnl = sum(
+            (p.realized_pnl for p in trade.positions if p.realized_pnl is not None),
+            Decimal("0.00"),
+        )
+        trade.realized_pnl = total_pnl.quantize(Decimal("0.01"))
+        trade.status = "closed"
+        trade.closed_at = exit_dt
+        trade.current_risk = Decimal("0.00")
+
+        # Atomic capital + profile stats update
+        profile = db.query(Profile).filter(Profile.id == trade.profile_id).first()
+        if profile:
+            profile.capital_current = (profile.capital_current + trade.realized_pnl).quantize(
+                Decimal("0.01")
+            )
+            profile.trades_count += 1
+            if trade.realized_pnl > 0:
+                profile.win_count += 1
+
+        # Atomic strategy stats update
+        if trade.strategy_id:
+            strategy = db.query(Strategy).filter(Strategy.id == trade.strategy_id).first()
+            if strategy:
+                strategy.trades_count += 1
+                if trade.realized_pnl > 0:
+                    strategy.win_count += 1
+    else:
+        trade.status = "partial"
 
     db.commit()
     return _reload_and_out(db, trade_id)
@@ -670,9 +731,9 @@ def full_close(db: Session, trade_id: int, data: TradeClose) -> TradeOut:
     # -- Atomic capital + profile win-rate update --------------------------------
     profile = db.query(Profile).filter(Profile.id == trade.profile_id).first()
     if profile:
-        profile.capital_current = (
-            profile.capital_current + trade.realized_pnl
-        ).quantize(Decimal("0.01"))
+        profile.capital_current = (profile.capital_current + trade.realized_pnl).quantize(
+            Decimal("0.01")
+        )
         # Always increment trade count; win_count only when PnL > 0
         profile.trades_count += 1
         if trade.realized_pnl > 0:

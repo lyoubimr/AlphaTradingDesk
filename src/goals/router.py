@@ -12,6 +12,7 @@ Routes:
   POST   /api/profiles/{id}/goal-overrides      → log a circuit-breaker override
   GET    /api/profiles/{id}/goal-overrides       → override history
 """
+
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Response, status
@@ -36,6 +37,7 @@ router = APIRouter(
 
 
 # ── Goals CRUD ────────────────────────────────────────────────────────────────
+
 
 @router.get("/goals", response_model=list[GoalOut])
 def list_goals(profile_id: int, db: Session = Depends(get_db)) -> list:
@@ -92,6 +94,7 @@ def get_progress(profile_id: int, db: Session = Depends(get_db)) -> list:
 
 
 # ── Goal Override Log ─────────────────────────────────────────────────────────
+
 
 @router.post("/goal-overrides", response_model=GoalOverrideOut, status_code=status.HTTP_201_CREATED)
 def create_override(

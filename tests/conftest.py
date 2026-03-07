@@ -16,6 +16,7 @@ after the test.
 Requires: docker compose -f docker-compose.dev.yml up -d db
           APP_ENV=test (loads .env.test → DATABASE_URL points to atd_test)
 """
+
 from __future__ import annotations
 
 from collections.abc import Generator
@@ -77,6 +78,7 @@ def client(db_session: Session) -> Generator[TestClient, None, None]:
     Return a FastAPI TestClient with `get_db` overridden to use the
     per-test transactional session.
     """
+
     def override_get_db():
         yield db_session
 
