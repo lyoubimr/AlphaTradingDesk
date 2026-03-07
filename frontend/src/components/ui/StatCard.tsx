@@ -9,7 +9,9 @@ interface StatCardProps {
   value: ReactNode
   sub?: string
   info?: string
-  accent?: 'bull' | 'bear' | 'neutral' | 'brand'
+  accent?: 'bull' | 'bear' | 'neutral' | 'brand' | 'blue'
+  /** Override value font size. Default: 'text-2xl'. Use 'text-base' or 'text-sm' for long values. */
+  valueSize?: string
   className?: string
 }
 
@@ -18,9 +20,10 @@ const accentBorder: Record<string, string> = {
   bear:    'border-t-red-500',
   neutral: 'border-t-amber-500',
   brand:   'border-t-brand-500',
+  blue:    'border-t-blue-500',
 }
 
-export function StatCard({ label, value, sub, info, accent, className }: StatCardProps) {
+export function StatCard({ label, value, sub, info, accent, valueSize, className }: StatCardProps) {
   return (
     <div className={cn(
       'rounded-xl bg-surface-800 border border-surface-700 p-4',
@@ -34,7 +37,7 @@ export function StatCard({ label, value, sub, info, accent, className }: StatCar
         </span>
         {info && <InfoBubble text={info} />}
       </div>
-      <div className="text-2xl font-semibold text-slate-100 tabular-nums">
+      <div className={cn(valueSize ?? 'text-2xl', 'font-semibold text-slate-100 tabular-nums')}>
         {value}
       </div>
       {sub && (

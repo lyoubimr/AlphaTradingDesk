@@ -182,12 +182,16 @@ class SessionListItem(BaseModel):
     module_id: int
     score_htf_a: Decimal | None
     score_mtf_a: Decimal | None
+    score_ltf_a: Decimal | None
     bias_htf_a: str | None
     bias_mtf_a: str | None
+    bias_ltf_a: str | None
     score_htf_b: Decimal | None
     score_mtf_b: Decimal | None
+    score_ltf_b: Decimal | None
     bias_htf_b: str | None
     bias_mtf_b: str | None
+    bias_ltf_b: str | None
     # v2 decomposed scores (slim — composite only)
     score_composite_a: Decimal | None = None
     bias_composite_a: str | None = None

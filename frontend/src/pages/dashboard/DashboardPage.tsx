@@ -330,11 +330,13 @@ function MAModuleCard({ staleness, lastSession, module }: MAModuleCardProps) {
               {module?.asset_a && <p className="text-[9px] text-slate-600 uppercase tracking-wide">{module.asset_a}</p>}
               <TFScoreRow label="HTF" score={lastSession.score_htf_a} bias={lastSession.bias_htf_a as MABias | null} />
               <TFScoreRow label="MTF" score={lastSession.score_mtf_a} bias={lastSession.bias_mtf_a as MABias | null} />
+              <TFScoreRow label="LTF" score={lastSession.score_ltf_a} bias={lastSession.bias_ltf_a as MABias | null} />
               {module?.asset_b && lastSession.score_htf_b && (
                 <>
                   <p className="text-[9px] text-slate-600 uppercase tracking-wide mt-1.5">{module.asset_b}</p>
                   <TFScoreRow label="HTF" score={lastSession.score_htf_b} bias={lastSession.bias_htf_b as MABias | null} />
                   <TFScoreRow label="MTF" score={lastSession.score_mtf_b} bias={lastSession.bias_mtf_b as MABias | null} />
+                  <TFScoreRow label="LTF" score={lastSession.score_ltf_b} bias={lastSession.bias_ltf_b as MABias | null} />
                 </>
               )}
             </>
@@ -342,6 +344,7 @@ function MAModuleCard({ staleness, lastSession, module }: MAModuleCardProps) {
             <>
               <TFScoreRow label="HTF" score={lastSession.score_htf_a} bias={lastSession.bias_htf_a as MABias | null} />
               <TFScoreRow label="MTF" score={lastSession.score_mtf_a} bias={lastSession.bias_mtf_a as MABias | null} />
+              <TFScoreRow label="LTF" score={lastSession.score_ltf_a} bias={lastSession.bias_ltf_a as MABias | null} />
             </>
           )}
         </div>
@@ -834,6 +837,7 @@ function KpiBar({ trades, loading, profile }: {
       {/* Portfolio Risk — enhanced with available risk */}
       <StatCard
         label={`${riskEmoji} Portfolio Risk`}
+        valueSize="text-base"
         value={loading
           ? <Loader2 size={18} className="animate-spin text-slate-500" />
           : <span className={riskColor}>{fmt(riskPct)}% / {fmt(maxRiskPct)}%</span>
@@ -856,7 +860,7 @@ function KpiBar({ trades, loading, profile }: {
         value={loading
           ? <Loader2 size={18} className="animate-spin text-slate-500" />
           : winRate !== null
-          ? <span className={winRate >= 55 ? 'text-emerald-400' : winRate >= 45 ? 'text-amber-400' : 'text-red-400'}>
+          ? <span className={winRate >= 55 ? 'text-emerald-400' : winRate >= 45 ? 'text-amber-400' : 'text-blue-400'}>
               {fmt(winRate)}%
             </span>
           : '—'
@@ -867,7 +871,7 @@ function KpiBar({ trades, loading, profile }: {
             ? `N=${closedAll.length} — low sample`
             : `${closedAll.length} closed trades`
         }
-        accent="bear"
+        accent="blue"
         info="Win rate from all closed trades. Shown from 1 trade with N= label when below 5 trades."
       />
     </div>

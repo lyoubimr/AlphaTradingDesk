@@ -485,12 +485,16 @@ export interface MASessionListItem {
   module_id: number
   score_htf_a: string | null
   score_mtf_a: string | null
+  score_ltf_a: string | null
   bias_htf_a: MABias | null
   bias_mtf_a: MABias | null
+  bias_ltf_a: MABias | null
   score_htf_b: string | null
   score_mtf_b: string | null
+  score_ltf_b: string | null
   bias_htf_b: MABias | null
   bias_mtf_b: MABias | null
+  bias_ltf_b: MABias | null
   // v2 composite (slim — block scores not in list item)
   score_composite_a: string | null
   bias_composite_a: MABias | null

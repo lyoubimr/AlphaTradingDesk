@@ -26,15 +26,15 @@ import type React from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   TrendingUp, TrendingDown, Loader2,
-  AlertTriangle, ChevronDown, ChevronUp, Search, X, Info, Clock, Plus,
+  AlertTriangle, ChevronDown, ChevronUp, Search, X, Info, Clock, Plus, ShieldAlert,
 } from 'lucide-react'
 import { PageHeader } from '../../components/ui/PageHeader'
 import { useProfile } from '../../context/ProfileContext'
-import { instrumentsApi, tradesApi, strategiesApi, statsApi } from '../../lib/api'
+import { instrumentsApi, tradesApi, strategiesApi, statsApi, goalsApi } from '../../lib/api'
 import { useRiskCalc } from '../../hooks/useRiskCalc'
 import type { RiskCalcResult } from '../../hooks/useRiskCalc'
 import { cn } from '../../lib/cn'
-import type { Instrument, Profile, Strategy, WinRateStats } from '../../types/api'
+import type { Instrument, Profile, Strategy, WinRateStats, GoalProgressItem } from '../../types/api'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Shared styles
@@ -691,8 +691,9 @@ export function NewTradePage() {
   // Global WR stats — for the 3rd-level WR fallback in ExpectancyPanel
   const [globalWrStats, setGlobalWrStats] = useState<WinRateStats | null>(null)
 
-  // Portfolio risk — TODO Phase 2: show risk-exceeded banner on trade form
-  // (state removed for now — will be re-added when the UI uses it)
+  // Goal circuit-breaker — blocked periods prevent trade creation unless overridden
+  const [goalsProgress, setGoalsProgress]   = useState<GoalProgressItem[]>([])
+  const [goalsOverridden, setGoalsOverridden] = useState(false)
 
   const [instrument, setInstrument] = useState<Instrument | null>(null)
   const [direction, setDirection]   = useState<'LONG' | 'SHORT'>('LONG')
@@ -761,6 +762,16 @@ export function NewTradePage() {
   useEffect(() => {
     statsApi.winrate().then(setGlobalWrStats).catch(() => setGlobalWrStats(null))
   }, [])
+
+  // ── Load goals progress for circuit-breaker ───────────────────────────────
+  // Reset override whenever we change profile (fresh friction each time).
+  useEffect(() => {
+    if (!activeProfile?.id) { setGoalsProgress([]); return }
+    goalsApi.progress(activeProfile.id)
+      .then(setGoalsProgress)
+      .catch(() => setGoalsProgress([]))
+    setGoalsOverridden(false)
+  }, [activeProfile?.id])
 
   // ── Reset form fields when active profile changes ─────────────────────────
   useEffect(() => {
@@ -1127,6 +1138,10 @@ export function NewTradePage() {
   const autoSession = detectSession()
   const isFormValid = !!instrument && pctValid && !slSideError && !tpSideErrors
 
+  // Goal circuit-breaker
+  const blockedGoals = goalsProgress.filter((g) => g.limit_hit && g.show_on_dashboard)
+  const isGoalBlocked = blockedGoals.length > 0 && !goalsOverridden
+
   // ─────────────────────────────────────────────────────────────────────────
   // Render
   // ─────────────────────────────────────────────────────────────────────────
@@ -1143,6 +1158,38 @@ export function NewTradePage() {
         {error && (
           <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/30 text-red-400 text-xs">
             <AlertTriangle size={14} className="shrink-0" />{error}
+          </div>
+        )}
+
+        {/* ── Goal circuit-breaker banner ────────────────────────────────── */}
+        {isGoalBlocked && (
+          <div className="rounded-xl bg-red-900/20 border border-red-700/40 p-4 space-y-3">
+            <div className="flex items-start gap-3">
+              <ShieldAlert size={16} className="text-red-400 shrink-0 mt-0.5" />
+              <div>
+                <p className="text-sm font-semibold text-red-300">🛑 Risk limit reached — trade creation blocked</p>
+                <p className="text-xs text-red-400/80 mt-0.5">
+                  {blockedGoals.map((g) => (
+                    <span key={`${g.goal_id}-${g.period}`} className="block">
+                      {g.period.charAt(0).toUpperCase() + g.period.slice(1)} goal: {parseFloat(g.pnl_pct).toFixed(2)}% P&L (limit: {Math.abs(parseFloat(g.limit_pct)).toFixed(2)}%)
+                    </span>
+                  ))}
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setGoalsOverridden(true)}
+              className="w-full text-xs text-amber-300 bg-amber-900/20 border border-amber-700/40 rounded-lg px-3 py-2.5 hover:bg-amber-900/30 transition-colors text-left"
+            >
+              ⚠️ I understand the risk — trade anyway →
+            </button>
+          </div>
+        )}
+        {goalsOverridden && blockedGoals.length > 0 && (
+          <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-900/10 border border-amber-800/30 text-amber-400/70 text-xs">
+            <AlertTriangle size={12} className="shrink-0" />
+            Override active — you are trading outside your risk limits. Proceed with caution.
           </div>
         )}
 
@@ -1751,15 +1798,16 @@ export function NewTradePage() {
         {/* Form actions */}
         <div className="flex items-center justify-between pt-2 pb-4 border-t border-surface-700">
           <p className="text-[10px] text-slate-600">
-            {!instrument && '⚠ Select an instrument to start'}
-            {instrument && slSideError && <span className="text-amber-400">{slSideError}</span>}
-            {instrument && !slSideError && !calc.valid && '· Fill entry & SL to size position'}
-            {instrument && !slSideError && calc.valid && !pctValid && '· TP split must total 100%'}
-            {isFormValid && calc.valid && <span className="text-emerald-500/70">✓ Ready to submit</span>}
+            {isGoalBlocked && <span className="text-red-400">🛑 Goal risk limit hit — override required above</span>}
+            {!isGoalBlocked && !instrument && '⚠ Select an instrument to start'}
+            {!isGoalBlocked && instrument && slSideError && <span className="text-amber-400">{slSideError}</span>}
+            {!isGoalBlocked && instrument && !slSideError && !calc.valid && '· Fill entry & SL to size position'}
+            {!isGoalBlocked && instrument && !slSideError && calc.valid && !pctValid && '· TP split must total 100%'}
+            {!isGoalBlocked && isFormValid && calc.valid && <span className="text-emerald-500/70">✓ Ready to submit</span>}
           </p>
           <div className="flex items-center gap-2">
             <button type="button" onClick={() => navigate('/trades')} className="atd-btn-ghost">Cancel</button>
-            <button type="submit" disabled={submitting || !isFormValid} className="atd-btn-primary disabled:opacity-40">
+            <button type="submit" disabled={submitting || !isFormValid || isGoalBlocked} className="atd-btn-primary disabled:opacity-40">
               {submitting ? <Loader2 size={14} className="animate-spin" /> : <TrendingUp size={14} />}
               Open trade
             </button>
