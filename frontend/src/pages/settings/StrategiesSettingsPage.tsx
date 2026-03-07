@@ -1,22 +1,26 @@
 // ── Strategies Settings ────────────────────────────────────────────────────
 //
-// Full CRUD for trading strategies scoped to the active profile.
-// Each strategy tracks win/loss stats (updated atomically on trade close).
+// Full CRUD for strategies — global (🌐) and profile-specific (👤).
 //
-// Backend:
-//   GET    /api/profiles/{id}/strategies
+// Global strategies (profile_id = NULL):
+//   GET    /api/strategies?profile_id={id}    ← also returns profile-specific
+//   POST   /api/strategies                    ← create global
+//   PUT    /api/strategies/{sid}              ← update global
+//   DELETE /api/strategies/{sid}              ← archive global
+//
+// Profile-specific strategies:
 //   POST   /api/profiles/{id}/strategies
 //   PUT    /api/profiles/{id}/strategies/{sid}
-//   DELETE /api/profiles/{id}/strategies/{sid}  → soft-delete (archived)
-//   POST   /api/profiles/{id}/strategies/{sid}/image  → multipart upload
-//   DELETE /api/profiles/{id}/strategies/{sid}/image  → remove image
+//   DELETE /api/profiles/{id}/strategies/{sid}
+//   POST   /api/profiles/{id}/strategies/{sid}/image
+//   DELETE /api/profiles/{id}/strategies/{sid}/image
 // ──────────────────────────────────────────────────────────────────────────
 
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { Link } from 'react-router-dom'
 import {
   BarChart2, Plus, Loader2, RefreshCw, Trash2,
-  Pencil, X, Check, BookOpen, Upload, ImageOff, ExternalLink,
+  Pencil, X, Check, BookOpen, Upload, ImageOff, ExternalLink, Globe, User,
 } from 'lucide-react'
 import { PageHeader } from '../../components/ui/PageHeader'
 import { useProfile } from '../../context/ProfileContext'
@@ -42,18 +46,18 @@ function winRate(s: Strategy): string {
 function wrColor(s: Strategy): string {
   if (s.trades_count < s.min_trades_for_stats) return 'text-slate-500'
   const pct = (s.win_count / s.trades_count) * 100
-  if (pct >= 85) return 'text-violet-300'   // 85–100% — Exceptional
-  if (pct >= 75) return 'text-cyan-300'     // 75–84%  — Outstanding
-  if (pct >= 70) return 'text-emerald-300'  // 70–74%  — Elite edge
-  if (pct >= 60) return 'text-emerald-400'  // 60–69%  — Strong edge
-  if (pct >= 50) return 'text-teal-400'     // 50–59%  — Profitable
-  if (pct >= 45) return 'text-amber-400'    // 45–49%  — Developing
-  if (pct >= 35) return 'text-orange-400'   // 35–44%  — Review needed
-  return 'text-red-400'                     //  < 35%  — High risk
+  if (pct >= 85) return 'text-violet-300'
+  if (pct >= 75) return 'text-cyan-300'
+  if (pct >= 70) return 'text-emerald-300'
+  if (pct >= 60) return 'text-emerald-400'
+  if (pct >= 50) return 'text-teal-400'
+  if (pct >= 45) return 'text-amber-400'
+  if (pct >= 35) return 'text-orange-400'
+  return 'text-red-400'
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// ImageUploader — file picker + preview + upload/delete
+// ImageUploader
 // ─────────────────────────────────────────────────────────────────────────────
 
 function ImageUploader({
@@ -62,7 +66,8 @@ function ImageUploader({
   onUpdated,
 }: {
   strategy: Strategy
-  profileId: number
+  /** null = global strategy (uses /api/strategies/:id/image) */
+  profileId: number | null
   onUpdated: (s: Strategy) => void
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -75,17 +80,24 @@ function ImageUploader({
     if (!file) return
     setError(null); setUploading(true)
     try {
-      const form = new FormData()
-      form.append('file', file)
-      const res = await fetch(`/api/profiles/${profileId}/strategies/${strategy.id}/image`, {
-        method: 'POST',
-        body: form,
-      })
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}))
-        throw new Error((body as { detail?: string })?.detail ?? `Upload failed (${res.status})`)
+      let updated: Strategy
+      if (profileId === null) {
+        // Global strategy — use /api/strategies/:id/image
+        updated = await strategiesApi.uploadGlobalImage(strategy.id, file)
+      } else {
+        // Profile-specific strategy — use /api/profiles/:pid/strategies/:sid/image
+        const form = new FormData()
+        form.append('file', file)
+        const res = await fetch(`/api/profiles/${profileId}/strategies/${strategy.id}/image`, {
+          method: 'POST',
+          body: form,
+        })
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}))
+          throw new Error((body as { detail?: string })?.detail ?? `Upload failed (${res.status})`)
+        }
+        updated = await res.json() as Strategy
       }
-      const updated: Strategy = await res.json()
       onUpdated(updated)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Upload failed.')
@@ -98,7 +110,12 @@ function ImageUploader({
   const handleRemove = async () => {
     setError(null); setRemoving(true)
     try {
-      const updated = await strategiesApi.deleteImage(profileId, strategy.id)
+      let updated: Strategy
+      if (profileId === null) {
+        updated = await strategiesApi.deleteGlobalImage(strategy.id)
+      } else {
+        updated = await strategiesApi.deleteImage(profileId, strategy.id)
+      }
       onUpdated(updated)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Remove failed.')
@@ -178,6 +195,35 @@ function ImageUploader({
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// SectionHeader
+// ─────────────────────────────────────────────────────────────────────────────
+
+function SectionHeader({
+  icon,
+  label,
+  count,
+  className,
+}: {
+  icon: React.ReactNode
+  label: string
+  count: number
+  className?: string
+}) {
+  return (
+    <div className={cn('flex items-center gap-2 py-1', className)}>
+      <span className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-slate-500">
+        {icon}
+        {label}
+      </span>
+      <span className="text-[10px] font-medium text-slate-600 tabular-nums bg-surface-700 px-1.5 py-0.5 rounded-full">
+        {count}
+      </span>
+      <div className="flex-1 h-px bg-surface-700" />
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // StrategyRow — read + inline-edit
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -192,6 +238,8 @@ function StrategyRow({
   onUpdated: (s: Strategy) => void
   onDeleted: (id: number) => void
 }) {
+  const isGlobal = strategy.profile_id === null
+
   const [editing,  setEditing]  = useState(false)
   const [saving,   setSaving]   = useState(false)
   const [deleting, setDeleting] = useState(false)
@@ -229,7 +277,9 @@ function StrategyRow({
         color: color || null,
         min_trades_for_stats: minT,
       }
-      const updated = await strategiesApi.update(profileId, strategy.id, patch)
+      const updated = isGlobal
+        ? await strategiesApi.updateGlobal(strategy.id, patch)
+        : await strategiesApi.update(profileId, strategy.id, patch)
       onUpdated(updated)
       setEditing(false)
     } catch (e) {
@@ -240,10 +290,15 @@ function StrategyRow({
   }
 
   const handleDelete = async () => {
-    if (!confirm(`Archive strategy "${strategy.name}"? It won't appear in trade forms anymore.`)) return
+    const label = isGlobal ? 'global' : 'profile'
+    if (!confirm(`Archive ${label} strategy "${strategy.name}"? It won't appear in trade forms anymore.`)) return
     setDeleting(true)
     try {
-      await strategiesApi.delete(profileId, strategy.id)
+      if (isGlobal) {
+        await strategiesApi.archiveGlobal(strategy.id)
+      } else {
+        await strategiesApi.delete(profileId, strategy.id)
+      }
       onDeleted(strategy.id)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Archive failed.')
@@ -258,7 +313,7 @@ function StrategyRow({
         ? 'border-brand-500/40 bg-surface-700/80'
         : 'border-surface-700 bg-surface-800 hover:border-surface-600',
     )}>
-      {/* ── Header ─────────────────────────────────────────────────── */}
+      {/* Header */}
       <div className="flex items-center gap-3 px-4 py-3">
         <div className="flex items-center gap-2 shrink-0">
           <span
@@ -268,11 +323,24 @@ function StrategyRow({
           <span className="text-base leading-none">{strategy.emoji ?? '📈'}</span>
         </div>
         <div className="flex-1 min-w-0">
-          <p className="text-sm font-semibold text-slate-200 truncate">{strategy.name}</p>
+          <div className="flex items-center gap-1.5 flex-wrap">
+            {isGlobal
+              ? <span title="Global strategy — shared across all profiles"
+                  className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md bg-cyan-500/10 border border-cyan-500/30 text-[9px] font-semibold text-cyan-400 uppercase tracking-wide shrink-0">
+                  <Globe size={8} /> Global
+                </span>
+              : <span title="Profile-specific strategy"
+                  className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md bg-violet-500/10 border border-violet-500/30 text-[9px] font-semibold text-violet-400 uppercase tracking-wide shrink-0">
+                  <User size={8} /> Profile
+                </span>
+            }
+            <p className="text-sm font-semibold text-slate-200 truncate">{strategy.name}</p>
+          </div>
           {strategy.description && (
-            <p className="text-xs text-slate-500 truncate">{strategy.description}</p>
+            <p className="text-xs text-slate-500 truncate mt-0.5">{strategy.description}</p>
           )}
         </div>
+
         {/* Stats */}
         <div className="flex items-center gap-4 shrink-0">
           <div className="text-right">
@@ -288,6 +356,7 @@ function StrategyRow({
             <p className="text-[10px] text-slate-600">min</p>
           </div>
         </div>
+
         {/* Actions */}
         <div className="flex items-center gap-1 shrink-0 ml-1">
           {editing ? (
@@ -316,7 +385,7 @@ function StrategyRow({
         </div>
       </div>
 
-      {/* ── Image preview (always shown when image exists, outside edit mode) */}
+      {/* Image preview (outside edit mode) */}
       {!editing && strategy.image_url && (
         <div className="px-4 pb-4">
           <div className="rounded-xl overflow-hidden border border-surface-700 bg-surface-900/60 flex items-center justify-center" style={{ maxHeight: 320 }}>
@@ -330,13 +399,12 @@ function StrategyRow({
         </div>
       )}
 
-      {/* ── Inline edit form ─────────────────────────────────────────── */}
+      {/* Inline edit form */}
       {editing && (
         <div className="px-4 pb-4 pt-1 space-y-3 border-t border-surface-700">
           {error && (
             <p className="text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">{error}</p>
           )}
-          {/* emoji + color + name */}
           <div className="flex gap-2">
             <div className="w-20 shrink-0">
               <label className="text-[10px] text-slate-500 uppercase tracking-wide mb-1 block">Emoji</label>
@@ -352,12 +420,10 @@ function StrategyRow({
               <input className={inputCls} value={name} onChange={e => setName(e.target.value)} placeholder="Strategy name" maxLength={255} />
             </div>
           </div>
-          {/* description */}
           <div>
             <label className="text-[10px] text-slate-500 uppercase tracking-wide mb-1 block">Description</label>
             <input className={inputCls} value={description} onChange={e => setDescription(e.target.value)} placeholder="Short description…" />
           </div>
-          {/* rules */}
           <div>
             <label className="text-[10px] text-slate-500 uppercase tracking-wide mb-1 flex items-center gap-1">
               <BookOpen size={10} /> Rules
@@ -365,7 +431,6 @@ function StrategyRow({
             <textarea className={cn(inputCls, 'h-20 resize-none')} value={rules} onChange={e => setRules(e.target.value)}
               placeholder="Entry criteria, filters, trade management rules…" />
           </div>
-          {/* min_trades_for_stats — per strategy */}
           <div className="w-52">
             <label className="text-[10px] text-slate-500 uppercase tracking-wide mb-1 block">
               Min trades for WR stats
@@ -380,8 +445,10 @@ function StrategyRow({
               onChange={e => setMinTradesLocal(e.target.value)}
             />
           </div>
-          {/* image upload */}
-          <ImageUploader strategy={strategy} profileId={profileId} onUpdated={onUpdated} />
+          {!isGlobal
+            ? <ImageUploader strategy={strategy} profileId={profileId} onUpdated={onUpdated} />
+            : <ImageUploader strategy={strategy} profileId={null} onUpdated={onUpdated} />
+          }
         </div>
       )}
     </div>
@@ -389,7 +456,7 @@ function StrategyRow({
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Add form
+// AddStrategyForm — Global / Profile toggle
 // ─────────────────────────────────────────────────────────────────────────────
 
 function AddStrategyForm({
@@ -401,6 +468,7 @@ function AddStrategyForm({
   onCreated: (s: Strategy) => void
   onCancel: () => void
 }) {
+  const [scope,       setScope]       = useState<'global' | 'profile'>('profile')
   const [name,        setName]        = useState('')
   const [description, setDescription] = useState('')
   const [rules,       setRules]       = useState('')
@@ -421,7 +489,9 @@ function AddStrategyForm({
         emoji: emoji.trim() || null,
         color: color || null,
       }
-      const created = await strategiesApi.create(profileId, data)
+      const created = scope === 'global'
+        ? await strategiesApi.createGlobal(data)
+        : await strategiesApi.create(profileId, data)
       onCreated(created)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Creation failed.')
@@ -432,8 +502,59 @@ function AddStrategyForm({
 
   return (
     <form onSubmit={handleSubmit} className="rounded-xl border border-brand-500/30 bg-surface-800 p-4 space-y-3">
-      <p className="text-xs font-semibold text-brand-400 uppercase tracking-wide">New strategy</p>
+      {/* Header + scope toggle */}
+      <div className="flex items-center justify-between">
+        <p className="text-xs font-semibold text-brand-400 uppercase tracking-wide">New strategy</p>
+        <div className="flex items-center gap-1 p-0.5 rounded-lg bg-surface-700 border border-surface-600">
+          <button
+            type="button"
+            onClick={() => setScope('profile')}
+            className={cn(
+              'flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-all',
+              scope === 'profile'
+                ? 'bg-violet-600/80 text-white shadow-sm'
+                : 'text-slate-500 hover:text-slate-300',
+            )}
+          >
+            <User size={11} /> Profile
+          </button>
+          <button
+            type="button"
+            onClick={() => setScope('global')}
+            className={cn(
+              'flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-all',
+              scope === 'global'
+                ? 'bg-cyan-600/80 text-white shadow-sm'
+                : 'text-slate-500 hover:text-slate-300',
+            )}
+          >
+            <Globe size={11} /> Global
+          </button>
+        </div>
+      </div>
+
+      {/* Scope info banner */}
+      {scope === 'global' ? (
+        <div className="flex items-start gap-2 rounded-lg bg-cyan-500/[0.08] border border-cyan-500/20 px-3 py-2">
+          <Globe size={12} className="text-cyan-400 mt-0.5 shrink-0" />
+          <p className="text-[11px] text-cyan-300/80 leading-relaxed">
+            <strong className="text-cyan-300">Global strategy</strong> — shared across all profiles.
+            Appears in every profile's trade form. Add an image after creation via the edit ✏️ button.
+          </p>
+        </div>
+      ) : (
+        <div className="flex items-start gap-2 rounded-lg bg-violet-500/[0.08] border border-violet-500/20 px-3 py-2">
+          <User size={12} className="text-violet-400 mt-0.5 shrink-0" />
+          <p className="text-[11px] text-violet-300/80 leading-relaxed">
+            <strong className="text-violet-300">Profile strategy</strong> — only visible to the current profile.
+            Supports image upload.
+          </p>
+        </div>
+      )}
+
       {error && <p className="text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">{error}</p>}
+
+      {/* emoji + color + name */}
       <div className="flex gap-2">
         <div className="w-20 shrink-0">
           <label className="text-[10px] text-slate-500 uppercase tracking-wide mb-1 block">Emoji</label>
@@ -450,10 +571,12 @@ function AddStrategyForm({
             placeholder="e.g. BOS Retest, OB Sweep…" maxLength={255} autoFocus />
         </div>
       </div>
+
       <div>
         <label className="text-[10px] text-slate-500 uppercase tracking-wide mb-1 block">Description</label>
         <input className={inputCls} value={description} onChange={e => setDescription(e.target.value)} placeholder="Short description…" />
       </div>
+
       <div>
         <label className="text-[10px] text-slate-500 uppercase tracking-wide mb-1 flex items-center gap-1">
           <BookOpen size={10} /> Rules
@@ -461,12 +584,17 @@ function AddStrategyForm({
         <textarea className={cn(inputCls, 'h-20 resize-none')} value={rules} onChange={e => setRules(e.target.value)}
           placeholder="Entry criteria, filters, trade management rules…" />
       </div>
+
       <p className="text-[10px] text-slate-600">💡 Add a strategy image after creation via the edit ✏️ button.</p>
+
       <div className="flex gap-2 pt-1">
         <button type="submit" disabled={saving}
-          className="flex items-center gap-2 px-4 py-2 rounded-lg bg-brand-600 hover:bg-brand-500 text-white text-sm font-medium transition-colors disabled:opacity-50">
+          className={cn(
+            'flex items-center gap-2 px-4 py-2 rounded-lg text-white text-sm font-medium transition-colors disabled:opacity-50',
+            scope === 'global' ? 'bg-cyan-600 hover:bg-cyan-500' : 'bg-violet-600 hover:bg-violet-500',
+          )}>
           {saving ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
-          Create strategy
+          Create {scope} strategy
         </button>
         <button type="button" onClick={onCancel} disabled={saving}
           className="px-4 py-2 rounded-lg border border-surface-600 text-sm text-slate-400 hover:text-slate-200 hover:border-surface-500 transition-colors">
@@ -514,6 +642,10 @@ export function StrategiesSettingsPage() {
     setShowAdd(false)
   }
 
+  const globalStrategies  = strategies.filter(s => s.profile_id === null)
+  const profileStrategies = strategies.filter(s => s.profile_id !== null)
+  const hasBoth = globalStrategies.length > 0 && profileStrategies.length > 0
+
   return (
     <div>
       <PageHeader
@@ -522,14 +654,12 @@ export function StrategiesSettingsPage() {
         subtitle="Define and manage your trading strategies. Win rate is tracked automatically on every trade close."
       />
 
-      {/* ── Profile-level thresholds ─────────────────────────────────── */}
+      {/* Profile-level thresholds */}
       {activeProfile && (
         <div className="mb-5 rounded-xl border border-surface-700 bg-surface-800 px-5 py-4">
           <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-3">Profile thresholds</p>
-          {/* BE filter only — Min trades info moved to bottom of page */}
           <div className="rounded-lg bg-surface-700/60 border border-surface-600 px-4 py-3">
             <p className="text-[10px] text-slate-500 uppercase tracking-wide mb-1">Break-even filter (profile-level)</p>
-            {/* Main values: % + currency amount side by side */}
             <div className="flex items-end gap-3 mt-0.5">
               <p className="text-lg font-bold text-slate-200 tabular-nums">
                 {parseFloat(activeProfile.min_pnl_pct_for_stats).toFixed(3)}%
@@ -566,13 +696,18 @@ export function StrategiesSettingsPage() {
         </div>
       )}
 
-      {/* ── Toolbar ──────────────────────────────────────────────────── */}
+      {/* Toolbar */}
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-2">
           <BarChart2 size={14} className="text-slate-500" />
           <span className="text-sm text-slate-400">
             {loading ? 'Loading…' : `${strategies.length} strateg${strategies.length === 1 ? 'y' : 'ies'}`}
           </span>
+          {!loading && strategies.length > 0 && (globalStrategies.length > 0 || profileStrategies.length > 0) && (
+            <span className="text-[11px] text-slate-600">
+              ({globalStrategies.length} global · {profileStrategies.length} profile)
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-2">
           <button onClick={load} disabled={loading}
@@ -598,14 +733,14 @@ export function StrategiesSettingsPage() {
         </div>
       )}
 
-      {/* ── Add form ─────────────────────────────────────────────────── */}
+      {/* Add form */}
       {showAdd && activeProfile && (
         <div className="mb-4">
           <AddStrategyForm profileId={activeProfile.id} onCreated={handleCreated} onCancel={() => setShowAdd(false)} />
         </div>
       )}
 
-      {/* ── Empty state ──────────────────────────────────────────────── */}
+      {/* Empty state */}
       {activeProfile && !loading && strategies.length === 0 && !showAdd && (
         <div className="rounded-xl border border-dashed border-surface-600 px-6 py-12 text-center">
           <BarChart2 size={32} className="mx-auto text-slate-600 mb-3" />
@@ -618,20 +753,64 @@ export function StrategiesSettingsPage() {
         </div>
       )}
 
-      {/* ── Strategy list ─────────────────────────────────────────────── */}
-      <div className="space-y-3">
-        {strategies.map(s => (
-          <StrategyRow
-            key={s.id}
-            strategy={s}
-            profileId={activeProfile!.id}
-            onUpdated={handleUpdated}
-            onDeleted={handleDeleted}
-          />
-        ))}
-      </div>
+      {/* Strategy list — sectioned by global / profile */}
+      {activeProfile && strategies.length > 0 && (
+        <div className="space-y-1">
 
-      {/* ── WR legend ────────────────────────────────────────────────── */}
+          {/* Global section */}
+          {globalStrategies.length > 0 && (
+            <div>
+              {hasBoth && (
+                <SectionHeader
+                  icon={<Globe size={11} className="text-cyan-400" />}
+                  label="Global strategies"
+                  count={globalStrategies.length}
+                  className="mb-2"
+                />
+              )}
+              <div className="space-y-3">
+                {globalStrategies.map(s => (
+                  <StrategyRow
+                    key={s.id}
+                    strategy={s}
+                    profileId={activeProfile.id}
+                    onUpdated={handleUpdated}
+                    onDeleted={handleDeleted}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Profile section */}
+          {profileStrategies.length > 0 && (
+            <div className={hasBoth ? 'mt-5' : ''}>
+              {hasBoth && (
+                <SectionHeader
+                  icon={<User size={11} className="text-violet-400" />}
+                  label="Profile strategies"
+                  count={profileStrategies.length}
+                  className="mb-2"
+                />
+              )}
+              <div className="space-y-3">
+                {profileStrategies.map(s => (
+                  <StrategyRow
+                    key={s.id}
+                    strategy={s}
+                    profileId={activeProfile.id}
+                    onUpdated={handleUpdated}
+                    onDeleted={handleDeleted}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+
+        </div>
+      )}
+
+      {/* WR legend */}
       {strategies.length > 0 && (
         <div className="mt-6 rounded-xl border border-surface-700 bg-surface-800 px-5 py-4">
           <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-3">Win rate legend</p>
@@ -679,7 +858,7 @@ export function StrategiesSettingsPage() {
         </div>
       )}
 
-      {/* ── Min trades info — informational footer ────────────────────── */}
+      {/* Min trades info footer */}
       {activeProfile && (
         <div className="mt-3 rounded-xl border border-surface-700/50 bg-surface-800/40 px-5 py-3 flex items-start gap-3">
           <span className="text-base leading-none mt-0.5 shrink-0">ℹ️</span>

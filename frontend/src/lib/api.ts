@@ -116,6 +116,28 @@ export const strategiesApi = {
   archiveGlobal: (strategyId: number): Promise<void> =>
     request(`/strategies/${strategyId}`, { method: 'DELETE' }),
 
+  /**
+   * Upload an image for a global strategy (multipart/form-data).
+   * Returns the updated Strategy.
+   */
+  uploadGlobalImage: async (strategyId: number, file: File): Promise<Strategy> => {
+    const form = new FormData()
+    form.append('file', file)
+    const res = await fetch(`${BASE}/strategies/${strategyId}/image`, {
+      method: 'POST',
+      body: form,
+    })
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({ detail: res.statusText }))
+      throw new Error(typeof body.detail === 'string' ? body.detail : JSON.stringify(body.detail))
+    }
+    return res.json() as Promise<Strategy>
+  },
+
+  /** Remove the image from a global strategy. */
+  deleteGlobalImage: (strategyId: number): Promise<Strategy> =>
+    request(`/strategies/${strategyId}/image`, { method: 'DELETE' }),
+
   /** Create a profile-specific strategy. */
   create: (profileId: number, data: StrategyCreate): Promise<Strategy> =>
     request(`/profiles/${profileId}/strategies`, {

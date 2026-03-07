@@ -15,6 +15,7 @@ from src.goals.router import router as goals_router
 from src.market_analysis.router import ma_router, profiles_ma_router
 from src.profiles.router import router as profiles_router
 from src.stats.router import router as stats_router
+from src.strategies.router import router as strategies_router
 from src.trades.router import router as trades_router
 
 app = FastAPI(
@@ -55,6 +56,7 @@ app.include_router(profiles_router, prefix=API_PREFIX)
 app.include_router(goals_router, prefix=API_PREFIX)
 app.include_router(trades_router, prefix=API_PREFIX)
 app.include_router(stats_router, prefix=API_PREFIX)
+app.include_router(strategies_router, prefix=API_PREFIX)
 app.include_router(ma_router, prefix=API_PREFIX)
 app.include_router(profiles_ma_router, prefix=API_PREFIX)
 

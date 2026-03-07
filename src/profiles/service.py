@@ -230,25 +230,20 @@ def _get_strategy_or_404(db: Session, profile_id: int, strategy_id: int) -> Stra
     return strategy
 
 
-def upload_strategy_image(
-    db: Session, profile_id: int, strategy_id: int, file: UploadFile
-) -> Strategy:
+def _do_upload_strategy_image(db: Session, strategy: Strategy, file: UploadFile) -> Strategy:
     """
-    Save the uploaded image to disk, set image_url on the strategy.
+    Shared image upload logic — works for both profile-specific and global strategies.
 
+    Validates MIME type + size, saves to disk, sets image_url on the strategy record.
     URL format: /uploads/strategies/<filename>
     Proxied through Vite in dev, served via StaticFiles mount in all envs.
     """
-    strategy = _get_strategy_or_404(db, profile_id, strategy_id)
-
-    # Validate MIME type
     if file.content_type not in _ALLOWED_IMAGE_TYPES:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=f"Unsupported file type '{file.content_type}'. Allowed: jpeg, png, webp, gif.",
         )
 
-    # Read + size check
     content = file.file.read()
     if len(content) > _MAX_IMAGE_BYTES:
         raise HTTPException(
@@ -256,11 +251,10 @@ def upload_strategy_image(
             detail=f"File too large ({len(content) // 1024} KB). Maximum is 5 MB.",
         )
 
-    # Build a unique filename: strategy_<id>_<uuid>.<ext>
     ext = (file.filename or "upload").rsplit(".", 1)[-1].lower()
     if ext not in ("jpg", "jpeg", "png", "webp", "gif"):
         ext = "jpg"
-    filename = f"strategy_{strategy_id}_{uuid.uuid4().hex[:8]}.{ext}"
+    filename = f"strategy_{strategy.id}_{uuid.uuid4().hex[:8]}.{ext}"
 
     # Delete old file if exists
     if strategy.image_url:
@@ -269,7 +263,6 @@ def upload_strategy_image(
         if os.path.isfile(old_path):
             os.remove(old_path)
 
-    # Write new file
     dest = os.path.join(_strategies_upload_dir(), filename)
     with open(dest, "wb") as f:
         f.write(content)
@@ -280,10 +273,8 @@ def upload_strategy_image(
     return strategy
 
 
-def delete_strategy_image(db: Session, profile_id: int, strategy_id: int) -> Strategy:
-    """Remove the strategy image: delete file from disk + set image_url = null."""
-    strategy = _get_strategy_or_404(db, profile_id, strategy_id)
-
+def _do_delete_strategy_image(db: Session, strategy: Strategy) -> Strategy:
+    """Shared image removal logic — works for both profile-specific and global strategies."""
     if strategy.image_url:
         filename = strategy.image_url.rsplit("/", 1)[-1]
         path = os.path.join(_strategies_upload_dir(), filename)
@@ -292,5 +283,48 @@ def delete_strategy_image(db: Session, profile_id: int, strategy_id: int) -> Str
         strategy.image_url = None
         db.commit()
         db.refresh(strategy)
-
     return strategy
+
+
+def upload_strategy_image(
+    db: Session, profile_id: int, strategy_id: int, file: UploadFile
+) -> Strategy:
+    """Upload an image for a profile-specific strategy."""
+    strategy = _get_strategy_or_404(db, profile_id, strategy_id)
+    return _do_upload_strategy_image(db, strategy, file)
+
+
+def delete_strategy_image(db: Session, profile_id: int, strategy_id: int) -> Strategy:
+    """Remove the image of a profile-specific strategy."""
+    strategy = _get_strategy_or_404(db, profile_id, strategy_id)
+    return _do_delete_strategy_image(db, strategy)
+
+
+def upload_global_strategy_image(db: Session, strategy_id: int, file: UploadFile) -> Strategy:
+    """Upload an image for a global strategy (profile_id = NULL)."""
+    strategy = (
+        db.query(Strategy)
+        .filter(Strategy.id == strategy_id, Strategy.profile_id.is_(None))
+        .first()
+    )
+    if not strategy:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Global strategy {strategy_id} not found.",
+        )
+    return _do_upload_strategy_image(db, strategy, file)
+
+
+def delete_global_strategy_image(db: Session, strategy_id: int) -> Strategy:
+    """Remove the image of a global strategy (profile_id = NULL)."""
+    strategy = (
+        db.query(Strategy)
+        .filter(Strategy.id == strategy_id, Strategy.profile_id.is_(None))
+        .first()
+    )
+    if not strategy:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Global strategy {strategy_id} not found.",
+        )
+    return _do_delete_strategy_image(db, strategy)

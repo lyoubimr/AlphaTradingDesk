@@ -109,6 +109,8 @@ export interface TradeOpen {
   positions: TradePosition[]      // 1–4 TPs required
   risk_pct_override?: string | null
   strategy_id?: number | null
+  /** Multi-strategy: all strategy IDs for this trade */
+  strategy_ids?: number[]
   session_tag?: string | null
   notes?: string | null
   confidence_score?: number | null
@@ -141,6 +143,9 @@ export interface TradeListItem {
   status: 'pending' | 'open' | 'partial' | 'closed' | 'cancelled'
   realized_pnl: string | null       // non-null only when fully closed
   booked_pnl: string | null         // sum of closed-position PnLs (partial trades)
+  strategy_id: number | null        // primary strategy (first of strategy_ids, compat)
+  /** All strategy IDs linked to this trade (via trade_strategies junction table) */
+  strategy_ids: number[]
   closed_at: string | null
   created_at: string
 }
@@ -196,6 +201,8 @@ export interface TradeUpdate {
   // Always editable (non-closed trades)
   stop_loss?: string | null
   strategy_id?: number | null
+  /** Replace full set of strategy links (empty = remove all) */
+  strategy_ids?: number[]
   notes?: string | null
   confidence_score?: number | null
   session_tag?: string | null
@@ -213,7 +220,8 @@ export interface TradeUpdate {
 
 export interface Strategy {
   id: number
-  profile_id: number
+  /** null = global strategy (shared across all profiles) */
+  profile_id: number | null
   name: string
   description: string | null
   rules: string | null

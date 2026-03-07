@@ -86,6 +86,11 @@ class TradeOpen(BaseModel):
     risk_pct_override: Decimal | None = Field(default=None, gt=0, le=10)
 
     strategy_id: int | None = None
+    # Multi-strategy: list of strategy IDs linked via trade_strategies table.
+    # If strategy_ids is set and non-empty, strategy_id is auto-set to strategy_ids[0]
+    # for backward compat with single-strategy code.
+    # If only strategy_id is set (legacy), it is treated as strategy_ids=[strategy_id].
+    strategy_ids: list[int] = Field(default_factory=list)
     session_tag: str | None = Field(default=None, max_length=20)
     notes: str | None = None
     confidence_score: int | None = Field(default=None, ge=0, le=100)
@@ -124,6 +129,12 @@ class TradeOpen(BaseModel):
         if self.direction == "short" and self.stop_loss <= self.entry_price:
             raise ValueError("For a short trade, stop_loss must be above entry_price.")
 
+        # 6. Normalise strategy_ids — if only strategy_id set, promote it
+        if not self.strategy_ids and self.strategy_id is not None:
+            self.strategy_ids = [self.strategy_id]
+        elif self.strategy_ids and self.strategy_id is None:
+            self.strategy_id = self.strategy_ids[0]
+
         return self
 
 
@@ -152,6 +163,9 @@ class TradeUpdate(BaseModel):
 
     stop_loss: Decimal | None = Field(default=None, gt=0)
     strategy_id: int | None = None
+    # Replace the full list of linked strategies (empty list = remove all)
+    # If provided (even empty), overrides the current trade_strategies links.
+    strategy_ids: list[int] | None = None
     notes: str | None = None
     confidence_score: int | None = Field(default=None, ge=0, le=100)
     session_tag: str | None = Field(default=None, max_length=20)
@@ -225,6 +239,9 @@ class TradeOut(BaseModel):
     profile_id: int
     instrument_id: int | None
     strategy_id: int | None
+    # All strategy IDs linked to this trade (via trade_strategies junction table)
+    # Populated by the service — not directly from the ORM model_validate.
+    strategy_ids: list[int] = Field(default_factory=list)
     pair: str
     instrument_display_name: str | None = (
         None  # from instrument.display_name, None for free-text pairs
@@ -287,6 +304,9 @@ class TradeListItem(BaseModel):
     instrument_display_name: str | None = None  # populated by list_trades service
     direction: str  # always uppercased by model_post_init → 'LONG' | 'SHORT'
     order_type: str
+    strategy_id: int | None = None
+    # All strategy IDs linked (populated by service, not ORM validate)
+    strategy_ids: list[int] = Field(default_factory=list)
     entry_price: Decimal
     entry_date: datetime
     stop_loss: Decimal

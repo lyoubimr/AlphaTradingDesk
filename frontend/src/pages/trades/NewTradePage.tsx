@@ -412,10 +412,10 @@ function MultiStrategySelect({
           bg-surface-800 border border-surface-600 rounded-xl shadow-2xl overflow-hidden">
 
           <div className="max-h-64 overflow-y-auto">
-            {/* ── Global strategies ── */}
+            {/* ── Global strategies — only shown if any exist ── */}
             {globalList.length > 0 && (
               <>
-                <div className="px-4 pt-2.5 pb-1 text-[9px] uppercase tracking-widest text-slate-600 font-semibold flex items-center gap-1.5">
+                <div className="px-4 pt-2.5 pb-1 text-[9px] uppercase tracking-widest text-slate-600 font-semibold">
                   🌐 Global
                 </div>
                 {globalList.map((s) => (
@@ -440,11 +440,14 @@ function MultiStrategySelect({
             )}
 
             {/* ── Profile-specific strategies ── */}
+            {/* Header only when both sections are present (separator needed) */}
             {profileList.length > 0 && (
               <>
-                <div className="px-4 pt-2.5 pb-1 text-[9px] uppercase tracking-widest text-slate-600 font-semibold flex items-center gap-1.5 border-t border-surface-700/50">
-                  👤 Profile
-                </div>
+                {globalList.length > 0 && (
+                  <div className="px-4 pt-2.5 pb-1 text-[9px] uppercase tracking-widest text-slate-600 font-semibold border-t border-surface-700/50">
+                    👤 Profile
+                  </div>
+                )}
                 {profileList.map((s) => (
                   <button key={s.id} type="button" onClick={() => toggle(s.id)}
                     className={cn('w-full flex items-center gap-2 px-4 py-2 hover:bg-surface-700 transition-colors text-left',
