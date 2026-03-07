@@ -135,18 +135,30 @@ def delete(db: Session, profile_id: int) -> None:
 
 
 def list_strategies(db: Session, profile_id: int) -> list[Strategy]:
-    """Return all active strategies for a profile, ordered by name."""
+    """Return strategies visible to a profile.
+
+    Includes:
+    - Global strategies (profile_id IS NULL) — shared across all profiles
+    - Profile-specific strategies (profile_id = profile_id)
+
+    Both ordered by name.
+    """
     _get_or_404(db, profile_id)
+    from sqlalchemy import or_
+
     return (
         db.query(Strategy)
-        .filter(Strategy.profile_id == profile_id, Strategy.status == "active")
+        .filter(
+            or_(Strategy.profile_id == profile_id, Strategy.profile_id.is_(None)),
+            Strategy.status == "active",
+        )
         .order_by(Strategy.name)
         .all()
     )
 
 
 def create_strategy(db: Session, profile_id: int, data: StrategyCreate) -> Strategy:
-    """Create a new strategy for a profile."""
+    """Create a new strategy for a profile (profile-specific, not global)."""
     _get_or_404(db, profile_id)
     strategy = Strategy(
         profile_id=profile_id,

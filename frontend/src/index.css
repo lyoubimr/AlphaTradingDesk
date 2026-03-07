@@ -131,6 +131,80 @@ html, body, #root {
   --color-surface-400: #1e4660;
 }
 
+/* ── 5. Night Black (pure black surfaces, white/slate brand) ────────────── */
+[data-theme="night"] {
+  --color-brand-50:  #f8fafc;
+  --color-brand-100: #f1f5f9;
+  --color-brand-200: #e2e8f0;
+  --color-brand-400: #cbd5e1;
+  --color-brand-500: #94a3b8;
+  --color-brand-600: #64748b;
+  --color-brand-700: #475569;
+  --color-brand-900: #0f172a;
+  --color-surface-950: #000000;
+  --color-surface-900: #080808;
+  --color-surface-800: #111111;
+  --color-surface-700: #1a1a1a;
+  --color-surface-600: #242424;
+  --color-surface-500: #333333;
+  --color-surface-400: #444444;
+}
+
+/* ── 6. Navy Pro (deep navy surfaces, blue brand) ───────────────────────── */
+[data-theme="navy"] {
+  --color-brand-50:  #eff6ff;
+  --color-brand-100: #dbeafe;
+  --color-brand-200: #bfdbfe;
+  --color-brand-400: #60a5fa;
+  --color-brand-500: #3b82f6;
+  --color-brand-600: #2563eb;
+  --color-brand-700: #1d4ed8;
+  --color-brand-900: #1e3a5f;
+  --color-surface-950: #020817;
+  --color-surface-900: #050f1f;
+  --color-surface-800: #091628;
+  --color-surface-700: #0d1d33;
+  --color-surface-600: #12273f;
+  --color-surface-500: #183350;
+  --color-surface-400: #1e4068;
+}
+
+/* ── 7. Light (clean white, indigo brand) ───────────────────────────────── */
+[data-theme="light"] {
+  --color-brand-50:  #eef2ff;
+  --color-brand-100: #e0e7ff;
+  --color-brand-200: #c7d2fe;
+  --color-brand-400: #818cf8;
+  --color-brand-500: #6366f1;
+  --color-brand-600: #4f46e5;
+  --color-brand-700: #4338ca;
+  --color-brand-900: #1e1b4b;
+  --color-surface-950: #f8fafc;
+  --color-surface-900: #f1f5f9;
+  --color-surface-800: #ffffff;
+  --color-surface-700: #f1f5f9;
+  --color-surface-600: #e2e8f0;
+  --color-surface-500: #cbd5e1;
+  --color-surface-400: #94a3b8;
+}
+
+/* Light theme text + bg overrides */
+[data-theme="light"] html,
+[data-theme="light"] body,
+html[data-theme="light"],
+html[data-theme="light"] body {
+  background-color: #f8fafc;
+  color: #0f172a;
+}
+[data-theme="light"] .text-slate-200  { color: #1e293b; }
+[data-theme="light"] .text-slate-300  { color: #334155; }
+[data-theme="light"] .text-slate-400  { color: #475569; }
+[data-theme="light"] .text-slate-500  { color: #64748b; }
+[data-theme="light"] .text-slate-600  { color: #94a3b8; }
+[data-theme="light"] .text-slate-700  { color: #cbd5e1; }
+[data-theme="light"] .border-surface-700 { border-color: #e2e8f0; }
+[data-theme="light"] .border-surface-600 { border-color: #cbd5e1; }
+
 /* ── Utility button classes ─────────────────────────────────────────────── */
 .atd-btn-primary {
   display: inline-flex;

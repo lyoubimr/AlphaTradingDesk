@@ -404,7 +404,10 @@ class TestUpdateTrade:
         assert resp.status_code == 200
         assert resp.json()["notes"] == "RSI divergence"
 
-    def test_cannot_update_closed_trade(self, client: TestClient, db_session: Session):
+    def test_cannot_update_closed_trade_structural_fields(
+        self, client: TestClient, db_session: Session
+    ):
+        """Structural fields (stop_loss, entry_price) cannot be changed on closed trades."""
         broker = _make_broker(db_session, name="ClosedUpdateBroker")
         inst = _make_instrument(db_session, broker)
         profile = _make_profile(db_session, broker)
@@ -413,8 +416,31 @@ class TestUpdateTrade:
         trade_id = r.json()["id"]
         client.post(f"/api/trades/{trade_id}/close", json={"exit_price": "51000"})
 
-        resp = client.put(f"/api/trades/{trade_id}", json={"notes": "late update"})
+        # Structural field update → rejected
+        resp = client.put(f"/api/trades/{trade_id}", json={"stop_loss": "48000"})
         assert resp.status_code == 422
+
+    def test_can_update_notes_on_closed_trade(
+        self, client: TestClient, db_session: Session
+    ):
+        """Notes and close_notes remain editable even after a trade is closed."""
+        broker = _make_broker(db_session, name="ClosedNotesUpdateBroker")
+        inst = _make_instrument(db_session, broker)
+        profile = _make_profile(db_session, broker)
+
+        r = client.post("/api/trades", json=_open_payload(profile, inst))
+        trade_id = r.json()["id"]
+        client.post(f"/api/trades/{trade_id}/close", json={"exit_price": "51000"})
+
+        # notes update on closed trade → allowed
+        resp = client.put(f"/api/trades/{trade_id}", json={"notes": "late entry note"})
+        assert resp.status_code == 200
+        assert resp.json()["notes"] == "late entry note"
+
+        # close_notes update → also allowed
+        resp2 = client.put(f"/api/trades/{trade_id}", json={"close_notes": "post-review"})
+        assert resp2.status_code == 200
+        assert resp2.json()["close_notes"] == "post-review"
 
 
 # ── Tests: POST /api/trades/{id}/close ────────────────────────────────────────

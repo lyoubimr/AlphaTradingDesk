@@ -883,11 +883,7 @@ def update_entry_screenshots(db: Session, trade_id: int, urls: list[str]) -> Tra
     avoiding NOT NULL violations on columns that are NULL due to legacy data.
     """
     _get_trade_or_404(db, trade_id)  # 404 guard
-    db.execute(
-        sa_update(Trade)
-        .where(Trade.id == trade_id)
-        .values(entry_screenshot_urls=urls)
-    )
+    db.execute(sa_update(Trade).where(Trade.id == trade_id).values(entry_screenshot_urls=urls))
     db.commit()
     return _reload_and_out(db, trade_id)
 
@@ -899,10 +895,6 @@ def update_close_screenshots(db: Session, trade_id: int, urls: list[str]) -> Tra
     avoiding NOT NULL violations on columns that are NULL due to legacy data.
     """
     _get_trade_or_404(db, trade_id)  # 404 guard
-    db.execute(
-        sa_update(Trade)
-        .where(Trade.id == trade_id)
-        .values(close_screenshot_urls=urls)
-    )
+    db.execute(sa_update(Trade).where(Trade.id == trade_id).values(close_screenshot_urls=urls))
     db.commit()
     return _reload_and_out(db, trade_id)

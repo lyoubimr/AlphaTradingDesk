@@ -170,11 +170,18 @@ export interface TradeOut extends TradeListItem {
   updated_at: string
   positions: TradePosition_Out[]
   size_info: TradeSizeResult | null
+
+  // Snapshots + post-trade review
+  entry_screenshot_urls: string[] | null
+  close_notes: string | null
+  close_screenshot_urls: string[] | null
 }
 
 export interface TradeClose {
   exit_price: string
   closed_at?: string | null
+  close_notes?: string | null
+  close_screenshot_urls?: string[] | null
 }
 
 export interface TradePartialClose {
@@ -193,6 +200,10 @@ export interface TradeUpdate {
   confidence_score?: number | null
   session_tag?: string | null
   analyzed_timeframe?: string | null
+  entry_screenshot_urls?: string[] | null
+  // Always editable (including closed — post-trade review)
+  close_notes?: string | null
+  close_screenshot_urls?: string[] | null
   // Pending-only: amend the LIMIT order before it triggers
   entry_price?: string | null
   amend_positions?: TradePosition[] | null

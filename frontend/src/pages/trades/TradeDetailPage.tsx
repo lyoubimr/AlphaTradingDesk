@@ -5,7 +5,7 @@
 //   pending  → Activate (LIMIT triggered) | Cancel | Edit SL/notes
 //   open     → Close all | Partial close TP | Edit SL/notes | Edit confidence
 //   partial  → Close all | Partial close remaining TPs | Edit SL/notes
-//   closed   → Read-only + P&L breakdown
+//   closed   → Read-only + P&L + editable close_notes + snapshots
 //   cancelled→ Read-only
 
 import { useState, useEffect, useCallback } from 'react'
@@ -14,6 +14,7 @@ import {
   ArrowLeft, Loader2, AlertTriangle, CheckCircle2, X,
   TrendingUp, TrendingDown, Clock, ChevronDown, ChevronUp,
   Trash2, Edit3, Save, SlidersHorizontal, ShieldCheck, ShieldOff,
+  ImagePlus, Maximize2,
 } from 'lucide-react'
 import { PageHeader } from '../../components/ui/PageHeader'
 import { tradesApi } from '../../lib/api'
@@ -92,6 +93,150 @@ function Section({ title, children }: { title: string; children: React.ReactNode
     <div className="bg-surface-800 rounded-xl border border-surface-700 p-5 space-y-1">
       <p className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold mb-3">{title}</p>
       {children}
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SnapshotGallery — upload + display trade screenshots (entry or close)
+// ─────────────────────────────────────────────────────────────────────────────
+
+function SnapshotGallery({
+  tradeId,
+  urls,
+  kind,
+  onUpdated,
+  readOnly = false,
+}: {
+  tradeId: number
+  urls: string[] | null
+  kind: 'entry' | 'close'
+  onUpdated: (updated: TradeOut) => void
+  readOnly?: boolean
+}) {
+  const [uploading, setUploading] = useState(false)
+  const [deleting, setDeleting]   = useState<string | null>(null)
+  const [err, setErr]             = useState<string | null>(null)
+  const [lightbox, setLightbox]   = useState<string | null>(null)
+
+  const list = urls ?? []
+
+  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setUploading(true); setErr(null)
+    try {
+      const updated = kind === 'entry'
+        ? await tradesApi.uploadEntrySnapshot(tradeId, file)
+        : await tradesApi.uploadCloseSnapshot(tradeId, file)
+      onUpdated(updated)
+    } catch (ex: unknown) {
+      setErr((ex as Error).message)
+    } finally {
+      setUploading(false)
+      e.target.value = ''
+    }
+  }
+
+  const handleDelete = async (url: string) => {
+    setDeleting(url); setErr(null)
+    try {
+      const updated = kind === 'entry'
+        ? await tradesApi.deleteEntrySnapshot(tradeId, url)
+        : await tradesApi.deleteCloseSnapshot(tradeId, url)
+      onUpdated(updated)
+    } catch (ex: unknown) {
+      setErr((ex as Error).message)
+    } finally {
+      setDeleting(null)
+    }
+  }
+
+  return (
+    <div className="space-y-2">
+      {/* Lightbox */}
+      {lightbox && (
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/85 backdrop-blur-sm"
+          onClick={() => setLightbox(null)}
+        >
+          <img
+            src={lightbox} alt="snapshot"
+            className="max-w-[90vw] max-h-[90vh] object-contain rounded-xl shadow-2xl"
+          />
+          <button
+            type="button"
+            onClick={() => setLightbox(null)}
+            className="absolute top-4 right-4 text-slate-400 hover:text-white bg-black/50 rounded-full p-2"
+          >
+            <X size={18} />
+          </button>
+        </div>
+      )}
+
+      {/* Grid */}
+      <div className="flex flex-wrap gap-2">
+        {list.map((url) => (
+          <div key={url} className="relative group w-24 h-24 rounded-lg overflow-hidden border border-surface-600 bg-surface-700 shrink-0">
+            <img
+              src={url} alt="snapshot"
+              className="w-full h-full object-cover cursor-pointer"
+              onClick={() => setLightbox(url)}
+            />
+            {/* View button */}
+            <button
+              type="button"
+              onClick={() => setLightbox(url)}
+              className="absolute top-1 left-1 opacity-0 group-hover:opacity-100 bg-black/60 text-white rounded p-0.5 transition-opacity"
+            >
+              <Maximize2 size={11} />
+            </button>
+            {/* Delete button */}
+            {!readOnly && (
+              <button
+                type="button"
+                onClick={() => void handleDelete(url)}
+                disabled={deleting === url}
+                className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 bg-red-600/80 text-white rounded p-0.5 transition-opacity disabled:opacity-40"
+              >
+                {deleting === url ? <Loader2 size={11} className="animate-spin" /> : <X size={11} />}
+              </button>
+            )}
+          </div>
+        ))}
+
+        {/* Upload button */}
+        {!readOnly && (
+          <label className={cn(
+            'flex flex-col items-center justify-center gap-1 w-24 h-24 rounded-lg border-2 border-dashed cursor-pointer shrink-0 transition-colors',
+            uploading
+              ? 'border-brand-500/40 bg-brand-500/5 cursor-wait'
+              : 'border-surface-600 hover:border-brand-500/50 hover:bg-brand-500/5',
+          )}>
+            {uploading
+              ? <Loader2 size={18} className="text-brand-400 animate-spin" />
+              : <ImagePlus size={18} className="text-slate-500" />}
+            <span className="text-[9px] text-slate-600 text-center leading-tight">
+              {uploading ? 'Uploading…' : 'Add\nscreenshot'}
+            </span>
+            <input
+              type="file" accept="image/*" className="hidden"
+              onChange={(e) => void handleUpload(e)}
+              disabled={uploading}
+            />
+          </label>
+        )}
+      </div>
+
+      {list.length === 0 && readOnly && (
+        <p className="text-xs text-slate-600 italic">No screenshots.</p>
+      )}
+
+      {err && (
+        <p className="text-[11px] text-red-400 flex items-center gap-1">
+          <AlertTriangle size={11} /> {err}
+        </p>
+      )}
     </div>
   )
 }
@@ -338,7 +483,7 @@ function EditTradeModal({ trade, onClose, onSuccess }: {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Close-all modal
+// Close-all modal (with close notes + screenshot upload)
 // ─────────────────────────────────────────────────────────────────────────────
 
 function CloseAllModal({ trade, onClose, onSuccess }: {
@@ -346,26 +491,47 @@ function CloseAllModal({ trade, onClose, onSuccess }: {
   onClose: () => void
   onSuccess: (updated: TradeOut) => void
 }) {
-  const [exitPrice, setExitPrice] = useState('')
-  const [saving, setSaving] = useState(false)
-  const [err, setErr] = useState<string | null>(null)
+  const [exitPrice, setExitPrice]       = useState('')
+  const [closeNotes, setCloseNotes]     = useState('')
+  const [pendingFiles, setPendingFiles] = useState<File[]>([])
+  const [saving, setSaving]             = useState(false)
+  const [uploadStep, setUploadStep]     = useState(false)
+  const [err, setErr]                   = useState<string | null>(null)
 
   const handleClose = async () => {
     if (!exitPrice || isNaN(Number(exitPrice))) { setErr('Exit price required'); return }
     setSaving(true); setErr(null)
     try {
-      const updated = await tradesApi.close(trade.id, { exit_price: exitPrice })
+      // 1. Close the trade (with notes)
+      let updated = await tradesApi.close(trade.id, {
+        exit_price: exitPrice,
+        close_notes: closeNotes || null,
+      })
+      // 2. Upload any pending snapshots one by one
+      if (pendingFiles.length > 0) {
+        setUploadStep(true)
+        for (const f of pendingFiles) {
+          updated = await tradesApi.uploadCloseSnapshot(updated.id, f)
+        }
+      }
       onSuccess(updated)
     } catch (e: unknown) {
       setErr((e as Error).message)
     } finally {
       setSaving(false)
+      setUploadStep(false)
     }
+  }
+
+  const addFiles = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files ?? [])
+    setPendingFiles((prev) => [...prev, ...files])
+    e.target.value = ''
   }
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-      <div className="w-full max-w-sm bg-surface-800 rounded-2xl border border-surface-700 shadow-2xl p-6 space-y-4">
+      <div className="w-full max-w-md bg-surface-800 rounded-2xl border border-surface-700 shadow-2xl p-6 space-y-4 max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between">
           <h2 className="text-sm font-semibold text-slate-200">Close trade — {displayPair(trade)}</h2>
           <button type="button" onClick={onClose} className="text-slate-500 hover:text-slate-300">
@@ -373,6 +539,7 @@ function CloseAllModal({ trade, onClose, onSuccess }: {
           </button>
         </div>
 
+        {/* Summary */}
         <div className="space-y-1">
           <p className="text-xs text-slate-500">This will close ALL open positions at the exit price.</p>
           <div className="rounded-lg bg-surface-700/60 px-3 py-2 text-xs text-slate-400 space-y-0.5">
@@ -384,30 +551,23 @@ function CloseAllModal({ trade, onClose, onSuccess }: {
               <span>Stop loss</span>
               <span className="font-mono text-red-400">{fmt(trade.stop_loss, 4)}</span>
             </div>
-            {/* Always show initial risk */}
             <div className="flex justify-between">
               <span>Initial risk</span>
               <span className="font-mono text-red-400">−{fmt(trade.risk_amount)}</span>
             </div>
-            {/* Always show current risk — especially important at BE (= 0) */}
             {trade.current_risk != null && (
               <div className="flex justify-between">
                 <span>Current risk</span>
                 <span className={cn(
                   'font-mono font-semibold',
-                  parseFloat(trade.current_risk) === 0
-                    ? 'text-emerald-400'
-                    : parseFloat(trade.current_risk) < parseFloat(trade.risk_amount)
-                      ? 'text-amber-400'
-                      : 'text-red-400',
+                  parseFloat(trade.current_risk) === 0 ? 'text-emerald-400'
+                  : parseFloat(trade.current_risk) < parseFloat(trade.risk_amount) ? 'text-amber-400'
+                  : 'text-red-400',
                 )}>
-                  {parseFloat(trade.current_risk) === 0
-                    ? '0,00 ✓ at BE'
-                    : `−${fmt(trade.current_risk)}`}
+                  {parseFloat(trade.current_risk) === 0 ? '0,00 ✓ at BE' : `−${fmt(trade.current_risk)}`}
                 </span>
               </div>
             )}
-            {/* Booked P&L from already-closed positions */}
             {trade.booked_pnl != null && parseFloat(trade.booked_pnl) !== 0 && (
               <div className="flex justify-between border-t border-surface-600/60 pt-0.5 mt-0.5">
                 <span>Booked P&L</span>
@@ -419,6 +579,7 @@ function CloseAllModal({ trade, onClose, onSuccess }: {
           </div>
         </div>
 
+        {/* Exit price */}
         <div className="space-y-1.5">
           <label className="text-xs font-medium text-slate-400">Exit price *</label>
           <div className="flex">
@@ -434,27 +595,20 @@ function CloseAllModal({ trade, onClose, onSuccess }: {
           </div>
         </div>
 
-        {/* Quick P&L preview — only remaining open positions */}
+        {/* Quick P&L preview */}
         {exitPrice && !isNaN(Number(exitPrice)) && (() => {
           const entry   = parseFloat(trade.entry_price)
           const exit_   = Number(exitPrice)
           const risk    = parseFloat(trade.risk_amount)
-          // Use initial_stop_loss so price_dist is never 0 after BE move
           const refSl   = parseFloat(trade.initial_stop_loss ?? trade.stop_loss)
           const dist    = Math.abs(entry - refSl)
-          if (dist === 0) return null   // can't compute — initial_sl == entry (bad seed data)
-
+          if (dist === 0) return null
           const totalUnits = risk / dist
-
-          // Only count positions still open — closed ones are already booked
           const openPositions = trade.positions.filter((p) => p.status === 'open')
           const openPct = openPositions.reduce((s, p) => s + parseFloat(p.lot_percentage), 0)
           const remainingUnits = totalUnits * (openPct / 100)
-
           const diff  = trade.direction === 'LONG' ? exit_ - entry : entry - exit_
           const pnl   = remainingUnits * diff
-
-          // Add already-booked PnL from closed positions
           const booked = trade.booked_pnl ? parseFloat(trade.booked_pnl) : 0
           const totalEstPnl = pnl + booked
           const isPos = totalEstPnl >= 0
@@ -472,9 +626,7 @@ function CloseAllModal({ trade, onClose, onSuccess }: {
                 'rounded-lg px-3 py-2 text-xs flex items-center justify-between',
                 isPos ? 'bg-emerald-500/10 border border-emerald-500/30' : 'bg-red-500/10 border border-red-500/30',
               )}>
-                <span className="text-slate-400">
-                  {booked !== 0 ? 'Total Est. P&L (incl. booked)' : 'Est. P&L'}
-                </span>
+                <span className="text-slate-400">{booked !== 0 ? 'Total Est. P&L (incl. booked)' : 'Est. P&L'}</span>
                 <span className={cn('font-mono font-bold', isPos ? 'text-emerald-300' : 'text-red-400')}>
                   {isPos ? '+' : ''}{totalEstPnl.toFixed(2)}
                 </span>
@@ -483,7 +635,57 @@ function CloseAllModal({ trade, onClose, onSuccess }: {
           )
         })()}
 
+        {/* Close notes */}
+        <div className="space-y-1.5">
+          <label className="text-xs font-medium text-slate-400 flex items-center gap-1.5">
+            Post-trade notes
+            <span className="text-[10px] text-slate-600">(optional — editable later)</span>
+          </label>
+          <textarea
+            value={closeNotes}
+            onChange={(e) => setCloseNotes(e.target.value)}
+            rows={3}
+            className={cn(inputCls, 'resize-none text-xs')}
+            placeholder="What happened? Key lessons? Would you take this again?"
+          />
+        </div>
+
+        {/* Close screenshots */}
+        <div className="space-y-1.5">
+          <label className="text-xs font-medium text-slate-400 flex items-center gap-1.5">
+            Closing screenshots
+            <span className="text-[10px] text-slate-600">(optional — can upload after close too)</span>
+          </label>
+          <div className="flex flex-wrap gap-2">
+            {pendingFiles.map((f, i) => (
+              <div key={i} className="relative w-20 h-20 rounded-lg overflow-hidden border border-surface-600 bg-surface-700">
+                <img src={URL.createObjectURL(f)} alt={f.name} className="w-full h-full object-cover" />
+                <button
+                  type="button"
+                  onClick={() => setPendingFiles((prev) => prev.filter((_, j) => j !== i))}
+                  className="absolute top-0.5 right-0.5 bg-red-600/80 text-white rounded p-0.5"
+                >
+                  <X size={10} />
+                </button>
+              </div>
+            ))}
+            <label className={cn(
+              'flex flex-col items-center justify-center gap-1 w-20 h-20 rounded-lg border-2 border-dashed cursor-pointer shrink-0 transition-colors',
+              'border-surface-600 hover:border-brand-500/50 hover:bg-brand-500/5',
+            )}>
+              <ImagePlus size={16} className="text-slate-500" />
+              <span className="text-[9px] text-slate-600 text-center leading-tight">Add</span>
+              <input type="file" accept="image/*" multiple className="hidden" onChange={addFiles} />
+            </label>
+          </div>
+        </div>
+
         {err && <p className="text-[11px] text-red-400 flex items-center gap-1"><AlertTriangle size={11} />{err}</p>}
+        {uploadStep && (
+          <p className="text-[11px] text-brand-400 flex items-center gap-1.5">
+            <Loader2 size={11} className="animate-spin" /> Uploading screenshots…
+          </p>
+        )}
 
         <div className="flex gap-2 pt-1">
           <button type="button" onClick={onClose}
@@ -666,10 +868,15 @@ export function TradeDetailPage() {
   const [showEditTrade, setShowEditTrade]        = useState(false)
   const [partialTpId, setPartialTpId]           = useState<number | null>(null)
 
-  // Notes editing
+  // Entry notes editing (setup rationale — editable on open trades)
   const [editingNotes, setEditingNotes]         = useState(false)
   const [notesValue, setNotesValue]             = useState('')
   const [savingNotes, setSavingNotes]           = useState(false)
+
+  // Close notes editing (post-trade review — always editable, including closed)
+  const [editingCloseNotes, setEditingCloseNotes] = useState(false)
+  const [closeNotesValue, setCloseNotesValue]     = useState('')
+  const [savingCloseNotes, setSavingCloseNotes]   = useState(false)
 
   // Action states
   const [activating, setActivating]             = useState(false)
@@ -689,6 +896,7 @@ export function TradeDetailPage() {
       const t = await tradesApi.get(Number(id))
       setTrade(t)
       setNotesValue(t.notes ?? '')
+      setCloseNotesValue(t.close_notes ?? '')
     } catch (e: unknown) {
       setError((e as Error).message)
     } finally {
@@ -765,6 +973,20 @@ export function TradeDetailPage() {
     }
   }
 
+  async function handleSaveCloseNotes() {
+    if (!trade) return
+    setSavingCloseNotes(true); setActionError(null)
+    try {
+      const updated = await tradesApi.update(trade.id, { close_notes: closeNotesValue })
+      setTrade(updated)
+      setEditingCloseNotes(false)
+    } catch (e: unknown) {
+      setActionError(`Failed to save close notes: ${(e as Error).message}`)
+    } finally {
+      setSavingCloseNotes(false)
+    }
+  }
+
   // ── Computed ───────────────────────────────────────────────────────────────
 
   const pnlNum    = trade?.realized_pnl ? parseFloat(trade.realized_pnl) : null
@@ -777,7 +999,7 @@ export function TradeDetailPage() {
   const isPending = trade?.status === 'pending'
   const isClosed  = trade?.status === 'closed'
   const isCancelled = trade?.status === 'cancelled'
-  const isReadOnly = isClosed || isCancelled
+  const isReadOnly = isCancelled  // closed trades allow close_notes/screenshots
   const isAtBe    = trade != null && Math.abs(parseFloat(trade.stop_loss) - parseFloat(trade.entry_price)) < 0.000001
 
   // Realised R multiple
@@ -815,7 +1037,7 @@ export function TradeDetailPage() {
         <CloseAllModal
           trade={trade}
           onClose={() => setShowCloseAll(false)}
-          onSuccess={(updated) => { setTrade(updated); setShowCloseAll(false) }}
+          onSuccess={(updated) => { setTrade(updated); setShowCloseAll(false); setCloseNotesValue(updated.close_notes ?? '') }}
         />
       )}
       {showEditTrade && (
@@ -896,7 +1118,6 @@ export function TradeDetailPage() {
                     Close all
                   </button>
 
-                  {/* Move SL to breakeven — only if not already at BE */}
                   {!isAtBe && !confirmBe && (
                     <button type="button" onClick={() => setConfirmBe(true)} disabled={movingBe}
                       className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-500/10 border border-amber-500/30 text-xs text-amber-300 font-medium hover:bg-amber-500/20 transition-colors disabled:opacity-40"
@@ -915,7 +1136,7 @@ export function TradeDetailPage() {
               )}
 
               {/* Edit — available for pending / open / partial */}
-              {!isReadOnly && (
+              {!isReadOnly && !isClosed && (
                 <button type="button" onClick={() => setShowEditTrade(true)}
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-surface-700 border border-surface-600 text-xs text-slate-400 hover:text-brand-300 hover:border-brand-500/40 transition-colors"
                   title="Edit stop-loss, timeframe, confidence">
@@ -1057,7 +1278,6 @@ export function TradeDetailPage() {
                 const posNum    = pos.position_number
                 const tpNum     = parseFloat(pos.take_profit_price)
                 const entryP    = parseFloat(trade.entry_price)
-                // Use initial_stop_loss for R:R — current stop_loss may be at BE
                 const slP       = parseFloat(trade.initial_stop_loss ?? trade.stop_loss)
                 const slDistP   = Math.abs(entryP - slP)
                 const tpDistP   = Math.abs(tpNum - entryP)
@@ -1065,10 +1285,7 @@ export function TradeDetailPage() {
                 const isOpen    = pos.status === 'open'
                 const isHit     = pos.status === 'closed' || pos.status === 'partial'
                 const canClose  = isActive && isOpen
-
-                // Remaining units for this position (displayed as % of total)
                 const lotPct    = parseFloat(pos.lot_percentage)
-                // Units = total_units × lot_pct/100
                 const totalUnits = slDistP > 0 ? parseFloat(trade.risk_amount) / slDistP : 0
                 const posUnits  = totalUnits * (lotPct / 100)
 
@@ -1101,7 +1318,7 @@ export function TradeDetailPage() {
                             'text-xs font-mono font-bold',
                             parseFloat(pos.realized_pnl) > 0 ? 'text-emerald-400'
                             : parseFloat(pos.realized_pnl) < 0 ? 'text-red-400'
-                            : 'text-amber-400/80',   // exactly 0 = BE close
+                            : 'text-amber-400/80',
                           )}>
                             {parseFloat(pos.realized_pnl) > 0 ? '+' : ''}{fmt(pos.realized_pnl)}
                             {parseFloat(pos.realized_pnl) === 0 && <span className="ml-1 text-[9px] opacity-60">(BE)</span>}
@@ -1118,19 +1335,12 @@ export function TradeDetailPage() {
                         )}
                       </div>
                     </div>
-                    {/* Units row — open: qty to be booked · closed: qty that was booked */}
                     {totalUnits > 0 && (
                       <div className="ml-9 mt-1 flex items-center gap-3 text-[10px] text-slate-600">
-                        <span>
-                          Qty: <span className={cn('font-mono', isOpen ? 'text-slate-400' : 'text-slate-500')}>{posUnits.toFixed(6)}</span>
-                        </span>
+                        <span>Qty: <span className={cn('font-mono', isOpen ? 'text-slate-400' : 'text-slate-500')}>{posUnits.toFixed(6)}</span></span>
                         <span className="text-slate-700">·</span>
-                        <span>
-                          Alloc: <span className={cn('font-mono', isOpen ? 'text-slate-400' : 'text-slate-500')}>{lotPct}%</span>
-                        </span>
-                        {slDistP === 0 && (
-                          <span className="text-amber-500/70">⚠ initial SL = entry — qty unavailable</span>
-                        )}
+                        <span>Alloc: <span className={cn('font-mono', isOpen ? 'text-slate-400' : 'text-slate-500')}>{lotPct}%</span></span>
+                        {slDistP === 0 && <span className="text-amber-500/70">⚠ initial SL = entry — qty unavailable</span>}
                       </div>
                     )}
                   </div>
@@ -1140,11 +1350,12 @@ export function TradeDetailPage() {
           )}
         </div>
 
-        {/* ── Notes ───────────────────────────────────────────────────── */}
-        <div className="bg-surface-800 rounded-xl border border-surface-700 p-5 space-y-2">
+        {/* ── Entry notes + screenshots ────────────────────────────────── */}
+        <div className="bg-surface-800 rounded-xl border border-surface-700 p-5 space-y-3">
+          {/* Notes header */}
           <div className="flex items-center justify-between">
-            <p className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold">Notes</p>
-            {!isReadOnly && !editingNotes && (
+            <p className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold">📝 Entry notes</p>
+            {!isClosed && !isReadOnly && !editingNotes && (
               <button type="button" onClick={() => setEditingNotes(true)}
                 className="flex items-center gap-1 text-[10px] text-slate-500 hover:text-brand-400 transition-colors">
                 <Edit3 size={10} /> Edit
@@ -1158,7 +1369,7 @@ export function TradeDetailPage() {
                 onChange={(e) => setNotesValue(e.target.value)}
                 rows={4}
                 className={cn(inputCls, 'resize-none text-xs')}
-                placeholder="Setup rationale, confluences, lessons…"
+                placeholder="Setup rationale, confluences, market context…"
               />
               <div className="flex gap-2">
                 <button type="button" onClick={() => { setEditingNotes(false); setNotesValue(trade.notes ?? '') }}
@@ -1174,9 +1385,82 @@ export function TradeDetailPage() {
             </div>
           ) : (
             <p className="text-xs text-slate-400 leading-relaxed whitespace-pre-wrap">
-              {trade.notes || <span className="text-slate-600 italic">No notes recorded.</span>}
+              {trade.notes || <span className="text-slate-600 italic">No entry notes.</span>}
             </p>
           )}
+
+          {/* Entry screenshots */}
+          <div className="space-y-1.5 pt-1 border-t border-surface-700/40">
+            <p className="text-[10px] uppercase tracking-wider text-slate-600 font-semibold">📸 Entry screenshots</p>
+            <SnapshotGallery
+              tradeId={trade.id}
+              urls={trade.entry_screenshot_urls}
+              kind="entry"
+              onUpdated={setTrade}
+              readOnly={isReadOnly}
+            />
+          </div>
+        </div>
+
+        {/* ── Close notes + screenshots (always editable — post-trade review) */}
+        <div className="bg-surface-800 rounded-xl border border-surface-700 p-5 space-y-3">
+          <div className="flex items-center justify-between">
+            <p className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold">
+              🔍 Post-trade review
+            </p>
+            {!editingCloseNotes && !isReadOnly && (
+              <button type="button" onClick={() => setEditingCloseNotes(true)}
+                className="flex items-center gap-1 text-[10px] text-slate-500 hover:text-brand-400 transition-colors">
+                <Edit3 size={10} /> Edit
+              </button>
+            )}
+            {isClosed && !editingCloseNotes && (
+              <span className="text-[9px] text-emerald-400/60">always editable</span>
+            )}
+          </div>
+
+          {editingCloseNotes ? (
+            <div className="space-y-2">
+              <textarea
+                value={closeNotesValue}
+                onChange={(e) => setCloseNotesValue(e.target.value)}
+                rows={4}
+                className={cn(inputCls, 'resize-none text-xs')}
+                placeholder="What happened? Key lessons? Would you take this again?"
+              />
+              <div className="flex gap-2">
+                <button type="button" onClick={() => { setEditingCloseNotes(false); setCloseNotesValue(trade.close_notes ?? '') }}
+                  className="flex-1 py-1.5 rounded-lg border border-surface-600 text-xs text-slate-400 hover:text-slate-200 hover:bg-surface-700 transition-colors">
+                  Discard
+                </button>
+                <button type="button" onClick={() => void handleSaveCloseNotes()} disabled={savingCloseNotes}
+                  className="flex-1 py-1.5 rounded-lg bg-brand-600/20 border border-brand-500/40 text-xs text-brand-300 font-medium hover:bg-brand-600/30 transition-colors disabled:opacity-40 flex items-center justify-center gap-1.5">
+                  {savingCloseNotes ? <Loader2 size={11} className="animate-spin" /> : <Save size={11} />}
+                  Save
+                </button>
+              </div>
+            </div>
+          ) : (
+            <p className="text-xs text-slate-400 leading-relaxed whitespace-pre-wrap">
+              {trade.close_notes || (
+                <span className="text-slate-600 italic">
+                  {isClosed ? 'No post-trade notes. Click edit to add.' : 'Will be available after closing the trade.'}
+                </span>
+              )}
+            </p>
+          )}
+
+          {/* Close screenshots */}
+          <div className="space-y-1.5 pt-1 border-t border-surface-700/40">
+            <p className="text-[10px] uppercase tracking-wider text-slate-600 font-semibold">📸 Close screenshots</p>
+            <SnapshotGallery
+              tradeId={trade.id}
+              urls={trade.close_screenshot_urls}
+              kind="close"
+              onUpdated={(updated) => { setTrade(updated); setCloseNotesValue(updated.close_notes ?? '') }}
+              readOnly={isReadOnly}
+            />
+          </div>
         </div>
 
         {/* ── Metadata ────────────────────────────────────────────────── */}

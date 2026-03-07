@@ -128,11 +128,18 @@ db-refresh: ## Reset DB + re-apply migrations + re-seed (full clean slate, DESTR
 	$(MAKE) db-seed
 
 db-recover: ## Recover from stale alembic_version (schema wiped but stamp survived)
-	@echo "→ Removing stale alembic_version stamp…"
-	$(COMPOSE) exec -T db psql -U atd -d atd_dev -c "DELETE FROM alembic_version;"
-	@echo "→ Running all migrations from base…"
-	$(COMPOSE) exec -T backend alembic upgrade head
+	@echo "→ Running DB recovery script…"
+	$(COMPOSE) exec -T backend python scripts/db_recover.py
 	@echo "✓ DB recovered and up to date."
+
+db-recover-full: ## Full recovery: smart migrate + seed ref data + seed test data
+	@echo "🔧 Full DB recovery…"
+	$(MAKE) db-recover
+	@echo "→ Seeding reference data…"
+	$(MAKE) db-seed
+	@echo "→ Seeding test profiles + trades…"
+	$(MAKE) db-seed-test
+	@echo "✅ DB fully recovered and seeded."
 
 ## ── CI checks (run same checks as GitHub Actions) ────────────────
 ci-backend: backend-lint backend-typecheck backend-test ## Run all backend CI checks locally

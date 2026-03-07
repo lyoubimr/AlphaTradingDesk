@@ -246,6 +246,7 @@ def delete_entry_snapshot(
     Does NOT delete the file from disk — managed separately.
     """
     import base64
+
     url = base64.urlsafe_b64decode(url_b64 + "==").decode("utf-8")
     trade = service.get_trade_raw(db, trade_id)
     existing = [u for u in (trade.entry_screenshot_urls or []) if u != url]
@@ -263,6 +264,7 @@ def delete_close_snapshot(
     Does NOT delete the file from disk — managed separately.
     """
     import base64
+
     url = base64.urlsafe_b64decode(url_b64 + "==").decode("utf-8")
     trade = service.get_trade_raw(db, trade_id)
     existing = [u for u in (trade.close_screenshot_urls or []) if u != url]

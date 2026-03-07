@@ -1,8 +1,9 @@
 // ── Topbar component ───────────────────────────────────────────────────────
-import { useEffect, useState } from 'react'
-import { Bell, TrendingUp } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { Bell, TrendingUp, Palette } from 'lucide-react'
 import { ProfilePicker } from './ProfilePicker'
 import { useProfile } from '../../context/ProfileContext'
+import { useTheme } from '../../context/ThemeContext'
 import { statsApi } from '../../lib/api'
 import type { WinRateStats } from '../../types/api'
 
@@ -91,7 +92,7 @@ export function Topbar({ currentTime }: TopbarProps) {
         <CapitalChip />
       </div>
 
-      {/* ── Right: WR pill + market pills + clock + actions ────────── */}
+      {/* ── Right: WR pill + market pills + clock + theme picker + bell ── */}
       <div className="flex items-center gap-4">
         {/* Global win-rate across all profiles */}
         <GlobalWRPill />
@@ -109,6 +110,10 @@ export function Topbar({ currentTime }: TopbarProps) {
             {currentTime}
           </span>
         )}
+
+        {/* Theme picker */}
+        <ThemePicker />
+
         <button
           type="button"
           className="text-slate-600 hover:text-slate-300 transition-colors"
@@ -118,6 +123,72 @@ export function Topbar({ currentTime }: TopbarProps) {
         </button>
       </div>
     </header>
+  )
+}
+
+// ── Theme picker ──────────────────────────────────────────────────────────
+function ThemePicker() {
+  const { theme, setTheme, themes } = useTheme()
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [])
+
+  const current = themes.find((t) => t.id === theme)
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        title="Change theme"
+        className="flex items-center gap-1.5 text-slate-500 hover:text-slate-300 transition-colors px-2 py-1 rounded-lg hover:bg-surface-800"
+      >
+        <Palette size={14} />
+        <span className="hidden lg:inline text-[11px]">{current?.emoji ?? '🌌'}</span>
+      </button>
+
+      {open && (
+        <div className="absolute right-0 top-full mt-2 z-50 w-52
+          bg-surface-800 border border-surface-600 rounded-xl shadow-2xl overflow-hidden">
+          <div className="px-3 py-2 border-b border-surface-700">
+            <p className="text-[10px] text-slate-500 uppercase tracking-wide font-medium">Theme</p>
+          </div>
+          <div className="py-1">
+            {themes.map((t) => (
+              <button
+                key={t.id}
+                type="button"
+                onClick={() => { setTheme(t.id); setOpen(false) }}
+                className={`w-full flex items-center gap-3 px-3 py-2.5 text-left transition-colors hover:bg-surface-700 ${
+                  theme === t.id ? 'bg-brand-600/15' : ''
+                }`}
+              >
+                <span
+                  className="w-4 h-4 rounded-full border-2 border-white/20 shrink-0"
+                  style={{ backgroundColor: t.swatch }}
+                />
+                <div className="min-w-0">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-xs font-medium text-slate-200">{t.emoji} {t.label}</span>
+                    {theme === t.id && (
+                      <span className="text-[9px] text-brand-400 font-semibold">✓</span>
+                    )}
+                  </div>
+                  <p className="text-[9px] text-slate-600 truncate">{t.description}</p>
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
   )
 }
 

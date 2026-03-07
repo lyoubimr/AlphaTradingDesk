@@ -105,7 +105,9 @@ class StrategyOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
-    profile_id: int
+    # NULL = global strategy (shared across all profiles)
+    # NOT NULL = profile-specific strategy
+    profile_id: int | None
     name: str
     description: str | None
     rules: str | None

@@ -42,6 +42,7 @@ services:
       - ./src:/app/src
       - ./database:/app/database
       - ./alembic.ini:/app/alembic.ini
+      - ./scripts:/app/scripts
       # Uploads — bind-mounted so images survive container restarts in dev
       - ./uploads:/app/uploads
 

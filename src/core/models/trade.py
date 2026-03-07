@@ -28,9 +28,21 @@ from src.core.database import Base
 
 
 class Strategy(Base):
+    """
+    A strategy can be:
+      - Global (profile_id = NULL) → shared across all profiles
+      - Profile-specific (profile_id = NOT NULL) → private to that profile
+
+    Uniqueness is enforced by two partial indexes (see migration 412487625940):
+      uq_strategies_global   : UNIQUE(name) WHERE profile_id IS NULL
+      uq_strategies_profile  : UNIQUE(profile_id, name) WHERE profile_id IS NOT NULL
+    """
+
     __tablename__ = "strategies"
     __table_args__ = (
-        UniqueConstraint("profile_id", "name"),
+        # No UniqueConstraint here — DB uses two partial indexes instead
+        # (see migration 412487625940).  SQLAlchemy does not generate DDL
+        # for partial unique indexes via __table_args__, so we keep it clean.
         CheckConstraint("trades_count >= 0", name="ck_strategies_trades_count"),
         CheckConstraint("win_count >= 0", name="ck_strategies_win_count"),
         CheckConstraint("win_count <= trades_count", name="ck_strategies_win_lte_trades"),
@@ -39,8 +51,10 @@ class Strategy(Base):
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    profile_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("profiles.id", ondelete="CASCADE"), nullable=False
+    # NULL = global strategy (shared across all profiles)
+    # NOT NULL = profile-specific strategy
+    profile_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("profiles.id", ondelete="CASCADE"), nullable=True
     )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(Text)
@@ -63,8 +77,18 @@ class Strategy(Base):
     )
 
     # Relationships
-    profile: Mapped[Profile] = relationship(back_populates="strategies")  # type: ignore[name-defined]
+    # profile may be None for global strategies
+    profile: Mapped[Profile | None] = relationship(back_populates="strategies")  # type: ignore[name-defined]
     trades: Mapped[list[Trade]] = relationship(back_populates="strategy")
+    # Many-to-many: trades linked via trade_strategies junction
+    trades_m2m: Mapped[list[Trade]] = relationship(
+        secondary="trade_strategies",
+        back_populates="strategies",
+        viewonly=True,
+    )
+    trade_strategy_links: Mapped[list[TradeStrategy]] = relationship(
+        back_populates="strategy", cascade="all, delete-orphan", passive_deletes=True
+    )
 
 
 class Tag(Base):
@@ -191,6 +215,14 @@ class Trade(Base):
     structured_notes: Mapped[dict | None] = mapped_column(JSONB)
     screenshot_urls: Mapped[list | None] = mapped_column(ARRAY(Text))
 
+    # Entry & close snapshots (Phase 1 v1.1+)
+    # entry_screenshot_urls  — screenshots taken at trade open (chart, setup)
+    # close_notes            — post-trade review notes (editable even after close)
+    # close_screenshot_urls  — screenshots taken at close (outcome, chart)
+    entry_screenshot_urls: Mapped[list | None] = mapped_column(ARRAY(Text))
+    close_notes: Mapped[str | None] = mapped_column(Text)
+    close_screenshot_urls: Mapped[list | None] = mapped_column(ARRAY(Text))
+
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, server_default=func.now()
@@ -204,6 +236,14 @@ class Trade(Base):
     profile: Mapped[Profile] = relationship(back_populates="trades")  # type: ignore[name-defined]
     instrument: Mapped[Instrument | None] = relationship(back_populates="trades")  # type: ignore[name-defined]
     strategy: Mapped[Strategy | None] = relationship(back_populates="trades")
+    strategies: Mapped[list[Strategy]] = relationship(
+        secondary="trade_strategies",
+        back_populates="trades_m2m",
+        viewonly=True,
+    )
+    trade_strategy_links: Mapped[list[TradeStrategy]] = relationship(
+        back_populates="trade", cascade="all, delete-orphan", passive_deletes=True
+    )
     positions: Mapped[list[Position]] = relationship(
         back_populates="trade", cascade="all, delete-orphan", passive_deletes=True
     )
@@ -277,6 +317,37 @@ class TradeTag(Base):
     # Relationships
     trade: Mapped[Trade] = relationship(back_populates="trade_tags")
     tag: Mapped[Tag] = relationship(back_populates="trade_tags")
+
+
+class TradeStrategy(Base):
+    """Junction table — trade 1,N strategies (many-to-many).
+
+    A trade can be linked to multiple strategies via this table.
+    The legacy `trades.strategy_id` FK is kept for the primary/first strategy
+    for backward-compat; additional strategies are stored here.
+    """
+
+    __tablename__ = "trade_strategies"
+    __table_args__ = (
+        UniqueConstraint("trade_id", "strategy_id", name="uq_trade_strategies"),
+        Index("idx_trade_strategies_trade", "trade_id"),
+        Index("idx_trade_strategies_strategy", "strategy_id"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    trade_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("trades.id", ondelete="CASCADE"), nullable=False
+    )
+    strategy_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("strategies.id", ondelete="CASCADE"), nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, server_default=func.now()
+    )
+
+    # Relationships
+    trade: Mapped[Trade] = relationship(back_populates="trade_strategy_links")
+    strategy: Mapped[Strategy] = relationship(back_populates="trade_strategy_links")
 
 
 # Late import to resolve forward references (broker.py defines Profile/Instrument)

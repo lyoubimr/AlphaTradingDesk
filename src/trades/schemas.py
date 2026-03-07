@@ -89,6 +89,7 @@ class TradeOpen(BaseModel):
     session_tag: str | None = Field(default=None, max_length=20)
     notes: str | None = None
     confidence_score: int | None = Field(default=None, ge=0, le=100)
+    entry_screenshot_urls: list[str] | None = None
 
     @model_validator(mode="after")
     def normalise_and_validate(self) -> TradeOpen:
@@ -135,7 +136,11 @@ class TradeUpdate(BaseModel):
 
     Fields available for all non-closed statuses:
         stop_loss, strategy_id, notes, confidence_score, session_tag,
-        analyzed_timeframe
+        analyzed_timeframe, entry_screenshot_urls
+
+    Fields available for ALL statuses (including closed!):
+        close_notes, close_screenshot_urls
+        (post-trade review — always editable)
 
     Fields only available for 'pending' trades (LIMIT not yet triggered):
         entry_price — recalculates risk_amount, lot sizes, potential_profit
@@ -151,6 +156,11 @@ class TradeUpdate(BaseModel):
     confidence_score: int | None = Field(default=None, ge=0, le=100)
     session_tag: str | None = Field(default=None, max_length=20)
     analyzed_timeframe: str | None = Field(default=None, max_length=10)
+    entry_screenshot_urls: list[str] | None = None
+
+    # Post-trade review — editable on closed trades too
+    close_notes: str | None = None
+    close_screenshot_urls: list[str] | None = None
 
     # ── pending-only amendments ───────────────────────────────────────────
     entry_price: Decimal | None = Field(default=None, gt=0)
@@ -165,6 +175,8 @@ class TradeClose(BaseModel):
 
     exit_price: Decimal = Field(..., gt=0)
     closed_at: datetime | None = None  # defaults to now()
+    close_notes: str | None = None
+    close_screenshot_urls: list[str] | None = None
 
 
 # ── Partial close ─────────────────────────────────────────────────────────────
@@ -241,6 +253,11 @@ class TradeOut(BaseModel):
     created_at: datetime
     updated_at: datetime
     closed_at: datetime | None
+
+    # Snapshots + post-trade review (editable even after close)
+    entry_screenshot_urls: list[str] | None = None
+    close_notes: str | None = None
+    close_screenshot_urls: list[str] | None = None
 
     positions: list[PositionOut] = []
 

@@ -156,6 +156,56 @@ export const tradesApi = {
 
   delete: (tradeId: number): Promise<void> =>
     request(`/trades/${tradeId}`, { method: 'DELETE' }),
+
+  /**
+   * Upload an entry snapshot image (multipart/form-data).
+   * Appends the URL to trade.entry_screenshot_urls.
+   * Returns the updated TradeOut.
+   */
+  uploadEntrySnapshot: async (tradeId: number, file: File): Promise<TradeOut> => {
+    const form = new FormData()
+    form.append('file', file)
+    const res = await fetch(`${BASE}/trades/${tradeId}/snapshots/entry`, {
+      method: 'POST',
+      body: form,
+    })
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({ detail: res.statusText }))
+      throw new Error(typeof body.detail === 'string' ? body.detail : JSON.stringify(body.detail))
+    }
+    return res.json() as Promise<TradeOut>
+  },
+
+  /**
+   * Upload a close snapshot image (multipart/form-data).
+   * Appends the URL to trade.close_screenshot_urls.
+   * Returns the updated TradeOut.
+   */
+  uploadCloseSnapshot: async (tradeId: number, file: File): Promise<TradeOut> => {
+    const form = new FormData()
+    form.append('file', file)
+    const res = await fetch(`${BASE}/trades/${tradeId}/snapshots/close`, {
+      method: 'POST',
+      body: form,
+    })
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({ detail: res.statusText }))
+      throw new Error(typeof body.detail === 'string' ? body.detail : JSON.stringify(body.detail))
+    }
+    return res.json() as Promise<TradeOut>
+  },
+
+  /** Remove one entry snapshot URL (by its path). */
+  deleteEntrySnapshot: (tradeId: number, url: string): Promise<TradeOut> => {
+    const b64 = btoa(url).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '')
+    return request(`/trades/${tradeId}/snapshots/entry/${b64}`, { method: 'DELETE' })
+  },
+
+  /** Remove one close snapshot URL (by its path). */
+  deleteCloseSnapshot: (tradeId: number, url: string): Promise<TradeOut> => {
+    const b64 = btoa(url).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '')
+    return request(`/trades/${tradeId}/snapshots/close/${b64}`, { method: 'DELETE' })
+  },
 }
 
 // ── Stats ─────────────────────────────────────────────────────────────────

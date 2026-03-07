@@ -262,26 +262,27 @@ function GoalsWidget({ profileId }: { profileId: number }) {
 // 2. MARKET ANALYSIS WIDGET — shows HTF/MTF/LTF scores inline
 // ─────────────────────────────────────────────────────────────────────────────
 
-const BIAS_COLOR: Record<MABias, string> = {
-  bullish: 'text-emerald-400',
-  neutral: 'text-amber-400',
-  bearish: 'text-red-400',
-}
 const BIAS_EMOJI: Record<MABias, string> = { bullish: '🟢', neutral: '🟡', bearish: '🔴' }
 
-function TFScoreRow({ label, score, bias }: { label: string; score: string | null; bias: MABias | null }) {
+function TFBadge({ label, score, bias }: { label: string; score: string | null; bias: MABias | null }) {
   if (score === null) return null
-  const pctVal = parseFloat(score)
-  const color = bias ? BIAS_COLOR[bias] : 'text-slate-500'
-  const fill  = bias === 'bullish' ? 'bg-emerald-500' : bias === 'bearish' ? 'bg-red-500' : 'bg-amber-400'
+  const val = Math.round(parseFloat(score))
+  const ringCls = bias === 'bullish'
+    ? 'border-emerald-500 text-emerald-300'
+    : bias === 'bearish'
+      ? 'border-red-500 text-red-300'
+      : 'border-amber-400 text-amber-300'
+  const bgCls = bias === 'bullish'
+    ? 'bg-emerald-900/30'
+    : bias === 'bearish'
+      ? 'bg-red-900/30'
+      : 'bg-amber-900/20'
   return (
-    <div className="flex items-center gap-2">
-      <span className="text-[9px] text-slate-600 uppercase tracking-wide w-7 shrink-0">{label}</span>
-      <div className="flex-1 h-1 rounded-full bg-surface-700 overflow-hidden">
-        <div className={`h-full rounded-full ${fill}`} style={{ width: `${pctVal}%` }} />
+    <div className="flex flex-col items-center gap-0.5">
+      <div className={`w-9 h-9 rounded-full border-2 flex items-center justify-center text-[11px] font-bold tabular-nums ${ringCls} ${bgCls}`}>
+        {val}
       </div>
-      <span className={`text-[10px] font-mono tabular-nums w-7 text-right ${color}`}>{pctVal.toFixed(0)}</span>
-      {bias && <span className="text-[9px]">{BIAS_EMOJI[bias]}</span>}
+      <span className="text-[9px] text-slate-600 uppercase tracking-wide font-medium">{label}</span>
     </div>
   )
 }
@@ -290,6 +291,23 @@ interface MAModuleCardProps {
   staleness: MAStalenessItem
   lastSession: MASessionListItem | undefined
   module: MAModule | undefined
+}
+
+// Extracted outside MAModuleCard to avoid "component created during render" lint error
+function BadgeRow({
+  suffix,
+  lastSession,
+}: {
+  suffix: 'a' | 'b'
+  lastSession: MASessionListItem
+}) {
+  return (
+    <div className="flex items-center gap-3">
+      <TFBadge label="HTF" score={lastSession[`score_htf_${suffix}`] ?? null} bias={lastSession[`bias_htf_${suffix}`] as MABias | null ?? null} />
+      <TFBadge label="MTF" score={lastSession[`score_mtf_${suffix}`] ?? null} bias={lastSession[`bias_mtf_${suffix}`] as MABias | null ?? null} />
+      <TFBadge label="LTF" score={lastSession[`score_ltf_${suffix}`] ?? null} bias={lastSession[`bias_ltf_${suffix}`] as MABias | null ?? null} />
+    </div>
+  )
 }
 
 function MAModuleCard({ staleness, lastSession, module }: MAModuleCardProps) {
@@ -303,63 +321,50 @@ function MAModuleCard({ staleness, lastSession, module }: MAModuleCardProps) {
   const borderCls = !hasData
     ? 'border-surface-600'
     : isStale
-      ? 'border-amber-500/30'
+      ? 'border-amber-500/40'
       : 'border-emerald-500/20'
 
-  const headerDot = !hasData ? '⚪' : isStale ? '🟡' : '🟢'
+  const headerDot = !hasData ? BIAS_EMOJI.neutral : isStale ? BIAS_EMOJI.neutral : BIAS_EMOJI.bullish
 
   return (
-    <div className={`rounded-lg bg-surface-700/40 border ${borderCls} p-3 flex flex-col gap-2`}>
-      {/* Module header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-1.5">
-          <span className="text-[10px]">{headerDot}</span>
-          <span className="text-xs font-semibold text-slate-200">{staleness.module_name}</span>
-          {isDual && module && (
-            <span className="text-[9px] text-slate-600">· {module.asset_a}/{module.asset_b}</span>
-          )}
+    <div className={`rounded-lg bg-surface-700/40 border ${borderCls} px-3 py-2.5 flex items-center justify-between gap-3`}>
+      {/* Left: module name + age */}
+      <div className="flex items-center gap-2 min-w-0">
+        <span className="text-[11px] shrink-0">{headerDot}</span>
+        <div className="min-w-0">
+          <div className="flex items-center gap-1.5">
+            <span className="text-xs font-semibold text-slate-200 truncate">{staleness.module_name}</span>
+            {isDual && module && (
+              <span className="text-[9px] text-slate-600 shrink-0">{module.asset_a}/{module.asset_b}</span>
+            )}
+          </div>
+          <span className={`text-[9px] font-mono ${isStale ? 'text-amber-400/70' : 'text-slate-600'}`}>{ageLabel}</span>
         </div>
-        <span className="text-[9px] text-slate-600 font-mono">{ageLabel}</span>
       </div>
 
-      {/* Scores — if we have a session */}
+      {/* Right: badge rows */}
       {lastSession ? (
-        <div className="space-y-1">
-          {isDual ? (
+        <div className="flex flex-col gap-2 shrink-0">
+          {isDual && module?.asset_b && lastSession.score_htf_b ? (
             <>
-              {module?.asset_a && <p className="text-[9px] text-slate-600 uppercase tracking-wide">{module.asset_a}</p>}
-              <TFScoreRow label="HTF" score={lastSession.score_htf_a} bias={lastSession.bias_htf_a as MABias | null} />
-              <TFScoreRow label="MTF" score={lastSession.score_mtf_a} bias={lastSession.bias_mtf_a as MABias | null} />
-              <TFScoreRow label="LTF" score={lastSession.score_ltf_a} bias={lastSession.bias_ltf_a as MABias | null} />
-              {module?.asset_b && lastSession.score_htf_b && (
-                <>
-                  <p className="text-[9px] text-slate-600 uppercase tracking-wide mt-1.5">{module.asset_b}</p>
-                  <TFScoreRow label="HTF" score={lastSession.score_htf_b} bias={lastSession.bias_htf_b as MABias | null} />
-                  <TFScoreRow label="MTF" score={lastSession.score_mtf_b} bias={lastSession.bias_mtf_b as MABias | null} />
-                  <TFScoreRow label="LTF" score={lastSession.score_ltf_b} bias={lastSession.bias_ltf_b as MABias | null} />
-                </>
-              )}
+              <div className="flex items-center gap-2">
+                <span className="text-[9px] text-slate-600 w-8 text-right shrink-0">{module.asset_a}</span>
+                <BadgeRow suffix="a" lastSession={lastSession} />
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-[9px] text-slate-600 w-8 text-right shrink-0">{module.asset_b}</span>
+                <BadgeRow suffix="b" lastSession={lastSession} />
+              </div>
             </>
+
           ) : (
-            <>
-              <TFScoreRow label="HTF" score={lastSession.score_htf_a} bias={lastSession.bias_htf_a as MABias | null} />
-              <TFScoreRow label="MTF" score={lastSession.score_mtf_a} bias={lastSession.bias_mtf_a as MABias | null} />
-              <TFScoreRow label="LTF" score={lastSession.score_ltf_a} bias={lastSession.bias_ltf_a as MABias | null} />
-            </>
+            <BadgeRow suffix="a" lastSession={lastSession} />
           )}
         </div>
       ) : (
-        <div className="flex items-center gap-1.5 text-[10px] text-amber-400/70 bg-amber-900/10 border border-amber-800/20 rounded px-2 py-1.5">
+        <div className="flex items-center gap-1.5 text-[10px] text-amber-400/70 bg-amber-900/10 border border-amber-800/20 rounded px-2 py-1 shrink-0">
           <AlertTriangle size={10} className="shrink-0" />
-          No analysis yet — <Link to="/market-analysis/new" className="underline">run analysis</Link>
-        </div>
-      )}
-
-      {/* Stale warning */}
-      {hasData && isStale && (
-        <div className="flex items-center gap-1.5 text-[9px] text-amber-400/70 bg-amber-900/10 border border-amber-800/20 rounded px-2 py-1">
-          <AlertTriangle size={9} className="shrink-0" />
-          Analysis stale — update recommended
+          <Link to="/market-analysis/new" className="underline">Run analysis</Link>
         </div>
       )}
     </div>

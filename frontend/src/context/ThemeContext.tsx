@@ -19,7 +19,7 @@ import {
 
 // ── Types ─────────────────────────────────────────────────────────────────
 
-export type ThemeId = 'indigo' | 'emerald' | 'amber' | 'rose' | 'cyan'
+export type ThemeId = 'indigo' | 'emerald' | 'amber' | 'rose' | 'cyan' | 'night' | 'navy' | 'light'
 
 export interface ThemeMeta {
   id: ThemeId
@@ -67,6 +67,27 @@ export const THEMES: ThemeMeta[] = [
     description: 'Matrix cyan — precision, algorithmic mindset',
     swatch: '#06b6d4',
   },
+  {
+    id: 'night',
+    label: 'Night Black',
+    emoji: '🌑',
+    description: 'Pure black — maximum contrast, OLED-friendly',
+    swatch: '#f8fafc',
+  },
+  {
+    id: 'navy',
+    label: 'Navy Pro',
+    emoji: '🌊',
+    description: 'Deep navy — professional trading terminal look',
+    swatch: '#3b82f6',
+  },
+  {
+    id: 'light',
+    label: 'Light',
+    emoji: '☀️',
+    description: 'Clean white — bright, minimal, day mode',
+    swatch: '#6366f1',
+  },
 ]
 
 const LS_KEY = 'atd_theme'
@@ -85,9 +106,9 @@ const ThemeContext = createContext<ThemeContextValue | null>(null)
 
 function applyTheme(id: ThemeId) {
   const html = document.documentElement
-  if (id === 'indigo') {
-    html.removeAttribute('data-theme')
-  } else {
+  // Remove all theme data attributes first
+  html.removeAttribute('data-theme')
+  if (id !== 'indigo') {
     html.setAttribute('data-theme', id)
   }
 }
