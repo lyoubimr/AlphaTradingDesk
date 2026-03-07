@@ -26,9 +26,15 @@ done
 echo "✅ PostgreSQL ready."
 
 echo "🔄 Checking DB state…"
-# Detect the two failure modes:
-#   A) alembic_version exists but tables do not → false stamp → clear stamp + upgrade head
-#   B) tables exist but alembic_version is empty → stamp head (DDL already applied)
+# Detect the DB state and pick the right migration strategy:
+#
+#   has_trades | has_stamp | MODE
+#   -----------|-----------|--------------------------------------------
+#   true       | false     | stamp_head   — tables exist, stamp missing (manual restore or pre-Alembic DB)
+#   false      | true      | clear_stamp  — stamp present but tables gone → clear + upgrade head
+#   false      | false     | normal       — fresh DB → upgrade head
+#   true       | true      | normal       — already migrated → alembic upgrade head is a no-op
+#
 python -c "
 import os, psycopg
 raw = os.environ.get('DATABASE_URL', '').replace('postgresql+psycopg://', 'postgresql://')
@@ -44,15 +50,17 @@ with psycopg.connect(raw) as conn:
         cur3 = conn.execute('SELECT COUNT(*) FROM alembic_version')
         has_stamp = cur3.fetchone()[0] > 0
     print(f'has_trades={has_trades} has_stamp={has_stamp}')
-    if has_alembic_table and not has_stamp and has_trades:
+    if has_trades and not has_stamp:
         # Tables exist but stamp missing → stamp to head, no DDL needed
         print('MODE=stamp_head')
-    elif not has_trades and has_alembic_table and has_stamp:
-        # Stamp exists but tables gone → clear stamp, run upgrade
+    elif not has_trades and has_stamp:
+        # Stamp says we are at head but tables are gone (volume reset, corrupt state)
+        # → clear the false stamp so alembic will replay all migrations
         conn.execute('DELETE FROM alembic_version')
         conn.commit()
-        print('MODE=upgrade_after_clear')
+        print('MODE=clear_stamp')
     else:
+        # Normal: either fresh DB (upgrade creates everything) or already migrated (no-op)
         print('MODE=normal')
 " >/tmp/atd_dbcheck.txt 2>&1 || true
 cat /tmp/atd_dbcheck.txt
@@ -60,6 +68,10 @@ cat /tmp/atd_dbcheck.txt
 if grep -q "MODE=stamp_head" /tmp/atd_dbcheck.txt 2>/dev/null; then
   echo "⚠️  Tables present but stamp missing — stamping to head (no DDL)…"
   alembic stamp head
+elif grep -q "MODE=clear_stamp" /tmp/atd_dbcheck.txt 2>/dev/null; then
+  echo "⚠️  Stamp present but tables missing — clearing stamp and running full upgrade…"
+  alembic upgrade head
+  echo "✅ Migrations done."
 else
   echo "🔄 Running Alembic migrations…"
   alembic upgrade head
