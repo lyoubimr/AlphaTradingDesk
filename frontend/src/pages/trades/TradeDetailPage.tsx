@@ -8,7 +8,7 @@
 //   closed   → Read-only + P&L + editable close_notes + snapshots
 //   cancelled→ Read-only
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import {
   ArrowLeft, Loader2, AlertTriangle, CheckCircle2, X,
@@ -17,9 +17,10 @@ import {
   ImagePlus, Maximize2,
 } from 'lucide-react'
 import { PageHeader } from '../../components/ui/PageHeader'
-import { tradesApi } from '../../lib/api'
+import { tradesApi, strategiesApi } from '../../lib/api'
 import { cn } from '../../lib/cn'
-import type { TradeOut } from '../../types/api'
+import { useProfile } from '../../context/ProfileContext'
+import type { TradeOut, Strategy } from '../../types/api'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -858,10 +859,15 @@ function PartialCloseModal({ trade, positionNumber, onClose, onSuccess }: {
 export function TradeDetailPage() {
   const { id }   = useParams<{ id: string }>()
   const navigate = useNavigate()
+  const { activeProfile } = useProfile()
 
   const [trade, setTrade]           = useState<TradeOut | null>(null)
   const [loading, setLoading]       = useState(true)
   const [error, setError]           = useState<string | null>(null)
+
+  // Strategies (global + profile) — loaded once profile is known
+  const [strategies, setStrategies] = useState<Strategy[]>([])
+  const strategyMap = useMemo(() => new Map(strategies.map((s) => [s.id, s])), [strategies])
 
   // Modal state
   const [showCloseAll, setShowCloseAll]         = useState(false)
@@ -905,6 +911,12 @@ export function TradeDetailPage() {
   }, [id])
 
   useEffect(() => { void load() }, [load])
+
+  // Load strategies to resolve names for strategy_ids on this trade
+  useEffect(() => {
+    if (!activeProfile) { setStrategies([]); return }
+    strategiesApi.list(activeProfile.id).then(setStrategies).catch(() => setStrategies([]))
+  }, [activeProfile])
 
   // ── Actions ────────────────────────────────────────────────────────────────
 
@@ -1469,7 +1481,26 @@ export function TradeDetailPage() {
           <InfoRow label="Updated"     value={fmtDate(trade.updated_at)} />
           {trade.closed_at && <InfoRow label="Closed" value={fmtDate(trade.closed_at)} />}
           {trade.session_tag && <InfoRow label="Session" value={trade.session_tag} />}
-          {trade.strategy_id && <InfoRow label="Strategy ID" value={String(trade.strategy_id)} />}
+          {trade.strategy_ids && trade.strategy_ids.length > 0 && (
+              <InfoRow
+                label="Strategies"
+                value={
+                  <div className="flex flex-wrap gap-1 mt-0.5">
+                    {trade.strategy_ids.map((sid) => {
+                      const s = strategyMap.get(sid)
+                      return (
+                        <span key={sid}
+                          className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded
+                            bg-brand-600/15 border border-brand-500/30 text-[10px] font-medium text-brand-300 whitespace-nowrap">
+                          {s?.emoji && <span>{s.emoji}</span>}
+                          {s?.name ?? `#${sid}`}
+                        </span>
+                      )
+                    })}
+                  </div>
+                }
+              />
+            )}
         </Section>
 
       </div>

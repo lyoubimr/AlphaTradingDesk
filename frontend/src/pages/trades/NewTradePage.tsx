@@ -333,22 +333,25 @@ function fmt(n: number | null | undefined, decimals = 2): string {
 interface TpRow { price: string; pct: string }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Strategy dropdown with inline "New strategy" create
+// Multi-strategy dropdown with section headers (Global / Profile-specific)
+// and inline "New profile strategy" create.
 // ─────────────────────────────────────────────────────────────────────────────
 
-function StrategySelect({
+function MultiStrategySelect({
   strategies, loading, value, onChange, profileId, onCreated,
 }: {
-  strategies: Strategy[]; loading: boolean; value: number | null
-  onChange: (id: number | null) => void; profileId: number
+  strategies: Strategy[]        // already merged global + profile-specific
+  loading: boolean
+  value: number[]               // selected IDs
+  onChange: (ids: number[]) => void
+  profileId: number
   onCreated: (s: Strategy) => void
 }) {
-  const [open, setOpen]       = useState(false)
+  const [open, setOpen]         = useState(false)
   const [creating, setCreating] = useState(false)
-  const [newName, setNewName] = useState('')
-  const [saving, setSaving]   = useState(false)
-  const ref                   = useRef<HTMLDivElement>(null)
-  const selected              = strategies.find((s) => s.id === value) ?? null
+  const [newName, setNewName]   = useState('')
+  const [saving, setSaving]     = useState(false)
+  const ref                     = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     const h = (e: MouseEvent) => {
@@ -358,70 +361,117 @@ function StrategySelect({
     return () => document.removeEventListener('mousedown', h)
   }, [])
 
+  const toggle = (id: number) =>
+    onChange(value.includes(id) ? value.filter((x) => x !== id) : [...value, id])
+
   const handleCreate = async () => {
     if (!newName.trim()) return
     setSaving(true)
     try {
       const s = await strategiesApi.create(profileId, { name: newName.trim() })
       onCreated(s)
-      onChange(s.id)
+      onChange([...value, s.id])
       setNewName('')
       setCreating(false)
-      setOpen(false)
     } finally { setSaving(false) }
   }
 
+  const globalList  = strategies.filter((s) => s.profile_id === null)
+  const profileList = strategies.filter((s) => s.profile_id !== null)
+  const selectedNames = value.map((id) => strategies.find((s) => s.id === id)).filter(Boolean) as Strategy[]
+
   return (
     <div ref={ref} className="relative">
+      {/* Trigger */}
       <button type="button" onClick={() => setOpen((o) => !o)}
-        className={cn(inputCls, 'flex items-center justify-between gap-2 cursor-pointer text-left')}>
-        <span className={cn('flex-1 text-sm truncate', selected ? 'text-slate-200' : 'text-slate-500')}>
-          {loading ? 'Loading…'
-            : selected
-              ? <span className="flex items-center gap-1.5">
-                  {selected.emoji && <span>{selected.emoji}</span>}
-                  {selected.name}
-                  {selected.trades_count >= selected.min_trades_for_stats && (
-                    <span className="text-[10px] text-emerald-400 font-mono">
-                      {((selected.win_count / selected.trades_count) * 100).toFixed(0)}% WR
-                    </span>
-                  )}
-                </span>
-              : 'None (optional)'}
+        className={cn(inputCls, 'flex items-center justify-between gap-2 cursor-pointer text-left min-h-[2.5rem]')}>
+        <span className="flex-1 flex flex-wrap gap-1 min-w-0">
+          {loading
+            ? <span className="text-slate-500 text-sm">Loading…</span>
+            : selectedNames.length === 0
+              ? <span className="text-slate-500 text-sm">None (optional)</span>
+              : selectedNames.map((s) => (
+                  <span key={s.id}
+                    className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-brand-600/20 border border-brand-500/40 text-[11px] font-medium text-brand-300">
+                    {s.emoji && <span>{s.emoji}</span>}
+                    {s.name}
+                    {/* remove badge on click */}
+                    <button type="button" onMouseDown={(e) => { e.stopPropagation(); toggle(s.id) }}
+                      className="ml-0.5 text-brand-400/70 hover:text-brand-200">
+                      <X size={9} />
+                    </button>
+                  </span>
+                ))
+          }
         </span>
-        {selected && (
-          <button type="button" onClick={(e) => { e.stopPropagation(); onChange(null) }}
-            className="shrink-0 text-slate-500 hover:text-slate-300">
-            <X size={12} />
-          </button>
-        )}
         <ChevronDown size={13} className="shrink-0 text-slate-500" />
       </button>
 
       {open && (
         <div className="absolute top-full left-0 right-0 mt-1 z-50
           bg-surface-800 border border-surface-600 rounded-xl shadow-2xl overflow-hidden">
-          <div className="max-h-48 overflow-y-auto">
-            <button type="button" onClick={() => { onChange(null); setOpen(false) }}
-              className={cn('w-full text-left px-4 py-2.5 text-xs text-slate-500 hover:bg-surface-700 transition-colors',
-                value === null && 'bg-surface-700/50')}>
-              — None
-            </button>
-            {strategies.map((s) => (
-              <button key={s.id} type="button" onClick={() => { onChange(s.id); setOpen(false) }}
-                className={cn('w-full flex items-center gap-2 px-4 py-2.5 hover:bg-surface-700 transition-colors text-left',
-                  value === s.id && 'bg-brand-600/15')}>
-                {s.emoji && <span className="text-sm">{s.emoji}</span>}
-                <span className="flex-1 text-xs font-medium text-slate-200 truncate">{s.name}</span>
-                {s.trades_count >= s.min_trades_for_stats
-                  ? <span className="text-[10px] text-emerald-400 font-mono shrink-0">
-                      {((s.win_count / s.trades_count) * 100).toFixed(0)}% WR
+
+          <div className="max-h-64 overflow-y-auto">
+            {/* ── Global strategies ── */}
+            {globalList.length > 0 && (
+              <>
+                <div className="px-4 pt-2.5 pb-1 text-[9px] uppercase tracking-widest text-slate-600 font-semibold flex items-center gap-1.5">
+                  🌐 Global
+                </div>
+                {globalList.map((s) => (
+                  <button key={s.id} type="button" onClick={() => toggle(s.id)}
+                    className={cn('w-full flex items-center gap-2 px-4 py-2 hover:bg-surface-700 transition-colors text-left',
+                      value.includes(s.id) && 'bg-brand-600/15')}>
+                    <span className={cn('shrink-0 w-3.5 h-3.5 rounded border flex items-center justify-center',
+                      value.includes(s.id) ? 'bg-brand-500/40 border-brand-500/60' : 'border-surface-500 bg-surface-700')}>
+                      {value.includes(s.id) && <span className="text-[8px] text-brand-300 font-bold">✓</span>}
                     </span>
-                  : <span className="text-[10px] text-slate-600 shrink-0">{s.trades_count}t</span>
-                }
-              </button>
-            ))}
+                    {s.emoji && <span className="text-sm">{s.emoji}</span>}
+                    <span className="flex-1 text-xs font-medium text-slate-200 truncate">{s.name}</span>
+                    {s.trades_count >= s.min_trades_for_stats
+                      ? <span className="text-[10px] text-emerald-400 font-mono shrink-0">
+                          {((s.win_count / s.trades_count) * 100).toFixed(0)}% WR
+                        </span>
+                      : <span className="text-[10px] text-slate-600 shrink-0">{s.trades_count}t</span>
+                    }
+                  </button>
+                ))}
+              </>
+            )}
+
+            {/* ── Profile-specific strategies ── */}
+            {profileList.length > 0 && (
+              <>
+                <div className="px-4 pt-2.5 pb-1 text-[9px] uppercase tracking-widest text-slate-600 font-semibold flex items-center gap-1.5 border-t border-surface-700/50">
+                  👤 Profile
+                </div>
+                {profileList.map((s) => (
+                  <button key={s.id} type="button" onClick={() => toggle(s.id)}
+                    className={cn('w-full flex items-center gap-2 px-4 py-2 hover:bg-surface-700 transition-colors text-left',
+                      value.includes(s.id) && 'bg-brand-600/15')}>
+                    <span className={cn('shrink-0 w-3.5 h-3.5 rounded border flex items-center justify-center',
+                      value.includes(s.id) ? 'bg-brand-500/40 border-brand-500/60' : 'border-surface-500 bg-surface-700')}>
+                      {value.includes(s.id) && <span className="text-[8px] text-brand-300 font-bold">✓</span>}
+                    </span>
+                    {s.emoji && <span className="text-sm">{s.emoji}</span>}
+                    <span className="flex-1 text-xs font-medium text-slate-200 truncate">{s.name}</span>
+                    {s.trades_count >= s.min_trades_for_stats
+                      ? <span className="text-[10px] text-emerald-400 font-mono shrink-0">
+                          {((s.win_count / s.trades_count) * 100).toFixed(0)}% WR
+                        </span>
+                      : <span className="text-[10px] text-slate-600 shrink-0">{s.trades_count}t</span>
+                    }
+                  </button>
+                ))}
+              </>
+            )}
+
+            {globalList.length === 0 && profileList.length === 0 && (
+              <p className="px-4 py-3 text-xs text-slate-600">No strategies yet.</p>
+            )}
           </div>
+
+          {/* ── Inline create (profile-specific) ── */}
           <div className="border-t border-surface-700 p-2">
             {creating ? (
               <div className="flex gap-1.5">
@@ -430,7 +480,7 @@ function StrategySelect({
                     if (e.key === 'Enter') { e.preventDefault(); void handleCreate() }
                     if (e.key === 'Escape') setCreating(false)
                   }}
-                  placeholder="Strategy name…"
+                  placeholder="New profile strategy…"
                   className="flex-1 px-2 py-1.5 rounded-lg bg-surface-700 border border-surface-600
                     text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:border-brand-500/60" />
                 <button type="button" onClick={() => void handleCreate()}
@@ -445,7 +495,7 @@ function StrategySelect({
             ) : (
               <button type="button" onClick={() => setCreating(true)}
                 className="w-full flex items-center gap-1.5 px-2 py-1.5 rounded-lg text-xs text-slate-500 hover:text-brand-300 hover:bg-brand-600/10 transition-colors">
-                <Plus size={11} /> New strategy…
+                <Plus size={11} /> New profile strategy…
               </button>
             )}
           </div>
@@ -686,7 +736,7 @@ export function NewTradePage() {
   const [instrLoading, setInstrLoading] = useState(false)
   const [strategies, setStrategies]     = useState<Strategy[]>([])
   const [stratLoading, setStratLoading] = useState(false)
-  const [strategyId, setStrategyId]     = useState<number | null>(null)
+  const [strategyIds, setStrategyIds]   = useState<number[]>([])
 
   // Global WR stats — for the 3rd-level WR fallback in ExpectancyPanel
   const [globalWrStats, setGlobalWrStats] = useState<WinRateStats | null>(null)
@@ -782,7 +832,7 @@ export function NewTradePage() {
     setRiskPct('')
     setRiskAmt('')
     setRiskSyncDir('pct')
-    setStrategyId(null)
+    setStrategyIds([])
     setTpCount(1)
     setActivePreset('Smart Scale')
     setTps([{ price: '', pct: '100' }])
@@ -1100,7 +1150,8 @@ export function NewTradePage() {
           lot_percentage:     Number(t.pct),
         })),
         risk_pct_override:  riskPct || null,
-        strategy_id:        strategyId ?? null,
+        strategy_ids:       strategyIds.length > 0 ? strategyIds : undefined,
+        strategy_id:        strategyIds[0] ?? null,
         session_tag:        sessionTag || null,
         notes:              notes || null,
         confidence_score:   confidence ? Number(confidence) : null,
@@ -1229,12 +1280,12 @@ export function NewTradePage() {
         {/* in future phases (market analysis will also feed into this).           */}
         <Section icon="🧠" title="Strategy & setup intent">
           <div className="grid grid-cols-2 gap-3">
-            <Field label={<>Strategy <Tip text="Your trading method for this trade. Win rate stats accumulate per strategy after 5+ trades. Different from setup tags." /></>}>
-              <StrategySelect
+            <Field label={<>Strategy <Tip text="Your trading methods for this trade — select one or more. Win rate stats accumulate per strategy after 5+ trades. Different from setup tags." /></>}>
+              <MultiStrategySelect
                 strategies={strategies} loading={stratLoading}
-                value={strategyId} onChange={setStrategyId}
+                value={strategyIds} onChange={setStrategyIds}
                 profileId={activeProfile.id}
-                onCreated={(s) => setStrategies((prev) => [...prev, s].sort((a, b) => a.name.localeCompare(b.name)))}
+                onCreated={(s: Strategy) => setStrategies((prev) => [...prev, s].sort((a, b) => a.name.localeCompare(b.name)))}
               />
             </Field>
             <Field label="Timeframe analysed">
@@ -1729,7 +1780,7 @@ export function NewTradePage() {
           calc={calc}
           totalProfit={totalProfit}
           pctValid={pctValid}
-          selectedStrategy={strategies.find((s) => s.id === strategyId) ?? null}
+          selectedStrategy={strategies.find((s) => s.id === strategyIds[0]) ?? null}
           activeProfile={activeProfile}
           globalWrStats={globalWrStats}
           ccy={ccy}

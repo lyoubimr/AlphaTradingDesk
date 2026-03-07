@@ -1,13 +1,13 @@
 // ── Trade Journal page ─────────────────────────────────────────────────────
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useMemo } from 'react'
 import { Plus, Filter, Download, X, Loader2, RefreshCw } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { PageHeader } from '../../components/ui/PageHeader'
 import { Badge } from '../../components/ui/Badge'
 import { StatCard } from '../../components/ui/StatCard'
 import { useProfile } from '../../context/ProfileContext'
-import { tradesApi } from '../../lib/api'
-import type { TradeListItem } from '../../types/api'
+import { tradesApi, strategiesApi } from '../../lib/api'
+import type { TradeListItem, Strategy } from '../../types/api'
 
 // ── Status badge ──────────────────────────────────────────────────────────
 function StatusBadge({ status, orderType }: { status: string; orderType?: string }) {
@@ -64,6 +64,12 @@ export function TradesPage() {
   const [error, setError]           = useState<string | null>(null)
   const [cancelling, setCancelling] = useState<number | null>(null)
   const [activating, setActivating] = useState<number | null>(null)
+  const [strategies, setStrategies] = useState<Strategy[]>([])
+
+  const strategyMap = useMemo(
+    () => new Map(strategies.map((s) => [s.id, s])),
+    [strategies],
+  )
 
   const fetchTrades = useCallback(() => {
     if (!activeProfile) { setTrades([]); return }
@@ -77,6 +83,12 @@ export function TradesPage() {
   }, [activeProfile])
 
   useEffect(() => { fetchTrades() }, [fetchTrades])
+
+  // Load strategies (global + profile) to resolve names in trade rows
+  useEffect(() => {
+    if (!activeProfile) { setStrategies([]); return }
+    strategiesApi.list(activeProfile.id).then(setStrategies).catch(() => setStrategies([]))
+  }, [activeProfile])
 
   async function handleCancel(tradeId: number) {
     if (!confirm('Cancel this LIMIT order? It will be marked as cancelled with no capital or win-rate impact.')) return
@@ -241,7 +253,7 @@ export function TradesPage() {
               <table className="w-full text-xs">
                 <thead>
                   <tr className="border-b border-surface-700">
-                    {['Date', 'Pair', 'Side', 'Status', 'Entry', 'Stop Loss', 'Risk', 'P&L', ''].map((h, i) => (
+                    {['Date', 'Pair', 'Side', 'Status', 'Entry', 'Stop Loss', 'Risk', 'Strategy', 'P&L', ''].map((h, i) => (
                       <th
                         key={i}
                         className="px-4 py-2.5 text-left text-slate-600 font-medium uppercase tracking-wider whitespace-nowrap"
@@ -322,6 +334,27 @@ export function TradesPage() {
                         {/* Risk */}
                         <td className="px-4 py-2.5 text-slate-500 tabular-nums">
                           ${parseFloat(t.risk_amount).toFixed(2)}
+                        </td>
+
+                        {/* Strategy badges */}
+                        <td className="px-4 py-2.5">
+                          {t.strategy_ids && t.strategy_ids.length > 0 ? (
+                            <div className="flex flex-wrap gap-1">
+                              {t.strategy_ids.map((sid) => {
+                                const s = strategyMap.get(sid)
+                                return (
+                                  <span key={sid}
+                                    className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded
+                                      bg-brand-600/15 border border-brand-500/30 text-[10px] font-medium text-brand-300 whitespace-nowrap">
+                                    {s?.emoji && <span>{s.emoji}</span>}
+                                    {s?.name ?? `#${sid}`}
+                                  </span>
+                                )
+                              })}
+                            </div>
+                          ) : (
+                            <span className="text-slate-700 text-[10px]">—</span>
+                          )}
                         </td>
 
                         {/* P&L */}
