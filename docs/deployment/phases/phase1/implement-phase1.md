@@ -2,8 +2,8 @@
 
 **Date:** March 1, 2026  
 **Updated:** March 7, 2026  
-**Version:** 2.6  
-**Status:** Step 13-A/B/C/D/E + bugfixes DONE → Next: Step 13-F (MA v2 frontend) → 13-G → 13-H → 13-I → v1.0.0
+**Version:** 2.7  
+**Status:** Steps 13-A→H DONE → Next: 13-I (QA full pass) → v1.0.0
 
 > This document describes **what to build, in what order**.  
 > Each step is a working, testable increment — nothing is left dangling.
@@ -18,10 +18,10 @@
 
 | Step | What | Status |
 |------|------|--------|
-| **13-F** | Market Analysis v2 frontend (score decomposition, conclusion card, MA settings) | 🔜 **NEXT** |
-| **13-G** | Strategy module (settings page, win rate editor, archive) | ⏳ Pending |
-| **13-H** | Dashboard polish (small UI fixes, widget cleanup) | ⏳ Pending |
-| **13-I** | QA full pass (lint + tests + manual E2E) | ⏳ Pending |
+| ~~13-F~~ | MA widget: circular badges, LTF display, compact layout | ✅ DONE |
+| ~~13-G~~ | Strategies global (profile_id nullable), trade 1,N strategies, TradeStrategy ORM | ✅ DONE |
+| ~~13-H~~ | Dashboard polish: themes (Night/Navy/Light), SnapshotGallery, db_recover.py | ✅ DONE |
+| **13-I** | QA full pass (lint + tests + manual E2E) | 🔜 **NEXT** |
 | **14** | Deploy to Dell (Docker Compose prod, CI/CD pipeline) | ⏳ Pending |
 
 **After 13-I passes → merge `develop → main` → tag `v1.0.0` → deploy to Dell.**
@@ -210,8 +210,89 @@ level raised `OSError: Read-only file system` when running pytest locally on mac
 - vitest → **8/8 passing**
 - pytest → **118/118 passing**
 
+### Steps 13-F/G/H — DONE (2026-03-07) — Strategies global + Themes + Snapshot Gallery
 
-- Fixed Fractional position sizing (Crypto: units, CFD: lots)
+#### 13-F: Market Analysis widget — circular badges
+
+- `DashboardPage.tsx` — `TFBadge` component: circular ring badges (HTF/MTF/LTF)
+  - Color ring: emerald (bullish) / red (bearish) / amber (neutral)
+  - `MAModuleCard` — compact horizontal layout, badges replace progress bars
+  - `BadgeRow` extracted to top-level component (fix `react-hooks/static-components` lint rule)
+  - LTF score now shown (was missing before)
+
+#### 13-G: Strategies — global shared strategies
+
+**DB changes (migration `412487625940`):**
+- `strategies.profile_id` → nullable (`NULL` = global, shared across all profiles)
+- Dropped `UNIQUE(profile_id, name)` constraint
+- Added two partial indexes:
+  - `uq_strategies_global` — `UNIQUE(name) WHERE profile_id IS NULL`
+  - `uq_strategies_profile` — `UNIQUE(profile_id, name) WHERE profile_id IS NOT NULL`
+- `trades.close_notes` — TEXT nullable (post-trade review notes, editable after close)
+- `trades.close_screenshot_urls` — TEXT[] nullable (close snapshots)
+- `trades.entry_screenshot_urls` — TEXT[] nullable (entry snapshots)
+
+**DB changes (migration `4365b5e32ea3`):**
+- `trade_strategies` — new junction table for trade 1,N strategies (many-to-many)
+  - `UNIQUE(trade_id, strategy_id)`
+  - FK → `trades.id ON DELETE CASCADE`, `strategies.id ON DELETE CASCADE`
+
+**Backend:**
+- `src/core/models/trade.py`:
+  - `Strategy.profile_id` → `Mapped[int | None]` (nullable)
+  - `Strategy.__table_args__` — removed `UniqueConstraint("profile_id","name")` (replaced by DB partial indexes)
+  - New `TradeStrategy` ORM model (junction table)
+  - `Trade.strategies` — m2m viewonly relationship via `trade_strategies`
+  - `Trade.trade_strategy_links` — writable relationship to `TradeStrategy`
+  - `Strategy.trades_m2m` — m2m viewonly relationship
+  - `Strategy.trade_strategy_links` — writable relationship
+- `src/profiles/service.py` — `list_strategies`: now returns global (profile_id=NULL) + profile-specific, ordered by name
+- `src/profiles/schemas.py` — `StrategyOut.profile_id` → `int | None`
+
+**Rule: strategy editing via profile endpoint only works on profile-specific strategies.**
+Global strategies (profile_id=NULL) are read-only via `/api/profiles/{id}/strategies`.
+
+#### 13-H: Dashboard polish + Themes + Snapshot Gallery
+
+**Themes (8 total):**
+
+| Theme ID | Label | Swatch |
+|----------|-------|--------|
+| `indigo` | Indigo Night (default) | #6366f1 |
+| `emerald` | Emerald Oasis | #10b981 |
+| `amber` | Amber Desert | #f59e0b |
+| `rose` | Rose Blaze | #f43f5e |
+| `cyan` | Cyan Terminal | #06b6d4 |
+| `night` | Night Black | #f8fafc |
+| `navy` | Navy Pro | #3b82f6 |
+| `light` | Light | #6366f1 |
+
+- `frontend/src/context/ThemeContext.tsx` — 3 new theme entries (night, navy, light)
+- `frontend/src/index.css` — CSS variable overrides for `[data-theme="night"]`, `[data-theme="navy"]`, `[data-theme="light"]`
+- `frontend/src/components/topbar/Topbar.tsx` — theme picker dropdown with swatch dots
+
+**Snapshot Gallery (`TradeDetailPage.tsx`):**
+- `SnapshotGallery` component — upload/delete/lightbox for entry + close screenshots
+- Entry screenshots: shown on open/partial trades (editable)
+- Close screenshots: shown on all statuses, editable always
+- `close_notes` text area — editable on all trade statuses (post-trade review)
+- API: `tradesApi.uploadEntrySnapshot`, `uploadCloseSnapshot`, `deleteEntrySnapshot`, `deleteCloseSnapshot`
+- Types: `TradeOut.entry_screenshot_urls`, `.close_notes`, `.close_screenshot_urls`
+- `TradeClose` + `TradeUpdate` schemas accept `close_notes` + `close_screenshot_urls`
+
+**DevOps:**
+- `scripts/db_recover.py` — smart recovery script (detects schema state → stamps or migrates)
+- `Makefile` — `db-recover` now calls `db_recover.py`; new `db-recover-full` target
+- `docker-compose.dev.yml` — `scripts/` bind-mounted into backend container
+
+**Quality after 13-F/G/H:**
+- `ruff check` → 0 errors
+- `mypy src/` → 0 errors (35 files)
+- `eslint` → 0 errors
+- `tsc --noEmit` → 0 errors
+- `pytest` → **119/119 passing**
+
+
 - Multi-TP presets (1–4 TPs, Smart Scale / Balanced / Aggressive / Conservative / Profit Max)
 - SL direction validation (LONG: SL < entry, SHORT: SL > entry)
 - Crypto: leverage slider, safe margin calc (MMR-aware), estimated liquidation price
