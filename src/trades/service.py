@@ -22,10 +22,11 @@ Full close flow:
   3. trade.status = 'closed', trade.closed_at = now()
   4. In same transaction:
      a. profile.capital_current += realized_pnl
-     b. profile.trades_count    += 1
-     c. profile.win_count       += 1  (if PnL > 0)
-     d. strategy.trades_count   += 1  (if strategy set)
-     e. strategy.win_count      += 1  (if PnL > 0 and strategy set)
+     b. BE filter: pnl_pct = realized_pnl / risk_amount * 100
+        - If abs(pnl_pct) < profile.min_pnl_pct_for_stats → BREAKEVEN → no stats updated
+     c. profile.trades_count += 1  (if not BE)
+     d. profile.win_count    += 1  (if pnl_pct > 0 and not BE)
+     e. ALL linked strategies (via trade_strategies) get trades_count/win_count updated
 
 Capital is ALWAYS updated in the same DB transaction as trade close.
 """
@@ -40,7 +41,7 @@ from sqlalchemy import update as sa_update
 from sqlalchemy.orm import Session, joinedload
 
 from src.core.models.broker import Instrument, Profile
-from src.core.models.trade import Position, Strategy, Trade
+from src.core.models.trade import Position, Strategy, Trade, TradeStrategy
 from src.trades.schemas import (
     PositionIn,
     TradeClose,
@@ -285,14 +286,127 @@ def _reload_and_out(
     Reload a trade fresh from DB with joinedload (instrument + positions),
     then convert to TradeOut. Use this after any commit() to ensure the
     instrument relationship is populated (avoids post-commit lazy-load failures).
+    Also populates strategy_ids from trade_strategies junction table.
     """
     trade = _get_trade_or_404(db, trade_id)
-    return _trade_to_out(trade, size_info)
+    out = _trade_to_out(trade, size_info)
+    _populate_strategy_ids(out, db)
+    return out
 
 
 def _attach_size_info(trade: Trade, size_info: TradeSizeResult) -> TradeOut:
     """Build a TradeOut from a Trade ORM object and attach size_info."""
     return _trade_to_out(trade, size_info)
+
+
+def _sync_trade_strategies(db: Session, trade: Trade, strategy_ids: list[int]) -> None:
+    """
+    Replace the full set of trade_strategies links for a trade.
+
+    - Validates each strategy_id exists in DB.
+    - Deletes all existing links then inserts the new set.
+    - Also keeps trade.strategy_id = strategy_ids[0] (compat with single-strategy FK).
+    - strategy_ids=[] removes all links and sets strategy_id = None.
+    """
+    # Validate all IDs exist
+    if strategy_ids:
+        found = (
+            db.query(Strategy.id)
+            .filter(Strategy.id.in_(strategy_ids), Strategy.status == "active")
+            .all()
+        )
+        found_ids = {r[0] for r in found}
+        missing = set(strategy_ids) - found_ids
+        if missing:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Strategy IDs not found or not active: {sorted(missing)}",
+            )
+
+    # Delete existing links
+    db.query(TradeStrategy).filter(TradeStrategy.trade_id == trade.id).delete()
+
+    # Insert new links
+    for sid in strategy_ids:
+        db.add(TradeStrategy(trade_id=trade.id, strategy_id=sid))
+
+    # Keep FK in sync (first strategy = primary)
+    trade.strategy_id = strategy_ids[0] if strategy_ids else None
+
+
+def _populate_strategy_ids(out: TradeOut | TradeListItem, db: Session) -> None:
+    """Fetch strategy_ids from trade_strategies and attach to the schema output."""
+    rows = (
+        db.query(TradeStrategy.strategy_id)
+        .filter(TradeStrategy.trade_id == out.id)
+        .order_by(TradeStrategy.id)
+        .all()
+    )
+    out.strategy_ids = [r[0] for r in rows]
+
+
+def _update_wr_stats(db: Session, trade: Trade, profile: Profile) -> None:
+    """
+    Update win-rate stats on the profile + ALL linked strategies atomically.
+
+    BE filter (profile-level):
+      - Compute pnl_pct = realized_pnl / risk_amount * 100
+        (risk_amount is the capital at risk for this trade — always > 0 for real trades)
+      - If abs(pnl_pct) < profile.min_pnl_pct_for_stats → BREAK-EVEN trade
+        → excluded from BOTH trades_count AND win_count on all targets (profile + strategies).
+      - Otherwise → trades_count += 1 everywhere.
+        win_count += 1 only where pnl_pct > 0 (pure win, not BE).
+
+    Strategy scope:
+      - We update ALL strategies linked via trade_strategies junction table,
+        NOT just the legacy single-FK trade.strategy_id.
+    """
+    # Compute pnl%: realized_pnl expressed as a % of risk_amount.
+    # risk_amount is the capital-at-risk for the trade (always > 0 for valid trades).
+    # realized_pnl is set by the close flow before this helper is called — never None here.
+    realized_pnl: Decimal = trade.realized_pnl or Decimal("0")
+
+    if trade.risk_amount and trade.risk_amount > 0:
+        pnl_pct = (realized_pnl / trade.risk_amount * 100).quantize(Decimal("0.001"))
+    else:
+        # Edge case: risk_amount is 0 (should not happen for real trades).
+        # Fall back to raw PnL sign — at least profile WR won't be wrong.
+        pnl_pct = Decimal("100") if realized_pnl > 0 else (
+            Decimal("-100") if realized_pnl < 0 else Decimal("0")
+        )
+
+    be_threshold = profile.min_pnl_pct_for_stats  # e.g. 0.100
+
+    # BE trade — skip entirely, zero impact on WR
+    if abs(pnl_pct) < be_threshold:
+        return
+
+    is_win = pnl_pct > 0
+
+    # ── Profile stats ────────────────────────────────────────────────────
+    profile.trades_count += 1
+    if is_win:
+        profile.win_count += 1
+
+    # ── All linked strategies ────────────────────────────────────────────
+    # Fetch all strategy IDs from the junction table (many-to-many).
+    rows = (
+        db.query(TradeStrategy.strategy_id)
+        .filter(TradeStrategy.trade_id == trade.id)
+        .all()
+    )
+    linked_ids = [r[0] for r in rows]
+
+    if linked_ids:
+        strategies = (
+            db.query(Strategy)
+            .filter(Strategy.id.in_(linked_ids))
+            .all()
+        )
+        for strategy in strategies:
+            strategy.trades_count += 1
+            if is_win:
+                strategy.win_count += 1
 
 
 # -- Public service functions --------------------------------------------------
@@ -363,6 +477,10 @@ def open_trade(db: Session, data: TradeOpen) -> TradeOut:
         )
         db.add(pos)
 
+    # Link all strategies via trade_strategies junction table
+    if data.strategy_ids:
+        _sync_trade_strategies(db, trade, data.strategy_ids)
+
     db.commit()
     # Reload fresh with joinedload to populate instrument_display_name
     return _reload_and_out(db, trade.id, size_info)
@@ -391,6 +509,20 @@ def list_trades(
 
     trades = q.order_by(Trade.entry_date.desc()).offset(offset).limit(limit).all()
 
+    # Bulk-fetch strategy_ids for all trades in one query (avoid N+1)
+    trade_ids = [t.id for t in trades]
+    strat_rows: list = []
+    if trade_ids:
+        strat_rows = (
+            db.query(TradeStrategy.trade_id, TradeStrategy.strategy_id)
+            .filter(TradeStrategy.trade_id.in_(trade_ids))
+            .order_by(TradeStrategy.trade_id, TradeStrategy.id)
+            .all()
+        )
+    strat_map: dict[int, list[int]] = {}
+    for trade_id, strategy_id in strat_rows:
+        strat_map.setdefault(trade_id, []).append(strategy_id)
+
     items = []
     for t in trades:
         item = TradeListItem.model_validate(t)
@@ -404,13 +536,16 @@ def list_trades(
             )
             or None
         )
+        item.strategy_ids = strat_map.get(t.id, [])
         items.append(item)
     return items
 
 
 def get_trade(db: Session, trade_id: int) -> TradeOut:
     trade = _get_trade_or_404(db, trade_id)
-    return _trade_to_out(trade)
+    out = _trade_to_out(trade)
+    _populate_strategy_ids(out, db)
+    return out
 
 
 def update_trade(db: Session, trade_id: int, data: TradeUpdate) -> TradeOut:
@@ -490,6 +625,10 @@ def update_trade(db: Session, trade_id: int, data: TradeUpdate) -> TradeOut:
     for field in simple_fields:
         if field in data.model_fields_set:
             setattr(trade, field, getattr(data, field))
+
+    # ── Multi-strategy sync ───────────────────────────────────────────────
+    if "strategy_ids" in data.model_fields_set and data.strategy_ids is not None:
+        _sync_trade_strategies(db, trade, data.strategy_ids)
 
     # ── Recalculate risk when SL changed (open/partial) ───────────────────
     if "stop_loss" in data.model_fields_set and not amend_entry:
@@ -697,23 +836,13 @@ def partial_close(db: Session, trade_id: int, data: TradePartialClose) -> TradeO
         trade.closed_at = exit_dt
         trade.current_risk = Decimal("0.00")
 
-        # Atomic capital + profile stats update
+        # Atomic capital + WR stats update (profile + all linked strategies)
         profile = db.query(Profile).filter(Profile.id == trade.profile_id).first()
         if profile:
             profile.capital_current = (profile.capital_current + trade.realized_pnl).quantize(
                 Decimal("0.01")
             )
-            profile.trades_count += 1
-            if trade.realized_pnl > 0:
-                profile.win_count += 1
-
-        # Atomic strategy stats update
-        if trade.strategy_id:
-            strategy = db.query(Strategy).filter(Strategy.id == trade.strategy_id).first()
-            if strategy:
-                strategy.trades_count += 1
-                if trade.realized_pnl > 0:
-                    strategy.win_count += 1
+            _update_wr_stats(db, trade, profile)
     else:
         trade.status = "partial"
 
@@ -765,24 +894,13 @@ def full_close(db: Session, trade_id: int, data: TradeClose) -> TradeOut:
     if data.close_screenshot_urls is not None:
         trade.close_screenshot_urls = data.close_screenshot_urls
 
-    # -- Atomic capital + profile win-rate update --------------------------------
+    # -- Atomic capital + WR stats update (profile + all linked strategies) -----
     profile = db.query(Profile).filter(Profile.id == trade.profile_id).first()
     if profile:
         profile.capital_current = (profile.capital_current + trade.realized_pnl).quantize(
             Decimal("0.01")
         )
-        # Always increment trade count; win_count only when PnL > 0
-        profile.trades_count += 1
-        if trade.realized_pnl > 0:
-            profile.win_count += 1
-
-    # -- Atomic strategy stats update ------------------------------------------
-    if trade.strategy_id:
-        strategy = db.query(Strategy).filter(Strategy.id == trade.strategy_id).first()
-        if strategy:
-            strategy.trades_count += 1
-            if trade.realized_pnl > 0:
-                strategy.win_count += 1
+        _update_wr_stats(db, trade, profile)
 
     db.commit()
     return _reload_and_out(db, trade_id)

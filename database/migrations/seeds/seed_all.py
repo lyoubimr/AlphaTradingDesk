@@ -10,12 +10,13 @@ All seeds are idempotent — safe to re-run at any time.
 Running on an already-seeded DB will produce no changes.
 
 Dependency order:
-  1. brokers          (no deps)
-  2. trading_styles   (no deps)
-  3. sessions         (no deps)
-  4. instruments      (requires broker_ids from step 1)
-  5. note_templates   (no deps — profile_id = NULL = global default)
-  6. market_analysis  (no deps)
+  1. brokers             (no deps)
+  2. trading_styles      (no deps)
+  3. sessions            (no deps)
+  4. instruments         (requires broker_ids from step 1)
+  5. note_templates      (no deps — profile_id = NULL = global default)
+  6. market_analysis     (no deps)
+  7. global_strategies   (no deps — profile_id = NULL)
 """
 from __future__ import annotations
 
@@ -25,6 +26,7 @@ import sys
 from src.core.database import get_session_factory
 SessionLocal = get_session_factory()
 from database.migrations.seeds.seed_brokers import seed_brokers
+from database.migrations.seeds.seed_global_strategies import seed_global_strategies
 from database.migrations.seeds.seed_instruments import seed_instruments
 from database.migrations.seeds.seed_market_analysis import seed_market_analysis
 from database.migrations.seeds.seed_note_templates import seed_note_templates
@@ -50,6 +52,7 @@ def run_all_seeds() -> None:
             seed_instruments(session, broker_ids)
             seed_note_templates(session)
             seed_market_analysis(session)
+            seed_global_strategies(session)
             session.commit()
             logger.info("=== Seed run complete — all changes committed ===")
         except Exception:
