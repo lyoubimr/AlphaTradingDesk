@@ -36,6 +36,7 @@ from datetime import datetime
 from decimal import Decimal
 
 from fastapi import HTTPException, status
+from sqlalchemy import update as sa_update
 from sqlalchemy.orm import Session, joinedload
 
 from src.core.models.broker import Instrument, Profile
@@ -347,6 +348,7 @@ def open_trade(db: Session, data: TradeOpen) -> TradeOut:
         session_tag=data.session_tag,
         notes=data.notes,
         confidence_score=data.confidence_score,
+        entry_screenshot_urls=data.entry_screenshot_urls,
     )
     db.add(trade)
     db.flush()  # get trade.id before adding positions
@@ -417,21 +419,49 @@ def update_trade(db: Session, trade_id: int, data: TradeUpdate) -> TradeOut:
 
     Always allowed (pending / open / partial):
         stop_loss, strategy_id, notes, confidence_score, session_tag,
-        analyzed_timeframe
+        analyzed_timeframe, entry_screenshot_urls
+
+    Always allowed (including closed):
+        close_notes, close_screenshot_urls
+        (post-trade review — always editable regardless of status)
 
     Pending-only (LIMIT not yet triggered):
         entry_price      — recalculates risk_amount, lot sizes, potential_profit
         amend_positions  — replaces all TP positions
 
-    Closed trades cannot be modified at all.
+    Closed trades can ONLY update close_notes / notes / close_screenshot_urls.
     """
     trade = _get_trade_or_404(db, trade_id)
 
+    # ── Fields allowed on closed trades (post-trade review) ──────────────
+    # notes is also editable on closed trades (late entry rationale fix).
+    closed_allowed = {"close_notes", "close_screenshot_urls", "notes"}
+
     if trade.status == "closed":
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Cannot update a closed trade.",
+        # Reject structural field changes on closed trades
+        structural_fields = (
+            data.model_fields_set
+            - closed_allowed
+            - {"entry_price", "amend_positions"}  # handled below
         )
+        if structural_fields:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=(
+                    f"Cannot update structural fields on a closed trade: "
+                    f"{', '.join(sorted(structural_fields))}. "
+                    "Only close_notes, notes and close_screenshot_urls are editable."
+                ),
+            )
+        for field in closed_allowed:
+            if field in data.model_fields_set:
+                setattr(trade, field, getattr(data, field))
+        db.commit()
+        return _reload_and_out(db, trade_id)
+
+    for field in closed_allowed:
+        if field in data.model_fields_set:
+            setattr(trade, field, getattr(data, field))
 
     # ── Guard: pending-only fields on non-pending trade ───────────────────
     amend_entry = data.entry_price is not None
@@ -455,6 +485,7 @@ def update_trade(db: Session, trade_id: int, data: TradeUpdate) -> TradeOut:
         "confidence_score",
         "session_tag",
         "analyzed_timeframe",
+        "entry_screenshot_urls",
     }
     for field in simple_fields:
         if field in data.model_fields_set:
@@ -728,6 +759,12 @@ def full_close(db: Session, trade_id: int, data: TradeClose) -> TradeOut:
     trade.closed_at = exit_dt
     trade.current_risk = Decimal("0.00")
 
+    # Save close notes + screenshots if provided
+    if data.close_notes is not None:
+        trade.close_notes = data.close_notes
+    if data.close_screenshot_urls is not None:
+        trade.close_screenshot_urls = data.close_screenshot_urls
+
     # -- Atomic capital + profile win-rate update --------------------------------
     profile = db.query(Profile).filter(Profile.id == trade.profile_id).first()
     if profile:
@@ -832,3 +869,40 @@ def delete_trade(db: Session, trade_id: int) -> None:
 
     db.delete(trade)
     db.commit()
+
+
+def get_trade_raw(db: Session, trade_id: int) -> Trade:
+    """Return the raw Trade ORM object (no eager loads). Used by snapshot endpoints."""
+    return _get_trade_or_404(db, trade_id)
+
+
+def update_entry_screenshots(db: Session, trade_id: int, urls: list[str]) -> TradeOut:
+    """
+    Targeted SQL UPDATE — sets only entry_screenshot_urls.
+    Uses Core SQLAlchemy (not ORM session flush) so no other column is touched,
+    avoiding NOT NULL violations on columns that are NULL due to legacy data.
+    """
+    _get_trade_or_404(db, trade_id)  # 404 guard
+    db.execute(
+        sa_update(Trade)
+        .where(Trade.id == trade_id)
+        .values(entry_screenshot_urls=urls)
+    )
+    db.commit()
+    return _reload_and_out(db, trade_id)
+
+
+def update_close_screenshots(db: Session, trade_id: int, urls: list[str]) -> TradeOut:
+    """
+    Targeted SQL UPDATE — sets only close_screenshot_urls.
+    Uses Core SQLAlchemy (not ORM session flush) so no other column is touched,
+    avoiding NOT NULL violations on columns that are NULL due to legacy data.
+    """
+    _get_trade_or_404(db, trade_id)  # 404 guard
+    db.execute(
+        sa_update(Trade)
+        .where(Trade.id == trade_id)
+        .values(close_screenshot_urls=urls)
+    )
+    db.commit()
+    return _reload_and_out(db, trade_id)

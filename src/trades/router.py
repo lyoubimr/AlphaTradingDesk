@@ -2,24 +2,32 @@
 Trade Journal router.
 
 Routes:
-  POST   /api/trades                  ← open trade (MARKET → 'open', LIMIT → 'pending')
-  GET    /api/trades                  ← journal list (paginated + filters)
-  GET    /api/trades/{id}             ← trade detail
-  PUT    /api/trades/{id}             ← update (SL, notes, strategy… | pending: also entry + TPs)
-  POST   /api/trades/{id}/activate    ← LIMIT triggered: pending → open (reserves risk)
-  POST   /api/trades/{id}/breakeven   ← move SL to entry price, current_risk → 0
-  POST   /api/trades/{id}/close       ← full close
-  POST   /api/trades/{id}/partial     ← partial close (TP hit)
-  POST   /api/trades/{id}/cancel      ← cancel pending LIMIT order (no capital/WR impact)
-  DELETE /api/trades/{id}             ← physical delete (pending/open/partial/cancelled only)
+  POST   /api/trades                          ← open trade (MARKET → 'open', LIMIT → 'pending')
+  GET    /api/trades                          ← journal list (paginated + filters)
+  GET    /api/trades/{id}                     ← trade detail
+  PUT    /api/trades/{id}                     ← update (SL, notes, strategy… | closed: close_notes/screenshots only)
+  POST   /api/trades/{id}/activate            ← LIMIT triggered: pending → open (reserves risk)
+  POST   /api/trades/{id}/breakeven           ← move SL to entry price, current_risk → 0
+  POST   /api/trades/{id}/close               ← full close
+  POST   /api/trades/{id}/partial             ← partial close (TP hit)
+  POST   /api/trades/{id}/cancel              ← cancel pending LIMIT order (no capital/WR impact)
+  POST   /api/trades/{id}/snapshots/entry     ← upload entry snapshot image → returns updated TradeOut
+  POST   /api/trades/{id}/snapshots/close     ← upload close snapshot image → returns updated TradeOut
+  DELETE /api/trades/{id}/snapshots/entry/{url} ← remove one entry snapshot URL
+  DELETE /api/trades/{id}/snapshots/close/{url} ← remove one close snapshot URL
+  DELETE /api/trades/{id}                     ← physical delete (pending/open/partial/cancelled only)
 """
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Query, status
+import os
+import uuid
+
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
+from src.core.config import settings
 from src.core.deps import get_db
 from src.trades import service
 from src.trades.schemas import (
@@ -148,3 +156,114 @@ def delete_trade(trade_id: int, db: Session = Depends(get_db)) -> Response:
     """Delete an open/partial/cancelled trade. Closed trades cannot be deleted."""
     service.delete_trade(db, trade_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+# ── Snapshot upload helpers ────────────────────────────────────────────────────
+
+ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif"}
+MAX_IMAGE_SIZE_MB = 10
+UPLOAD_DIR = os.path.join(settings.uploads_dir, "trades")
+
+
+def _save_snapshot(file: UploadFile, trade_id: int) -> str:
+    """
+    Save an uploaded image to disk and return the relative URL path.
+    URL format: /uploads/trades/<trade_id>/<uuid>.<ext>
+    """
+    if file.content_type not in ALLOWED_IMAGE_TYPES:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Unsupported image type: {file.content_type}. Allowed: jpeg, png, webp, gif",
+        )
+
+    ext = (file.filename or "image.jpg").rsplit(".", 1)[-1].lower()
+    if ext not in ("jpg", "jpeg", "png", "webp", "gif"):
+        ext = "jpg"
+
+    dest_dir = os.path.join(UPLOAD_DIR, str(trade_id))
+    os.makedirs(dest_dir, exist_ok=True)
+
+    filename = f"{uuid.uuid4().hex}.{ext}"
+    dest_path = os.path.join(dest_dir, filename)
+
+    content = file.file.read()
+    if len(content) > MAX_IMAGE_SIZE_MB * 1024 * 1024:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=f"Image too large (max {MAX_IMAGE_SIZE_MB} MB).",
+        )
+
+    with open(dest_path, "wb") as f:
+        f.write(content)
+
+    return f"/uploads/trades/{trade_id}/{filename}"
+
+
+@router.post("/{trade_id}/snapshots/entry", response_model=TradeOut)
+def upload_entry_snapshot(
+    trade_id: int,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+) -> object:
+    """
+    Upload an entry snapshot image for a trade.
+    Appends the URL to trade.entry_screenshot_urls.
+    Available for any trade status (you may upload screenshots retroactively).
+    """
+    url = _save_snapshot(file, trade_id)
+    trade = service.get_trade_raw(db, trade_id)
+    existing = list(trade.entry_screenshot_urls or [])
+    existing.append(url)
+    return service.update_entry_screenshots(db, trade_id, existing)
+
+
+@router.post("/{trade_id}/snapshots/close", response_model=TradeOut)
+def upload_close_snapshot(
+    trade_id: int,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+) -> object:
+    """
+    Upload a close snapshot image for a trade.
+    Appends the URL to trade.close_screenshot_urls.
+    Available for any trade status, including closed.
+    """
+    url = _save_snapshot(file, trade_id)
+    trade = service.get_trade_raw(db, trade_id)
+    existing = list(trade.close_screenshot_urls or [])
+    existing.append(url)
+    return service.update_close_screenshots(db, trade_id, existing)
+
+
+@router.delete("/{trade_id}/snapshots/entry/{url_b64}", response_model=TradeOut)
+def delete_entry_snapshot(
+    trade_id: int,
+    url_b64: str,
+    db: Session = Depends(get_db),
+) -> object:
+    """
+    Remove a specific entry snapshot URL (base64url-encoded path).
+    Does NOT delete the file from disk — managed separately.
+    """
+    import base64
+    url = base64.urlsafe_b64decode(url_b64 + "==").decode("utf-8")
+    trade = service.get_trade_raw(db, trade_id)
+    existing = [u for u in (trade.entry_screenshot_urls or []) if u != url]
+    return service.update_entry_screenshots(db, trade_id, existing)
+
+
+@router.delete("/{trade_id}/snapshots/close/{url_b64}", response_model=TradeOut)
+def delete_close_snapshot(
+    trade_id: int,
+    url_b64: str,
+    db: Session = Depends(get_db),
+) -> object:
+    """
+    Remove a specific close snapshot URL (base64url-encoded path).
+    Does NOT delete the file from disk — managed separately.
+    """
+    import base64
+    url = base64.urlsafe_b64decode(url_b64 + "==").decode("utf-8")
+    trade = service.get_trade_raw(db, trade_id)
+    existing = [u for u in (trade.close_screenshot_urls or []) if u != url]
+    return service.update_close_screenshots(db, trade_id, existing)

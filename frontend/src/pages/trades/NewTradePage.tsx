@@ -26,7 +26,7 @@ import type React from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   TrendingUp, TrendingDown, Loader2,
-  AlertTriangle, ChevronDown, ChevronUp, Search, X, Info, Clock, Plus, ShieldAlert,
+  AlertTriangle, ChevronDown, ChevronUp, Search, X, Info, Clock, Plus, ShieldAlert, ImagePlus, Trash2,
 } from 'lucide-react'
 import { PageHeader } from '../../components/ui/PageHeader'
 import { useProfile } from '../../context/ProfileContext'
@@ -724,6 +724,7 @@ export function NewTradePage() {
   const [confidence, setConfidence] = useState('')
   const [tradeTags, setTradeTags]   = useState<string[]>([])
   const [notes, setNotes]           = useState('')
+  const [entryScreenshots, setEntryScreenshots] = useState<File[]>([])
 
   const [showSession, setShowSession] = useState(false)
   const [sessionTag, setSessionTag]   = useState<SessionLabel | ''>(detectSession)
@@ -1082,7 +1083,7 @@ export function NewTradePage() {
     if (!activeProfile || !instrument || slSideError) return
     setError(null); setSubmitting(true)
     try {
-      await tradesApi.open({
+      const newTrade = await tradesApi.open({
         profile_id:         activeProfile.id,
         instrument_id:      instrument.id,
         pair:               instrument.symbol,
@@ -1104,6 +1105,14 @@ export function NewTradePage() {
         notes:              notes || null,
         confidence_score:   confidence ? Number(confidence) : null,
       })
+      // Upload entry screenshots sequentially (fire-and-forget errors — non-blocking)
+      for (const file of entryScreenshots) {
+        try {
+          await tradesApi.uploadEntrySnapshot(newTrade.id, file)
+        } catch {
+          // screenshot upload failure is non-fatal — trade is already created
+        }
+      }
       navigate('/trades')
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error')
@@ -1746,6 +1755,54 @@ export function NewTradePage() {
                 </button>
               ))}
             </div>
+          </div>
+
+          {/* Entry screenshots — optional, uploaded after trade creation */}
+          <div>
+            <span className="flex items-center gap-1 text-xs font-medium text-slate-400 mb-1.5">
+              <ImagePlus size={12} className="text-slate-500" />
+              Entry screenshots
+              <span className="text-[10px] text-slate-600 font-normal ml-1">(optional — chart setup, confluences)</span>
+            </span>
+            {/* Thumbnails row */}
+            {entryScreenshots.length > 0 && (
+              <div className="flex flex-wrap gap-2 mb-2">
+                {entryScreenshots.map((file, idx) => (
+                  <div key={idx} className="relative group w-20 h-20 rounded-lg overflow-hidden border border-surface-600 bg-surface-700">
+                    <img
+                      src={URL.createObjectURL(file)}
+                      alt={file.name}
+                      className="w-full h-full object-cover"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setEntryScreenshots((prev) => prev.filter((_, i) => i !== idx))}
+                      className="absolute inset-0 flex items-center justify-center bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity"
+                    >
+                      <Trash2 size={14} className="text-red-400" />
+                    </button>
+                    <span className="absolute bottom-0 left-0 right-0 text-[9px] text-slate-400 bg-black/60 px-1 truncate">
+                      {file.name}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+            <label className="flex items-center gap-2 px-3 py-2 rounded-lg border border-dashed border-surface-500 bg-surface-700/30 text-xs text-slate-500 hover:text-slate-300 hover:border-brand-500/50 cursor-pointer transition-colors w-fit">
+              <ImagePlus size={13} />
+              {entryScreenshots.length === 0 ? 'Add screenshot' : 'Add more'}
+              <input
+                type="file"
+                accept="image/*"
+                multiple
+                className="sr-only"
+                onChange={(e) => {
+                  const files = Array.from(e.target.files ?? [])
+                  if (files.length) setEntryScreenshots((prev) => [...prev, ...files])
+                  e.target.value = ''
+                }}
+              />
+            </label>
           </div>
 
           {/* Notes */}
