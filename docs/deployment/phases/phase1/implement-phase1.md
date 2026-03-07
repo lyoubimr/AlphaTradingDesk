@@ -1,8 +1,9 @@
 # 🛠️ Phase 1 — Implementation Plan
 
 **Date:** March 1, 2026  
-**Version:** 1.9  
-**Status:** Step 13 IN PROGRESS — Goals v2 + MA v2 + Settings → Deploy Dell ce weekend
+**Updated:** March 6, 2026  
+**Version:** 2.5  
+**Status:** Step 13-A/B/C/D/E DONE → Next: Step 13-F (MA v2 frontend) → Step 13-G (Strategy module) → Step 13-H (Dashboard polish) → Step 13-I (QA) → v1.0.0
 
 > This document describes **what to build, in what order**.  
 > Each step is a working, testable increment — nothing is left dangling.
@@ -10,6 +11,20 @@
 > **Dev environment during Steps 1–13:** everything runs locally on the Mac.  
 > Postgres runs in Docker on the Mac — no Dell needed yet.  
 > The Dell comes in at Step 14.0 (migration) and Step 14.1 (prod deploy).
+
+---
+
+## 🗺️ Roadmap to v1.0.0 — remaining steps
+
+| Step | What | Status |
+|------|------|--------|
+| **13-F** | Market Analysis v2 frontend (score decomposition, conclusion card, MA settings) | 🔜 **NEXT** |
+| **13-G** | Strategy module (settings page, win rate editor, archive) | ⏳ Pending |
+| **13-H** | Dashboard polish (small UI fixes, widget cleanup) | ⏳ Pending |
+| **13-I** | QA full pass (lint + tests + manual E2E) | ⏳ Pending |
+| **14** | Deploy to Dell (Docker Compose prod, CI/CD pipeline) | ⏳ Pending |
+
+**After 13-I passes → merge `develop → main` → tag `v1.0.0` → deploy to Dell.**
 
 ---
 
@@ -40,7 +55,94 @@
 - `/settings/profiles` — CRUD, broker selector, ProfilePicker topbar
 - ProfilePicker on all pages, auto-selects first profile
 
-### Step 10 — IN PROGRESS (2026-03-02/03)
+### Step 10 — DONE (2026-03-02/03)
+
+**Trade form (NewTradePage.tsx):**
+- Fixed Fractional position sizing (Crypto: units, CFD: lots)
+- Multi-TP presets (1–4 TPs, Smart Scale / Balanced / Aggressive / Conservative / Profit Max)
+- SL direction validation (LONG: SL < entry, SHORT: SL > entry)
+- Crypto: leverage slider, safe margin calc (MMR-aware), estimated liquidation price
+- CFD: broker margin estimate, maintenance margin, margin level %, margin call warning
+- Session auto-detection (UTC-based)
+- Strategy dropdown with inline "New strategy" creation
+- Confidence score 1–10
+- Setup tags (chart patterns / confluences)
+- **Expectancy panel** — E(R) = WR × AvgWinR − (1−WR) × 1R, 4-level WR priority
+
+**LIMIT order lifecycle:**
+```
+MARKET: open → partial → closed
+LIMIT:  pending → open → partial → closed
+                ↘ cancelled
+```
+- `POST /api/trades/{id}/activate` — pending → open
+- `POST /api/trades/{id}/cancel`   — pending → cancelled only
+
+### Step 11 — DONE (2026-03-03)
+- `GET /api/trading-styles` — styles_router
+- `GET /api/stats/winrate` — stats_router registered in main.py
+- GoalsPage.tsx — real backend: create, toggle, live progress, KPIs, ProgressCard
+
+### Step 12 — DONE (2026-03-03)
+- Dashboard fully connected: Goals widget, MA badge, Open Positions, Performance summary
+- KPI bar: Open Positions, Today's P&L, Portfolio Risk %, Win Rate
+
+### Step 12.1 — DONE (2026-03-03)
+- MA sessions are global (no profile filter) — `GET /api/market-analysis/staleness`
+- `PATCH /api/market-analysis/indicators/{id}` — partial update of UI text fields
+- Frontend: `maApi.getStalenessGlobal()`, `maApi.patchIndicator()`, profile_id removed from listSessions
+
+### Step 13-A — DONE (2026-03-06) — DB Migrations (Goals v2 + MA v2)
+
+**Migrations applied:**
+- `step12_goals_v2.py` — added `avg_r_min`, `max_trades`, `period_type`, `show_on_dashboard` to `profile_goals`
+- `step13_goal_override_log.py` — new `goal_override_log` table
+- `step14_goals_nullable_style_drop_review.py` (dbf0b348bf21):
+  - `profile_goals.style_id` → nullable (NULL = global goal, all styles)
+  - `goal_progress_log.style_id` → nullable
+  - Dropped `'review'` from `period_type` CHECK — now `'outcome' | 'process'` only
+  - Replaced UNIQUE(profile_id, style_id, period) with partial indexes:
+    - `uq_profile_goals_style` — WHERE style_id IS NOT NULL
+    - `uq_profile_goals_global` — WHERE style_id IS NULL (one global goal per profile+period)
+- `step15_goals_unique_add_period_type.py` (7ca85c6b1bd1) — added `period_type` to unique index
+
+### Step 13-B — DONE (2026-03-06) — Backend Goals v2
+
+- `src/goals/schemas.py` — `GoalCreate/Update`: `avg_r_min`, `max_trades`, `period_type`, `show_on_dashboard`
+- `src/goals/schemas.py` — `GoalProgressItem`: `avg_r`, `avg_r_min`, `avg_r_hit`, `max_trades_hit`, `period_type`, `show_on_dashboard`
+- `src/goals/service.py`:
+  - Global goals: `style_id = NULL` → all trades of profile
+  - `avg_r` computed from `realized_pnl / risk_amount` on closed trades in period
+  - `avg_r_min` passed from `ProfileGoal` → `GoalProgressItem`
+  - Circuit breaker (`limit_hit`) fires only for `period_type == 'outcome'`
+  - `risk_progress` always computed regardless of period_type (loss is loss)
+  - Changing type outcome → process does NOT reset accumulated loss
+  - `POST /api/profiles/{id}/goal-overrides` + `GET .../goal-overrides`
+
+### Step 13-C — DONE (2026-03-06) — Backend MA v2 (partial)
+
+- `seed_market_analysis.py` — upsert logic, `score_block` field, fixed emoji/sort_order
+- Backend `GoalProgressItem` schema now includes `avg_r_min`
+- MA decomposed score columns added to `market_analysis_sessions` (schema-ready, compute logic pending 13-F)
+
+### Step 13-D — DONE (2026-03-06) — Settings + GoalsSettingsPage
+
+- `GoalsSettingsPage.tsx` — full rewrite: global goals, no style grouping, no review, compact layout
+- `GoalsPage.tsx`:
+  - `ProgressCard` — currency amounts signed (+$410 / -$205), Avg R badge (violet, last in card), loss limit always shown
+  - "New Goal" → `/settings/goals?new=1`
+  - Compact Period Plan footer
+- `DashboardPage.tsx` — GoalsWidget shows global goals (style filter removed)
+- `types/api.ts` — `GoalProgressItem.avg_r_min`, `style_id` nullable, `review` removed
+- `lib/api.ts` — overrides endpoints, goal_id-based update/delete
+
+### Step 13-E — DONE (2026-03-06) — Goals UX polish
+
+- Avg R bar replaced with compact badge (violet neutral / red negative / amber below goal / green hit)
+- Badge positioned last in ProgressCard, separated by thin divider
+- Bug fixed: negative avg_r no longer causes full bar (CSS negative width issue)
+- `fmtAmount(signed=true)` — P&L shows +/- prefix on currency amounts
+- Target/Limit row: `+$410` green / `-$205` red — visually clear
 
 **Trade form (NewTradePage.tsx) — completed:**
 - Fixed Fractional position sizing (Crypto: units, CFD: lots)
@@ -874,14 +976,143 @@ Widgets (all read from API using active profile from ProfileContext):
 
 ---
 
-### Step 13 — Goals v2 + MA v2 + Settings + QA (2026-03-06→08)
+### Step 13 — Goals v2 + MA v2 + Settings + QA (2026-03-06→)
 
-> **Objectif :** tout finir avant le deploy Dell ce weekend.
-> Décisions actées lors du design review du 2026-03-06 (voir `custom/plan_integration_goals_v2.md` + `custom/plan_integration_ma_v2.md`).
+> **Objectif :** tout finir avant le deploy Dell.
+> Steps 13-A through 13-E are DONE. Steps 13-F through 13-I remain.
 
 ---
 
-#### 13-A — DB Migrations (Alembic)
+#### ✅ 13-A — DB Migrations — DONE
+#### ✅ 13-B — Backend Goals v2 — DONE
+#### ✅ 13-C — Backend MA v2 (seed + schema) — DONE (compute logic in 13-F)
+#### ✅ 13-D — Settings + GoalsSettingsPage — DONE
+#### ✅ 13-E — Goals UX polish — DONE
+
+---
+
+#### 🔜 13-F — Market Analysis v2 Frontend + Backend compute
+
+> **This is the next step.**
+
+**F1 — Backend: decomposed score computation (`src/market_analysis/service.py`)**
+```python
+def compute_decomposed_scores(answers: list[MAAnswer], indicators: list[MAIndicator]) -> dict:
+    """
+    Returns score_trend, score_momentum, score_participation, score_composite, bias_composite
+    for each asset group (a / b).
+
+    Indicator weights by timeframe:  HTF=0.6  MTF=0.3  LTF=0.1
+    Block weights:                   Trend=0.45  Momentum=0.30  Participation=0.25
+    Bias thresholds:                 ≥65 = bullish | ≤34 = bearish | else = neutral
+    """
+```
+
+- `create_session()` → calls `compute_decomposed_scores()`, populates new columns
+- `get_trade_conclusion(trend, momentum, participation, bias) → TradeConclusion`
+- `GET /api/market-analysis/sessions/{id}/conclusion` endpoint
+
+**Trade Conclusion rules (priority order):**
+
+| Condition | Label | Color |
+|-----------|-------|-------|
+| `bias=bearish AND participation<40` | 🔴 Risk-Off — No Longs | red |
+| `trend≥65 AND momentum<40` | ⚠️ Late Stage / Exhaustion | amber |
+| `trend≥65 AND momentum≥60 AND participation≥55 AND bias=bullish` | 🟢 Trend Following — Full Size | green |
+| `trend≥55 AND (momentum<50 OR participation<50)` | 🟡 Wait for Confirmation | amber |
+| `momentum≥60 AND trend<50` | ⚡ Day Trade Only | amber |
+| default | 🟡 Neutral — Selective | neutral |
+
+**F2 — Frontend: `NewAnalysisPage.tsx` — summary screen v2**
+```
+📊 TREND/STRUCTURE    ████████░░ 79%  🟢 Bullish
+⚡ MOMENTUM/VOLUME    ██████░░░░ 58%  🟡 Neutral
+🔄 PARTICIPATION      ████░░░░░░ 44%  🟡 Neutral
+────────────────────────────────────
+🎯 COMPOSITE          ███████░░░ 64%  🟡 NEUTRAL
+
+[Conclusion card]
+🟡 Wait for Confirmation
+"Trend present but momentum not confirming. Reduce size or wait."
+Styles recommandés: Swing careful · Day Trade
+Size advice: 50–75%
+```
+
+**F3 — Frontend: `MarketAnalysisPage.tsx` — conclusion per module**
+- Each module card shows `TradeConclusion` badge of last session (emoji + label + size_advice)
+
+**F4 — Frontend: `DashboardPage.tsx` — MAWidget conclusion badge**
+- Short conclusion (emoji + label) on each module card in the MA widget
+
+**F5 — Frontend: `NewAnalysisPage.tsx` — visual grouping by score_block**
+- Questions grouped by block (Trend / Momentum / Participation)
+- Block progress bar shown at end of questionnaire
+
+---
+
+#### ⏳ 13-G — Strategy Module
+
+> A dedicated strategy settings page + minor backend additions.
+
+**What:**
+- `/settings/strategies` — new page `StrategiesSettingsPage.tsx`
+- List all strategies per profile (name, emoji, win rate bar, trades_count)
+- Edit name / emoji / notes inline
+- `min_trades_for_stats` override per strategy (default 5)
+- Archive strategy (archived still appear in closed trade history)
+- Performance summary per strategy: win/loss streak, avg R per strategy
+
+**Backend additions:**
+- `GET /api/profiles/{id}/strategies` — already exists, enhance with `avg_r`, `streak`
+- `PATCH /api/profiles/{id}/strategies/{id}` — partial update (name, emoji, is_archived, min_trades_for_stats)
+- `POST /api/profiles/{id}/strategies/{id}/archive` — soft archive
+
+**Frontend additions:**
+- `frontend/src/pages/settings/StrategiesSettingsPage.tsx` — new page
+- `SettingsPage.tsx` — add "Strategies" link in Trading section
+- Strategy dropdown in `NewTradePage.tsx` — hide archived strategies (already filtered by `is_active`)
+
+---
+
+#### ⏳ 13-H — Dashboard Polish
+
+> Small UI improvements on the dashboard — no new features.
+
+**Planned changes:**
+- Open Positions widget: show unrealized P&L estimate (manual entry field on trade row)
+- Performance widget: add Profit Factor computation from closed trades
+- KPI bar: Portfolio Risk % — show breakdown (open vs pending LIMIT)
+- Goals widget on Dashboard: match GoalsPage card style (period badges, Avg R badge)
+- MA widget: show conclusion badge from latest session per module
+- General: loading skeletons where missing, consistent empty states
+
+---
+
+#### ⏳ 13-I — QA Full Pass
+
+```
+Backend:
+  [ ] make lint — ruff + mypy 0 errors
+  [ ] make test — pytest all green
+  [ ] alembic upgrade head — no errors on fresh DB
+  [ ] seed_market_analysis.py re-run — idempotent
+
+Frontend:
+  [ ] make lint-fe — eslint 0 errors
+  [ ] vitest run — all tests pass
+  [ ] tsc --noEmit — 0 errors
+
+End-to-end (manual):
+  [ ] Create profile → log trade → partial close → full close → goal progress updates
+  [ ] Goal hit → ✅ badge on Dashboard
+  [ ] Limit hit (outcome) → Limit hit badge shown, process goal not blocked
+  [ ] New MA analysis → decomposed scores → conclusion shown on /market-analysis
+  [ ] Dashboard MAWidget → conclusion badge per module
+  [ ] Settings Goals → toggle period_type → no circuit breaker for process
+  [ ] Settings Strategies → edit name, archive strategy
+  [ ] Avg R badge: positive/negative/goal hit states all correct
+  [ ] Mobile layout: Dashboard, Goals, MarketAnalysis responsive
+```
 
 **A1 — `profile_goals` v2 :**
 ```sql
@@ -1549,7 +1780,7 @@ crontab -e
 
 ## 🚀 Phase 1 — v1.0.0 Release checklist
 
-> Steps 1–11 complete. After this checklist → merge `develop → main` → tag `v1.0.0`.
+> Steps 1–13E complete. Remaining: 13-F → 13-G → 13-H → 13-I → merge → tag → deploy.
 
 ### Code
 
@@ -1560,30 +1791,40 @@ crontab -e
 - [x] Step 10 — Trade form (risk calc, multi-TP, LIMIT lifecycle, expectancy, margin/leverage)
 - [x] Step 11 — Goals page (real backend: create, toggle, live progress, KPIs)
 - [x] Step 12 — Dashboard fully connected (Goals widget, MA badge, Open Positions, Performance)
-- [x] Step 12.1 — Market Analysis global sessions (no profile filter) + PATCH indicator endpoint
+- [x] Step 12.1 — Market Analysis global sessions + PATCH indicator endpoint
+- [x] Step 13-A — DB Migrations (Goals v2: avg_r_min, period_type, global goals, override log)
+- [x] Step 13-B — Backend Goals v2 (global goals, avg_r, circuit breaker, overrides)
+- [x] Step 13-C — Backend MA v2 seed + schema (score_block, decomposed columns)
+- [x] Step 13-D — GoalsSettingsPage + DashboardPage global goals
+- [x] Step 13-E — Goals UX: signed amounts, Avg R badge, loss limit always shown
+- [ ] **Step 13-F** — MA v2 frontend (decomposed scores, conclusion card, MA settings)
+- [ ] **Step 13-G** — Strategy module (settings page, archive, avg_r per strategy)
+- [ ] **Step 13-H** — Dashboard polish (Profit Factor, Risk breakdown, MA conclusion badge)
+- [ ] **Step 13-I** — QA full pass (lint + tests + manual E2E)
 
-### Quality gates
+### Quality gates (13-I)
 
-- [ ] `make lint` — ruff + mypy pass (0 errors)
-- [ ] `make lint-fe` — eslint pass
+- [ ] `make lint` — ruff + mypy 0 errors
+- [ ] `make lint-fe` — eslint 0 errors
 - [ ] `make test` — pytest all green
 - [ ] `vitest run` — all tests pass
-- [ ] Manual QA: create profile → log trade → partial close → full close → goal progress updates
+- [ ] Manual E2E: trade lifecycle + goal progress + MA conclusion
 
-### Git
+### Git — release
 
 ```bash
 # Confirm clean working tree
 git status
 
-# Final commit
-git add -A && git commit -m "feat(market-analysis): Step 12.1 — global sessions, PATCH indicator, Goals inline edit"
+# Final commit on develop
+git add -A && git commit -m "feat: Step 13-I QA pass — v1.0.0 ready"
 
 # Merge to main and tag
 git checkout main
 git merge --no-ff develop -m "feat: Phase 1 complete — v1.0.0"
 git tag v1.0.0
 git push origin main --tags
+# → triggers atd-deploy.yml → deploys to Dell
 ```
 
 ---
@@ -1603,5 +1844,5 @@ git push origin main --tags
 
 ---
 
-**Next:** → `post-implement-phase1.md` → Dell deploy (Step 14)
+**Next:** → Step 13-F (MA v2 frontend) → 13-G (Strategy module) → 13-H (Dashboard polish) → 13-I (QA) → `post-implement-phase1.md` → Dell deploy (Step 14)
 
