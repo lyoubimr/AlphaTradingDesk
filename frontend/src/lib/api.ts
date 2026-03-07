@@ -85,13 +85,46 @@ export const instrumentsApi = {
     request(`/brokers/${brokerId}/instruments`),
 }
 
-// ── Strategies ────────────────────────────────────────────────────────────
+// ── Strategies (global + profile-specific) ───────────────────────────────
 
 export const strategiesApi = {
-  list: (profileId: number): Promise<Strategy[]> =>
-    request(`/profiles/${profileId}/strategies`),
+  /**
+   * List strategies visible to a profile.
+   * Returns global (profile_id=null) + profile-specific strategies.
+   * Without profileId → global only.
+   */
+  list: (profileId?: number): Promise<Strategy[]> => {
+    const qs = profileId !== undefined ? `?profile_id=${profileId}` : ''
+    return request(`/strategies${qs}`)
+  },
 
+  /** Create a global strategy (profile_id = null — shared across all profiles). */
+  createGlobal: (data: StrategyCreate): Promise<Strategy> =>
+    request('/strategies', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  /** Update a global strategy. */
+  updateGlobal: (strategyId: number, data: StrategyUpdate): Promise<Strategy> =>
+    request(`/strategies/${strategyId}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+
+  /** Archive (soft-delete) a global strategy. */
+  archiveGlobal: (strategyId: number): Promise<void> =>
+    request(`/strategies/${strategyId}`, { method: 'DELETE' }),
+
+  /** Create a profile-specific strategy. */
   create: (profileId: number, data: StrategyCreate): Promise<Strategy> =>
+    request(`/profiles/${profileId}/strategies`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  /** Alias kept for StrategiesSettingsPage compatibility. */
+  createForProfile: (profileId: number, data: StrategyCreate): Promise<Strategy> =>
     request(`/profiles/${profileId}/strategies`, {
       method: 'POST',
       body: JSON.stringify(data),
@@ -107,10 +140,10 @@ export const strategiesApi = {
     request(`/profiles/${profileId}/strategies/${strategyId}`, { method: 'DELETE' }),
 
   // Image upload is done directly with fetch + FormData (multipart) in the component.
-  // deleteImage uses JSON (no file), so it goes through the normal request helper.
   deleteImage: (profileId: number, strategyId: number): Promise<Strategy> =>
     request(`/profiles/${profileId}/strategies/${strategyId}/image`, { method: 'DELETE' }),
 }
+
 
 // ── Trades ────────────────────────────────────────────────────────────────
 
