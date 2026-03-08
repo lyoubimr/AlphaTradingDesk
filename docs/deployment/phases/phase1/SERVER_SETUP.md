@@ -33,7 +33,9 @@
 10. [LAN domain — alphatradingdesk.local](#10-lan-domain)
 11. [CI/CD — full flow explained](#11-cicd-flow)
 12. [Backups + DB refresh](#12-backups)
-13. [Maintenance + ops commands](#13-maintenance)
+13. [SSL/HTTPS — self-signed cert (LAN)](#13-ssl)
+14. [OS updates + monthly reboot](#14-os-updates)
+15. [Maintenance + ops commands](#15-maintenance)
 
 ---
 
@@ -193,6 +195,7 @@ ping alphatradingdesk.local   # → must reply 192.168.1.100
 ```bash
 sudo ufw allow OpenSSH   # ← do this FIRST
 sudo ufw allow 80/tcp
+sudo ufw allow 443/tcp   # ← HTTPS (self-signed cert, see §13)
 sudo ufw enable
 sudo ufw status
 ```
@@ -474,6 +477,9 @@ services:
     restart: unless-stopped
     ports:
       - "80:80"
+      - "443:443"
+    volumes:
+      - /srv/atd/certs:/etc/nginx/certs:ro   # self-signed cert — see §13
     depends_on:
       - backend
     logging:
@@ -890,7 +896,166 @@ zcat "$LATEST" | \
 
 ---
 
-## 13. Maintenance
+## 13. SSL/HTTPS — Self-Signed Certificate (LAN)
+
+> **Why self-signed and not Let's Encrypt?**
+> Let's Encrypt requires a publicly reachable domain for HTTP/DNS challenge.
+> `.local` domains exist only on the LAN (mDNS/RFC 6762) — no public DNS record.
+> A self-signed cert with SAN is the correct and standard solution for LAN-only
+> deployments. Trusted once in the OS keychain → no browser warnings.
+
+### 13.1 — Generate the certificate (run once on Dell)
+
+```bash
+# The script generates a 10-year cert covering both the hostname and the LAN IP.
+# Stored in /srv/atd/certs/ — mounted read-only into the Nginx container.
+~/apps/setup-ssl.sh
+```
+
+What it creates:
+```
+/srv/atd/certs/atd.crt   ← certificate (give to browsers to trust)
+/srv/atd/certs/atd.key   ← private key  (never share, never copy outside Dell)
+```
+
+### 13.2 — Update docker-compose.prod.yml (once, after cert generated)
+
+The compose file in `~/apps/docker-compose.prod.yml` on the Dell must have:
+
+```yaml
+frontend:
+  ports:
+    - "80:80"
+    - "443:443"          # ← add
+  volumes:
+    - /srv/atd/certs:/etc/nginx/certs:ro   # ← add
+```
+
+Then restart the frontend:
+```bash
+docker compose -f ~/apps/docker-compose.prod.yml up -d frontend
+```
+
+> ℹ️ Port `80` now redirects to `443` (Nginx config in the frontend image).
+> HTTP access (`http://alphatradingdesk.local`) automatically becomes HTTPS.
+
+### 13.3 — Trust the certificate on your devices
+
+**macOS (Chrome, Safari, curl — all in one command):**
+```bash
+# On your Mac:
+scp atd@alphatradingdesk.local:/srv/atd/certs/atd.crt ~/Downloads/atd.crt
+sudo security add-trusted-cert -d -r trustRoot \
+     -k /Library/Keychains/System.keychain ~/Downloads/atd.crt
+# Restart browser → https://alphatradingdesk.local works without any warning
+```
+
+**iOS / iPadOS:**
+```
+1. AirDrop atd.crt from Mac to iPhone/iPad
+2. Settings → General → VPN & Device Management → install the profile
+3. Settings → General → About → Certificate Trust Settings → enable full trust
+```
+
+**Windows:**
+```
+1. Copy atd.crt to Windows
+2. Double-click → Install certificate → Local Machine → Trusted Root CAs
+```
+
+### 13.4 — Verify
+
+```bash
+# Without trusting (server-side check):
+curl -k https://alphatradingdesk.local/api/health
+
+# After trusting on Mac:
+curl https://alphatradingdesk.local/api/health   # → {"status": "ok"}
+
+# Check cert details:
+openssl x509 -noout -text -in /srv/atd/certs/atd.crt | grep -E "Subject|DNS|IP|Not"
+```
+
+### 13.5 — Certificate renewal
+
+The cert is valid for 10 years. No automation needed.
+To regenerate early (e.g. if lost or compromised):
+```bash
+# On Dell:
+rm /srv/atd/certs/atd.{crt,key}
+~/apps/setup-ssl.sh
+docker compose -f ~/apps/docker-compose.prod.yml up -d frontend
+# Then re-trust on all devices (§13.3)
+```
+
+---
+
+## 14. OS Updates + Monthly Reboot
+
+### 14.1 — Strategy
+
+| What | How | When |
+|------|-----|------|
+| OS security updates | `apt upgrade` (non-interactive) | 1st Sunday of each month, 04:00 |
+| Reboot | unconditional (even if no updates) | same — after backup at 03:00 |
+| Docker image prune | dangling images older than 72h | same run |
+
+> The reboot is **unconditional** — it ensures kernel updates are applied,
+> clears memory, and confirms that all containers restart cleanly.
+> Docker brings everything back up automatically in ~30 seconds.
+
+### 14.2 — Setup (run once on Dell, after first deploy)
+
+```bash
+# The script is synced to ~/apps/ automatically by CD on every release.
+# Run it once to install/update all cron entries (idempotent):
+~/apps/setup-cron.sh
+
+# Verify:
+crontab -l
+```
+
+Expected crontab output (ATD block):
+```cron
+# ATD-BEGIN — managed by setup-cron.sh
+
+# DB backup every 6 hours
+0 */6 * * * /home/atd/apps/backup-db.sh rolling >> /srv/atd/logs/cron/backup-db.log 2>&1
+
+# DB weekly backup — Sundays 03:00
+0 3 * * 0 /home/atd/apps/backup-db.sh weekly >> /srv/atd/logs/cron/backup-db.log 2>&1
+
+# Log rotation — daily 01:00
+0 1 * * * find /srv/atd/logs/app -name "*.log" -size +100M -exec truncate -s 50M {} \;
+
+# OS update + reboot — 1st Sunday of month at 04:00
+0 4 1-7 * 0 /home/atd/apps/update-server.sh >> /srv/atd/logs/cron/update-server.log 2>&1
+
+# ATD-END
+```
+
+### 14.3 — Manual update (outside the schedule)
+
+```bash
+# Run on Dell as user atd:
+~/apps/update-server.sh
+# → applies updates, logs to /srv/atd/logs/cron/update-server.log, then reboots
+```
+
+### 14.4 — Verify after reboot
+
+```bash
+# From Mac, wait ~60 seconds after the scheduled reboot then:
+ssh atd "docker compose -f ~/apps/docker-compose.prod.yml ps"
+curl https://alphatradingdesk.local/api/health   # → {"status": "ok"}
+
+# Check update log:
+ssh atd "tail -50 /srv/atd/logs/cron/update-server.log"
+```
+
+---
+
+## 15. Maintenance
 
 ```bash
 # Check status:
@@ -929,13 +1094,15 @@ docker compose -f ~/apps/docker-compose.prod.yml exec backend \
 ║  Dell LAN IP         192.168.1.100  (DHCP reservation + Netplan)     ║
 ║  Dell Tailscale      100.x.x.x  → tailscale ip -4  on the Dell       ║
 ║  SSH shortcut        ssh atd  (via ~/.ssh/config)                     ║
-║  App URL (LAN)       http://alphatradingdesk.local                    ║
-║  App URL (IP)        http://192.168.1.100                             ║
+║  App URL (HTTP)      http://alphatradingdesk.local   → 301 to HTTPS  ║
+║  App URL (HTTPS)     https://alphatradingdesk.local  ← use this      ║
+║  App URL (IP)        https://192.168.1.100                            ║
 ║                                                                       ║
 ║  DB data             /srv/atd/data/postgres/                          ║
 ║  Uploads             /srv/atd/data/uploads/                           ║
 ║  Backups             /srv/atd/backups/                                ║
 ║  Logs                /srv/atd/logs/                                   ║
+║  Certs               /srv/atd/certs/   (atd.crt + atd.key)           ║
 ║  Scripts             ~/apps/                                          ║
 ║  Compose             ~/apps/docker-compose.prod.yml                   ║
 ║  Env file            ~/apps/.env                                      ║
@@ -950,5 +1117,16 @@ docker compose -f ~/apps/docker-compose.prod.yml exec backend \
 ║                     → Scope: read:packages (repo privé → pull GHCR)  ║
 ║  GITHUB_TOKEN       auto-injected (no setup needed)                  ║
 ║  GHCR_OWNER         NOT a secret (github.repository_owner, auto)     ║
+╠══════════════════════════════════════════════════════════════════════╣
+║  SSL CERT            /srv/atd/certs/atd.crt  (valid 10 years)        ║
+║  Generate            ~/apps/setup-ssl.sh                              ║
+║  Trust on Mac        sudo security add-trusted-cert -d -r trustRoot  ║
+║                        -k /Library/Keychains/System.keychain atd.crt ║
+╠══════════════════════════════════════════════════════════════════════╣
+║  CRON SCHEDULE                                                        ║
+║  Backup (rolling)    every 6h                                         ║
+║  Backup (weekly)     Sundays 03:00                                    ║
+║  OS update + reboot  1st Sunday/month 04:00                           ║
+║  Log rotation        daily 01:00                                      ║
 ╚══════════════════════════════════════════════════════════════════════╝
 ```
