@@ -82,7 +82,37 @@ jobs:
           draft: false
           prerelease: false
 
-      # ── 7. SSH into Dell → pull images → docker compose up ──────────────
+      # ── 7. Sync operational scripts to Dell ─────────────────────────────
+      # deploy.sh, backup-db.sh, healthcheck.sh, setup-cron.sh are copied
+      # to ~/apps/ on every release so the Dell always runs the latest version.
+      # setup-server.sh is intentionally excluded — it provisions the OS and
+      # is run manually once; auto-deploying it would be dangerous.
+      - name: Sync prod scripts to Dell
+        if: steps.semver.outputs.new_tag != ''
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.DELL_HOST }}
+          username: ${{ secrets.DELL_USER }}
+          key: ${{ secrets.DELL_SSH_KEY }}
+          source: "scripts/prod/deploy.sh,scripts/prod/backup-db.sh,scripts/prod/healthcheck.sh,scripts/prod/setup-cron.sh"
+          target: "~/apps/"
+          strip_components: 2
+
+      # ── 8. Make scripts executable after copy ───────────────────────────
+      - name: chmod scripts on Dell
+        if: steps.semver.outputs.new_tag != ''
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.DELL_HOST }}
+          username: ${{ secrets.DELL_USER }}
+          key: ${{ secrets.DELL_SSH_KEY }}
+          script: |
+            chmod +x ~/apps/deploy.sh ~/apps/backup-db.sh ~/apps/healthcheck.sh ~/apps/setup-cron.sh
+
+      # ── 9. SSH into Dell → pull images → docker compose up ──────────────
+      # GHCR_OWNER is passed as an env var so deploy.sh stays fully generic
+      # (no hardcoded username). It reads github.repository_owner which is
+      # the org/user that owns the repo — works for forks and org migrations.
       - name: Deploy to Dell
         if: steps.semver.outputs.new_tag != ''
         uses: appleboy/ssh-action@v1
@@ -91,9 +121,10 @@ jobs:
           username: ${{ secrets.DELL_USER }}
           key: ${{ secrets.DELL_SSH_KEY }}
           script: |
+            export GHCR_OWNER="${{ github.repository_owner }}"
             ~/apps/deploy.sh "${{ steps.semver.outputs.new_tag }}"
 
-      # ── 8. Report deploy skipped (no version bump) ──────────────────────
+      # ── 10. Report deploy skipped (no version bump) ─────────────────────
       - name: No release
         if: steps.semver.outputs.new_tag == ''
         run: |
