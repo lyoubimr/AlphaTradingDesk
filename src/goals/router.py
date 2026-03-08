@@ -50,7 +50,9 @@ def create_goal(
     data: GoalCreate,
     db: Session = Depends(get_db),
 ) -> object:
-    return service.create_goal(db, profile_id, data)
+    result = service.create_goal(db, profile_id, data)
+    db.commit()
+    return result
 
 
 @router.post("/goals/matrix", response_model=list[GoalOut], status_code=status.HTTP_201_CREATED)
