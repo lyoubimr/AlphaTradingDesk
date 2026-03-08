@@ -33,6 +33,10 @@ BACKUP_DIR="/srv/atd/backups/${MODE}"
 TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
 OUTPUT_FILE="${BACKUP_DIR}/atd_prod_${TIMESTAMP}.sql.gz"
 
+# Suppress "GHCR_OWNER not set" warning — not needed for backup ops
+export GHCR_OWNER="${GHCR_OWNER:-placeholder}"
+export IMAGE_TAG="${IMAGE_TAG:-latest}"
+
 # How many files to keep per mode
 # rolling: 48 files × 6h = ~12 days of coverage
 # weekly:  13 files × 7d = ~3 months of coverage

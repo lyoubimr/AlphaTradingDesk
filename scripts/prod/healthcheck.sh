@@ -22,6 +22,10 @@ set -euo pipefail
 COMPOSE_FILE="$HOME/apps/docker-compose.prod.yml"
 ATD_DATA_DIR="/srv/atd"
 
+# Suppress "GHCR_OWNER not set" warning — not needed for read-only ops
+export GHCR_OWNER="${GHCR_OWNER:-placeholder}"
+export IMAGE_TAG="${IMAGE_TAG:-latest}"
+
 echo "══════════════════════════════════════════════════"
 echo "  ATD — Production healthcheck"
 echo "  $(date '+%Y-%m-%d %H:%M:%S %Z')"
