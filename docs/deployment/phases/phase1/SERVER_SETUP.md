@@ -1,1094 +1,790 @@
-# 🖥️ Server S1. [Phase progression overview](#1-phase-progression-overview)
-2. [Hardware notes — Dell D09U](#2-hardware-notes--dell-d09u)
-3. [Step-by-step: Install Ubuntu Server 22.04](#3-step-by-step-install-ubuntu-server-2204)
-4. [Step-by-step: Post-install OS configuration](#4-step-by-step-post-install-os-configuration)
-5. [Step-by-step: Fix IP address (router + OS)](#5-step-by-step-fix-ip-address-router--os)
-6. [Step-by-step: Install Docker + Docker Compose](#6-step-by-step-install-docker--docker-compose)
-7. [Step-by-step: Deploy AlphaTradingDesk](#7-step-by-step-deploy-alphatradingdesk)
-8. [LAN domain — alphatradingdesk.local](#8-lan-domain--alphatradingdesklocal)
-9. [CI/CD — Git Flow + Semantic Versioning + Auto-Deploy](#9-cicd--git-flow--semantic-versioning--auto-deploy)
-10. [Maintenance & ops](#10-maintenance--ops)
-11. [DB sync — prod → dev (daily)](#11-db-sync--prod--dev-daily)haTradingDesk
+# 🖥️ Server Setup — AlphaTradingDesk Phase 1
 
-**Date:** March 1, 2026  
-**Version:** 1.0  
-**Hardware:** Dell OptiPlex Micro (D09U) — Core i7, 19.5V 3.34A  
-**Target OS:** Ubuntu Server 22.04 LTS (headless)
-
-> This document covers the full path from bare metal to running app:  
-> **Dev (localhost) → Dell server (LAN, fixed IP) → alphatradingdesk.local**
+**Date:** March 2026 — v2.0  
+**Hardware:** Dell OptiPlex Micro (D09U) — Core i7, 65W  
+**Target OS:** Ubuntu Server 22.04 LTS (headless)  
+**Deploy model:** Pull pre-built Docker images from GHCR — Dell **never** builds anything
 
 ---
 
 ## 📋 Table of Contents
 
-1. [Phase progression overview](#1-phase-progression-overview)
-2. [Hardware notes — Dell D09U](#2-hardware-notes--dell-d09u)
-3. [Step-by-step: Install Ubuntu Server 22.04](#3-step-by-step-install-ubuntu-server-2204)
-4. [Step-by-step: Post-install OS configuration](#4-step-by-step-post-install-os-configuration)
-5. [Step-by-step: Fix IP address (router + OS)](#5-step-by-step-fix-ip-address-router--os)
-6. [Step-by-step: Install Docker + Docker Compose](#6-step-by-step-install-docker--docker-compose)
-7. [Step-by-step: Deploy AlphaTradingDesk](#7-step-by-step-deploy-alphatradingdesk)
-8. [LAN domain — alphatradingdesk.local](#8-lan-domain--alphatradingdesklocal)
-9. [CI/CD — Git Flow + Semantic Versioning + Auto-Deploy](#9-cicd--git-flow--semantic-versioning--auto-deploy)
-10. [Maintenance & ops](#10-maintenance--ops)
-11. [Data strategy — volumes, backups & dev DB](#11-data-strategy--volumes-backups--dev-db)
+1. [Big picture — how it all fits together](#1-big-picture)
+2. [Hardware notes](#2-hardware-notes)
+3. [Install Ubuntu Server 22.04](#3-install-ubuntu-server)
+4. [Post-install OS config](#4-post-install-os-config)
+5. [Fix IP address](#5-fix-ip-address)
+6. [Install Docker](#6-install-docker)
+7. [First deploy — pulling images + starting the stack](#7-first-deploy)
+8. [GitHub Secrets — CD pipeline wiring](#8-github-secrets)
+9. [Persistent volumes — DB + uploads](#9-persistent-volumes)
+10. [LAN domain — alphatradingdesk.local](#10-lan-domain)
+11. [CI/CD — full flow explained](#11-cicd-flow)
+12. [Backups + DB refresh](#12-backups)
+13. [Maintenance + ops commands](#13-maintenance)
 
 ---
 
-## 1. Phase Progression Overview
+## 1. Big Picture
 
 ```
-PHASE DEV MAC  (Steps 1–13 — NOW)
-  Mac (your main machine)
-  → docker-compose.dev.yml  (Postgres + backend + frontend, all local)
-  → http://localhost:5173   (React + Vite hot reload)
-  → http://localhost:8000   (FastAPI uvicorn --reload)
-  → http://localhost:8080   (Adminer DB GUI)
-  → No Caddy, no nginx — direct ports
-  → No Dell needed yet
+┌──────────────────────────────────────────────────────────────────────┐
+│  Your Mac (dev machine)                                               │
+│  → docker-compose.dev.yml  (Postgres + backend + frontend, all local) │
+│  → http://localhost:5173   (React Vite hot-reload)                    │
+│  → commit + push to develop → CI runs (lint/typecheck/tests)          │
+└──────────────────────┬───────────────────────────────────────────────┘
+                       │  PR: develop → main, then merge
+                       ▼
+┌──────────────────────────────────────────────────────────────────────┐
+│  GitHub Actions (cloud runner — ubuntu-latest)                        │
+│  → build backend image  → push ghcr.io/…/atd-backend:vX.Y.Z         │
+│  → build frontend image → push ghcr.io/…/atd-frontend:vX.Y.Z        │
+│  → create git tag + GitHub Release                                    │
+│  → SSH into Dell → run deploy.sh vX.Y.Z                              │
+└──────────────────────┬───────────────────────────────────────────────┘
+                       │  SSH (deploy key stored in GitHub Secrets)
+                       ▼
+┌──────────────────────────────────────────────────────────────────────┐
+│  Dell OptiPlex (Ubuntu server — always-on, LAN)                       │
+│  → docker pull ghcr.io/…/atd-backend:vX.Y.Z                         │
+│  → docker pull ghcr.io/…/atd-frontend:vX.Y.Z                        │
+│  → docker compose up -d   (rolling restart, DB untouched)            │
+│  → alembic upgrade head   (auto-migrate inside entrypoint)           │
+│  → http://alphatradingdesk.local  live in ~2 min                     │
+└──────────────────────────────────────────────────────────────────────┘
 
-  ↓  Step 14 — app runs end-to-end, ready to move to Dell
-
-MIGRATION DEV MAC → DELL  (Step 14.0 — one-time)
-  1. Prepare Dell: Ubuntu + Docker + IP fixe (SERVER_SETUP.md §3–6)
-  2. Dump atd_dev from Mac → restore on Dell
-  3. Update .env.dev: DATABASE_URL → 192.168.1.50:5432/atd_dev
-  4. Remove db service from docker-compose.dev.yml (Mac no longer runs Postgres)
-  5. Verify: make dev → app works, data intact
-
-  ↓  then deploy prod
-
-PHASE PROD DELL  (Step 14.1+)
-  Dell OptiPlex Micro (D09U)
-  → Ubuntu Server 22.04 LTS (headless)
-  → Cable ethernet → router (fixed IP: 192.168.1.50)
-  → docker-compose.prod.yml  (images from GHCR — never built on Dell)
-  → http://alphatradingdesk.local  (Caddy → React + FastAPI)
-  → Access from Mac/iPhone/iPad on same WiFi
-  → atd_dev refreshed from atd_prod every 4h (§11.4)
-
-  ↓  (future — when needed)
-
-PHASE FUTURE — Cloud (GCE europe-west9)
-  → Same compose stack, change domain + add TLS
-  → Zero code changes
-```
-
----
-
-## 2. Hardware Notes — Dell D09U
-
-```
-Model:     Dell OptiPlex Micro (D09U001 chassis)
-CPU:       Intel Core i7 (7th or 8th gen likely)
-Power:     19.5V × 3.34A = 65W max, ~15–25W idle with Docker
-RAM:       Depends on your config — minimum 8GB recommended (16GB ideal)
-Storage:   250GB+ SSD recommended (PostgreSQL data + Docker images)
-Network:   Gigabit Ethernet port (rear) ← use this, NOT WiFi
-
-Ideal configuration for this app:
-  - Ubuntu Server (no GUI → saves ~2GB RAM)
-  - Docker + Docker Compose V2
-  - SSH access from Mac (no screen/keyboard needed after setup)
-  - Ethernet cable to router (stable, no WiFi dropout)
-```
-
-**Check your RAM before starting:**
-```bash
-# Boot the Dell with any Linux live USB and run:
-free -h
-# Or from BIOS: F2 at boot → check RAM
+Rules:
+  ✅ Dell NEVER runs docker build
+  ✅ Dell NEVER has the source code
+  ✅ All secrets: GitHub Secrets (CI/CD) + /srv/atd/.env (runtime)
+  ✅ Data survives all restarts via bind mounts on /srv/atd/
 ```
 
 ---
 
-## 3. Step-by-step: Install Ubuntu Server 22.04
+## 2. Hardware Notes
 
-### 3.1 — Download the ISO
+```
+Model:    Dell OptiPlex Micro D09U
+CPU:      Intel Core i7 (7th/8th gen)
+Power:    65W max, ~15–25W idle running Docker
+RAM:      8 GB minimum — 16 GB ideal
+Storage:  250 GB+ SSD required
+Network:  Gigabit Ethernet (rear port) ← use this, not WiFi
 
-```bash
-# On your Mac — download Ubuntu Server 22.04 LTS (not Desktop)
-# URL: https://ubuntu.com/download/server
-# File: ubuntu-22.04.X-live-server-amd64.iso
-# Size: ~1.4 GB
+Recommended:
+  Ubuntu Server (no GUI → saves ~2 GB RAM)
+  Docker Engine (not Docker Desktop)
+  SSH-only after initial setup
 ```
 
-### 3.2 — Create a bootable USB
+---
+
+## 3. Install Ubuntu Server
+
+### 3.1 — Flash USB
 
 ```bash
-# On Mac — use balenaEtcher (free, GUI)
-# https://www.balena.io/etcher/
-# 1. Open Etcher
-# 2. "Flash from file" → select the .iso
-# 3. "Select target" → select your USB drive (8GB+ required)
-# 4. "Flash!" → wait ~3 min
+# Download: https://ubuntu.com/download/server
+# balenaEtcher (Mac GUI): https://www.balena.io/etcher/
 
-# Alternative (terminal):
-diskutil list                    # find your USB drive, e.g. /dev/disk3
+# Or terminal:
+diskutil list                  # find USB → e.g. /dev/disk3
 diskutil unmountDisk /dev/disk3
 sudo dd if=ubuntu-22.04.X-live-server-amd64.iso of=/dev/rdisk3 bs=1m status=progress
-# Warning: dd is destructive — double-check the disk number
 ```
 
-### 3.3 — Boot the Dell from USB
+### 3.2 — Installation walkthrough
 
 ```
-1. Plug USB into Dell
-2. Plug ethernet cable from Dell to router (do this BEFORE booting)
-3. Power on Dell
-4. Press F12 (boot menu) at the Dell logo
-5. Select your USB drive from the boot menu
-6. Ubuntu installer starts
+1. Plug ethernet cable BEFORE booting
+2. Power on → F12 (boot menu) → select USB
+
+Installer screens:
+  Language:     English
+  Keyboard:     French (or yours)
+  Install type: Ubuntu Server  ← NOT minimized
+  Network:      leave DHCP — write down the IP shown
+  Storage:      use entire disk + LVM enabled
+  Profile:
+    Server name: alphatradingdesk   ← critical: sets your .local hostname
+    Username:    atd
+    Password:    [strong password]
+  ✅ Install OpenSSH server         ← mandatory
+  Snaps:        skip all
+  → Reboot → remove USB
 ```
 
-### 3.4 — Ubuntu Server Installation walkthrough
+### 3.3 — First SSH
 
-```
-Screen 1: Language → English
-
-Screen 2: Keyboard layout → French (or your layout)
-
-Screen 3: Installation type → Ubuntu Server (NOT minimized)
-  ✅ Ubuntu Server  ← choose this
-
-Screen 4: Network
-  → Should detect your ethernet (enp3s0 or similar)
-  → Leave as DHCP for now (we'll fix IP after install)
-  → Note the assigned IP shown on screen — write it down
-
-Screen 5: Proxy → leave empty → Done
-
-Screen 6: Mirror → leave default → Done
-
-Screen 7: Storage layout
-  → "Use an entire disk" → select your SSD
-  → Enable LVM: YES (allows resizing later)
-  → Set up this disk as an LVM group: YES
-  → Continue / Done → Confirm destructive action: Continue
-
-Screen 8: Profile setup
-  Your name:        alphatradingdesk        (or your name)
-  Server name:      alphatradingdesk        ← IMPORTANT — this is your mDNS hostname
-  Username:         atd                     (or your choice)
-  Password:         [strong password]
-  Confirm:          [same]
-
-Screen 9: SSH Setup
-  ✅ Install OpenSSH server   ← CHECK THIS — essential for remote access
-  Import SSH identity: No (we'll set up keys after)
-
-Screen 10: Featured server snaps → SKIP ALL (uncheck everything)
-  → Done
-
-Screen 11: Installing... (10–15 minutes)
-
-Screen 12: Installation complete!
-  → "Reboot Now"
-  → Remove USB when prompted
-  → System reboots
-```
-
-### 3.5 — First boot
-
-```
-After reboot, you see a login prompt:
-  alphatradingdesk login: atd
-  Password: [your password]
-
-You're in. 
+```bash
+ssh atd@192.168.1.X    # IP from install screen
+# accept fingerprint → enter password
 ```
 
 ---
 
-## 4. Step-by-step: Post-install OS Configuration
+## 4. Post-install OS Config
 
-**All these commands run on the Dell (via SSH from Mac, or direct keyboard).**
-
-### 4.1 — Connect from Mac via SSH
+### 4.1 — System update
 
 ```bash
-# On your Mac terminal:
-# First find the Dell's IP (written down from install, or check router admin)
-ssh atd@192.168.1.X     # replace X with actual IP
-
-# First connection: type "yes" to accept host key
-# Enter your password
+sudo apt update && sudo apt upgrade -y && sudo apt autoremove -y
 ```
 
-### 4.2 — System update
-
-```bash
-sudo apt update && sudo apt upgrade -y
-sudo apt autoremove -y
-```
-
-### 4.3 — Essential packages
+### 4.2 — Required packages
 
 ```bash
 sudo apt install -y \
-  curl wget git \
-  htop ncdu \
-  ufw \
-  fail2ban \
-  avahi-daemon \     # mDNS / Bonjour — enables .local domain
-  ca-certificates \
-  gnupg lsb-release
+  curl wget htop ncdu \
+  ufw fail2ban \
+  avahi-daemon \
+  ca-certificates gnupg lsb-release
 ```
 
-### 4.4 — Enable mDNS (Bonjour) for .local domain
+### 4.3 — Enable mDNS (.local domain)
 
 ```bash
-# avahi-daemon is already installed above
-sudo systemctl enable avahi-daemon
-sudo systemctl start avahi-daemon
+sudo systemctl enable --now avahi-daemon
 
-# Verify
-avahi-daemon --version
-# Should output: avahi 0.8
-
-# Test from your Mac:
+# Test from Mac after setup:
 ping alphatradingdesk.local
-# Should reply from Dell's IP — if so, LAN domain is working
 ```
 
-### 4.5 — Firewall (UFW)
+### 4.4 — Firewall
 
 ```bash
-sudo ufw allow OpenSSH          # SSH — MUST do this before enabling UFW
-sudo ufw allow 80/tcp           # HTTP (Caddy)
-sudo ufw allow 443/tcp          # HTTPS (future)
-sudo ufw enable                 # Enable firewall
-sudo ufw status                 # Verify rules
+sudo ufw allow OpenSSH   # ← do this FIRST
+sudo ufw allow 80/tcp
+sudo ufw enable
+sudo ufw status
 ```
 
-### 4.6 — SSH key authentication (from Mac — recommended)
+### 4.5 — SSH key authentication
 
 ```bash
-# On your Mac:
-ssh-keygen -t ed25519 -C "alphatradingdesk-server" -f ~/.ssh/atd_key
-# Press enter for no passphrase (or add one for extra security)
+# On your Mac — dedicated key for this server:
+ssh-keygen -t ed25519 -C "atd-server" -f ~/.ssh/atd_key
 
-# Copy public key to server:
+# Copy to Dell:
 ssh-copy-id -i ~/.ssh/atd_key.pub atd@192.168.1.X
 
 # Test:
 ssh -i ~/.ssh/atd_key atd@192.168.1.X
 
-# Add to Mac's SSH config for convenience:
+# SSH shortcut on Mac:
 cat >> ~/.ssh/config << 'EOF'
+
 Host atd
-  HostName 192.168.1.X        # replace with actual IP later (or alphatradingdesk.local)
+  HostName alphatradingdesk.local
   User atd
   IdentityFile ~/.ssh/atd_key
 EOF
 
-# After: ssh atd  ← one word to connect
+# From now on: ssh atd
 ```
 
-### 4.7 — Disable password login (after key works)
+### 4.6 — Disable password auth (after key works)
 
 ```bash
-# On the server — only if key login works perfectly:
 sudo nano /etc/ssh/sshd_config
-# Change:
-#   PasswordAuthentication yes  →  PasswordAuthentication no
+# Set: PasswordAuthentication no
 sudo systemctl restart sshd
 ```
 
 ---
 
-## 5. Step-by-step: Fix IP Address (Router + OS)
+## 5. Fix IP Address
 
-**Strategy: do both — router reservation AND static OS config. Belt + suspenders.**
+Do BOTH — router reservation + OS static config.
 
-### 5.1 — Find the Dell's MAC address
-
-```bash
-# On the Dell:
-ip link show
-# Look for your ethernet interface (enp3s0, eno1, eth0...)
-# Note the MAC address: e.g. a8:a1:59:12:34:56
-```
-
-### 5.2 — DHCP reservation on router (static IP via router)
-
-```
-Every router is different, but the concept is the same:
-
-1. Open router admin: http://192.168.1.1  (or 192.168.0.1 — check router label)
-2. Login (admin/admin or check label)
-3. Find: DHCP → DHCP Reservations (or "Static Leases" / "Address Binding")
-4. Add new entry:
-     MAC address:  a8:a1:59:12:34:56  (Dell's MAC)
-     IP address:   192.168.1.50       (choose a free IP outside DHCP range)
-     Hostname:     alphatradingdesk
-5. Save and apply
-
-→ From now on, router always gives 192.168.1.50 to this MAC
-```
-
-Common router brands:
-```
-Freebox:      http://mafreebox.freebox.fr → DHCP → Baux statiques
-Bbox:         http://192.168.1.254 → Réseau → DHCP → Réservations
-SFR Box:      http://192.168.0.1  → Réseau → Configuration DHCP
-Orange Livebox: http://192.168.1.1 → Réseau avancé → DHCP
-```
-
-### 5.3 — Static IP on the OS (via Netplan)
+### 5.1 — Router DHCP reservation
 
 ```bash
-# On the Dell — find your network interface name:
-ip link show
-# e.g. enp3s0
+# Get Dell's MAC address:
+ip link show    # note the MAC of your ethernet interface (e.g. a8:a1:59:12:34:56)
+```
 
-# Edit netplan config:
+```
+Router admin panel (find URL on your router label):
+  Freebox:   http://mafreebox.freebox.fr  → DHCP → Baux statiques
+  Bbox:      http://192.168.1.254         → Réseau → DHCP → Réservations
+  SFR:       http://192.168.0.1           → Réseau → DHCP
+  Livebox:   http://192.168.1.1           → Réseau avancé → DHCP
+
+Add entry:
+  MAC:      <Dell MAC>
+  IP:       192.168.1.50
+  Save + apply
+```
+
+### 5.2 — Static IP on OS (Netplan)
+
+```bash
+ip link show    # find interface name, e.g. enp3s0
+
 sudo nano /etc/netplan/00-installer-config.yaml
 ```
 
-Replace content with:
 ```yaml
-# /etc/netplan/00-installer-config.yaml
 network:
   version: 2
   ethernets:
-    enp3s0:                          # replace with your interface name
+    enp3s0:                      # ← replace with your interface
       dhcp4: false
       addresses:
-        - 192.168.1.50/24            # your chosen fixed IP
+        - 192.168.1.50/24
       routes:
         - to: default
-          via: 192.168.1.1           # your router's gateway IP
+          via: 192.168.1.1       # ← your router gateway
       nameservers:
-        addresses:
-          - 1.1.1.1                  # Cloudflare DNS
-          - 8.8.8.8                  # Google DNS
+        addresses: [1.1.1.1, 8.8.8.8]
       optional: true
 ```
 
 ```bash
-# Apply:
 sudo netplan apply
-
-# Verify:
-ip addr show enp3s0
-# Should show inet 192.168.1.50/24
-
-# Test internet:
-ping 1.1.1.1 -c 3
-```
-
-> ⚠️ After this, your SSH session may drop (IP changed). Reconnect:
-> `ssh atd@192.168.1.50`  or  `ssh atd@alphatradingdesk.local`
-
-### 5.4 — Update Mac SSH config
-
-```bash
-# On your Mac, update ~/.ssh/config:
-Host atd
-  HostName alphatradingdesk.local    # use .local now that mDNS is working
-  User atd
-  IdentityFile ~/.ssh/atd_key
+# Session drops — reconnect:
+ssh atd@192.168.1.50
 ```
 
 ---
 
-## 6. Step-by-step: Install Docker + Docker Compose
+## 6. Install Docker
 
 ```bash
-# On the Dell:
-
-# 1. Add Docker's official GPG key:
-sudo apt-get install -y ca-certificates curl
+# Add Docker GPG key + repo:
 sudo install -m 0755 -d /etc/apt/keyrings
 sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg \
   -o /etc/apt/keyrings/docker.asc
 sudo chmod a+r /etc/apt/keyrings/docker.asc
-
-# 2. Add Docker repository:
-echo \
-  "deb [arch=$(dpkg --print-architecture) \
-  signed-by=/etc/apt/keyrings/docker.asc] \
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] \
   https://download.docker.com/linux/ubuntu \
   $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | \
   sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
 
-# 3. Install Docker:
+# Install:
 sudo apt-get update
 sudo apt-get install -y \
-  docker-ce \
-  docker-ce-cli \
-  containerd.io \
-  docker-buildx-plugin \
-  docker-compose-plugin
+  docker-ce docker-ce-cli containerd.io \
+  docker-buildx-plugin docker-compose-plugin
 
-# 4. Run Docker without sudo (add user to docker group):
+# Run without sudo:
 sudo usermod -aG docker atd
-newgrp docker               # apply without relogging
+newgrp docker
 
-# 5. Enable Docker to start on boot:
+# Enable on boot:
 sudo systemctl enable docker
-sudo systemctl start docker
 
-# 6. Verify:
-docker --version            # Docker version 25.x.x
-docker compose version      # Docker Compose version v2.x.x
-docker run hello-world      # Should print "Hello from Docker!"
+# Verify:
+docker --version           # Docker version 25.x.x
+docker compose version     # Docker Compose version v2.x.x
+docker run hello-world
 ```
 
 ---
 
-## 7. Step-by-step: Deploy AlphaTradingDesk
+## 7. First Deploy
 
-### 7.1 — Clone the repo on the server
+The Dell needs only 3 things — no source code, no git clone.
+
+### 7.1 — Create directory structure (run once)
 
 ```bash
-# On the Dell:
+sudo mkdir -p \
+  /srv/atd/data/postgres \
+  /srv/atd/data/uploads \
+  /srv/atd/logs/app \
+  /srv/atd/logs/cron \
+  /srv/atd/backups/rolling \
+  /srv/atd/backups/weekly
+sudo chown -R atd:atd /srv/atd
+sudo chmod -R 750 /srv/atd
+```
+
+### 7.2 — Create production secrets file
+
+```bash
 mkdir -p ~/apps
-cd ~/apps
-
-# If using GitHub:
-git clone https://github.com/YOUR_USERNAME/AlphaTradingDesk.git
-cd AlphaTradingDesk
-
-# If using a local Git server or rsync instead:
-# → see Section 9 (CI/CD)
+nano ~/apps/.env
 ```
 
-### 7.2 — Create the production .env file
-
 ```bash
-cd ~/apps/AlphaTradingDesk
-cp .env.example .env
-nano .env
-```
-
-Fill in:
-```bash
-# .env — production
+# ~/apps/.env — NEVER commit this file
 POSTGRES_DB=atd_prod
 POSTGRES_USER=atd
-POSTGRES_PASSWORD=CHANGE_ME_STRONG_PASSWORD_HERE
-SECRET_KEY=CHANGE_ME_64_CHAR_RANDOM_STRING
-ENCRYPTION_KEY=CHANGE_ME_32_CHAR_AES_KEY
-ENVIRONMENT=production
-ALLOWED_HOSTS=alphatradingdesk.local,192.168.1.50
+POSTGRES_PASSWORD=<openssl rand -hex 24>
+SECRET_KEY=<openssl rand -hex 32>
+ENCRYPTION_KEY=<openssl rand -hex 16>
+APP_ENV=prod
+ALLOWED_ORIGINS=http://alphatradingdesk.local,http://192.168.1.50
 ```
-
-Generate strong values:
-```bash
-# Generate SECRET_KEY:
-python3 -c "import secrets; print(secrets.token_hex(32))"
-
-# Generate ENCRYPTION_KEY (32 bytes for AES-256):
-python3 -c "import secrets; print(secrets.token_hex(16))"
-```
-
-### 7.3 — First production start
 
 ```bash
-cd ~/apps/AlphaTradingDesk
-
-# Build and start:
-docker compose -f docker-compose.prod.yml up -d --build
-
-# Check all services are running:
-docker compose -f docker-compose.prod.yml ps
-
-# Check logs:
-docker compose -f docker-compose.prod.yml logs -f
-
-# Run database migrations:
-docker compose -f docker-compose.prod.yml exec backend \
-  alembic upgrade head
-
-# Seed initial data (brokers, instruments, sessions, etc.):
-docker compose -f docker-compose.prod.yml exec backend \
-  python scripts/seed_db.py
+chmod 600 ~/apps/.env
 ```
 
-### 7.4 — Verify it's working
+Also create a DB-only env file (used by the postgres container at init):
 
 ```bash
-# From Mac browser:
-# → http://alphatradingdesk.local
-# → Should show the React app
-
-# From Mac terminal:
-curl http://alphatradingdesk.local/api/health
-# → {"status": "ok", "db": "connected"}
+cat > /srv/atd/.env.db << 'EOF'
+POSTGRES_DB=atd_prod
+POSTGRES_USER=atd
+POSTGRES_PASSWORD=<same as above>
+EOF
+chmod 600 /srv/atd/.env.db
 ```
 
----
-
-## 8. LAN Domain — alphatradingdesk.local
-
-### How it works
-
-```
-mDNS (Multicast DNS) — also called Bonjour (Apple) or Avahi (Linux)
-
-The Dell broadcasts "I am alphatradingdesk.local at 192.168.1.50"
-to the local network every few seconds.
-
-Any device on the same WiFi/LAN that supports mDNS can resolve it:
-  Mac:     native (built in macOS)
-  iPhone:  native (iOS supports mDNS)
-  iPad:    native
-  Linux:   avahi-daemon (already installed)
-  Windows: requires Bonjour for Windows (or use IP directly)
-
-→ http://alphatradingdesk.local resolves to http://192.168.1.50
-→ Caddy (port 80) receives the request
-→ Caddy routes /* to React SPA, /api/* to FastAPI
-```
-
-### Verify mDNS is broadcasting
+### 7.3 — Create docker-compose.prod.yml
 
 ```bash
-# On the Dell:
-avahi-browse -a -t 2>/dev/null | head -20
-
-# From Mac:
-dns-sd -q alphatradingdesk.local
-# Should show: alphatradingdesk.local. has address 192.168.1.50
-
-# Or simply:
-ping alphatradingdesk.local
+nano ~/apps/docker-compose.prod.yml
 ```
 
-### Fallback: access by IP
-
-```
-If mDNS doesn't work on a specific device (e.g. Android, Windows without Bonjour):
-→ Use: http://192.168.1.50  directly — works on all devices
-```
-
----
-
-## 9. CI/CD — Git Flow + Semantic Versioning + Auto-Deploy
-
-> **Scripts & Makefile** — leur contenu complet (deploy.sh, sync-db, Makefile) est documenté
-> dans [`implement-phase1.md` → Step 14](implement-phase1.md#step-14--scripts--tooling-once-app-runs-end-to-end).
-> À créer au Step 14 — pas avant.
-
-### How it works — the full picture
-
-```
-1. You work on the develop branch on your Mac.
-2. You test locally: http://localhost:5173  (Vite dev server — hot reload)
-3. When ready, you open a Pull Request: develop → main on GitHub.
-4. You review, then merge the PR.
-5. GitHub Actions fires on the merge to main (GitHub cloud runner — ubuntu-latest):
-   a. Reads commit messages to decide the version bump type.
-   b. Creates and pushes a new git tag (vX.Y.Z) + GitHub Release.
-   c. Builds Docker images (backend + frontend) on the GitHub runner.
-   d. Pushes images to GHCR: ghcr.io/<org>/atd-backend:vX.Y.Z + :latest
-   e. SSHes into the Dell → runs deploy.sh vX.Y.Z:
-      → docker pull ghcr.io/…/atd-backend:vX.Y.Z
-      → docker pull ghcr.io/…/atd-frontend:vX.Y.Z
-      → docker compose up -d  (no --build — Dell never builds anything)
-      → alembic upgrade head
-6. App is live at http://alphatradingdesk.local in ~2 min.
-```
-
-> **The Dell never builds images and never touches source code.**
-> It only pulls pre-built images from GHCR and runs them.
-> Build happens on GitHub's cloud runner — fast, clean, portable.
-> SSH from GitHub → Dell is secured via a deploy key stored in GitHub Secrets.
-
-### Overview diagram
-
-```mermaid
-%%{init: {"flowchart": {"htmlLabels": false}} }%%
-flowchart TD
-    subgraph MAC["`**Mac** — dev`"]
-        direction TB
-        devbranch["`develop branch
-        localhost:5173`"]
-        feat["`feature/* or fix/*`"]
-        feat -->|merge| devbranch
-    end
-
-    subgraph GH["`**GitHub Actions** — cloud runner`"]
-        direction TB
-        pr["`Pull Request
-        develop → main`"]
-        main["`main branch`"]
-        tag["`Tag vX.Y.Z
-        GitHub Release`"]
-        build["`docker build
-        backend + frontend`"]
-        push["`docker push
-        ghcr.io/…/atd:vX.Y.Z`"]
-        pr -->|merge| main
-        main --> tag
-        tag --> build --> push
-    end
-
-    subgraph DELL["`**Dell** — prod (runtime only)`"]
-        direction TB
-        pull["`docker pull
-        ghcr.io/…/atd:vX.Y.Z`"]
-        up["`docker compose up
-        (no --build)`"]
-        migrate["`alembic upgrade head`"]
-        live["`alphatradingdesk.local`"]
-        pull --> up --> migrate --> live
-    end
-
-    devbranch -->|"1 push + open PR"| pr
-    push -->|"2 SSH → deploy.sh vX.Y.Z"| pull
-```
-
-### 9.1 — Branch strategy
-
-```
-main        ← production branch — only receives merges from develop via PR
-develop     ← integration branch — where you work daily
-feature/*   ← optional feature branches (off develop)
-fix/*       ← optional bugfix branches (off develop)
-
-Day-to-day workflow:
-  1. git checkout develop       (or create feature/my-feature off develop)
-  2. Make your changes
-  3. git add . && git commit -m "feat: add economic calendar step"
-  4. git push origin develop
-  5. Test: http://localhost:5173 (Vite hot reload — instant feedback)
-  6. Repeat until feature is solid
-
-Release workflow:
-  1. Open PR on GitHub: develop → main
-  2. Review diff, merge PR (squash commit → single clean message, or merge commit)
-  3. GitHub Actions fires → reads commit type → tags → deploys
-  4. Done — no manual steps on the server
-
-Rules:
-  → Never push directly to main
-  → develop can be messy — main is always deployable
-  → Each merge to main = one release candidate
-```
-
-### 9.2 — Semantic versioning from commit messages
-
-Commit message convention (Conventional Commits):
-
-```
-Prefix          Example                                    Version bump
-─────────────────────────────────────────────────────────────────────
-fix:            fix: correct SL calculation rounding       PATCH  v1.0.0 → v1.0.1
-feat:           feat: add economic calendar to analysis    MINOR  v1.0.1 → v1.1.0
-feat!:          feat!: redesign trade form API             MAJOR  v1.1.0 → v2.0.0
-BREAKING CHANGE (in footer)  → same as feat!              MAJOR
-chore:          chore: update deps                         no tag (ignored by CD)
-docs:           docs: update README                        no tag (ignored by CD)
-refactor:       refactor: extract risk service             no tag (ignored by CD)
-test:           test: add unit tests for goals             no tag (ignored by CD)
-
-Rules:
-  feat!: prefix   OR   "BREAKING CHANGE:" in commit footer  →  MAJOR  vX.0.0
-  feat: prefix                                              →  MINOR  v1.X.0
-  fix:  prefix                                              →  PATCH  v1.0.X
-  anything else                                             →  no release
-
-Tag format:  v{major}.{minor}.{patch}
-Tag created on: main only, after PR merge — never on develop
-```
-
-**Examples:**
-
-```
-Merge "fix: correct SL rounding when price < 1"    → v1.0.0 → v1.0.1
-Merge "feat: add economic calendar to analysis"     → v1.0.1 → v1.1.0
-Merge "feat: add Gold module"                       → v1.1.0 → v1.2.0
-Merge "feat!: redesign trade form API (breaks /api/trades POST)"
-                                                    → v1.2.0 → v2.0.0
-Merge "chore: update node dependencies"             → no tag, no deploy
-Merge "docs: update README"                         → no tag, no deploy
-```
-
-### 9.3 — GitHub Actions workflow (`.github/workflows/cd.yml`)
-
-Already exists at `.github/workflows/cd.yml` — see `CI_CD.md` for the full spec.
-
-Summary of what it does on every merge to main:
-1. Compute next semver tag from commit messages
-2. `docker build` backend + frontend images on the GitHub cloud runner
-3. `docker push` → GHCR (`ghcr.io/<org>/atd-backend:vX.Y.Z` + `:latest`)
-4. Create GitHub Release + auto-changelog
-5. SSH into the Dell → `~/apps/deploy.sh vX.Y.Z`
-   - `docker pull ghcr.io/…/atd-backend:vX.Y.Z`
-   - `docker pull ghcr.io/…/atd-frontend:vX.Y.Z`
-   - `docker compose up -d` (no `--build` — Dell never builds anything)
-   - `alembic upgrade head`
-
-> **The Dell never builds images.** Build happens on GitHub's cloud runner.
-> The Dell is a pure runtime — it only pulls and runs pre-built images from GHCR.
-> SSH from GitHub cloud → Dell is secured via a deploy key in GitHub Secrets (`DELL_SSH_KEY`).
-
-### 9.4 — GitHub Secrets (to set up once on the repo)
-
-```
-GITHUB_TOKEN      ← auto-provided (pushes git tags + GHCR login — no setup needed)
-DELL_HOST         ← IP or LAN hostname of the Dell (e.g. 192.168.1.50)
-DELL_USER         ← SSH user on Dell (e.g. atd)
-DELL_SSH_KEY      ← private SSH key — GitHub SSHes into the Dell to trigger deploy
-```
-
-> Generate a dedicated deploy keypair (not your personal key):
-> ```bash
-> ssh-keygen -t ed25519 -C "github-actions-deploy" -f ~/.ssh/atd_deploy
-> # → Add ~/.ssh/atd_deploy.pub to Dell: echo "..." >> ~/.ssh/authorized_keys
-> # → Add ~/.ssh/atd_deploy (private) to GitHub Secrets as DELL_SSH_KEY
-> ```
-
-### 9.5 — Deploy script + Makefile
-
-> Content documented in [`implement-phase1.md` → Step 14](implement-phase1.md#step-14--scripts--tooling-once-app-runs-end-to-end).
->
-> To create at Step 14:
-> - `scripts/deploy.sh` — placed at `~/apps/deploy.sh` on the Dell, called by the runner and by `make deploy`
-> - `Makefile` — `make dev`, `make deploy`, `make deploy-tag`, `make db-sync` (Mac entry point for all ops)
-
-### 9.6 — Daily workflow (once everything is running)
-
-```
-Dev loop:
-  1. git checkout develop
-  2. make changes, git commit -m "feat: ..."
-  3. git push origin develop
-  4. Test: http://localhost:5173
-
-Release:
-  1. Open PR: develop → main on GitHub
-  2. Review + merge
-  3. GitHub Actions: detects "feat:" → creates v1.2.0 → deploys to Dell
-  4. http://alphatradingdesk.local updated in ~2 min
-
-Rollback:
-  make deploy-tag → enter v1.1.9 → previous version live in ~1 min
-```
-
----
-
-## 10. Maintenance & Ops
-
-### Check what's running
-
-```bash
-# On the Dell:
-docker compose -f ~/apps/AlphaTradingDesk/docker-compose.prod.yml ps
-docker stats --no-stream      # CPU/RAM per container
-df -h                          # disk usage
-free -h                        # RAM usage
-```
-
-### Logs
-
-```bash
-# All services:
-docker compose -f ~/apps/AlphaTradingDesk/docker-compose.prod.yml logs -f
-
-# Just backend:
-docker compose -f ~/apps/AlphaTradingDesk/docker-compose.prod.yml logs -f backend
-
-# Last 100 lines:
-docker compose -f ~/apps/AlphaTradingDesk/docker-compose.prod.yml logs --tail=100 backend
-```
-
-### Restart after power outage
-
-```bash
-# Docker and containers start automatically (docker.service + restart: unless-stopped)
-sudo systemctl is-enabled docker    # should say "enabled"
-```
-
-### Server reboot
-
-```bash
-sudo reboot
-# Wait 30s, then:
-ssh atd
-docker ps     # verify all containers restarted
-```
-
----
-
-## 11. Data Strategy — Volumes, Backups & Dev DB
-
-### 11.1 — Architecture: two phases, two configs
-
-#### Phase DEV MAC (Steps 1–13)
-
-```
-Mac
-└── docker-compose.dev.yml
-    ├── db (postgres:16-alpine) ← Postgres runs locally on Mac
-    ├── backend
-    └── frontend
-→ DATABASE_URL=postgresql://atd:dev_password@localhost:5432/atd_dev
-→ No Dell needed. Work fully offline if needed.
-```
-
-#### After migration (Step 14.0+) — Dell hosts everything
-
-```
-Dell server (always-on)
-└── PostgreSQL container
-    ├── atd_prod   ← production data (written by prod backend)
-    └── atd_dev    ← dev data (migrated from Mac, refreshed from prod every 4h)
-
-Mac (dev machine)
-└── docker-compose.dev.yml  (db service removed — no local Postgres)
-└── .env.dev → DATABASE_URL=postgresql://atd:<pw>@192.168.1.50:5432/atd_dev
-```
-
-**Why move dev DB to Dell after Step 14?**
-- Mac can be off — `atd_dev` is always reachable on LAN
-- No sync to manage between two machines
-- `atd_dev` stays in sync with prod data (refreshed every 4h — see §11.4)
-- Clean separation: prod data never touched by dev code
-
-### 11.2 — Volume & log layout on the Dell
-
-```
-/srv/atd/
-├── data/
-│   ├── postgres/           ← Docker bind mount (persistent DB files)
-│   └── caddy/              ← Caddy data (TLS certs if ever enabled)
-├── logs/
-│   ├── app/                ← Application logs (FastAPI, Alembic, gunicorn)
-│   │   ├── backend.log     ← rotated by Docker logging driver
-│   │   └── alembic.log
-│   ├── system/             ← OS-level logs (Docker daemon, cron daemon)
-│   │   └── docker.log      ← symlink or redirect from journald if needed
-│   └── cron/               ← Output of all cron jobs
-│       ├── backup-db.log
-│       └── (future cron jobs)
-└── backups/
-    ├── daily/              ← pg_dump .gz files, kept 30 days
-    └── weekly/             ← pg_dump .gz files, kept 12 weeks
-```
-
-Create on the Dell before first start:
-```bash
-sudo mkdir -p /srv/atd/data/postgres /srv/atd/data/caddy
-sudo mkdir -p /srv/atd/logs/app /srv/atd/logs/system /srv/atd/logs/cron
-sudo mkdir -p /srv/atd/backups/rolling /srv/atd/backups/weekly
-sudo chown -R atd:atd /srv/atd
-```
-
-In `docker-compose.prod.yml`, mount volumes explicitly and configure log rotation:
 ```yaml
+# ~/apps/docker-compose.prod.yml
+# Images pulled from GHCR — never built here.
+# Pass IMAGE_TAG and GHCR_OWNER as env vars (done by deploy.sh).
+
 services:
   db:
-    image: postgres:15-alpine
+    image: postgres:16-alpine
+    restart: unless-stopped
+    env_file: /srv/atd/.env.db
     volumes:
       - /srv/atd/data/postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U atd -d atd_prod"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
 
   backend:
+    image: ghcr.io/${GHCR_OWNER}/atd-backend:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    env_file: /root/apps/.env
+    environment:
+      DATABASE_URL: postgresql://atd:${POSTGRES_PASSWORD}@db:5432/atd_prod
+    depends_on:
+      db:
+        condition: service_healthy
     volumes:
-      - /srv/atd/logs/app:/app/logs   # FastAPI writes here
+      - /srv/atd/data/uploads:/app/uploads
+      - /srv/atd/logs/app:/app/logs
+    ports:
+      - "8000:8000"
     logging:
-      driver: "json-file"
-      options:
-        max-size: "20m"
-        max-file: "5"         # keep 5 × 20 MB = 100 MB max per service
+      driver: json-file
+      options: { max-size: "20m", max-file: "5" }
+
+  frontend:
+    image: ghcr.io/${GHCR_OWNER}/atd-frontend:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
 ```
 
-**Dev logs** — hors repo, créés au démarrage :
+### 7.4 — Get the deploy script onto the Dell
+
+The deploy script (`scripts/prod/deploy.sh`) lives in the Git repo and is
+**automatically synced to `~/apps/` by the CI/CD pipeline on every release**.
+You only need to copy it manually for the very first deploy (before CI/CD is wired up):
+
+```bash
+# From your Mac — first time only:
+scp scripts/prod/deploy.sh atd@192.168.1.50:~/apps/deploy.sh
+scp scripts/prod/backup-db.sh atd@192.168.1.50:~/apps/backup-db.sh
+scp scripts/prod/healthcheck.sh atd@192.168.1.50:~/apps/healthcheck.sh
+scp scripts/prod/setup-cron.sh atd@192.168.1.50:~/apps/setup-cron.sh
+ssh atd@192.168.1.50 "chmod +x ~/apps/*.sh"
 ```
-~/Library/Logs/atd/        ← logs des cron Mac (rsync, db-refresh)
-  ├── atd-db-refresh.log
-  └── atd-backup-sync.log
 
-[project]/logs/            ← logs dev de l'app (gitignored — créé par make dev ou l'app)
-  └── app/                 ← uvicorn --reload output redirigé ici
+> After Step 8 (GitHub Secrets) is done, CI/CD handles all future script updates
+> automatically — no manual `scp` needed after each release.
+
+**`GHCR_OWNER` — important:**
+The script requires `GHCR_OWNER` to be exported before running.
+CI/CD injects it automatically (`github.repository_owner`).
+For manual runs from the Dell:
+
+```bash
+export GHCR_OWNER=<your-github-org-or-username>
+~/apps/deploy.sh v1.2.3
 ```
-> `logs/` n'est pas tracké en git. Il est créé automatiquement au premier `make dev`
-> (ou par l'app elle-même au démarrage). Aucun `.gitkeep`, aucun dossier vide dans le repo.
 
-### 11.3 — Automated backups on the Dell (Docker + cron)
+> Never hardcode a username inside the script — it must remain generic for portability.
 
-**Strategy:**
-- `pg_dump` runs inside the `db` container via `docker exec`
-- Host cron triggers it — no extra container needed
-- Dumps are gzip-compressed → ~5–20 MB per dump
-- Every 6h: keep 48 dumps (~12 days rolling). Weekly (Sunday 03:00): keep 12 weeks.
-- Old files pruned automatically by the same cron
+### 7.5 — First start
 
-**Cron on the Dell** (`crontab -e` as user `atd`):
+```bash
+# GHCR_OWNER is the GitHub org/username that owns the repo (lowercase)
+export GHCR_OWNER=<your-github-org-or-username>
+export IMAGE_TAG=latest
+
+docker compose -f ~/apps/docker-compose.prod.yml up -d
+
+# Wait ~30s for DB healthcheck, then:
+docker compose -f docker-compose.prod.yml exec backend alembic upgrade head
+docker compose -f docker-compose.prod.yml exec backend \
+  python -m database.migrations.seeds.seed_all
+
+# Verify:
+curl http://localhost:8000/api/health
+# From Mac: open http://alphatradingdesk.local
+```
+
+---
+
+## 8. GitHub Secrets
+
+Go to: **GitHub repo → Settings → Secrets and variables → Actions → New repository secret**
+
+### 8.1 — Required secrets
+
+| Secret | Value | Notes |
+|--------|-------|-------|
+| `GITHUB_TOKEN` | auto | **Auto-injected** by GitHub — no setup needed |
+| `DELL_HOST` | Tailscale IP `100.x.x.x` | Use Tailscale IP — GitHub runners can't resolve LAN IPs/mDNS |
+| `DELL_USER` | `atd` | SSH user on Dell |
+| `DELL_SSH_KEY` | private key content | Generate below ↓ |
+| `TAILSCALE_AUTHKEY` | Tailscale reusable auth key | Required for GitHub runner → Dell tunnel (see §8.4) |
+
+> **`GHCR_OWNER` is NOT a secret.** It is injected automatically by the pipeline as
+> `github.repository_owner` (a built-in GitHub Actions variable). No manual setup needed.
+> It works for any org, fork, or migration without touching any code.
+
+### 8.2 — Generate deploy SSH key (dedicated, not your personal key)
+
+```bash
+# On your Mac:
+ssh-keygen -t ed25519 -C "github-actions-atd-deploy" -f ~/.ssh/atd_deploy_key
+# No passphrase — GitHub Actions needs non-interactive auth
+
+# Add PUBLIC key to Dell:
+ssh atd "cat >> ~/.ssh/authorized_keys" < ~/.ssh/atd_deploy_key.pub
+
+# Verify:
+ssh -i ~/.ssh/atd_deploy_key atd@192.168.1.50 "echo OK"
+
+# Copy PRIVATE key → paste into GitHub Secret DELL_SSH_KEY:
+cat ~/.ssh/atd_deploy_key
+# Copy everything: -----BEGIN OPENSSH PRIVATE KEY----- ... -----END ...
+```
+
+> ⚠️ **Private key → GitHub Secret. Public key → Dell `authorized_keys`.**
+> Never swap them. Never commit either to the repo.
+
+### 8.3 — GHCR authentication on the Dell (private repo only)
+
+If your GitHub repo is **public**, GHCR images are public → no token needed.
+If your repo is **private**:
+
+```bash
+# Create a PAT on GitHub: Settings → Developer settings → Tokens → Fine-grained
+# Permission: read:packages
+# Then on the Dell:
+echo "<YOUR_TOKEN>" | docker login ghcr.io -u <your-github-username> --password-stdin
+# Credentials saved to ~/.docker/config.json — persists across reboots
+```
+
+### 8.4 — LAN deployment: GitHub runner can't reach 192.168.1.50
+
+GitHub's cloud runners run on the internet — they can't SSH into your LAN.
+Two solutions:
+
+**Option A — Tailscale (recommended, 10 min setup):**
+
+```bash
+# On the Dell:
+curl -fsSL https://tailscale.com/install.sh | sh
+sudo tailscale up    # follow auth link in browser
+tailscale ip -4      # note the 100.x.x.x IP
+
+# Set DELL_HOST secret to the Tailscale IP (100.x.x.x)
+# Add to atd-deploy.yml (before the SSH step):
+```
+
+```yaml
+- name: Connect to Tailscale
+  uses: tailscale/github-action@v2
+  with:
+    authkey: ${{ secrets.TAILSCALE_AUTHKEY }}
+    # Create authkey: https://login.tailscale.com/admin/settings/keys
+```
+
+**Option B — Self-hosted runner on the Dell (no tunnel needed):**
+
+```bash
+# GitHub: Settings → Actions → Runners → New self-hosted runner
+# Follow the install instructions on the Dell
+# Change atd-deploy.yml: runs-on: self-hosted
+# Pro: fastest deploys, no tunnel. Con: runner process must stay running.
+```
+
+---
+
+## 9. Persistent Volumes
+
+### 9.1 — Why bind mounts, not named Docker volumes
+
+Named Docker volumes live in `/var/lib/docker/volumes/` — opaque, hard to backup.
+Bind mounts are just directories on the host — transparent, easy to `rsync` or inspect.
+
+```
+docker compose down -v   → removes named volumes  → our data SAFE (bind mount)
+rm -rf /srv/atd/data/    → removes bind mounts    → data LOST
+```
+
+### 9.2 — What needs to persist and where
+
+| Container | Data | Host path | What happens if deleted |
+|-----------|------|-----------|------------------------|
+| `db` | PostgreSQL files | `/srv/atd/data/postgres/` | All DB data lost |
+| `backend` | User uploads (images) | `/srv/atd/data/uploads/` | All images lost |
+| `backend` | App logs | `/srv/atd/logs/app/` | Logs lost (non-critical) |
+
+### 9.3 — Survival matrix
+
+```
+Scenario                         DB data   Uploads   Action needed
+────────────────────────────────────────────────────────────────────
+docker compose restart           ✅ safe   ✅ safe   nothing
+docker compose down              ✅ safe   ✅ safe   nothing
+docker compose down -v           ✅ safe   ✅ safe   nothing (bind mounts!)
+docker image rm                  ✅ safe   ✅ safe   re-pull image
+Server reboot                    ✅ safe   ✅ safe   auto-restart (unless-stopped)
+rm -rf /srv/atd/data/postgres    💀 lost   ✅ safe   restore from backup
+Server disk failure              💀 lost   💀 lost   restore from Mac rsync copy
+```
+
+---
+
+## 10. LAN Domain — alphatradingdesk.local
+
+```
+avahi-daemon on the Dell broadcasts: "I am alphatradingdesk.local at 192.168.1.50"
+
+Devices that resolve it natively:
+  macOS, iOS, iPadOS   → built-in (Bonjour)
+  Linux                → avahi-daemon installed
+  Windows              → needs Bonjour for Windows (or use IP directly)
+  Android              → use IP directly (192.168.1.50)
+```
+
+```bash
+# Verify mDNS on Dell:
+avahi-daemon --check && echo "running"
+
+# Test from Mac:
+ping alphatradingdesk.local         # → 192.168.1.50
+open http://alphatradingdesk.local  # → app
+```
+
+---
+
+## 11. CI/CD Flow
+
+### 11.1 — CI: `atd-test.yml`
+
+**Triggers:** push to `develop` OR any PR to `main`/`develop`
+
+```
+Job 1 — backend (ubuntu-latest + postgres:16-alpine service):
+  ① checkout
+  ② poetry install
+  ③ ruff check src/ tests/
+  ④ mypy src/
+  ⑤ pytest tests/ --cov=src   (119 tests)
+
+Job 2 — frontend (ubuntu-latest):
+  ① checkout
+  ② npm ci
+  ③ eslint .
+  ④ tsc --noEmit
+  ⑤ npm run test (vitest)
+
+Job 3 — build (runs after 1+2 pass):
+  ① docker build backend (no push — validates Dockerfile only)
+  ② docker build frontend (no push)
+
+→ Failure on any job blocks the PR from merging
+→ Duration: ~2–3 min
+```
+
+### 11.2 — CD: `atd-deploy.yml`
+
+**Trigger:** push to `main` (= PR merged)
+
+```
+① Compute next semver from commit message:
+   fix:   → PATCH   v1.0.0 → v1.0.1   → build + deploy
+   feat:  → MINOR   v1.0.1 → v1.1.0   → build + deploy
+   feat!: → MAJOR   v1.1.0 → v2.0.0   → build + deploy
+   chore: / docs: / test: / ci:       → NO release, NO deploy
+
+② Login to GHCR with GITHUB_TOKEN (auto)
+
+③ docker build + push backend:
+   ghcr.io/<org>/atd-backend:v1.2.3
+   ghcr.io/<org>/atd-backend:latest
+
+④ docker build + push frontend:
+   ghcr.io/<org>/atd-frontend:v1.2.3
+   ghcr.io/<org>/atd-frontend:latest
+
+⑤ Create GitHub Release + auto-changelog
+
+⑥ Sync prod scripts to Dell (appleboy/scp-action):
+   scripts/prod/deploy.sh      → ~/apps/deploy.sh
+   scripts/prod/backup-db.sh   → ~/apps/backup-db.sh
+   scripts/prod/healthcheck.sh → ~/apps/healthcheck.sh
+   scripts/prod/setup-cron.sh  → ~/apps/setup-cron.sh
+   (setup-server.sh excluded — OS provisioning, manual-only)
+   → chmod +x ~/apps/*.sh via SSH
+
+⑦ Connect Tailscale runner to Dell network
+
+⑧ SSH into Dell → inject GHCR_OWNER → run:
+   export GHCR_OWNER="<github.repository_owner>"
+   ~/apps/deploy.sh v1.2.3
+     → docker pull backend:v1.2.3
+     → docker pull frontend:v1.2.3
+     → docker compose up -d (rolling restart, DB untouched)
+     → alembic upgrade head
+
+→ Duration: ~4–6 min from merge to live
+```
+
+### 11.3 — Commit type → version bump quick ref
+
+```
+feat(scope): add X          → MINOR  → deploys
+fix(scope): fix Y           → PATCH  → deploys
+feat!: breaking change      → MAJOR  → deploys
+chore: update deps          → none   → CI only
+docs: update README         → none   → CI only
+refactor: clean up service  → none   → CI only
+test: add tests             → none   → CI only
+db: add migration           → none   → CI only
+```
+
+> To force a deploy of a chore/docs change, add one `fix:` commit to the PR.
+
+---
+
+## 12. Backups
+
+### 12.1 — Cron on Dell (`crontab -e`)
 
 ```cron
-# Backup every 6 hours — keep last 48 dumps (~12 days rolling)
-0 */6 * * * /home/atd/apps/AlphaTradingDesk/scripts/backup-db.sh rolling >> /srv/atd/logs/cron/backup-db.log 2>&1
+# pg_dump every 6h — keep last 48 files (~12 days)
+0 */6 * * * /home/atd/apps/backup-db.sh rolling >> /srv/atd/logs/cron/backup-db.log 2>&1
 
-# Weekly backup every Sunday at 03:00 — keep 12 weeks
-0 3 * * 0 /home/atd/apps/AlphaTradingDesk/scripts/backup-db.sh weekly >> /srv/atd/logs/cron/backup-db.log 2>&1
+# Weekly dump every Sunday 03:00 — keep last 12 weeks
+0 3 * * 0 /home/atd/apps/backup-db.sh weekly >> /srv/atd/logs/cron/backup-db.log 2>&1
 ```
 
-> **`0 */6 * * *`** = at minute 0 of every 6th hour → 00:00, 06:00, 12:00, 18:00.
-> Adjust the interval by changing `*/6` : `*/4` = every 4h, `*/12` = every 12h.
+### 12.2 — `~/apps/backup-db.sh`
 
-**`scripts/backup-db.sh`** (to create at Step 14):
 ```bash
 #!/usr/bin/env bash
-# backup-db.sh <rolling|weekly>
-# Dumps atd_prod, gzips it, prunes old files.
 set -euo pipefail
-
 MODE=${1:-rolling}
-BACKUP_DIR="/srv/atd/backups/${MODE}"
-TIMESTAMP=$(date +%Y%m%d_%H%M%S)
-FILE="${BACKUP_DIR}/atd_prod_${TIMESTAMP}.sql.gz"
-COMPOSE="/home/atd/apps/AlphaTradingDesk/docker-compose.prod.yml"
-
-echo "[$(date)] Starting ${MODE} backup → ${FILE}"
-
-docker compose -f "$COMPOSE" exec -T db \
-  pg_dump -U atd atd_prod | gzip > "$FILE"
-
-echo "[$(date)] Backup done: $(du -sh "$FILE" | cut -f1)"
-
-# Prune old files
-# rolling: keep last 48 dumps (6h × 48 = 12 days)
-# weekly:  keep last 12 (12 weeks)
-if [ "$MODE" = "rolling" ]; then
-  ls -1t "$BACKUP_DIR"/*.sql.gz 2>/dev/null | tail -n +49 | xargs -r rm --
-fi
-if [ "$MODE" = "weekly" ]; then
-  ls -1t "$BACKUP_DIR"/*.sql.gz 2>/dev/null | tail -n +13 | xargs -r rm --
-fi
-
-echo "[$(date)] Pruned old ${MODE} backups. Current count: $(ls "$BACKUP_DIR"/*.sql.gz 2>/dev/null | wc -l)"
+DIR="/srv/atd/backups/${MODE}"
+FILE="${DIR}/atd_prod_$(date +%Y%m%d_%H%M%S).sql.gz"
+COMPOSE="$HOME/apps/docker-compose.prod.yml"
+echo "[$(date)] Backup $MODE → $FILE"
+docker compose -f "$COMPOSE" exec -T db pg_dump -U atd atd_prod | gzip > "$FILE"
+echo "[$(date)] Done: $(du -sh "$FILE" | cut -f1)"
+KEEP=$( [ "$MODE" = "rolling" ] && echo 49 || echo 13 )
+ls -1t "$DIR"/*.sql.gz 2>/dev/null | tail -n +"$KEEP" | xargs -r rm --
+chmod +x ~/apps/backup-db.sh
 ```
 
-> **Pruning by count** (`ls -1t | tail -n +N | xargs rm`) rather than by age (`-mtime`) →
-> works correctly regardless of backup frequency changes. Always keeps exactly N most recent dumps.
+### 12.3 — Manual backup / restore
 
-### 11.4 — Dev DB refresh: prod → dev (automated, on Dell)
-
-```
-Direction: atd_prod → atd_dev  ONLY. Dev never writes to prod.
-Runs entirely on the Dell — Mac not involved.
-
-When:
-  - Cron on Dell every 4h (same machine, instant — no network transfer)
-  - On-demand: ssh atd "~/apps/AlphaTradingDesk/scripts/refresh-dev-db.sh"
-```
-
-**How it works:**
-
-```
-Dell cron (every 4h)
-  └─ pg_dump atd_prod → pipe → psql atd_dev  (DROP + CREATE + restore)
-  └─ scrub: UPDATE news_provider_config SET api_key_encrypted = NULL, enabled = FALSE
-```
-
-> Tout se passe sur le Dell dans le même container Postgres.
-> Pas de transfert réseau, pas de Mac impliqué. Latence ~secondes.
-
-**Cron on the Dell** (ajouter au crontab Dell):
-```cron
-# Refresh atd_dev from atd_prod every 4 hours
-0 */4 * * * /home/atd/apps/AlphaTradingDesk/scripts/refresh-dev-db.sh >> /srv/atd/logs/cron/refresh-dev-db.log 2>&1
-```
-
-**`scripts/refresh-dev-db.sh`** (to create at Step 14):
 ```bash
-#!/usr/bin/env bash
-# refresh-dev-db.sh — runs ON the Dell
-# Dumps atd_prod and restores into atd_dev, scrubs secrets.
-set -euo pipefail
+# Backup now:
+~/apps/backup-db.sh rolling
 
-COMPOSE="/home/atd/apps/AlphaTradingDesk/docker-compose.prod.yml"
-DB_USER="atd"
-
-echo "[$(date)] Refreshing atd_dev from atd_prod..."
-
-# Dump prod and restore directly into dev (pipe — no tmp file needed)
-docker compose -f "$COMPOSE" exec -T db \
-  pg_dump -U "$DB_USER" atd_prod | \
-docker compose -f "$COMPOSE" exec -T db \
-  bash -c "psql -U $DB_USER -c 'DROP DATABASE IF EXISTS atd_dev;' && \
-           psql -U $DB_USER -c 'CREATE DATABASE atd_dev OWNER $DB_USER;' && \
-           psql -U $DB_USER atd_dev"
-
-# Scrub secrets
-docker compose -f "$COMPOSE" exec -T db \
-  psql -U "$DB_USER" atd_dev -c \
-  "UPDATE news_provider_config SET api_key_encrypted = NULL, enabled = FALSE;"
-
-echo "[$(date)] ✅ atd_dev refreshed (secrets scrubbed)."
-```
-
-### 11.5 — Mac backup: pull prod dumps from Dell
-
-En plus des backups sur le Dell, les dumps sont copiés sur le Mac automatiquement.
-Si le Dell tombe (SSD mort, etc.), tu as une copie locale.
-
-**Cron sur Mac** (ajouter au même `crontab`):
-```cron
-# Pull new prod backups from Dell every 4 hours (--ignore-existing = never re-downloads)
-0 */4 * * * rsync -az --ignore-existing \
-  atd@alphatradingdesk.local:/srv/atd/backups/rolling/ \
-  ~/Backups/AlphaTradingDesk/rolling/ \
-  >> ~/Library/Logs/atd-backup-sync.log 2>&1
-
-# Pull weekly backups every 4 hours too (lightweight — files rarely change)
-0 */4 * * * rsync -az --ignore-existing \
-  atd@alphatradingdesk.local:/srv/atd/backups/weekly/ \
-  ~/Backups/AlphaTradingDesk/weekly/ \
-  >> ~/Library/Logs/atd-backup-sync.log 2>&1
-```
-
-> **`--ignore-existing`** = skip files already on Mac → only new dumps are transferred.
-> Mac éteint → occurrence ratée, le Dell garde ses backups. Rattrapage automatique à la reconnexion.
-
-### 11.6 — Summary
-
-```
-Dell (always-on)
-├── atd_prod                  ← app data, written by backend
-├── atd_dev                   ← refreshed every 4h from prod (scrubbed secrets)
-├── /srv/atd/data/            ← Docker bind mounts (persistent, survives restarts)
-├── /srv/atd/logs/            ← created by server setup script — NOT in git
-│   ├── app/                  ← FastAPI / gunicorn logs
-│   ├── system/               ← Docker daemon, OS-level
-│   └── cron/                 ← backup-db.log + future cron jobs
-└── /srv/atd/backups/
-    ├── rolling/ (last 48)    ← every 6h — ~12 days of point-in-time recovery
-    └── weekly/  (12 weeks)   ← every Sunday 03:00
-
-Mac (dev machine, can be off)
-├── .env.dev → Dell:5432/atd_dev        (no local Postgres)
-├── ~/Backups/AlphaTradingDesk/         ← rsync pull from Dell every 4h
-├── ~/Library/Logs/atd-*.log            ← cron output (rsync, db-refresh)
-└── [project]/logs/                     ← dev app logs — gitignored, created by make dev
-```
-
-**All crons use `*/N` intervals — no fixed clock times:**
-```
-Dell cron:  */6h backup (rolling) + Sunday weekly
-Mac cron:   */4h dev DB refresh + */4h rsync pull
-```
-
-**Rollback prod DB (disaster recovery):**
-```bash
-# On the Dell — restore latest rolling backup:
+# Restore latest:
 LATEST=$(ls -1t /srv/atd/backups/rolling/*.sql.gz | head -1)
 zcat "$LATEST" | \
-  docker compose -f ~/apps/AlphaTradingDesk/docker-compose.prod.yml \
-  exec -T db psql -U atd atd_prod
+  docker compose -f ~/apps/docker-compose.prod.yml exec -T db psql -U atd atd_prod
+```
+
+### 12.4 — Pull backups to Mac (cron on Mac)
+
+```bash
+# crontab -e on Mac:
+0 */4 * * * rsync -az --ignore-existing \
+  atd@alphatradingdesk.local:/srv/atd/backups/ \
+  ~/Backups/AlphaTradingDesk/ \
+  >> ~/Library/Logs/atd-backup-sync.log 2>&1
+```
+
+---
+
+## 13. Maintenance
+
+```bash
+# Check status:
+ssh atd
+~/apps/healthcheck.sh                                      # full ops summary
+docker compose -f ~/apps/docker-compose.prod.yml ps       # container status
+docker stats --no-stream                                   # CPU/RAM
+df -h /srv/atd                                             # disk usage
+
+# Logs:
+docker compose -f ~/apps/docker-compose.prod.yml logs -f
+docker compose -f ~/apps/docker-compose.prod.yml logs -f backend
+
+# Deploy specific version (GHCR_OWNER required for manual call):
+export GHCR_OWNER=<your-github-org-or-username>
+~/apps/deploy.sh v1.2.3
+
+# Rollback to previous version:
+~/apps/deploy.sh v1.2.2
+
+# After power outage (containers auto-restart via unless-stopped):
+docker ps    # verify
+
+# Re-seed if DB empty:
+docker compose -f ~/apps/docker-compose.prod.yml exec backend \
+  python -m database.migrations.seeds.seed_all
 ```
 
 ---
 
 ```
-Router admin:           http://192.168.1.1
-Dell server IP:         192.168.1.50  (DHCP reservation + static OS)
-App (LAN domain):       http://alphatradingdesk.local
-SSH from Mac:           ssh atd
-```
+Quick reference
+───────────────────────────────────────────────────
+Dell LAN IP:      192.168.1.50
+Dell Tailscale:   100.x.x.x  (used by CI/CD — set in DELL_HOST secret)
+SSH:              ssh atd
+App URL:          http://alphatradingdesk.local
+DB data:          /srv/atd/data/postgres/
+Uploads:          /srv/atd/data/uploads/
+Backups:          /srv/atd/backups/
+Logs:             /srv/atd/logs/
+Deploy script:    ~/apps/deploy.sh <version>   (export GHCR_OWNER=... first)
+Compose:          ~/apps/docker-compose.prod.yml
+Env file:         ~/apps/.env
 
+CI/CD secrets (GitHub Settings → Secrets → Actions):
+  DELL_HOST          → 100.x.x.x  (Tailscale IP)
+  DELL_USER          → atd
+  DELL_SSH_KEY       → ed25519 private key content
+  TAILSCALE_AUTHKEY  → Tailscale reusable auth key
+  GITHUB_TOKEN       → auto-injected (no setup)
+  GHCR_OWNER         → NOT a secret (github.repository_owner, auto)
+```
