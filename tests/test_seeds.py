@@ -15,18 +15,15 @@ so the test DB stays clean between runs.
 
 from __future__ import annotations
 
-import pytest
 from sqlalchemy.orm import Session
 
 from database.migrations.seeds.seed_brokers import seed_brokers
-from database.migrations.seeds.seed_global_strategies import seed_global_strategies
 from database.migrations.seeds.seed_instruments import seed_instruments
 from database.migrations.seeds.seed_market_analysis import seed_market_analysis
 from database.migrations.seeds.seed_note_templates import seed_note_templates
 from database.migrations.seeds.seed_sessions import seed_sessions
 from database.migrations.seeds.seed_trading_styles import seed_trading_styles
 from src.core.models.broker import Broker, Instrument, TradingStyle
-
 
 # ── Helper: run the full seed pipeline in the given session ──────────────────
 
@@ -38,7 +35,6 @@ def _run_all(session: Session) -> None:
     seed_instruments(session, broker_ids)
     seed_note_templates(session)
     seed_market_analysis(session)
-    seed_global_strategies(session)
     session.flush()
 
 
