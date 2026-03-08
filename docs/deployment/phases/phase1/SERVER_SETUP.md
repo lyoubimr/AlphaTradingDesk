@@ -2,20 +2,20 @@
 
 **Date:** March 2026 — v3.0  
 **Hardware:** Dell OptiPlex Micro (D09U) — Core i7, 65W  
-**MAC address:** `18:66:DA:13:01:9D` — LAN IP fixe: `192.168.1.100`  
+**MAC address:** `18:66:DA:13:01:9D` — Fixed LAN IP: `192.168.1.100`  
 **Target OS:** Ubuntu Server 24.04 LTS (headless)  
 **Deploy model:** Pull pre-built Docker images from GHCR — Dell **never** builds anything
 
-> 📌 **Ce doc contient des valeurs spécifiques à CE déploiement** — à adapter si tu
-> réinstalles sur un autre matériel :
+> 📌 **This doc contains values specific to THIS deployment** — adapt them if you
+> reinstall on different hardware:
 >
-> | Valeur dans ce doc | Ce que c'est | À remplacer par |
-> |--------------------|-------------|-----------------|
-> | `192.168.1.100` | IP LAN fixe du Dell | l'IP de ton serveur |
-> | `18:66:DA:13:01:9D` | MAC address NIC ethernet | la MAC de ton NIC |
-> | `alphatradingdesk.local` | hostname mDNS | le hostname choisi lors de l'install Ubuntu |
-> | `192.168.1.1` | gateway routeur | la gateway de ton réseau |
-> | `atd` | username Ubuntu | le username choisi lors de l'install |
+> | Value in this doc | What it is | Replace with |
+> |-------------------|-----------|--------------|
+> | `192.168.1.100` | Dell fixed LAN IP | your server's IP |
+> | `18:66:DA:13:01:9D` | ethernet NIC MAC address | your NIC's MAC |
+> | `alphatradingdesk.local` | mDNS hostname | the hostname chosen during Ubuntu install |
+> | `192.168.1.1` | router gateway | your network's gateway |
+> | `atd` | Ubuntu username | the username chosen during install |
 
 ---
 
@@ -85,10 +85,10 @@ Power:      65W max, ~15–25W idle running Docker
 RAM:        8 GB minimum — 16 GB ideal
 Storage:    250 GB+ SSD required
 Network:    Gigabit Ethernet (rear port) ← use this, not WiFi
-MAC addr:   18:66:DA:13:01:9D           ← ethernet NIC (pour réservation DHCP routeur)
-IP LAN:     192.168.1.100               ← fixe (réservation routeur + Netplan)
-Tailscale:  100.x.x.x                  ← à noter après §4.7
-Hostname:   alphatradingdesk            ← défini pendant l'install Ubuntu
+MAC addr:   18:66:DA:13:01:9D           ← ethernet NIC (for router DHCP reservation)
+IP LAN:     192.168.1.100               ← fixed (router reservation + Netplan)
+Tailscale:  100.x.x.x                  ← note down after §4.7
+Hostname:   alphatradingdesk            ← set during Ubuntu install
 
 Recommended:
   Ubuntu Server 24.04 LTS (no GUI → saves ~2 GB RAM)
@@ -133,13 +133,13 @@ Installer screens:
   → Reboot → remove USB
 ```
 
-### 3.3 — First SSH (avant que l'IP soit fixée)
+### 3.3 — First SSH (before the IP is fixed)
 
 ```bash
-# Utiliser l'IP DHCP affichée pendant l'installation
+# Use the DHCP IP shown during installation
 ssh atd@<dhcp-ip>
 # accept fingerprint → enter password
-# Une fois §5 fait, ce sera toujours: ssh atd@192.168.1.100
+# Once §5 is done, it will always be: ssh atd@192.168.1.100
 ```
 
 ---
@@ -186,11 +186,11 @@ sudo ufw status
 # On your Mac — dedicated key for this server:
 ssh-keygen -t ed25519 -C "atd-server" -f ~/.ssh/atd_key
 
-# Copy to Dell:
-ssh-copy-id -i ~/.ssh/atd_key.pub atd@192.168.1.X
+# Copy to Dell (use the DHCP IP shown during install, or 192.168.1.100 if §5 already done):
+ssh-copy-id -i ~/.ssh/atd_key.pub atd@<server-ip>
 
 # Test:
-ssh -i ~/.ssh/atd_key atd@192.168.1.X
+ssh -i ~/.ssh/atd_key atd@<server-ip>
 
 # SSH shortcut on Mac:
 cat >> ~/.ssh/config << 'EOF'
@@ -214,22 +214,22 @@ sudo systemctl restart sshd
 
 ### 4.7 — Install Tailscale
 
-> Tailscale permet au runner GitHub Actions de se connecter au Dell via un tunnel chiffré,
-> sans ouvrir aucun port sur Internet.
+> Tailscale allows the GitHub Actions runner to connect to the Dell via an encrypted tunnel,
+> without opening any port on the internet.
 
 ```bash
-# Sur le Dell:
+# On the Dell:
 curl -fsSL https://tailscale.com/install.sh | sh
-sudo tailscale up    # suit le lien d'auth dans le navigateur
+sudo tailscale up    # follow the auth link in your browser
 
-# Récupérer l'IP Tailscale → c'est la valeur du secret GitHub DELL_HOST
+# Get the Tailscale IP → this is the value for the GitHub secret DELL_HOST
 tailscale ip -4
-# Exemple: 100.94.12.45  ← noter cette IP
+# Example: 100.94.12.45  ← note this IP
 ```
 
-> ⚠️ **Mettre cette IP dans le secret GitHub `DELL_HOST`** (voir §8).  
-> Ne pas utiliser l'IP LAN `192.168.1.100` pour le secret — les runners GitHub  
-> ne peuvent pas résoudre les adresses LAN privées.
+> ⚠️ **Put this IP in the GitHub secret `DELL_HOST`** (see §8).  
+> Do not use the LAN IP `192.168.1.100` for the secret — GitHub runners  
+> cannot resolve private LAN addresses.
 
 ## 5. Fix IP Address
 
@@ -237,14 +237,14 @@ Do BOTH — router reservation + OS static config.
 
 ### 5.1 — Router DHCP reservation
 
-> La MAC address du Dell est connue : `18:66:DA:13:01:9D`
+> The Dell's MAC address is known: `18:66:DA:13:01:9D`
 
 ```
 Router admin panel (find URL on your router label):
-  Freebox:   http://mafreebox.freebox.fr  → Paramètres → DHCP → Baux statiques
-  Bbox:      http://192.168.1.254         → Réseau → DHCP → Réservations
-  SFR:       http://192.168.0.1           → Réseau → DHCP
-  Livebox:   http://192.168.1.1           → Réseau avancé → DHCP
+  Freebox:   http://mafreebox.freebox.fr  → Settings → DHCP → Static leases
+  Bbox:      http://192.168.1.254         → Network → DHCP → Reservations
+  SFR:       http://192.168.0.1           → Network → DHCP
+  Livebox:   http://192.168.1.1           → Advanced network → DHCP
 
 Add entry:
   MAC:  18:66:DA:13:01:9D
@@ -256,10 +256,10 @@ Add entry:
 ### 5.2 — Static IP on OS (Netplan)
 
 ```bash
-# Trouver le nom de l'interface ethernet:
+# Find the ethernet interface name:
 ip link show
-# Chercher l'interface avec la MAC 18:66:DA:13:01:9D
-# Typiquement: enp3s0, eno1, enp0s31f6 ...
+# Look for the interface with MAC 18:66:DA:13:01:9D
+# Typically: enp3s0, eno1, enp0s31f6 ...
 
 sudo nano /etc/netplan/00-installer-config.yaml
 ```
@@ -268,13 +268,13 @@ sudo nano /etc/netplan/00-installer-config.yaml
 network:
   version: 2
   ethernets:
-    enp3s0:                      # ← remplacer par TON nom d'interface
+    enp3s0:                      # ← replace with YOUR interface name
       dhcp4: false
       addresses:
         - 192.168.1.100/24
       routes:
         - to: default
-          via: 192.168.1.1       # ← gateway de ton routeur
+          via: 192.168.1.1       # ← your router's gateway
       nameservers:
         addresses: [1.1.1.1, 8.8.8.8]
       optional: true
@@ -282,17 +282,17 @@ network:
 
 ```bash
 sudo netplan apply
-# La session SSH tombe — se reconnecter avec la nouvelle IP:
+# The SSH session will drop — reconnect with the new IP:
 ssh atd@192.168.1.100
-# À partir de maintenant, cette IP est permanente
+# From now on, this IP is permanent
 ```
 
-### 5.3 — Vérification
+### 5.3 — Verification
 
 ```bash
-ip addr show           # confirme 192.168.1.100
+ip addr show           # confirms 192.168.1.100
 ping 1.1.1.1           # internet accessible
-tailscale ip -4        # Tailscale toujours actif
+tailscale ip -4        # Tailscale still active
 ```
 
 ---
@@ -333,28 +333,28 @@ docker run hello-world
 
 ## 7. Pre-Deploy Setup on Dell
 
-> ⚠️ **Séquençage critique — lire avant de commencer.**
+> ⚠️ **Critical sequencing — read before you start.**
 >
-> Le Dell doit être **entièrement préparé AVANT le premier merge `feat:` → `main`**.
-> Dès que tu merges, la CD se déclenche, build les images, et SSH dans le Dell pour
-> les déployer. Si le Dell n't pas prêt, le deploy échoue.
+> The Dell must be **fully prepared BEFORE the first `feat:` merge → `main`**.
+> As soon as you merge, CD triggers, builds the images, and SSHes into the Dell to
+> deploy them. If the Dell isn't ready, the deploy will fail.
 >
 > ```
-> ORDRE OBLIGATOIRE :
->   §7.1 → §7.2 → §7.3 → §7.4   ← Dell prêt (AVANT le merge)
->   §8.2 → §8.3 → §8.1           ← GitHub Secrets câblés (AVANT le merge)
+> MANDATORY ORDER:
+>   §7.1 → §7.2 → §7.3 → §7.4   ← Dell ready (BEFORE the merge)
+>   §8.2 → §8.3 → §8.1           ← GitHub Secrets wired (BEFORE the merge)
 >   ──────────────────────────────────────────────────────
->   → merge feat: → main          ← CD se déclenche
->   → images buildées + pushées sur GHCR par la CD
->   → deploy.sh v1.0.0 exécuté par la CD via SSH
->   → docker compose up -d + alembic upgrade head  ← automatique
+>   → merge feat: → main          ← CD triggers
+>   → images built + pushed to GHCR by CD
+>   → deploy.sh v1.0.0 executed by CD via SSH
+>   → docker compose up -d + alembic upgrade head  ← automatic
 >   ──────────────────────────────────────────────────────
->   §7.5                          ← vérification POST-deploy (pas un setup manuel)
+>   §7.5                          ← POST-deploy verification (not a manual setup step)
 > ```
 >
-> `docker-compose.prod.yml`, `~/apps/.env` et les scripts sont des **fichiers statiques**
-> que tu crées manuellement sur le Dell — ils n'ont pas besoin des images pour exister.
-> Les images (GHCR) n'existent qu'après le 1er merge.
+> `docker-compose.prod.yml`, `~/apps/.env` and the scripts are **static files**
+> you create manually on the Dell — they don't need the images to exist.
+> The images (GHCR) only exist after the 1st merge.
 
 The Dell needs only 3 things — no source code, no git clone.
 
@@ -381,7 +381,7 @@ nano ~/apps/.env
 
 ```bash
 # ~/apps/.env — NEVER commit this file
-# Générer les valeurs: openssl rand -hex 24 / openssl rand -hex 32
+# Generate values: openssl rand -hex 24 / openssl rand -hex 32
 POSTGRES_DB=atd_prod
 POSTGRES_USER=atd
 POSTGRES_PASSWORD=<openssl rand -hex 24>
@@ -437,7 +437,7 @@ services:
   backend:
     image: ghcr.io/${GHCR_OWNER}/atd-backend:${IMAGE_TAG:-latest}
     restart: unless-stopped
-    env_file: /root/apps/.env
+    env_file: /home/atd/apps/.env
     environment:
       DATABASE_URL: postgresql://atd:${POSTGRES_PASSWORD}@db:5432/atd_prod
     depends_on:
@@ -464,14 +464,15 @@ services:
       options: { max-size: "10m", max-file: "3" }
 ```
 
-### 7.4 — Get the deploy script onto the Dell
+### 7.4 — Copy prod scripts to Dell (once only)
 
 The deploy script (`scripts/prod/deploy.sh`) lives in the Git repo and is
-**automatically synced to `~/apps/` by the CI/CD pipeline on every release**.
-You only need to copy it manually for the very first deploy (before CI/CD is wired up):
+**automatically synced to `~/apps/` by CD on every release**.
+You only need to copy it **manually once** — for the initial bootstrap,
+before CD is wired up:
 
 ```bash
-# From your Mac — first time only (LAN IP, Tailscale pas encore nécessaire):
+# From your Mac — once only, BEFORE the 1st merge → main
 scp scripts/prod/deploy.sh \
     scripts/prod/backup-db.sh \
     scripts/prod/healthcheck.sh \
@@ -481,25 +482,18 @@ scp scripts/prod/deploy.sh \
 ssh atd@192.168.1.100 "chmod +x ~/apps/*.sh"
 ```
 
-> After Step 8 (GitHub Secrets) is done, CI/CD handles all future script updates
-> automatically — no manual `scp` needed after each release.
+> ⚠️ **DO NOT run `deploy.sh` now** — it would try to `docker pull`
+> images that don't exist yet on GHCR.
+> Images are created by CD **only after** the 1st `feat:` → `main` merge.
+> CD will call `deploy.sh` automatically.
 
-**`GHCR_OWNER` — important:**
-The script requires `GHCR_OWNER` to be exported before running.
-CI/CD injects it automatically (`github.repository_owner`).
-For manual runs from the Dell:
+> After §8 (GitHub Secrets), CD handles all script updates
+> automatically — no more `scp` needed per release.
 
-```bash
-export GHCR_OWNER=<your-github-org-or-username>
-~/apps/deploy.sh v1.2.3
-```
+### 7.5 — Post-deploy verification (after the 1st merge → main)
 
-> Never hardcode a username inside the script — it must remain generic for portability.
-
-### 7.5 — Vérification post-deploy (après le 1er merge → main)
-
-> **La CD fait tout le travail.** Ce bloc est uniquement pour VÉRIFIER que le deploy
-> automatique a bien fonctionné — pas pour lancer quoi que ce soit manuellement.
+> **CD does all the work.** This block is only to VERIFY that the automatic
+> deploy succeeded — do not run anything manually here.
 
 ```bash
 # Sur le Dell — vérifier que les containers tournent:
@@ -512,11 +506,20 @@ curl http://localhost:8000/api/health    # → {"status": "ok"}
 open http://alphatradingdesk.local      # → app live
 ```
 
-> **Deploy manuel** (si jamais tu as besoin de forcer une version sans passer par la CD) :
-> ```bash
-> export GHCR_OWNER=<your-github-org-or-username>
-> ~/apps/deploy.sh v1.0.0
-> ```
+**View published images on GHCR:**
+```
+https://github.com/<your-org>/AlphaTradingDesk/pkgs/container/atd-backend
+https://github.com/<your-org>/AlphaTradingDesk/pkgs/container/atd-frontend
+```
+> Or directly from GitHub: repo → **Packages** (right column on the main page).
+> Images appear there **only after** the 1st `feat:` → `main` merge.
+
+**Manual deploy** (only if you need to force a version without going through CD):
+```bash
+# On the Dell — requires images to already exist on GHCR
+export GHCR_OWNER=<your-github-org-or-username>
+~/apps/deploy.sh v1.0.0
+```
 
 ---
 
@@ -541,51 +544,51 @@ Go to: **GitHub repo → Settings → Secrets and variables → Actions → New 
 ### 8.2 — Generate deploy SSH key (dedicated, not your personal key)
 
 ```bash
-# On your Mac — clé DÉDIÉE CI/CD (pas ta clé perso):
+# On your Mac — DEDICATED CI/CD key (not your personal key):
 ssh-keygen -t ed25519 -C "github-actions-atd-deploy" \
            -f ~/.ssh/atd_deploy_key -N ""
-# -N "" = pas de passphrase (GitHub Actions a besoin d'auth non-interactive)
+# -N "" = no passphrase (GitHub Actions needs non-interactive auth)
 
-# Deux fichiers créés:
-#   ~/.ssh/atd_deploy_key      ← PRIVÉE → GitHub Secret DELL_SSH_KEY
-#   ~/.ssh/atd_deploy_key.pub  ← PUBLIQUE → Dell authorized_keys
+# Two files created:
+#   ~/.ssh/atd_deploy_key      ← PRIVATE → GitHub Secret DELL_SSH_KEY
+#   ~/.ssh/atd_deploy_key.pub  ← PUBLIC  → Dell authorized_keys
 
-# Copier la clé PUBLIQUE sur le Dell:
+# Copy the PUBLIC key to the Dell:
 ssh-copy-id -i ~/.ssh/atd_deploy_key.pub atd@192.168.1.100
 
-# Tester:
+# Test:
 ssh -i ~/.ssh/atd_deploy_key atd@192.168.1.100 "echo ✅ OK"
 
-# Copier la clé PRIVÉE → coller dans GitHub Secret DELL_SSH_KEY:
+# Copy the PRIVATE key → paste into GitHub Secret DELL_SSH_KEY:
 cat ~/.ssh/atd_deploy_key | pbcopy
-# → GitHub → Settings → Secrets → DELL_SSH_KEY → coller → Save
+# → GitHub → Settings → Secrets → DELL_SSH_KEY → paste → Save
 ```
 
-> ⚠️ **Clé PRIVÉE → GitHub Secret. Clé PUBLIQUE → Dell `authorized_keys`.**  
-> Ne jamais inverser. Ne jamais commiter l'une ou l'autre dans le repo.
+> ⚠️ **PRIVATE key → GitHub Secret. PUBLIC key → Dell `authorized_keys`.**  
+> Never swap them. Never commit either one to the repo.
 
-### 8.3 — Générer le TAILSCALE_AUTHKEY
+### 8.3 — Generate TAILSCALE_AUTHKEY
 
 ```
-1. Aller sur: https://login.tailscale.com/admin/settings/keys
-2. Cliquer "Generate auth key"
-3. Cocher:
-   ✅ Reusable    — le runner CI s'exécute à chaque deploy, a besoin de réutilisation
-   ✅ Ephemeral   — disparaît de l'admin Tailscale après usage (pas de pollution)
-   ✅ Pre-authorized — pas d'approbation manuelle nécessaire
-4. Expiration: 90 jours (prévoir un rappel calendrier pour renouveler)
-5. Copier la clé → GitHub Secret TAILSCALE_AUTHKEY
+1. Go to: https://login.tailscale.com/admin/settings/keys
+2. Click "Generate auth key"
+3. Check:
+   ✅ Reusable    — the CI runner runs on every deploy, needs reuse
+   ✅ Ephemeral   — disappears from Tailscale admin after use (no clutter)
+   ✅ Pre-authorized — no manual approval needed
+4. Expiration: 90 days (set a calendar reminder to renew)
+5. Copy the key → GitHub Secret TAILSCALE_AUTHKEY
 ```
 
-### 8.4 — Vérifier que les 4 secrets sont bien configurés
+### 8.4 — Verify all 4 secrets are configured
 
 ```
 GitHub → repo → Settings → Secrets and variables → Actions
 
-Tu dois voir exactement:
-  DELL_HOST          ✅  (100.x.x.x — IP Tailscale du Dell)
+You should see exactly:
+  DELL_HOST          ✅  (100.x.x.x — Tailscale IP of the Dell)
   DELL_USER          ✅  (atd)
-  DELL_SSH_KEY       ✅  (contenu complet -----BEGIN OPENSSH PRIVATE KEY-----)
+  DELL_SSH_KEY       ✅  (full content -----BEGIN OPENSSH PRIVATE KEY-----)
   TAILSCALE_AUTHKEY  ✅  (tskey-auth-...)
 ```
 
@@ -600,14 +603,14 @@ echo "<YOUR_TOKEN>" | docker login ghcr.io -u <your-github-username> --password-
 # Credentials saved to ~/.docker/config.json — persists across reboots
 ```
 
-### 8.4 — Pourquoi Tailscale ? (GitHub runner ne peut pas atteindre 192.168.1.100)
+### 8.5 — Why Tailscale? (GitHub runner cannot reach 192.168.1.100)
 
-GitHub cloud runners tournent sur Internet — ils ne peuvent pas SSH dans ton LAN directement.
-Tailscale est installé en §4.7. Le workflow CI/CD se connecte au réseau Tailscale via `TAILSCALE_AUTHKEY`
-avant d'ouvrir le SSH sur `DELL_HOST` (`100.x.x.x`).
+GitHub cloud runners run on the internet — they cannot SSH directly into your LAN.
+Tailscale is installed in §4.7. The CI/CD workflow joins the Tailscale network via `TAILSCALE_AUTHKEY`
+before opening SSH on `DELL_HOST` (`100.x.x.x`).
 
-> Tailscale est déjà installé (§4.7) et `TAILSCALE_AUTHKEY` déclaré (§8.1).
-> Le step dans `atd-deploy.yml` est déjà configuré — rien à faire manuellement ici.
+> Tailscale is already installed (§4.7) and `TAILSCALE_AUTHKEY` declared (§8.1).
+> The step in `atd-deploy.yml` is already configured — nothing to do manually here.
 
 ---
 
@@ -758,61 +761,61 @@ db: add migration           → none   → CI only
 
 > To force a deploy of a chore/docs change, add one `fix:` commit to the PR.
 
-### 11.4 — Merge strategy : quoi faire quand `develop` a plusieurs commits ?
+### 11.4 — Merge strategy: what to do when `develop` has multiple commits?
 
-**Utilise un merge ordinaire** (`Create a merge commit` sur GitHub — c'est le défaut).
+**Use a regular merge** (`Create a merge commit` on GitHub — this is the default).
 
-Le workflow scanne **tous les commits du merge** et prend le bump le plus élevé :
+The workflow scans **all commits in the merge** and picks the highest bump:
 
 ```
-develop contient :
+develop contains:
   chore: update deps         → patch
   test: add unit tests       → none
-  feat: add market analysis  → MINOR  ← gagne
+  feat: add market analysis  → MINOR  ← wins
 
-→ Le merge → main crée une release MINOR  v1.0.0 → v1.1.0
+→ The merge → main creates a MINOR release  v1.0.0 → v1.1.0
 ```
 
-| Stratégie | Comportement | Recommandation |
-|-----------|-------------|----------------|
-| **Merge commit** (défaut) | Scanne tous les commits → prend le plus haut | ✅ Recommandé |
-| **Squash merge** | 1 seul commit → **son message doit avoir le bon préfixe** (`feat:` / `fix:`) sinon `default_bump: false` → pas de release | ⚠️ Risqué si on oublie |
-| **Rebase** | Même logique que merge commit | ✅ OK aussi |
+| Strategy | Behaviour | Recommendation |
+|----------|-----------|----------------|
+| **Merge commit** (default) | Scans all commits → picks the highest | ✅ Recommended |
+| **Squash merge** | 1 single commit → **its message must have the right prefix** (`feat:` / `fix:`) otherwise `default_bump: false` → no release | ⚠️ Risky if you forget |
+| **Rebase** | Same logic as merge commit | ✅ OK too |
 
-> **Règle simple :** si ta PR contient au moins un commit `feat:` ou `fix:`, la CD se
-> déclenche après le merge. Si elle contient uniquement `docs:` / `test:` / `ci:` /
-> `chore:` → pas de release, pas de deploy (CI only). C'est voulu.
+> **Simple rule:** if your PR contains at least one `feat:` or `fix:` commit, CD triggers
+> after the merge. If it contains only `docs:` / `test:` / `ci:` / `chore:` → no release,
+> no deploy (CI only). This is intentional.
 
-### 11.5 — Reboot du Dell : les containers redémarrent-ils automatiquement ?
+### 11.5 — Dell reboot: do containers restart automatically?
 
-**Oui — 100% automatique.** Deux mécanismes combinés :
+**Yes — 100% automatic.** Two combined mechanisms:
 
 ```
-1. Docker lui-même est activé au boot :
-   sudo systemctl enable docker   (fait en §6)
+1. Docker itself is enabled at boot:
+   sudo systemctl enable docker   (done in §6)
 
-2. Chaque container a restart: unless-stopped dans docker-compose.prod.yml
-   → Docker les relance automatiquement après le reboot
+2. Each container has restart: unless-stopped in docker-compose.prod.yml
+   → Docker restarts them automatically after a reboot
 ```
 
-Séquence au reboot :
+Boot sequence:
 ```
-Serveur reboot
-  → systemd démarre Docker
-  → db démarre en premier
-  → backend attend que db soit healthy (depends_on + healthcheck)
-  → frontend démarre
-  → app live en ~30 secondes
-  → aucune action manuelle requise
+Server reboots
+  → systemd starts Docker
+  → db starts first
+  → backend waits for db to be healthy (depends_on + healthcheck)
+  → frontend starts
+  → app live in ~30 seconds
+  → no manual action required
 ```
 
-> `unless-stopped` signifie : redémarre toujours sauf si **tu l'as arrêté manuellement**
-> (`docker compose down`). Un reboot ne compte pas comme un arrêt manuel.
+> `unless-stopped` means: always restart unless **you stopped it manually**
+> (`docker compose down`). A reboot does not count as a manual stop.
 
-Survie des données au reboot :
+Data survival on reboot:
 ```
-DB data    /srv/atd/data/postgres/  → ✅ bind mount, survit à tout
-Uploads    /srv/atd/data/uploads/   → ✅ bind mount, survit à tout
+DB data    /srv/atd/data/postgres/  → ✅ bind mount, survives everything
+Uploads    /srv/atd/data/uploads/   → ✅ bind mount, survives everything
 ```
 
 ---
@@ -843,7 +846,6 @@ docker compose -f "$COMPOSE" exec -T db pg_dump -U atd atd_prod | gzip > "$FILE"
 echo "[$(date)] Done: $(du -sh "$FILE" | cut -f1)"
 KEEP=$( [ "$MODE" = "rolling" ] && echo 49 || echo 13 )
 ls -1t "$DIR"/*.sql.gz 2>/dev/null | tail -n +"$KEEP" | xargs -r rm --
-chmod +x ~/apps/backup-db.sh
 ```
 
 ### 12.3 — Manual backup / restore
@@ -905,9 +907,9 @@ docker compose -f ~/apps/docker-compose.prod.yml exec backend \
 ╔══════════════════════════════════════════════════════════════════════╗
 ║  QUICK REFERENCE                                                      ║
 ╠══════════════════════════════════════════════════════════════════════╣
-║  Dell MAC address    18:66:DA:13:01:9D  (NIC ethernet)               ║
+║  Dell MAC address    18:66:DA:13:01:9D  (ethernet NIC)               ║
 ║  Dell LAN IP         192.168.1.100  (DHCP reservation + Netplan)     ║
-║  Dell Tailscale      100.x.x.x  → tailscale ip -4  sur le Dell       ║
+║  Dell Tailscale      100.x.x.x  → tailscale ip -4  on the Dell       ║
 ║  SSH shortcut        ssh atd  (via ~/.ssh/config)                     ║
 ║  App URL (LAN)       http://alphatradingdesk.local                    ║
 ║  App URL (IP)        http://192.168.1.100                             ║
@@ -921,12 +923,12 @@ docker compose -f ~/apps/docker-compose.prod.yml exec backend \
 ║  Env file            ~/apps/.env                                      ║
 ╠══════════════════════════════════════════════════════════════════════╣
 ║  GITHUB SECRETS (4 required — Settings → Secrets → Actions)          ║
-║  DELL_HOST          100.x.x.x  (tailscale ip -4 sur le Dell)         ║
+║  DELL_HOST          100.x.x.x  (tailscale ip -4 on the Dell)         ║
 ║  DELL_USER          atd                                               ║
-║  DELL_SSH_KEY       cat ~/.ssh/atd_deploy_key | pbcopy  (privée)      ║
+║  DELL_SSH_KEY       cat ~/.ssh/atd_deploy_key | pbcopy  (private)     ║
 ║  TAILSCALE_AUTHKEY  tailscale.com/admin/settings/keys                 ║
 ║                     → Reusable + Ephemeral + Pre-authorized           ║
-║  GITHUB_TOKEN       auto-injecté (pas de setup)                      ║
-║  GHCR_OWNER         PAS un secret (github.repository_owner, auto)    ║
+║  GITHUB_TOKEN       auto-injected (no setup needed)                  ║
+║  GHCR_OWNER         NOT a secret (github.repository_owner, auto)     ║
 ╚══════════════════════════════════════════════════════════════════════╝
 ```
