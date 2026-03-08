@@ -61,6 +61,6 @@ app.include_router(ma_router, prefix=API_PREFIX)
 app.include_router(profiles_ma_router, prefix=API_PREFIX)
 
 
-@app.get("/health")
+@app.get("/api/health")
 def health() -> dict:
     return {"status": "ok", "environment": settings.environment}
