@@ -18,7 +18,6 @@ from __future__ import annotations
 from sqlalchemy.orm import Session
 
 from database.migrations.seeds.seed_brokers import seed_brokers
-from database.migrations.seeds.seed_global_strategies import seed_global_strategies
 from database.migrations.seeds.seed_instruments import seed_instruments
 from database.migrations.seeds.seed_market_analysis import seed_market_analysis
 from database.migrations.seeds.seed_note_templates import seed_note_templates
@@ -36,7 +35,6 @@ def _run_all(session: Session) -> None:
     seed_instruments(session, broker_ids)
     seed_note_templates(session)
     seed_market_analysis(session)
-    seed_global_strategies(session)
     session.flush()
 
 

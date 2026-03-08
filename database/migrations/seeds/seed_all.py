@@ -16,22 +16,23 @@ Dependency order:
   4. instruments         (requires broker_ids from step 1)
   5. note_templates      (no deps — profile_id = NULL = global default)
   6. market_analysis     (no deps)
-  7. global_strategies   (no deps — profile_id = NULL)
+
+Note: global strategies are NOT seeded — users create their own strategies.
 """
 from __future__ import annotations
 
 import logging
 import sys
 
-from src.core.database import get_session_factory
-SessionLocal = get_session_factory()
 from database.migrations.seeds.seed_brokers import seed_brokers
-from database.migrations.seeds.seed_global_strategies import seed_global_strategies
 from database.migrations.seeds.seed_instruments import seed_instruments
 from database.migrations.seeds.seed_market_analysis import seed_market_analysis
 from database.migrations.seeds.seed_note_templates import seed_note_templates
 from database.migrations.seeds.seed_sessions import seed_sessions
 from database.migrations.seeds.seed_trading_styles import seed_trading_styles
+from src.core.database import get_session_factory
+
+SessionLocal = get_session_factory()
 
 logging.basicConfig(
     level=logging.INFO,
@@ -52,7 +53,6 @@ def run_all_seeds() -> None:
             seed_instruments(session, broker_ids)
             seed_note_templates(session)
             seed_market_analysis(session)
-            seed_global_strategies(session)
             session.commit()
             logger.info("=== Seed run complete — all changes committed ===")
         except Exception:
