@@ -69,10 +69,18 @@ echo "♻️   Rolling restart (backend + frontend)…"
 docker compose -f "${COMPOSE_FILE}" up -d --no-build backend frontend
 
 # ── 4. Run pending Alembic migrations ─────────────────────────────────────────
-# The entrypoint already runs alembic upgrade head, but we run it explicitly
-# here as well in case the container restarted before the entrypoint finished.
+# The entrypoint already runs alembic upgrade head + seed_all, but we run them
+# explicitly here as well as a safety net — idempotent, safe to call twice.
 echo "🔄  Running Alembic migrations…"
 docker compose -f "${COMPOSE_FILE}" exec -T backend alembic upgrade head
+
+# ── 4b. Seed reference data (idempotent) ──────────────────────────────────────
+# Guarantees brokers, instruments, trading_styles, sessions etc. are always
+# present in prod, even if the entrypoint seed step failed on a previous deploy.
+# INSERT ON CONFLICT DO NOTHING — user data is NEVER touched.
+echo "🌱  Seeding reference data…"
+docker compose -f "${COMPOSE_FILE}" exec -T backend \
+  python -m database.migrations.seeds.seed_all
 
 # ── 5. Prune old images (keep last 72h) ───────────────────────────────────────
 echo "🧹  Pruning old images…"

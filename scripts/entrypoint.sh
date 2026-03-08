@@ -79,8 +79,13 @@ else
 fi
 
 echo "🌱 Seeding reference data…"
-python -m database.migrations.seeds.seed_all
-echo "✅ Seed done."
+if python -m database.migrations.seeds.seed_all; then
+  echo "✅ Seed done."
+else
+  echo "⚠️  Seed failed — app will still start. Run manually: python -m database.migrations.seeds.seed_all"
+  # Do NOT exit — migrations are done, the app is usable.
+  # deploy.sh also runs seed_all as a safety net after every deploy.
+fi
 
 # In dev, auto-seed test profiles+trades if the DB has no profiles yet.
 # This makes the app immediately usable after a fresh volume or db-reset.
