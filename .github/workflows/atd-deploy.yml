@@ -2,16 +2,22 @@ name: ATD — Deploy
 
 # ── Trigger ──────────────────────────────────────────────────────────────────
 # Runs on every push to main.
-# The pipeline is split into 3 independent jobs so that a failed deploy job
-# can be re-run alone — without re-building images or re-creating the tag.
+# The pipeline is split into 4 independent jobs:
 #
-# ⚠️  DORMANT until secrets are set (implement-phase1.md Step 14).
+#   version       — computes semver tag (always runs)
+#   sync-scripts  — copies prod scripts to Dell (always runs, no deploy needed)
+#   build         — builds + pushes Docker images (only if version bump)
+#   deploy        — SSH deploy on Dell (only if version bump)
+#
+# This means scripts/prod/*.sh are kept in sync on every merge to main,
+# even when the commit type (docs: / test: / ci:) triggers no release.
 #
 # ── Bump rules (commit prefix → semver) ──────────────────────────────────────
 #   fix: / chore: / refactor:  → PATCH  v1.0.0 → v1.0.1
 #   feat:                      → MINOR  v1.0.1 → v1.1.0
 #   feat!: / BREAKING CHANGE   → MAJOR  v1.1.0 → v2.0.0
 #   docs: / test: / ci:        → no bump (no release, no deploy)
+#                                but sync-scripts still runs ← key point
 #
 # ── Re-run behaviour ─────────────────────────────────────────────────────────
 # If the `deploy` job fails (e.g. SSH timeout) you can re-run it alone.
@@ -101,7 +107,56 @@ jobs:
           echo "   Commit types that trigger a release: fix: chore: refactor: feat: feat!:"
 
   # ===========================================================================
-  # JOB 2 — build
+  # JOB 2 — sync-scripts
+  # Copies all prod scripts to ~/apps/ on the Dell on EVERY push to main.
+  # Runs unconditionally — no dependency on version bump.
+  # This ensures setup-ssl.sh, update-server.sh, setup-cron.sh etc. are
+  # always up to date on the Dell, even after a docs-only commit.
+  # ===========================================================================
+  sync-scripts:
+    name: Sync prod scripts to Dell
+    runs-on: ubuntu-latest
+    # No `needs` — runs in parallel with version, immediately on push to main.
+
+    steps:
+      # ── 2a. Checkout (needed to read scripts/prod/) ───────────────────────
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ── 2b. Join Tailscale network ────────────────────────────────────────
+      - name: Connect Tailscale
+        uses: tailscale/github-action@v2
+        with:
+          authkey: ${{ secrets.TAILSCALE_AUTHKEY }}
+          version: "1.80.3"
+
+      # ── 2c. SCP scripts to Dell ───────────────────────────────────────────
+      # Syncs the entire scripts/prod/ directory.
+      # Any .sh added to scripts/prod/ is automatically included — no YAML change needed.
+      # setup-server.sh lives in scripts/ (not scripts/prod/) → never synced by CD.
+      - name: Copy scripts to Dell
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.DELL_HOST }}
+          username: ${{ secrets.DELL_USER }}
+          key: ${{ secrets.DELL_SSH_KEY }}
+          source: "scripts/prod/"
+          target: "~/apps/"
+          strip_components: 2
+
+      # ── 2d. Make all scripts executable ──────────────────────────────────
+      - name: chmod +x scripts
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.DELL_HOST }}
+          username: ${{ secrets.DELL_USER }}
+          key: ${{ secrets.DELL_SSH_KEY }}
+          script: |
+            chmod +x ~/apps/*.sh
+            echo "✅ Scripts synced: $(ls ~/apps/*.sh | xargs -n1 basename | tr '\n' ' ')"
+
+  # ===========================================================================
+  # JOB 3 — build
   # Builds Docker images and pushes them to GHCR.
   # Creates the GitHub Release on first run (skipped on re-run: tag exists).
   # Depends on: version (needs release_tag)
@@ -161,54 +216,32 @@ jobs:
         continue-on-error: true   # Release already exists on re-run → non-fatal
 
   # ===========================================================================
-  # JOB 3 — deploy
-  # Syncs operational scripts to Dell, then SSHes in to run deploy.sh.
-  # Depends on: build (images must be pushed first)
+  # JOB 4 — deploy
+  # SSHes into Dell to run deploy.sh.
+  # Depends on: build (images must be pushed first) + sync-scripts (scripts ready)
   # Re-runnable independently: re-run only this job after an SSH timeout.
   # ===========================================================================
   deploy:
     name: Deploy to Dell
-    needs: [version, build]
+    needs: [version, build, sync-scripts]
     if: needs.version.outputs.release_tag != ''
     runs-on: ubuntu-latest
 
     steps:
-      # ── 3a. Checkout (needed for scripts sync) ────────────────────────────
+      # ── 4a. Checkout (needed for context) ────────────────────────────────
       - name: Checkout (for scripts)
         uses: actions/checkout@v4
 
-      # ── 3b. Join Tailscale network ────────────────────────────────────────
-      # The GitHub runner is on the internet — it cannot reach the Dell's LAN
-      # IP (192.168.1.100) directly. Tailscale creates an encrypted tunnel so
-      # the runner can SSH into the Dell via its Tailscale IP (100.x.x.x).
-      # TAILSCALE_AUTHKEY must be: Reusable + Ephemeral + Pre-authorized.
+      # ── 4b. Join Tailscale network ────────────────────────────────────────
       - name: Connect Tailscale
         uses: tailscale/github-action@v2
         with:
           authkey: ${{ secrets.TAILSCALE_AUTHKEY }}
           version: "1.80.3"
 
-      # ── 3c. Sync operational scripts to Dell ──────────────────────────────
-      # deploy.sh, backup-db.sh, healthcheck.sh, setup-cron.sh are copied to
-      # ~/apps/ on every release so Dell always runs the latest version.
-      # setup-server.sh is intentionally excluded — it provisions the OS and
-      # must be run manually once; auto-deploying it would be dangerous.
-      - name: Sync prod scripts to Dell
-        uses: appleboy/scp-action@v0.1.7
-        with:
-          host: ${{ secrets.DELL_HOST }}
-          username: ${{ secrets.DELL_USER }}
-          key: ${{ secrets.DELL_SSH_KEY }}
-          source: "scripts/prod/deploy.sh,scripts/prod/backup-db.sh,scripts/prod/healthcheck.sh,scripts/prod/setup-cron.sh"
-          target: "~/apps/"
-          strip_components: 2
-
-      # ── 3d. Make scripts executable + login to GHCR + deploy ─────────────
-      # GHCR_TOKEN (PAT with read:packages) is stored in GitHub Secrets.
-      # It's used here to ensure the Dell is always authenticated to GHCR
-      # before pulling images — credentials are cached in ~/.docker/config.json.
-      # GHCR_OWNER is passed as env var so deploy.sh stays fully generic
-      # (no hardcoded username). Works for forks and org migrations.
+      # ── 4c. Login to GHCR + deploy ────────────────────────────────────────
+      # Scripts are already on the Dell (sync-scripts job ran first).
+      # GHCR_OWNER is passed as env var so deploy.sh stays fully generic.
       - name: SSH deploy
         uses: appleboy/ssh-action@v1
         with:
@@ -217,7 +250,6 @@ jobs:
           key: ${{ secrets.DELL_SSH_KEY }}
           script: |
             set -euo pipefail
-            chmod +x ~/apps/deploy.sh ~/apps/backup-db.sh ~/apps/healthcheck.sh ~/apps/setup-cron.sh
             echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u "${{ github.repository_owner }}" --password-stdin
             export GHCR_OWNER="${{ github.repository_owner }}"
             ~/apps/deploy.sh "${{ needs.version.outputs.release_tag }}"

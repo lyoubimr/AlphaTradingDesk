@@ -30,6 +30,7 @@
 set -euo pipefail
 
 BACKUP_SCRIPT="$HOME/apps/backup-db.sh"
+UPDATE_SCRIPT="$HOME/apps/update-server.sh"
 CRON_LOG="/srv/atd/logs/cron/backup-db.log"
 LOG_DIR="/srv/atd/logs/app"
 TRUNCATE_THRESHOLD_MB=100
@@ -41,7 +42,14 @@ if [ ! -f "${BACKUP_SCRIPT}" ]; then
   exit 1
 fi
 
+if [ ! -f "${UPDATE_SCRIPT}" ]; then
+  echo "❌  ${UPDATE_SCRIPT} not found." >&2
+  echo "    Copy scripts/prod/update-server.sh to ~/apps/" >&2
+  exit 1
+fi
+
 chmod +x "${BACKUP_SCRIPT}"
+chmod +x "${UPDATE_SCRIPT}"
 
 # ── Build the cron entries block ──────────────────────────────────────────────
 # The sentinel comments (# ATD-BEGIN / # ATD-END) delimit our block so
@@ -57,6 +65,11 @@ read -r -d '' ATD_CRON_BLOCK <<'CRON_EOF' || true
 
 # Log rotation: truncate app log files larger than 100 MB (daily at 01:00)
 0 1 * * * find /srv/atd/logs/app -name "*.log" -size +100M -exec truncate -s 50M {} \; 2>/dev/null
+
+# OS update + reboot — 1st Sunday of the month at 04:00
+# (after the weekly backup at 03:00 — reboot is unconditional)
+# "day-of-month <= 7" + "day-of-week = 0" = 1st Sunday of the month
+0 4 1-7 * 0 /home/atd/apps/update-server.sh >> /srv/atd/logs/cron/update-server.log 2>&1
 
 # ATD-END
 CRON_EOF
@@ -87,6 +100,7 @@ echo "────────────────────────�
 crontab -l | grep -A 20 "# ATD-BEGIN" || echo "(not found — something went wrong)"
 echo "────────────────────────────────────────────"
 echo ""
-echo "ℹ️   Cron log: ${CRON_LOG}"
-echo "    To check next run: crontab -l"
+echo "ℹ️   Cron log (backups)  : ${CRON_LOG}"
+echo "    Cron log (updates)  : /srv/atd/logs/cron/update-server.log"
+echo "    To check next run   : crontab -l"
 echo "    To remove all ATD crons: crontab -e → delete # ATD-BEGIN ... # ATD-END block"
