@@ -186,7 +186,7 @@ jobs:
         uses: tailscale/github-action@v2
         with:
           authkey: ${{ secrets.TAILSCALE_AUTHKEY }}
-          version: "latest"
+          version: "1.80.3"
 
       # ── 3c. Sync operational scripts to Dell ──────────────────────────────
       # deploy.sh, backup-db.sh, healthcheck.sh, setup-cron.sh are copied to
