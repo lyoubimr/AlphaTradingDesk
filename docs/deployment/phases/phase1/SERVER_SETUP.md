@@ -1,8 +1,9 @@
 # 🖥️ Server Setup — AlphaTradingDesk Phase 1
 
-**Date:** March 2026 — v2.0  
+**Date:** March 2026 — v3.0  
 **Hardware:** Dell OptiPlex Micro (D09U) — Core i7, 65W  
-**Target OS:** Ubuntu Server 22.04 LTS (headless)  
+**MAC address:** `18:66:DA:13:01:9D` — LAN IP fixe: `192.168.1.100`  
+**Target OS:** Ubuntu Server 24.04 LTS (headless)  
 **Deploy model:** Pull pre-built Docker images from GHCR — Dell **never** builds anything
 
 ---
@@ -11,7 +12,7 @@
 
 1. [Big picture — how it all fits together](#1-big-picture)
 2. [Hardware notes](#2-hardware-notes)
-3. [Install Ubuntu Server 22.04](#3-install-ubuntu-server)
+3. [Install Ubuntu Server 24.04](#3-install-ubuntu-server)
 4. [Post-install OS config](#4-post-install-os-config)
 5. [Fix IP address](#5-fix-ip-address)
 6. [Install Docker](#6-install-docker)
@@ -46,7 +47,8 @@
                        │  SSH (deploy key stored in GitHub Secrets)
                        ▼
 ┌──────────────────────────────────────────────────────────────────────┐
-│  Dell OptiPlex (Ubuntu server — always-on, LAN)                       │
+│  Dell OptiPlex (Ubuntu 24.04 — always-on, LAN)                       │
+│  IP LAN fixe : 192.168.1.100  (MAC: 18:66:DA:13:01:9D)               │
 │  → docker pull ghcr.io/…/atd-backend:vX.Y.Z                         │
 │  → docker pull ghcr.io/…/atd-frontend:vX.Y.Z                        │
 │  → docker compose up -d   (rolling restart, DB untouched)            │
@@ -66,15 +68,19 @@ Rules:
 ## 2. Hardware Notes
 
 ```
-Model:    Dell OptiPlex Micro D09U
-CPU:      Intel Core i7 (7th/8th gen)
-Power:    65W max, ~15–25W idle running Docker
-RAM:      8 GB minimum — 16 GB ideal
-Storage:  250 GB+ SSD required
-Network:  Gigabit Ethernet (rear port) ← use this, not WiFi
+Model:      Dell OptiPlex Micro D09U
+CPU:        Intel Core i7 (7th/8th gen)
+Power:      65W max, ~15–25W idle running Docker
+RAM:        8 GB minimum — 16 GB ideal
+Storage:    250 GB+ SSD required
+Network:    Gigabit Ethernet (rear port) ← use this, not WiFi
+MAC addr:   18:66:DA:13:01:9D           ← ethernet NIC (pour réservation DHCP routeur)
+IP LAN:     192.168.1.100               ← fixe (réservation routeur + Netplan)
+Tailscale:  100.x.x.x                  ← à noter après §4.7
+Hostname:   alphatradingdesk            ← défini pendant l'install Ubuntu
 
 Recommended:
-  Ubuntu Server (no GUI → saves ~2 GB RAM)
+  Ubuntu Server 24.04 LTS (no GUI → saves ~2 GB RAM)
   Docker Engine (not Docker Desktop)
   SSH-only after initial setup
 ```
@@ -86,13 +92,13 @@ Recommended:
 ### 3.1 — Flash USB
 
 ```bash
-# Download: https://ubuntu.com/download/server
+# Download: https://ubuntu.com/download/server  (24.04 LTS)
 # balenaEtcher (Mac GUI): https://www.balena.io/etcher/
 
 # Or terminal:
 diskutil list                  # find USB → e.g. /dev/disk3
 diskutil unmountDisk /dev/disk3
-sudo dd if=ubuntu-22.04.X-live-server-amd64.iso of=/dev/rdisk3 bs=1m status=progress
+sudo dd if=ubuntu-24.04-live-server-amd64.iso of=/dev/rdisk3 bs=1m status=progress
 ```
 
 ### 3.2 — Installation walkthrough
@@ -116,11 +122,13 @@ Installer screens:
   → Reboot → remove USB
 ```
 
-### 3.3 — First SSH
+### 3.3 — First SSH (avant que l'IP soit fixée)
 
 ```bash
-ssh atd@192.168.1.X    # IP from install screen
+# Utiliser l'IP DHCP affichée pendant l'installation
+ssh atd@<dhcp-ip>
 # accept fingerprint → enter password
+# Une fois §5 fait, ce sera toujours: ssh atd@192.168.1.100
 ```
 
 ---
@@ -193,7 +201,24 @@ sudo nano /etc/ssh/sshd_config
 sudo systemctl restart sshd
 ```
 
----
+### 4.7 — Install Tailscale
+
+> Tailscale permet au runner GitHub Actions de se connecter au Dell via un tunnel chiffré,
+> sans ouvrir aucun port sur Internet.
+
+```bash
+# Sur le Dell:
+curl -fsSL https://tailscale.com/install.sh | sh
+sudo tailscale up    # suit le lien d'auth dans le navigateur
+
+# Récupérer l'IP Tailscale → c'est la valeur du secret GitHub DELL_HOST
+tailscale ip -4
+# Exemple: 100.94.12.45  ← noter cette IP
+```
+
+> ⚠️ **Mettre cette IP dans le secret GitHub `DELL_HOST`** (voir §8).  
+> Ne pas utiliser l'IP LAN `192.168.1.100` pour le secret — les runners GitHub  
+> ne peuvent pas résoudre les adresses LAN privées.
 
 ## 5. Fix IP Address
 
@@ -201,28 +226,29 @@ Do BOTH — router reservation + OS static config.
 
 ### 5.1 — Router DHCP reservation
 
-```bash
-# Get Dell's MAC address:
-ip link show    # note the MAC of your ethernet interface (e.g. a8:a1:59:12:34:56)
-```
+> La MAC address du Dell est connue : `18:66:DA:13:01:9D`
 
 ```
 Router admin panel (find URL on your router label):
-  Freebox:   http://mafreebox.freebox.fr  → DHCP → Baux statiques
+  Freebox:   http://mafreebox.freebox.fr  → Paramètres → DHCP → Baux statiques
   Bbox:      http://192.168.1.254         → Réseau → DHCP → Réservations
   SFR:       http://192.168.0.1           → Réseau → DHCP
   Livebox:   http://192.168.1.1           → Réseau avancé → DHCP
 
 Add entry:
-  MAC:      <Dell MAC>
-  IP:       192.168.1.50
-  Save + apply
+  MAC:  18:66:DA:13:01:9D
+  IP:   192.168.1.100
+  Name: alphatradingdesk
+  → Save + apply
 ```
 
 ### 5.2 — Static IP on OS (Netplan)
 
 ```bash
-ip link show    # find interface name, e.g. enp3s0
+# Trouver le nom de l'interface ethernet:
+ip link show
+# Chercher l'interface avec la MAC 18:66:DA:13:01:9D
+# Typiquement: enp3s0, eno1, enp0s31f6 ...
 
 sudo nano /etc/netplan/00-installer-config.yaml
 ```
@@ -231,13 +257,13 @@ sudo nano /etc/netplan/00-installer-config.yaml
 network:
   version: 2
   ethernets:
-    enp3s0:                      # ← replace with your interface
+    enp3s0:                      # ← remplacer par TON nom d'interface
       dhcp4: false
       addresses:
-        - 192.168.1.50/24
+        - 192.168.1.100/24
       routes:
         - to: default
-          via: 192.168.1.1       # ← your router gateway
+          via: 192.168.1.1       # ← gateway de ton routeur
       nameservers:
         addresses: [1.1.1.1, 8.8.8.8]
       optional: true
@@ -245,8 +271,17 @@ network:
 
 ```bash
 sudo netplan apply
-# Session drops — reconnect:
-ssh atd@192.168.1.50
+# La session SSH tombe — se reconnecter avec la nouvelle IP:
+ssh atd@192.168.1.100
+# À partir de maintenant, cette IP est permanente
+```
+
+### 5.3 — Vérification
+
+```bash
+ip addr show           # confirme 192.168.1.100
+ping 1.1.1.1           # internet accessible
+tailscale ip -4        # Tailscale toujours actif
 ```
 
 ---
@@ -312,13 +347,15 @@ nano ~/apps/.env
 
 ```bash
 # ~/apps/.env — NEVER commit this file
+# Générer les valeurs: openssl rand -hex 24 / openssl rand -hex 32
 POSTGRES_DB=atd_prod
 POSTGRES_USER=atd
 POSTGRES_PASSWORD=<openssl rand -hex 24>
 SECRET_KEY=<openssl rand -hex 32>
 ENCRYPTION_KEY=<openssl rand -hex 16>
 APP_ENV=prod
-ALLOWED_ORIGINS=http://alphatradingdesk.local,http://192.168.1.50
+ALLOWED_ORIGINS=http://alphatradingdesk.local,http://192.168.1.100
+DATABASE_URL=postgresql://atd:<POSTGRES_PASSWORD>@db:5432/atd_prod
 ```
 
 ```bash
@@ -400,12 +437,14 @@ The deploy script (`scripts/prod/deploy.sh`) lives in the Git repo and is
 You only need to copy it manually for the very first deploy (before CI/CD is wired up):
 
 ```bash
-# From your Mac — first time only:
-scp scripts/prod/deploy.sh atd@192.168.1.50:~/apps/deploy.sh
-scp scripts/prod/backup-db.sh atd@192.168.1.50:~/apps/backup-db.sh
-scp scripts/prod/healthcheck.sh atd@192.168.1.50:~/apps/healthcheck.sh
-scp scripts/prod/setup-cron.sh atd@192.168.1.50:~/apps/setup-cron.sh
-ssh atd@192.168.1.50 "chmod +x ~/apps/*.sh"
+# From your Mac — first time only (LAN IP, Tailscale pas encore nécessaire):
+scp scripts/prod/deploy.sh \
+    scripts/prod/backup-db.sh \
+    scripts/prod/healthcheck.sh \
+    scripts/prod/setup-cron.sh \
+    atd@192.168.1.100:~/apps/
+
+ssh atd@192.168.1.100 "chmod +x ~/apps/*.sh"
 ```
 
 > After Step 8 (GitHub Secrets) is done, CI/CD handles all future script updates
@@ -465,25 +504,53 @@ Go to: **GitHub repo → Settings → Secrets and variables → Actions → New 
 ### 8.2 — Generate deploy SSH key (dedicated, not your personal key)
 
 ```bash
-# On your Mac:
-ssh-keygen -t ed25519 -C "github-actions-atd-deploy" -f ~/.ssh/atd_deploy_key
-# No passphrase — GitHub Actions needs non-interactive auth
+# On your Mac — clé DÉDIÉE CI/CD (pas ta clé perso):
+ssh-keygen -t ed25519 -C "github-actions-atd-deploy" \
+           -f ~/.ssh/atd_deploy_key -N ""
+# -N "" = pas de passphrase (GitHub Actions a besoin d'auth non-interactive)
 
-# Add PUBLIC key to Dell:
-ssh atd "cat >> ~/.ssh/authorized_keys" < ~/.ssh/atd_deploy_key.pub
+# Deux fichiers créés:
+#   ~/.ssh/atd_deploy_key      ← PRIVÉE → GitHub Secret DELL_SSH_KEY
+#   ~/.ssh/atd_deploy_key.pub  ← PUBLIQUE → Dell authorized_keys
 
-# Verify:
-ssh -i ~/.ssh/atd_deploy_key atd@192.168.1.50 "echo OK"
+# Copier la clé PUBLIQUE sur le Dell:
+ssh-copy-id -i ~/.ssh/atd_deploy_key.pub atd@192.168.1.100
 
-# Copy PRIVATE key → paste into GitHub Secret DELL_SSH_KEY:
-cat ~/.ssh/atd_deploy_key
-# Copy everything: -----BEGIN OPENSSH PRIVATE KEY----- ... -----END ...
+# Tester:
+ssh -i ~/.ssh/atd_deploy_key atd@192.168.1.100 "echo ✅ OK"
+
+# Copier la clé PRIVÉE → coller dans GitHub Secret DELL_SSH_KEY:
+cat ~/.ssh/atd_deploy_key | pbcopy
+# → GitHub → Settings → Secrets → DELL_SSH_KEY → coller → Save
 ```
 
-> ⚠️ **Private key → GitHub Secret. Public key → Dell `authorized_keys`.**
-> Never swap them. Never commit either to the repo.
+> ⚠️ **Clé PRIVÉE → GitHub Secret. Clé PUBLIQUE → Dell `authorized_keys`.**  
+> Ne jamais inverser. Ne jamais commiter l'une ou l'autre dans le repo.
 
-### 8.3 — GHCR authentication on the Dell (private repo only)
+### 8.3 — Générer le TAILSCALE_AUTHKEY
+
+```
+1. Aller sur: https://login.tailscale.com/admin/settings/keys
+2. Cliquer "Generate auth key"
+3. Cocher:
+   ✅ Reusable    — le runner CI s'exécute à chaque deploy, a besoin de réutilisation
+   ✅ Ephemeral   — disparaît de l'admin Tailscale après usage (pas de pollution)
+   ✅ Pre-authorized — pas d'approbation manuelle nécessaire
+4. Expiration: 90 jours (prévoir un rappel calendrier pour renouveler)
+5. Copier la clé → GitHub Secret TAILSCALE_AUTHKEY
+```
+
+### 8.4 — Vérifier que les 4 secrets sont bien configurés
+
+```
+GitHub → repo → Settings → Secrets and variables → Actions
+
+Tu dois voir exactement:
+  DELL_HOST          ✅  (100.x.x.x — IP Tailscale du Dell)
+  DELL_USER          ✅  (atd)
+  DELL_SSH_KEY       ✅  (contenu complet -----BEGIN OPENSSH PRIVATE KEY-----)
+  TAILSCALE_AUTHKEY  ✅  (tskey-auth-...)
+```
 
 If your GitHub repo is **public**, GHCR images are public → no token needed.
 If your repo is **private**:
@@ -496,39 +563,14 @@ echo "<YOUR_TOKEN>" | docker login ghcr.io -u <your-github-username> --password-
 # Credentials saved to ~/.docker/config.json — persists across reboots
 ```
 
-### 8.4 — LAN deployment: GitHub runner can't reach 192.168.1.50
+### 8.4 — Pourquoi Tailscale ? (GitHub runner ne peut pas atteindre 192.168.1.100)
 
-GitHub's cloud runners run on the internet — they can't SSH into your LAN.
-Two solutions:
+GitHub cloud runners tournent sur Internet — ils ne peuvent pas SSH dans ton LAN directement.
+Tailscale est installé en §4.7. Le workflow CI/CD se connecte au réseau Tailscale via `TAILSCALE_AUTHKEY`
+avant d'ouvrir le SSH sur `DELL_HOST` (`100.x.x.x`).
 
-**Option A — Tailscale (recommended, 10 min setup):**
-
-```bash
-# On the Dell:
-curl -fsSL https://tailscale.com/install.sh | sh
-sudo tailscale up    # follow auth link in browser
-tailscale ip -4      # note the 100.x.x.x IP
-
-# Set DELL_HOST secret to the Tailscale IP (100.x.x.x)
-# Add to atd-deploy.yml (before the SSH step):
-```
-
-```yaml
-- name: Connect to Tailscale
-  uses: tailscale/github-action@v2
-  with:
-    authkey: ${{ secrets.TAILSCALE_AUTHKEY }}
-    # Create authkey: https://login.tailscale.com/admin/settings/keys
-```
-
-**Option B — Self-hosted runner on the Dell (no tunnel needed):**
-
-```bash
-# GitHub: Settings → Actions → Runners → New self-hosted runner
-# Follow the install instructions on the Dell
-# Change atd-deploy.yml: runs-on: self-hosted
-# Pro: fastest deploys, no tunnel. Con: runner process must stay running.
-```
+> Tailscale est déjà installé (§4.7) et `TAILSCALE_AUTHKEY` déclaré (§8.1).
+> Le step dans `atd-deploy.yml` est déjà configuré — rien à faire manuellement ici.
 
 ---
 
@@ -571,13 +613,13 @@ Server disk failure              💀 lost   💀 lost   restore from Mac rsync 
 ## 10. LAN Domain — alphatradingdesk.local
 
 ```
-avahi-daemon on the Dell broadcasts: "I am alphatradingdesk.local at 192.168.1.50"
+avahi-daemon on the Dell broadcasts: "I am alphatradingdesk.local at 192.168.1.100"
 
 Devices that resolve it natively:
   macOS, iOS, iPadOS   → built-in (Bonjour)
   Linux                → avahi-daemon installed
   Windows              → needs Bonjour for Windows (or use IP directly)
-  Android              → use IP directly (192.168.1.50)
+  Android              → use IP directly (192.168.1.100)
 ```
 
 ```bash
@@ -585,7 +627,7 @@ Devices that resolve it natively:
 avahi-daemon --check && echo "running"
 
 # Test from Mac:
-ping alphatradingdesk.local         # → 192.168.1.50
+ping alphatradingdesk.local         # → 192.168.1.100
 open http://alphatradingdesk.local  # → app
 ```
 
@@ -766,25 +808,31 @@ docker compose -f ~/apps/docker-compose.prod.yml exec backend \
 ---
 
 ```
-Quick reference
-───────────────────────────────────────────────────
-Dell LAN IP:      192.168.1.50
-Dell Tailscale:   100.x.x.x  (used by CI/CD — set in DELL_HOST secret)
-SSH:              ssh atd
-App URL:          http://alphatradingdesk.local
-DB data:          /srv/atd/data/postgres/
-Uploads:          /srv/atd/data/uploads/
-Backups:          /srv/atd/backups/
-Logs:             /srv/atd/logs/
-Deploy script:    ~/apps/deploy.sh <version>   (export GHCR_OWNER=... first)
-Compose:          ~/apps/docker-compose.prod.yml
-Env file:         ~/apps/.env
-
-CI/CD secrets (GitHub Settings → Secrets → Actions):
-  DELL_HOST          → 100.x.x.x  (Tailscale IP)
-  DELL_USER          → atd
-  DELL_SSH_KEY       → ed25519 private key content
-  TAILSCALE_AUTHKEY  → Tailscale reusable auth key
-  GITHUB_TOKEN       → auto-injected (no setup)
-  GHCR_OWNER         → NOT a secret (github.repository_owner, auto)
+╔══════════════════════════════════════════════════════════════════════╗
+║  QUICK REFERENCE                                                      ║
+╠══════════════════════════════════════════════════════════════════════╣
+║  Dell MAC address    18:66:DA:13:01:9D  (NIC ethernet)               ║
+║  Dell LAN IP         192.168.1.100  (DHCP reservation + Netplan)     ║
+║  Dell Tailscale      100.x.x.x  → tailscale ip -4  sur le Dell       ║
+║  SSH shortcut        ssh atd  (via ~/.ssh/config)                     ║
+║  App URL (LAN)       http://alphatradingdesk.local                    ║
+║  App URL (IP)        http://192.168.1.100                             ║
+║                                                                       ║
+║  DB data             /srv/atd/data/postgres/                          ║
+║  Uploads             /srv/atd/data/uploads/                           ║
+║  Backups             /srv/atd/backups/                                ║
+║  Logs                /srv/atd/logs/                                   ║
+║  Scripts             ~/apps/                                          ║
+║  Compose             ~/apps/docker-compose.prod.yml                   ║
+║  Env file            ~/apps/.env                                      ║
+╠══════════════════════════════════════════════════════════════════════╣
+║  GITHUB SECRETS (4 required — Settings → Secrets → Actions)          ║
+║  DELL_HOST          100.x.x.x  (tailscale ip -4 sur le Dell)         ║
+║  DELL_USER          atd                                               ║
+║  DELL_SSH_KEY       cat ~/.ssh/atd_deploy_key | pbcopy  (privée)      ║
+║  TAILSCALE_AUTHKEY  tailscale.com/admin/settings/keys                 ║
+║                     → Reusable + Ephemeral + Pre-authorized           ║
+║  GITHUB_TOKEN       auto-injecté (pas de setup)                      ║
+║  GHCR_OWNER         PAS un secret (github.repository_owner, auto)    ║
+╚══════════════════════════════════════════════════════════════════════╝
 ```
