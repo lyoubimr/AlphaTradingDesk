@@ -18,6 +18,7 @@ env_file_required=False ensures the app starts cleanly without a file.
 
 import os
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Resolve which .env file to load based on APP_ENV.
@@ -41,8 +42,9 @@ class Settings(BaseSettings):
     secret_key: str
     encryption_key: str
 
-    # App
-    environment: str = "development"
+    # App — reads APP_ENV directly (same var used to select the .env file)
+    # Values: "dev" | "test" | "prod"
+    environment: str = Field("dev", alias="APP_ENV")
 
     # Uploads — absolute path to the uploads directory
     # In Docker: mount a named volume here so uploads survive container restarts
@@ -59,7 +61,7 @@ class Settings(BaseSettings):
 
     @property
     def is_dev(self) -> bool:
-        return self.environment == "development"
+        return self.environment == "dev"
 
 
 settings = Settings()  # type: ignore[call-arg]

@@ -1,34 +1,57 @@
 name: ATD — Deploy
 
+# ── Trigger ──────────────────────────────────────────────────────────────────
+# Runs on every push to main.
+# The pipeline is split into 3 independent jobs so that a failed deploy job
+# can be re-run alone — without re-building images or re-creating the tag.
+#
+# ⚠️  DORMANT until secrets are set (implement-phase1.md Step 14).
+#
+# ── Bump rules (commit prefix → semver) ──────────────────────────────────────
+#   fix: / chore: / refactor:  → PATCH  v1.0.0 → v1.0.1
+#   feat:                      → MINOR  v1.0.1 → v1.1.0
+#   feat!: / BREAKING CHANGE   → MAJOR  v1.1.0 → v2.0.0
+#   docs: / test: / ci:        → no bump (no release, no deploy)
+#
+# ── Re-run behaviour ─────────────────────────────────────────────────────────
+# If the `deploy` job fails (e.g. SSH timeout) you can re-run it alone.
+# On re-run: `version` skips tag creation (tag already exists) but still
+# exports `release_tag` via `previous_tag`, so `build` and `deploy` receive
+# the correct version and run normally.
+
 on:
   push:
     branches: [main]
 
+# ── Shared permissions ────────────────────────────────────────────────────────
+permissions:
+  contents: write    # push git tags + create GitHub Release
+  packages: write    # push images to GHCR
+
+# =============================================================================
+# JOB 1 — version
+# Computes the next semver tag (or detects the existing one on re-run).
+# Outputs: release_tag (e.g. "v1.2.0") — empty string if no bump needed.
+# =============================================================================
 jobs:
-  tag-build-deploy:
-    # ── Runs on GitHub cloud runner ─────────────────────────────────────────
-    # Builds images here, pushes to GHCR, then SSHes into Dell to deploy.
-    # To migrate: change DELL_HOST → GCE_HOST in GitHub Secrets. Zero pipeline rework.
-    # ⚠️  DORMANT until secrets are set (implement-phase1.md Step 14).
+  version:
+    name: Compute version
     runs-on: ubuntu-latest
-    permissions:
-      contents: write    # push git tags
-      packages: write    # push to GHCR (ghcr.io)
+    outputs:
+      release_tag: ${{ steps.pick_tag.outputs.release_tag }}
+      changelog:   ${{ steps.semver.outputs.changelog }}
 
     steps:
-      # ── 1. Checkout with full history (needed for semver) ───────────────
+      # ── 1a. Checkout with full history (needed for semver) ───────────────
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      # ── 2. Compute next semantic version from commit messages ───────────
-      # Bump rules:
-      #   fix: / chore: / refactor:  → PATCH  v1.0.0 → v1.0.1
-      #   feat:                      → MINOR  v1.0.1 → v1.1.0
-      #   feat!: / BREAKING CHANGE   → MAJOR  v1.1.0 → v2.0.0
-      #   docs: / test: / ci:        → no bump (skips release)
-      - name: Compute next version
+      # ── 1b. Compute (or skip) semver tag ─────────────────────────────────
+      # On first run  → creates tag, new_tag = "v1.2.0", previous_tag = "v1.1.0"
+      # On re-run     → tag already exists, new_tag = "", previous_tag = "v1.2.0"
+      - name: Compute semver tag
         id: semver
         uses: mathieudutour/github-tag-action@v6.2
         with:
@@ -38,57 +61,139 @@ jobs:
           tag_prefix: v
           custom_release_rules: "chore:patch,refactor:patch"
 
-      # ── 3. Login to GHCR ────────────────────────────────────────────────
+      # ── 1c. Resolve the tag to use downstream ────────────────────────────
+      # First run : new_tag      = "v1.2.0"  → release_tag = "v1.2.0"
+      # Re-run    : new_tag      = ""         → release_tag = previous_tag ("v1.2.0")
+      # No bump   : previous_tag = "v1.1.0", new_tag = "" but no feat/fix → stays ""
+      #
+      # We distinguish "re-run of a real release" from "no-bump commit" by
+      # checking whether previous_tag changed in this push.  Since we can't
+      # easily detect that here, we use a simple heuristic: if new_tag is
+      # empty but the HEAD commit message contains a bump-worthy prefix, we
+      # fall back to previous_tag; otherwise we leave release_tag empty.
+      # In practice: just always pass previous_tag when new_tag is empty —
+      # downstream jobs guard on release_tag being non-empty anyway.
+      - name: Resolve release tag
+        id: pick_tag
+        run: |
+          NEW="${{ steps.semver.outputs.new_tag }}"
+          PREV="${{ steps.semver.outputs.previous_tag }}"
+          if [ -n "$NEW" ]; then
+            echo "release_tag=$NEW" >> "$GITHUB_OUTPUT"
+            echo "✅ New release: $NEW"
+          else
+            # Check if HEAD commit is bump-worthy (re-run scenario)
+            MSG=$(git log -1 --pretty=%s)
+            if echo "$MSG" | grep -qE '^(feat|fix|chore|refactor)(\(.+\))?!?:'; then
+              echo "release_tag=$PREV" >> "$GITHUB_OUTPUT"
+              echo "♻️  Re-run detected — reusing existing tag: $PREV"
+            else
+              echo "release_tag=" >> "$GITHUB_OUTPUT"
+              echo "ℹ️  No version bump — commit: $MSG"
+            fi
+          fi
+
+      # ── 1d. Report skip ──────────────────────────────────────────────────
+      - name: No release
+        if: steps.pick_tag.outputs.release_tag == ''
+        run: |
+          echo "ℹ️ No version bump — skipping build & deploy."
+          echo "   Commit types that trigger a release: fix: chore: refactor: feat: feat!:"
+
+  # ===========================================================================
+  # JOB 2 — build
+  # Builds Docker images and pushes them to GHCR.
+  # Creates the GitHub Release on first run (skipped on re-run: tag exists).
+  # Depends on: version (needs release_tag)
+  # ===========================================================================
+  build:
+    name: Build & push images
+    needs: version
+    if: needs.version.outputs.release_tag != ''
+    runs-on: ubuntu-latest
+
+    steps:
+      # ── 2a. Checkout ──────────────────────────────────────────────────────
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # ── 2b. Login to GHCR ─────────────────────────────────────────────────
       - name: Log in to GHCR
-        if: steps.semver.outputs.new_tag != ''
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # ── 4. Build & push backend image ───────────────────────────────────
+      # ── 2c. Build & push backend image ────────────────────────────────────
       - name: Build & push backend
-        if: steps.semver.outputs.new_tag != ''
         uses: docker/build-push-action@v5
         with:
           context: .
           file: ./Dockerfile.backend
           push: true
           tags: |
-            ghcr.io/${{ github.repository_owner }}/atd-backend:${{ steps.semver.outputs.new_tag }}
+            ghcr.io/${{ github.repository_owner }}/atd-backend:${{ needs.version.outputs.release_tag }}
             ghcr.io/${{ github.repository_owner }}/atd-backend:latest
 
-      # ── 5. Build & push frontend image ──────────────────────────────────
+      # ── 2d. Build & push frontend image ───────────────────────────────────
       - name: Build & push frontend
-        if: steps.semver.outputs.new_tag != ''
         uses: docker/build-push-action@v5
         with:
           context: ./frontend
           file: ./frontend/Dockerfile
           push: true
           tags: |
-            ghcr.io/${{ github.repository_owner }}/atd-frontend:${{ steps.semver.outputs.new_tag }}
+            ghcr.io/${{ github.repository_owner }}/atd-frontend:${{ needs.version.outputs.release_tag }}
             ghcr.io/${{ github.repository_owner }}/atd-frontend:latest
 
-      # ── 6. Create GitHub Release with auto-generated changelog ──────────
+      # ── 2e. Create GitHub Release (idempotent — skipped if tag exists) ────
       - name: Create GitHub Release
-        if: steps.semver.outputs.new_tag != ''
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.semver.outputs.new_tag }}
-          name: Release ${{ steps.semver.outputs.new_tag }}
-          body: ${{ steps.semver.outputs.changelog }}
+          tag_name: ${{ needs.version.outputs.release_tag }}
+          name: Release ${{ needs.version.outputs.release_tag }}
+          body: ${{ needs.version.outputs.changelog }}
           draft: false
           prerelease: false
+        continue-on-error: true   # Release already exists on re-run → non-fatal
 
-      # ── 7. Sync operational scripts to Dell ─────────────────────────────
-      # deploy.sh, backup-db.sh, healthcheck.sh, setup-cron.sh are copied
-      # to ~/apps/ on every release so the Dell always runs the latest version.
+  # ===========================================================================
+  # JOB 3 — deploy
+  # Syncs operational scripts to Dell, then SSHes in to run deploy.sh.
+  # Depends on: build (images must be pushed first)
+  # Re-runnable independently: re-run only this job after an SSH timeout.
+  # ===========================================================================
+  deploy:
+    name: Deploy to Dell
+    needs: [version, build]
+    if: needs.version.outputs.release_tag != ''
+    runs-on: ubuntu-latest
+
+    steps:
+      # ── 3a. Checkout (needed for scripts sync) ────────────────────────────
+      - name: Checkout (for scripts)
+        uses: actions/checkout@v4
+
+      # ── 3b. Join Tailscale network ────────────────────────────────────────
+      # The GitHub runner is on the internet — it cannot reach the Dell's LAN
+      # IP (192.168.1.100) directly. Tailscale creates an encrypted tunnel so
+      # the runner can SSH into the Dell via its Tailscale IP (100.x.x.x).
+      # TAILSCALE_AUTHKEY must be: Reusable + Ephemeral + Pre-authorized.
+      - name: Connect Tailscale
+        uses: tailscale/github-action@v2
+        with:
+          authkey: ${{ secrets.TAILSCALE_AUTHKEY }}
+          version: "latest"
+
+      # ── 3c. Sync operational scripts to Dell ──────────────────────────────
+      # deploy.sh, backup-db.sh, healthcheck.sh, setup-cron.sh are copied to
+      # ~/apps/ on every release so Dell always runs the latest version.
       # setup-server.sh is intentionally excluded — it provisions the OS and
-      # is run manually once; auto-deploying it would be dangerous.
+      # must be run manually once; auto-deploying it would be dangerous.
       - name: Sync prod scripts to Dell
-        if: steps.semver.outputs.new_tag != ''
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.DELL_HOST }}
@@ -98,35 +203,21 @@ jobs:
           target: "~/apps/"
           strip_components: 2
 
-      # ── 8. Make scripts executable after copy ───────────────────────────
-      - name: chmod scripts on Dell
-        if: steps.semver.outputs.new_tag != ''
+      # ── 3d. Make scripts executable + login to GHCR + deploy ─────────────
+      # GHCR_TOKEN (PAT with read:packages) is stored in GitHub Secrets.
+      # It's used here to ensure the Dell is always authenticated to GHCR
+      # before pulling images — credentials are cached in ~/.docker/config.json.
+      # GHCR_OWNER is passed as env var so deploy.sh stays fully generic
+      # (no hardcoded username). Works for forks and org migrations.
+      - name: SSH deploy
         uses: appleboy/ssh-action@v1
         with:
           host: ${{ secrets.DELL_HOST }}
           username: ${{ secrets.DELL_USER }}
           key: ${{ secrets.DELL_SSH_KEY }}
           script: |
+            set -euo pipefail
             chmod +x ~/apps/deploy.sh ~/apps/backup-db.sh ~/apps/healthcheck.sh ~/apps/setup-cron.sh
-
-      # ── 9. SSH into Dell → pull images → docker compose up ──────────────
-      # GHCR_OWNER is passed as an env var so deploy.sh stays fully generic
-      # (no hardcoded username). It reads github.repository_owner which is
-      # the org/user that owns the repo — works for forks and org migrations.
-      - name: Deploy to Dell
-        if: steps.semver.outputs.new_tag != ''
-        uses: appleboy/ssh-action@v1
-        with:
-          host: ${{ secrets.DELL_HOST }}
-          username: ${{ secrets.DELL_USER }}
-          key: ${{ secrets.DELL_SSH_KEY }}
-          script: |
+            echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u "${{ github.repository_owner }}" --password-stdin
             export GHCR_OWNER="${{ github.repository_owner }}"
-            ~/apps/deploy.sh "${{ steps.semver.outputs.new_tag }}"
-
-      # ── 10. Report deploy skipped (no version bump) ─────────────────────
-      - name: No release
-        if: steps.semver.outputs.new_tag == ''
-        run: |
-          echo "ℹ️ No version bump — skipping build & deploy."
-          echo "   Commit types that trigger a release: fix: chore: refactor: feat: feat!:"
+            ~/apps/deploy.sh "${{ needs.version.outputs.release_tag }}"
