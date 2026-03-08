@@ -1,0 +1,32 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# System deps for psycopg (binary)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libpq-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Poetry
+RUN pip install --no-cache-dir poetry
+
+# Copy dependency files first (layer cache)
+COPY pyproject.toml poetry.lock* ./
+
+# Install dependencies only (no project package yet)
+RUN poetry config virtualenvs.create false \
+    && poetry install --no-root --no-interaction --no-ansi
+
+# Copy source + Alembic config + entrypoint
+COPY src/ ./src/
+COPY database/ ./database/
+COPY alembic.ini ./alembic.ini
+COPY scripts/entrypoint.sh ./entrypoint.sh
+RUN chmod +x ./entrypoint.sh
+
+EXPOSE 8000
+
+# entrypoint: wait-for-db → migrate → seed → uvicorn
+# Extra uvicorn flags can be passed as CMD overrides (e.g. --reload in dev)
+ENTRYPOINT ["./entrypoint.sh"]
+CMD []

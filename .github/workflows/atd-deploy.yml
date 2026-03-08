@@ -1,0 +1,132 @@
+name: ATD — Deploy
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  tag-build-deploy:
+    # ── Runs on GitHub cloud runner ─────────────────────────────────────────
+    # Builds images here, pushes to GHCR, then SSHes into Dell to deploy.
+    # To migrate: change DELL_HOST → GCE_HOST in GitHub Secrets. Zero pipeline rework.
+    # ⚠️  DORMANT until secrets are set (implement-phase1.md Step 14).
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write    # push git tags
+      packages: write    # push to GHCR (ghcr.io)
+
+    steps:
+      # ── 1. Checkout with full history (needed for semver) ───────────────
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # ── 2. Compute next semantic version from commit messages ───────────
+      # Bump rules:
+      #   fix: / chore: / refactor:  → PATCH  v1.0.0 → v1.0.1
+      #   feat:                      → MINOR  v1.0.1 → v1.1.0
+      #   feat!: / BREAKING CHANGE   → MAJOR  v1.1.0 → v2.0.0
+      #   docs: / test: / ci:        → no bump (skips release)
+      - name: Compute next version
+        id: semver
+        uses: mathieudutour/github-tag-action@v6.2
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          release_branches: main
+          default_bump: false
+          tag_prefix: v
+          custom_release_rules: "chore:patch,refactor:patch"
+
+      # ── 3. Login to GHCR ────────────────────────────────────────────────
+      - name: Log in to GHCR
+        if: steps.semver.outputs.new_tag != ''
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # ── 4. Build & push backend image ───────────────────────────────────
+      - name: Build & push backend
+        if: steps.semver.outputs.new_tag != ''
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile.backend
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/atd-backend:${{ steps.semver.outputs.new_tag }}
+            ghcr.io/${{ github.repository_owner }}/atd-backend:latest
+
+      # ── 5. Build & push frontend image ──────────────────────────────────
+      - name: Build & push frontend
+        if: steps.semver.outputs.new_tag != ''
+        uses: docker/build-push-action@v5
+        with:
+          context: ./frontend
+          file: ./frontend/Dockerfile
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/atd-frontend:${{ steps.semver.outputs.new_tag }}
+            ghcr.io/${{ github.repository_owner }}/atd-frontend:latest
+
+      # ── 6. Create GitHub Release with auto-generated changelog ──────────
+      - name: Create GitHub Release
+        if: steps.semver.outputs.new_tag != ''
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.semver.outputs.new_tag }}
+          name: Release ${{ steps.semver.outputs.new_tag }}
+          body: ${{ steps.semver.outputs.changelog }}
+          draft: false
+          prerelease: false
+
+      # ── 7. Sync operational scripts to Dell ─────────────────────────────
+      # deploy.sh, backup-db.sh, healthcheck.sh, setup-cron.sh are copied
+      # to ~/apps/ on every release so the Dell always runs the latest version.
+      # setup-server.sh is intentionally excluded — it provisions the OS and
+      # is run manually once; auto-deploying it would be dangerous.
+      - name: Sync prod scripts to Dell
+        if: steps.semver.outputs.new_tag != ''
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.DELL_HOST }}
+          username: ${{ secrets.DELL_USER }}
+          key: ${{ secrets.DELL_SSH_KEY }}
+          source: "scripts/prod/deploy.sh,scripts/prod/backup-db.sh,scripts/prod/healthcheck.sh,scripts/prod/setup-cron.sh"
+          target: "~/apps/"
+          strip_components: 2
+
+      # ── 8. Make scripts executable after copy ───────────────────────────
+      - name: chmod scripts on Dell
+        if: steps.semver.outputs.new_tag != ''
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.DELL_HOST }}
+          username: ${{ secrets.DELL_USER }}
+          key: ${{ secrets.DELL_SSH_KEY }}
+          script: |
+            chmod +x ~/apps/deploy.sh ~/apps/backup-db.sh ~/apps/healthcheck.sh ~/apps/setup-cron.sh
+
+      # ── 9. SSH into Dell → pull images → docker compose up ──────────────
+      # GHCR_OWNER is passed as an env var so deploy.sh stays fully generic
+      # (no hardcoded username). It reads github.repository_owner which is
+      # the org/user that owns the repo — works for forks and org migrations.
+      - name: Deploy to Dell
+        if: steps.semver.outputs.new_tag != ''
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.DELL_HOST }}
+          username: ${{ secrets.DELL_USER }}
+          key: ${{ secrets.DELL_SSH_KEY }}
+          script: |
+            export GHCR_OWNER="${{ github.repository_owner }}"
+            ~/apps/deploy.sh "${{ steps.semver.outputs.new_tag }}"
+
+      # ── 10. Report deploy skipped (no version bump) ─────────────────────
+      - name: No release
+        if: steps.semver.outputs.new_tag == ''
+        run: |
+          echo "ℹ️ No version bump — skipping build & deploy."
+          echo "   Commit types that trigger a release: fix: chore: refactor: feat: feat!:"

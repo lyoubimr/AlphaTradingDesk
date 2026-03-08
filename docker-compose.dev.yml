@@ -1,0 +1,77 @@
+# ─────────────────────────────────────────────────────────────────
+# AlphaTradingDesk — docker-compose.dev.yml
+# Steps 1–13: everything runs locally on Mac
+# After Step 14.0 migration: db + adminer services removed,
+#   .env.dev updated to point to Dell 192.168.1.50:5432/atd_dev
+# ─────────────────────────────────────────────────────────────────
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: atd_dev
+      POSTGRES_USER: atd
+      POSTGRES_PASSWORD: dev_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U atd -d atd_dev"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    # entrypoint.sh handles: wait-for-db → migrate → seed → uvicorn
+    # --reload is passed as extra arg to uvicorn (dev only)
+    command: ["--reload"]
+    ports:
+      - "8000:8000"
+    env_file: .env.dev
+    environment:
+      # Override the DATABASE_URL host: inside Docker, the DB is reachable
+      # via the service name "db", not "localhost".
+      DATABASE_URL: postgresql://atd:dev_password@db:5432/atd_dev
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./src:/app/src
+      - ./database:/app/database
+      - ./alembic.ini:/app/alembic.ini
+      - ./scripts:/app/scripts
+      # Uploads — bind-mounted so images survive container restarts in dev
+      - ./uploads:/app/uploads
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.dev       # dev-only: node + Vite HMR (not nginx)
+    ports:
+      - "5173:5173"
+    depends_on:
+      - backend
+    volumes:
+      # Bind-mount the whole frontend source for HMR to work
+      - ./frontend/src:/app/src
+      - ./frontend/public:/app/public
+      - ./frontend/index.html:/app/index.html
+      - ./frontend/vite.config.ts:/app/vite.config.ts
+    environment:
+      # Tell Vite to poll for file changes (needed on macOS Docker Desktop)
+      CHOKIDAR_USEPOLLING: "true"
+      # Inside Docker, backend is reachable via service name, not localhost
+      VITE_API_TARGET: "http://backend:8000"
+
+  adminer:
+    image: adminer:latest
+    ports:
+      - "8080:8080"
+    depends_on:
+      - db
+
+volumes:
+  postgres_data:

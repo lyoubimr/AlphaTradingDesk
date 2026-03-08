@@ -1,0 +1,19 @@
+# ─────────────────────────────────────────────────────────────────
+# AlphaTradingDesk — frontend/Dockerfile.dev
+# Dev-only: node:22-alpine + Vite HMR on :5173
+# NOT used in production (see Dockerfile for nginx multi-stage build)
+# ─────────────────────────────────────────────────────────────────
+FROM node:22-alpine
+WORKDIR /app
+
+# Install deps first (cached layer — only re-runs when package*.json changes)
+COPY package*.json ./
+RUN npm ci
+
+# Source is mounted via volume in docker-compose.dev.yml
+# COPY . .  ← NOT needed: ./frontend/src is bind-mounted at runtime
+
+EXPOSE 5173
+
+# --host exposes Vite to all interfaces inside the container
+CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0"]
