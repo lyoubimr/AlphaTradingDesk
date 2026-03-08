@@ -1,6 +1,6 @@
 # 📈 AlphaTradingDesk
 
-> A self-hosted, multi-asset trading platform — risk management, trade journal, goals & market analysis.  
+> A self-hosted, multi-asset trading platform — risk management, trade journal, goals and market analysis.  
 > Runs on your LAN. Your data stays yours.
 
 ---
