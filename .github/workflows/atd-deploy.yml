@@ -173,14 +173,26 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # ── 3a. Sync operational scripts to Dell ──────────────────────────────
+      # ── 3a. Checkout (needed for scripts sync) ────────────────────────────
+      - name: Checkout (for scripts)
+        uses: actions/checkout@v4
+
+      # ── 3b. Join Tailscale network ────────────────────────────────────────
+      # The GitHub runner is on the internet — it cannot reach the Dell's LAN
+      # IP (192.168.1.100) directly. Tailscale creates an encrypted tunnel so
+      # the runner can SSH into the Dell via its Tailscale IP (100.x.x.x).
+      # TAILSCALE_AUTHKEY must be: Reusable + Ephemeral + Pre-authorized.
+      - name: Connect Tailscale
+        uses: tailscale/github-action@v2
+        with:
+          authkey: ${{ secrets.TAILSCALE_AUTHKEY }}
+          version: "latest"
+
+      # ── 3c. Sync operational scripts to Dell ──────────────────────────────
       # deploy.sh, backup-db.sh, healthcheck.sh, setup-cron.sh are copied to
       # ~/apps/ on every release so Dell always runs the latest version.
       # setup-server.sh is intentionally excluded — it provisions the OS and
       # must be run manually once; auto-deploying it would be dangerous.
-      - name: Checkout (for scripts)
-        uses: actions/checkout@v4
-
       - name: Sync prod scripts to Dell
         uses: appleboy/scp-action@v0.1.7
         with:
@@ -191,8 +203,10 @@ jobs:
           target: "~/apps/"
           strip_components: 2
 
-      # ── 3b. Make scripts executable + deploy ──────────────────────────────
-      # Combined into one SSH session to save a round-trip.
+      # ── 3d. Make scripts executable + login to GHCR + deploy ─────────────
+      # GHCR_TOKEN (PAT with read:packages) is stored in GitHub Secrets.
+      # It's used here to ensure the Dell is always authenticated to GHCR
+      # before pulling images — credentials are cached in ~/.docker/config.json.
       # GHCR_OWNER is passed as env var so deploy.sh stays fully generic
       # (no hardcoded username). Works for forks and org migrations.
       - name: SSH deploy
@@ -204,5 +218,6 @@ jobs:
           script: |
             set -euo pipefail
             chmod +x ~/apps/deploy.sh ~/apps/backup-db.sh ~/apps/healthcheck.sh ~/apps/setup-cron.sh
+            echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u "${{ github.repository_owner }}" --password-stdin
             export GHCR_OWNER="${{ github.repository_owner }}"
             ~/apps/deploy.sh "${{ needs.version.outputs.release_tag }}"

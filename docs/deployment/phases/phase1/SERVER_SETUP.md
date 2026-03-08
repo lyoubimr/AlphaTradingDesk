@@ -166,9 +166,26 @@ sudo apt install -y \
 
 ```bash
 sudo systemctl enable --now avahi-daemon
+```
 
+> ⚠️ **If the server has multiple network interfaces** (ethernet + Tailscale),
+> avahi broadcasts on all of them by default — macOS Bonjour can't resolve it.
+> Force avahi to broadcast on the LAN interface only:
+
+```bash
+# Find your ethernet interface name
+ip link show   # e.g. enp3s0, eno1, enp0s31f6
+
+sudo nano /etc/avahi/avahi-daemon.conf
+# In the [server] section, uncomment and set:
+#   allow-interfaces=enp3s0   ← your ethernet interface name
+
+sudo systemctl restart avahi-daemon
+```
+
+```bash
 # Test from Mac after setup:
-ping alphatradingdesk.local
+ping alphatradingdesk.local   # → must reply 192.168.1.100
 ```
 
 ### 4.4 — Firewall
@@ -536,6 +553,7 @@ Go to: **GitHub repo → Settings → Secrets and variables → Actions → New 
 | `DELL_USER` | `atd` | SSH user on Dell |
 | `DELL_SSH_KEY` | private key content | Generate below ↓ |
 | `TAILSCALE_AUTHKEY` | Tailscale reusable auth key | Required for GitHub runner → Dell tunnel (see §8.4) |
+| `GHCR_TOKEN` | PAT `ghp_…` with `read:packages` | Allows the Dell to `docker pull` from GHCR (repo is private) |
 
 > **`GHCR_OWNER` is NOT a secret.** It is injected automatically by the pipeline as
 > `github.repository_owner` (a built-in GitHub Actions variable). No manual setup needed.
@@ -922,12 +940,14 @@ docker compose -f ~/apps/docker-compose.prod.yml exec backend \
 ║  Compose             ~/apps/docker-compose.prod.yml                   ║
 ║  Env file            ~/apps/.env                                      ║
 ╠══════════════════════════════════════════════════════════════════════╣
-║  GITHUB SECRETS (4 required — Settings → Secrets → Actions)          ║
+║  GITHUB SECRETS (5 required — Settings → Secrets → Actions)          ║
 ║  DELL_HOST          100.x.x.x  (tailscale ip -4 on the Dell)         ║
 ║  DELL_USER          atd                                               ║
 ║  DELL_SSH_KEY       cat ~/.ssh/atd_deploy_key | pbcopy  (private)     ║
 ║  TAILSCALE_AUTHKEY  tailscale.com/admin/settings/keys                 ║
 ║                     → Reusable + Ephemeral + Pre-authorized           ║
+║  GHCR_TOKEN         PAT → github.com/settings/tokens                 ║
+║                     → Scope: read:packages (repo privé → pull GHCR)  ║
 ║  GITHUB_TOKEN       auto-injected (no setup needed)                  ║
 ║  GHCR_OWNER         NOT a secret (github.repository_owner, auto)     ║
 ╚══════════════════════════════════════════════════════════════════════╝
