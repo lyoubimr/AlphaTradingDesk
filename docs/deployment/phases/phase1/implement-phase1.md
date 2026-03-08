@@ -1,9 +1,9 @@
 # 🛠️ Phase 1 — Implementation Plan
 
 **Date:** March 1, 2026  
-**Updated:** March 7, 2026  
-**Version:** 2.7  
-**Status:** Steps 13-A→H DONE → Next: 13-I (QA full pass) → v1.0.0
+**Updated:** March 14, 2026  
+**Version:** 2.8  
+**Status:** Phase 1 COMPLETE — v1.0.0 tagged → Step 14 (Dell prod deploy) DONE
 
 > This document describes **what to build, in what order**.  
 > Each step is a working, testable increment — nothing is left dangling.
@@ -14,17 +14,17 @@
 
 ---
 
-## 🗺️ Roadmap to v1.0.0 — remaining steps
+## 🗺️ Roadmap to v1.0.0 — COMPLETE
 
 | Step | What | Status |
 |------|------|--------|
 | ~~13-F~~ | MA widget: circular badges, LTF display, compact layout | ✅ DONE |
 | ~~13-G~~ | Strategies global (profile_id nullable), trade 1,N strategies, TradeStrategy ORM | ✅ DONE |
 | ~~13-H~~ | Dashboard polish: themes (Night/Navy/Light), SnapshotGallery, db_recover.py | ✅ DONE |
-| **13-I** | QA full pass (lint + tests + manual E2E) | 🔜 **NEXT** |
-| **14** | Deploy to Dell (Docker Compose prod, CI/CD pipeline) | ⏳ Pending |
+| ~~13-I~~ | QA full pass (lint + tests + manual E2E) — 119/119 pytest, 8/8 vitest, 0 type errors | ✅ DONE |
+| ~~14~~ | Deploy to Dell (Docker Compose prod, CI/CD pipeline, backup, healthcheck) | ✅ DONE |
 
-**After 13-I passes → merge `develop → main` → tag `v1.0.0` → deploy to Dell.**
+**→ v1.0.0 tagged. Prod running on Dell. Next: Phase 2 (Volatility Analysis).**
 
 ---
 
@@ -212,8 +212,6 @@ level raised `OSError: Read-only file system` when running pytest locally on mac
 
 ### Steps 13-F/G/H — DONE (2026-03-07) — Strategies global + Themes + Snapshot Gallery
 
-#### 13-F: Market Analysis widget — circular badges
-
 - `DashboardPage.tsx` — `TFBadge` component: circular ring badges (HTF/MTF/LTF)
   - Color ring: emerald (bullish) / red (bearish) / amber (neutral)
   - `MAModuleCard` — compact horizontal layout, badges replace progress bars
@@ -292,8 +290,58 @@ Global strategies (profile_id=NULL) are read-only via `/api/profiles/{id}/strate
 - `tsc --noEmit` → 0 errors
 - `pytest` → **119/119 passing**
 
+---
 
-- Multi-TP presets (1–4 TPs, Smart Scale / Balanced / Aggressive / Conservative / Profit Max)
+### Step 13-I — DONE (2026-03-08) — QA full pass
+
+- `ruff check` → 0 errors
+- `ruff format` → clean
+- `mypy src/` → 0 errors (35 files)
+- `eslint .` → 0 warnings/errors
+- `tsc --noEmit` → 0 type errors
+- `vitest run` → 8/8 passing
+- `pytest` → 119/119 passing
+- Manual E2E: trade lifecycle, goal progress, MA analysis, themes, snapshot gallery
+- `frontend/package.json` — added `type-check` script (required by CI)
+- Merged `develop → main` via `--no-ff`
+- Tagged `v1.0.0` → pushed to GitHub
+
+---
+
+### Step 14 — DONE (2026-03-14) — Dell prod deploy
+
+**Server provisioning:**
+- Ubuntu Server 24.04 LTS on Dell OptiPlex
+- `scripts/prod/setup-server.sh` — Docker, UFW, SSH keys, `atd` user, directory layout
+- `avahi-daemon` configured for mDNS — `http://alphatradingdesk.local` resolves on LAN
+- Tailscale installed for remote CD access
+
+**CI/CD pipeline (`atd-deploy.yml`):**
+- 3-job pipeline: `version` (semver bump) → `build` (GHCR push) → `deploy` (SSH to Dell)
+- `version` job: conventional-commits bump → pushes tag + version commit to `main`
+- `build` job: Docker buildx → images pushed to `ghcr.io`
+- `deploy` job: Tailscale join → SSH to Dell → `deploy.sh` (pull GHCR images + `up -d`)
+- `GHCR_TOKEN` used for Dell `docker login` (separate from CI build token)
+
+**Prod stack:**
+- `docker-compose.prod.yml` — backend + frontend (nginx) + db (postgres:16) + adminer
+- `env_file: /home/atd/apps/.env` (fixed from `/root/apps/.env`)
+- DB seeded automatically via `entrypoint.sh` on first container start
+- Alembic migrations run on every deploy (`alembic upgrade head`)
+- `src/core/config.py` — `APP_ENV` reads `environment` field (fixed; default `prod` in Docker)
+
+**Ops scripts (all in `scripts/prod/`):**
+- `backup-db.sh` — rolling (every 6h, keep 48) + weekly (Sunday 03:00, keep 13)
+- `setup-cron.sh` — installs cron jobs on Dell
+- `healthcheck.sh` — containers, API (`/health`), disk, RAM, last backup, alembic head
+- `scripts/sync-db-prod-to-dev.sh` — pulls prod DB to Mac dev, scrubs secrets
+
+**Connectivity:**
+- SSH config (`~/.ssh/config` Host `atd`) — passwordless rsync + SSH from Mac
+- `rsync` backup pull from Dell → Mac (on demand or cron)
+- GHCR_OWNER warning suppressed in `backup-db.sh` + `healthcheck.sh`
+
+ (1–4 TPs, Smart Scale / Balanced / Aggressive / Conservative / Profit Max)
 - SL direction validation (LONG: SL < entry, SHORT: SL > entry)
 - Crypto: leverage slider, safe margin calc (MMR-aware), estimated liquidation price
 - CFD: broker margin estimate, maintenance margin, margin level %, margin call warning
@@ -1925,9 +1973,9 @@ crontab -e
 
 ---
 
-## 🚀 Phase 1 — v1.0.0 Release checklist
+## 🚀 Phase 1 — v1.0.0 Release checklist — ✅ COMPLETE
 
-> Steps 1–13E complete. Remaining: 13-F → 13-G → 13-H → 13-I → merge → tag → deploy.
+> All steps complete. v1.0.0 tagged. Prod deployed to Dell.
 
 ### Code
 
@@ -1944,35 +1992,24 @@ crontab -e
 - [x] Step 13-C — Backend MA v2 seed + schema (score_block, decomposed columns)
 - [x] Step 13-D — GoalsSettingsPage + DashboardPage global goals
 - [x] Step 13-E — Goals UX: signed amounts, Avg R badge, loss limit always shown
-- [ ] **Step 13-F** — MA v2 frontend (decomposed scores, conclusion card, MA settings)
-- [ ] **Step 13-G** — Strategy module (settings page, archive, avg_r per strategy)
-- [ ] **Step 13-H** — Dashboard polish (Profit Factor, Risk breakdown, MA conclusion badge)
-- [ ] **Step 13-I** — QA full pass (lint + tests + manual E2E)
+- [x] Step 13-F — MA widget: circular TFBadge (HTF/MTF/LTF), LTF shown, BadgeRow extracted
+- [x] Step 13-G — Strategies global (profile_id nullable), trade 1,N m2m, TradeStrategy ORM
+- [x] Step 13-H — Themes (8), SnapshotGallery, close_notes, db_recover.py, Makefile targets
+- [x] Step 13-I — QA full pass: 119/119 pytest · 8/8 vitest · 0 ruff · 0 mypy · 0 eslint · 0 tsc
 
-### Quality gates (13-I)
+### Deployment (Step 14)
 
-- [ ] `make lint` — ruff + mypy 0 errors
-- [ ] `make lint-fe` — eslint 0 errors
-- [ ] `make test` — pytest all green
-- [ ] `vitest run` — all tests pass
-- [ ] Manual E2E: trade lifecycle + goal progress + MA conclusion
-
-### Git — release
-
-```bash
-# Confirm clean working tree
-git status
-
-# Final commit on develop
-git add -A && git commit -m "feat: Step 13-I QA pass — v1.0.0 ready"
-
-# Merge to main and tag
-git checkout main
-git merge --no-ff develop -m "feat: Phase 1 complete — v1.0.0"
-git tag v1.0.0
-git push origin main --tags
-# → triggers atd-deploy.yml → deploys to Dell
-```
+- [x] Dell Ubuntu server provisioned (setup-server.sh)
+- [x] CI pipeline green (atd-test.yml)
+- [x] CD pipeline: version bump → GHCR build → Tailscale SSH deploy (atd-deploy.yml)
+- [x] docker-compose.prod.yml running on Dell
+- [x] Prod DB seeded (brokers, instruments, sessions, styles, MA modules/indicators)
+- [x] Alembic migrations applied on prod
+- [x] mDNS/Bonjour: http://alphatradingdesk.local resolves on LAN
+- [x] Cron backups: rolling (every 6h) + weekly (Sunday 03:00) via backup-db.sh
+- [x] Healthcheck script: healthcheck.sh (containers, API, disk, RAM, backup, alembic)
+- [x] DB sync: sync-db-prod-to-dev.sh (prod → dev, secrets scrubbed)
+- [x] rsync backup retrieval: Dell → Mac (passwordless via SSH config)
 
 ---
 
@@ -1991,5 +2028,5 @@ git push origin main --tags
 
 ---
 
-**Next:** → Step 13-F (MA v2 frontend) → 13-G (Strategy module) → 13-H (Dashboard polish) → 13-I (QA) → `post-implement-phase1.md` → Dell deploy (Step 14)
+**Next:** → Phase 2 (Volatility Analysis — VI scores)
 
