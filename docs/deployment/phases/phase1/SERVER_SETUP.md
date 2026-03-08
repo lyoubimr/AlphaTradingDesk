@@ -6,6 +6,17 @@
 **Target OS:** Ubuntu Server 24.04 LTS (headless)  
 **Deploy model:** Pull pre-built Docker images from GHCR — Dell **never** builds anything
 
+> 📌 **Ce doc contient des valeurs spécifiques à CE déploiement** — à adapter si tu
+> réinstalles sur un autre matériel :
+>
+> | Valeur dans ce doc | Ce que c'est | À remplacer par |
+> |--------------------|-------------|-----------------|
+> | `192.168.1.100` | IP LAN fixe du Dell | l'IP de ton serveur |
+> | `18:66:DA:13:01:9D` | MAC address NIC ethernet | la MAC de ton NIC |
+> | `alphatradingdesk.local` | hostname mDNS | le hostname choisi lors de l'install Ubuntu |
+> | `192.168.1.1` | gateway routeur | la gateway de ton réseau |
+> | `atd` | username Ubuntu | le username choisi lors de l'install |
+
 ---
 
 ## 📋 Table of Contents
@@ -16,7 +27,7 @@
 4. [Post-install OS config](#4-post-install-os-config)
 5. [Fix IP address](#5-fix-ip-address)
 6. [Install Docker](#6-install-docker)
-7. [First deploy — pulling images + starting the stack](#7-first-deploy)
+7. [Pre-deploy setup on Dell — dirs, secrets, compose file, scripts](#7-pre-deploy-setup)
 8. [GitHub Secrets — CD pipeline wiring](#8-github-secrets)
 9. [Persistent volumes — DB + uploads](#9-persistent-volumes)
 10. [LAN domain — alphatradingdesk.local](#10-lan-domain)
@@ -320,7 +331,30 @@ docker run hello-world
 
 ---
 
-## 7. First Deploy
+## 7. Pre-Deploy Setup on Dell
+
+> ⚠️ **Séquençage critique — lire avant de commencer.**
+>
+> Le Dell doit être **entièrement préparé AVANT le premier merge `feat:` → `main`**.
+> Dès que tu merges, la CD se déclenche, build les images, et SSH dans le Dell pour
+> les déployer. Si le Dell n't pas prêt, le deploy échoue.
+>
+> ```
+> ORDRE OBLIGATOIRE :
+>   §7.1 → §7.2 → §7.3 → §7.4   ← Dell prêt (AVANT le merge)
+>   §8.2 → §8.3 → §8.1           ← GitHub Secrets câblés (AVANT le merge)
+>   ──────────────────────────────────────────────────────
+>   → merge feat: → main          ← CD se déclenche
+>   → images buildées + pushées sur GHCR par la CD
+>   → deploy.sh v1.0.0 exécuté par la CD via SSH
+>   → docker compose up -d + alembic upgrade head  ← automatique
+>   ──────────────────────────────────────────────────────
+>   §7.5                          ← vérification POST-deploy (pas un setup manuel)
+> ```
+>
+> `docker-compose.prod.yml`, `~/apps/.env` et les scripts sont des **fichiers statiques**
+> que tu crées manuellement sur le Dell — ils n'ont pas besoin des images pour exister.
+> Les images (GHCR) n'existent qu'après le 1er merge.
 
 The Dell needs only 3 things — no source code, no git clone.
 
@@ -462,24 +496,27 @@ export GHCR_OWNER=<your-github-org-or-username>
 
 > Never hardcode a username inside the script — it must remain generic for portability.
 
-### 7.5 — First start
+### 7.5 — Vérification post-deploy (après le 1er merge → main)
+
+> **La CD fait tout le travail.** Ce bloc est uniquement pour VÉRIFIER que le deploy
+> automatique a bien fonctionné — pas pour lancer quoi que ce soit manuellement.
 
 ```bash
-# GHCR_OWNER is the GitHub org/username that owns the repo (lowercase)
-export GHCR_OWNER=<your-github-org-or-username>
-export IMAGE_TAG=latest
+# Sur le Dell — vérifier que les containers tournent:
+docker compose -f ~/apps/docker-compose.prod.yml ps
 
-docker compose -f ~/apps/docker-compose.prod.yml up -d
+# Vérifier l'API:
+curl http://localhost:8000/api/health    # → {"status": "ok"}
 
-# Wait ~30s for DB healthcheck, then:
-docker compose -f docker-compose.prod.yml exec backend alembic upgrade head
-docker compose -f docker-compose.prod.yml exec backend \
-  python -m database.migrations.seeds.seed_all
-
-# Verify:
-curl http://localhost:8000/api/health
-# From Mac: open http://alphatradingdesk.local
+# Depuis ton Mac:
+open http://alphatradingdesk.local      # → app live
 ```
+
+> **Deploy manuel** (si jamais tu as besoin de forcer une version sans passer par la CD) :
+> ```bash
+> export GHCR_OWNER=<your-github-org-or-username>
+> ~/apps/deploy.sh v1.0.0
+> ```
 
 ---
 
@@ -720,6 +757,63 @@ db: add migration           → none   → CI only
 ```
 
 > To force a deploy of a chore/docs change, add one `fix:` commit to the PR.
+
+### 11.4 — Merge strategy : quoi faire quand `develop` a plusieurs commits ?
+
+**Utilise un merge ordinaire** (`Create a merge commit` sur GitHub — c'est le défaut).
+
+Le workflow scanne **tous les commits du merge** et prend le bump le plus élevé :
+
+```
+develop contient :
+  chore: update deps         → patch
+  test: add unit tests       → none
+  feat: add market analysis  → MINOR  ← gagne
+
+→ Le merge → main crée une release MINOR  v1.0.0 → v1.1.0
+```
+
+| Stratégie | Comportement | Recommandation |
+|-----------|-------------|----------------|
+| **Merge commit** (défaut) | Scanne tous les commits → prend le plus haut | ✅ Recommandé |
+| **Squash merge** | 1 seul commit → **son message doit avoir le bon préfixe** (`feat:` / `fix:`) sinon `default_bump: false` → pas de release | ⚠️ Risqué si on oublie |
+| **Rebase** | Même logique que merge commit | ✅ OK aussi |
+
+> **Règle simple :** si ta PR contient au moins un commit `feat:` ou `fix:`, la CD se
+> déclenche après le merge. Si elle contient uniquement `docs:` / `test:` / `ci:` /
+> `chore:` → pas de release, pas de deploy (CI only). C'est voulu.
+
+### 11.5 — Reboot du Dell : les containers redémarrent-ils automatiquement ?
+
+**Oui — 100% automatique.** Deux mécanismes combinés :
+
+```
+1. Docker lui-même est activé au boot :
+   sudo systemctl enable docker   (fait en §6)
+
+2. Chaque container a restart: unless-stopped dans docker-compose.prod.yml
+   → Docker les relance automatiquement après le reboot
+```
+
+Séquence au reboot :
+```
+Serveur reboot
+  → systemd démarre Docker
+  → db démarre en premier
+  → backend attend que db soit healthy (depends_on + healthcheck)
+  → frontend démarre
+  → app live en ~30 secondes
+  → aucune action manuelle requise
+```
+
+> `unless-stopped` signifie : redémarre toujours sauf si **tu l'as arrêté manuellement**
+> (`docker compose down`). Un reboot ne compte pas comme un arrêt manuel.
+
+Survie des données au reboot :
+```
+DB data    /srv/atd/data/postgres/  → ✅ bind mount, survit à tout
+Uploads    /srv/atd/data/uploads/   → ✅ bind mount, survit à tout
+```
 
 ---
 
