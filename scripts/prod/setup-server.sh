@@ -3,8 +3,8 @@
 # scripts/prod/setup-server.sh
 #
 # PURPOSE
-#   First-time provisioning of the Dell production server.
-#   Run this ONCE after a fresh Ubuntu 22.04 install, before any deploy.
+#   First-time provisioning of the production server.
+#   Run this ONCE after a fresh Ubuntu 24.04 install, before any deploy.
 #   Idempotent: safe to re-run if interrupted.
 #
 # WHAT IT DOES
@@ -159,7 +159,8 @@ POSTGRES_PASSWORD=CHANGE_ME_$(openssl rand -hex 8)
 SECRET_KEY=$(openssl rand -hex 32)
 ENCRYPTION_KEY=$(openssl rand -hex 16)
 APP_ENV=prod
-ALLOWED_ORIGINS=http://alphatradingdesk.local,http://192.168.1.50
+ALLOWED_ORIGINS=http://alphatradingdesk.local,http://192.168.1.100
+DATABASE_URL=postgresql://atd:CHANGE_ME@db:5432/atd_prod
 EOF
   chmod 600 "${ENV_FILE}"
   echo "    ✅ ${ENV_FILE} created (template — fill POSTGRES_PASSWORD)"
@@ -216,7 +217,7 @@ services:
   backend:
     image: ghcr.io/\${GHCR_OWNER}/atd-backend:\${IMAGE_TAG:-latest}
     restart: unless-stopped
-    env_file: /root/apps/.env
+    env_file: /home/atd/apps/.env
     environment:
       DATABASE_URL: postgresql://atd:\${POSTGRES_PASSWORD}@db:5432/atd_prod
     depends_on:
