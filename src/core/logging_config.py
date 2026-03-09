@@ -62,7 +62,12 @@ def setup_logging(
 
     # ── File handler (prod only) ──────────────────────────────────────────────
     if log_dir and environment != "dev":
-        os.makedirs(log_dir, exist_ok=True)
+        try:
+            os.makedirs(log_dir, exist_ok=True)
+        except OSError:
+            # Log dir not accessible (CI, read-only fs) — fall back to stdout only
+            log_dir = None
+    if log_dir and environment != "dev":
         log_file = os.path.join(log_dir, "backend.log")
         # RotatingFileHandler: safety net inside the process
         # 10 MB max per file, keep 5 backups → max 50 MB
