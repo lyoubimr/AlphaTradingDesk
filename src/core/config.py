@@ -50,6 +50,13 @@ class Settings(BaseSettings):
     # In Docker: mount a named volume here so uploads survive container restarts
     uploads_dir: str = "/app/uploads"
 
+    # Logging
+    # LOG_LEVEL: DEBUG | INFO | WARNING | ERROR  (default: DEBUG in dev, INFO elsewhere)
+    log_level: str = Field("INFO", alias="LOG_LEVEL")
+    # LOG_DIR: directory for log files — prod only, ignored in dev (stdout only)
+    # In prod Docker: bind-mounted to /srv/atd/logs/app on the Dell
+    log_dir: str = Field("/app/logs", alias="LOG_DIR")
+
     # CORS — comma-separated list of allowed origins
     # Override via ALLOWED_ORIGINS env var for any deployment
     # e.g. ALLOWED_ORIGINS=https://myapp.example.com,https://app2.example.com

@@ -11,6 +11,7 @@ from fastapi.staticfiles import StaticFiles
 from src.brokers.router import router as brokers_router
 from src.brokers.router import styles_router
 from src.core.config import settings
+from src.core.logging_config import setup_logging
 from src.goals.router import router as goals_router
 from src.market_analysis.router import ma_router, profiles_ma_router
 from src.profiles.router import router as profiles_router
@@ -22,6 +23,13 @@ app = FastAPI(
     title="AlphaTradingDesk",
     version="0.1.0",
     description="Multi-asset trading platform — risk management, trade journal, market analysis",
+)
+
+# ── Logging — configure before anything else ──────────────────────
+setup_logging(
+    level=settings.log_level,
+    log_dir=settings.log_dir,
+    environment=settings.environment,
 )
 
 app.add_middleware(
