@@ -3,6 +3,7 @@ Pydantic schemas for the Market Analysis API — Step 7.
 
 ModuleOut               GET /api/market-analysis/modules
 IndicatorOut            GET /api/market-analysis/modules/{id}/indicators
+IndicatorCreate         POST /api/market-analysis/modules/{id}/indicators
 IndicatorConfigItem     GET/PUT /api/profiles/{id}/indicator-config
 SessionCreate           POST /api/market-analysis/sessions
 AnswerIn                answer inside SessionCreate
@@ -77,6 +78,25 @@ class IndicatorUpdate(BaseModel):
     answer_partial: str | None = Field(default=None, min_length=1, max_length=200)
     answer_bearish: str | None = Field(default=None, min_length=1, max_length=200)
     default_enabled: bool | None = None
+
+
+class IndicatorCreate(BaseModel):
+    """Body for POST /api/market-analysis/modules/{id}/indicators."""
+
+    key: str = Field(min_length=1, max_length=100)
+    label: str = Field(min_length=1, max_length=200)
+    asset_target: Literal["a", "b", "single"] = "single"
+    tv_symbol: str = Field(default="", max_length=100)
+    tv_timeframe: str = Field(default="1D", max_length=10)
+    timeframe_level: Literal["htf", "mtf", "ltf"] = "htf"
+    score_block: Literal["trend", "momentum", "participation"] = "trend"
+    question: str = Field(min_length=1)
+    tooltip: str | None = None
+    answer_bullish: str = Field(default="🟢 Bullish", max_length=200)
+    answer_partial: str = Field(default="🟡 Neutral", max_length=200)
+    answer_bearish: str = Field(default="🔴 Bearish", max_length=200)
+    default_enabled: bool = True
+    sort_order: int = 999
 
 
 # ── Indicator config (per-profile toggles) ────────────────────────────────────

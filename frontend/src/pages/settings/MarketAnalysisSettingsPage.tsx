@@ -2,26 +2,29 @@
 //
 // Allows editing indicator questions, labels, tooltips, and answer labels
 // per module. Also lets you toggle default_enabled and per-profile on/off.
+// Supports adding new indicators and deleting existing ones.
 //
 // Backend:
-//   GET  /api/market-analysis/modules
-//   GET  /api/market-analysis/modules/{id}/indicators
-//   PATCH /api/market-analysis/indicators/{id}
-//   GET  /api/profiles/{id}/indicator-config
-//   PUT  /api/profiles/{id}/indicator-config
+//   GET    /api/market-analysis/modules
+//   GET    /api/market-analysis/modules/{id}/indicators
+//   POST   /api/market-analysis/modules/{id}/indicators
+//   PATCH  /api/market-analysis/indicators/{id}
+//   DELETE /api/market-analysis/indicators/{id}
+//   GET    /api/profiles/{id}/indicator-config
+//   PUT    /api/profiles/{id}/indicator-config
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import {
   Settings2, ChevronDown, ChevronUp, ExternalLink,
   Save, Loader2, CheckCircle2, RefreshCw, Info,
-  Eye, EyeOff, Edit3, RotateCcw,
+  Eye, EyeOff, Edit3, RotateCcw, Trash2, Plus, X,
 } from 'lucide-react'
 import { PageHeader } from '../../components/ui/PageHeader'
 import { useProfile } from '../../context/ProfileContext'
 import { maApi } from '../../lib/api'
 import type {
-  MAModule, MAIndicator, MAIndicatorConfig,
+  MAModule, MAIndicator, MAIndicatorConfig, MAIndicatorCreate,
 } from '../../types/api'
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -48,17 +51,20 @@ function IndicatorRow({
   profileEnabled,
   onToggleProfile,
   onSave,
+  onDelete,
   savingId,
 }: {
   indicator: MAIndicator
   profileEnabled: boolean
   onToggleProfile: (id: number, enabled: boolean) => void
   onSave: (id: number, patch: Partial<MAIndicator>) => Promise<void>
+  onDelete: (id: number) => void
   savingId: number | null
 }) {
   const [expanded, setExpanded]     = useState(false)
   const [editing, setEditing]       = useState(false)
   const [saved, setSaved]           = useState(false)
+  const [confirmDel, setConfirmDel] = useState(false)
 
   // Editable draft
   const [label, setLabel]           = useState(indicator.label)
@@ -161,6 +167,35 @@ function IndicatorRow({
             {profileEnabled ? <Eye size={10} /> : <EyeOff size={10} />}
             {profileEnabled ? 'On' : 'Off'}
           </button>
+
+          {/* Delete */}
+          {confirmDel ? (
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={() => onDelete(indicator.id)}
+                className="text-[10px] text-red-400 hover:text-red-300 border border-red-500/30 bg-red-500/10 px-2 py-0.5 rounded transition-colors"
+              >
+                Confirm
+              </button>
+              <button
+                type="button"
+                onClick={() => setConfirmDel(false)}
+                className="text-[10px] text-slate-500 hover:text-slate-300 transition-colors"
+              >
+                <X size={10} />
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setConfirmDel(true)}
+              className="text-slate-600 hover:text-red-400 transition-colors"
+              title="Delete indicator"
+            >
+              <Trash2 size={12} />
+            </button>
+          )}
 
           {/* Expand */}
           <button
@@ -281,19 +316,233 @@ function IndicatorRow({
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// AddIndicatorForm — inline form to create a new indicator inside a module
+// ─────────────────────────────────────────────────────────────────────────────
+
+function AddIndicatorForm({
+  moduleId,
+  onCreated,
+  onCancel,
+}: {
+  moduleId: number
+  onCreated: (ind: MAIndicator) => void
+  onCancel: () => void
+}) {
+  const formRef                       = useRef<HTMLDivElement>(null)
+  const [label, setLabel]             = useState('')
+  const [key, setKey]                 = useState('')
+  const [tfLevel, setTfLevel]         = useState<'htf' | 'mtf' | 'ltf'>('htf')
+  const [scoreBlock, setScoreBlock]   = useState<'trend' | 'momentum' | 'participation'>('trend')
+  const [assetTarget, setAssetTarget] = useState<'a' | 'b' | 'single'>('single')
+  const [tvSymbol, setTvSymbol]       = useState('')
+  const [tvTimeframe, setTvTimeframe] = useState('1D')
+  const [question, setQuestion]       = useState('')
+  const [tooltip, setTooltip]         = useState('')
+  const [bullish, setBullish]         = useState('🟢 Bullish')
+  const [neutral, setNeutral]         = useState('🟡 Neutral')
+  const [bearish, setBearish]         = useState('🔴 Bearish')
+  const [saving, setSaving]           = useState(false)
+  const [err, setErr]                 = useState<string | null>(null)
+  const keyTouched                    = useRef(false)
+  useEffect(() => {
+    formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+  }, [])
+  const autoSlug = (s: string) =>
+    s.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '')
+
+  const handleLabelChange = (v: string) => {
+    setLabel(v)
+    if (!keyTouched.current) setKey(autoSlug(v))
+  }
+
+  const handleSubmit = async () => {
+    if (!label.trim() || !key.trim() || !question.trim()) {
+      setErr('Label, key, and question are required.')
+      return
+    }
+    setSaving(true); setErr(null)
+    try {
+      const data: MAIndicatorCreate = {
+        key: key.trim(),
+        label: label.trim(),
+        asset_target: assetTarget,
+        tv_symbol: tvSymbol.trim(),
+        tv_timeframe: tvTimeframe.trim() || '1D',
+        timeframe_level: tfLevel,
+        score_block: scoreBlock,
+        question: question.trim(),
+        tooltip: tooltip.trim() || null,
+        answer_bullish: bullish.trim() || '🟢 Bullish',
+        answer_partial: neutral.trim() || '🟡 Neutral',
+        answer_bearish: bearish.trim() || '🔴 Bearish',
+      }
+      const ind = await maApi.createIndicator(moduleId, data)
+      onCreated(ind)
+    } catch (e: unknown) {
+      setErr((e as Error).message)
+      setSaving(false)
+    }
+  }
+
+  const inputCls = 'w-full px-3 py-1.5 rounded-lg bg-surface-700 border border-surface-600 text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:border-brand-500/60 focus:ring-1 focus:ring-brand-500/20 transition-colors'
+  const selectCls = `${inputCls} cursor-pointer`
+  const textareaCls = 'w-full px-3 py-2 rounded-lg bg-surface-700 border border-surface-600 text-xs text-slate-200 placeholder-slate-600 leading-relaxed resize-none focus:outline-none focus:border-brand-500/60 focus:ring-1 focus:ring-brand-500/20 transition-colors'
+
+  return (
+    <div ref={formRef} className="rounded-xl border border-brand-500/30 bg-brand-500/5 p-4 space-y-3">
+      <p className="text-[10px] font-semibold text-brand-400 uppercase tracking-wider flex items-center gap-1.5">
+        <Plus size={10} /> New indicator
+      </p>
+
+      <div className="grid grid-cols-2 gap-3">
+        <div className="space-y-1">
+          <label className="text-[10px] font-medium text-slate-500 uppercase tracking-wider">Label *</label>
+          <input
+            type="text"
+            value={label}
+            onChange={(e) => handleLabelChange(e.target.value)}
+            placeholder="e.g. EMA 200 Trend"
+            className={inputCls}
+          />
+        </div>
+        <div className="space-y-1">
+          <label className="text-[10px] font-medium text-slate-500 uppercase tracking-wider">Key (slug) *</label>
+          <input
+            type="text"
+            value={key}
+            onChange={(e) => { keyTouched.current = true; setKey(e.target.value) }}
+            placeholder="e.g. ema_200_trend"
+            className={`${inputCls} font-mono`}
+          />
+        </div>
+      </div>
+
+      <div className="grid grid-cols-3 gap-3">
+        <div className="space-y-1">
+          <label className="text-[10px] font-medium text-slate-500 uppercase tracking-wider">Timeframe</label>
+          <select value={tfLevel} onChange={(e) => setTfLevel(e.target.value as 'htf' | 'mtf' | 'ltf')} className={selectCls}>
+            <option value="htf">HTF — Higher</option>
+            <option value="mtf">MTF — Medium</option>
+            <option value="ltf">LTF — Lower</option>
+          </select>
+        </div>
+        <div className="space-y-1">
+          <label className="text-[10px] font-medium text-slate-500 uppercase tracking-wider">Score block</label>
+          <select value={scoreBlock} onChange={(e) => setScoreBlock(e.target.value as 'trend' | 'momentum' | 'participation')} className={selectCls}>
+            <option value="trend">Trend</option>
+            <option value="momentum">Momentum</option>
+            <option value="participation">Participation</option>
+          </select>
+        </div>
+        <div className="space-y-1">
+          <label className="text-[10px] font-medium text-slate-500 uppercase tracking-wider">
+            Asset target
+          </label>
+          <select value={assetTarget} onChange={(e) => setAssetTarget(e.target.value as 'a' | 'b' | 'single')} className={selectCls}>
+            <option value="single">Single — ✅ Crypto / Gold / Indices (one asset)</option>
+            <option value="a">A — Forex only: 1st asset of a pair (e.g. EUR in EUR/USD)</option>
+            <option value="b">B — Forex only: 2nd asset of a pair (e.g. USD in EUR/USD)</option>
+          </select>
+          <p className="text-[9px] text-slate-600 leading-snug mt-0.5">
+            <strong className="text-slate-500">Single</strong> in 99% of cases. A/B is only for Forex modules where you want to score both sides of a pair independently.
+          </p>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3">
+        <div className="space-y-1">
+          <label className="text-[10px] font-medium text-slate-500 uppercase tracking-wider">TV Symbol</label>
+          <input type="text" value={tvSymbol} onChange={(e) => setTvSymbol(e.target.value)}
+            placeholder="e.g. BINANCE:BTCUSDT" className={inputCls} />
+        </div>
+        <div className="space-y-1">
+          <label className="text-[10px] font-medium text-slate-500 uppercase tracking-wider">TV Timeframe</label>
+          <input type="text" value={tvTimeframe} onChange={(e) => setTvTimeframe(e.target.value)}
+            placeholder="1D, 4H, 1W…" className={inputCls} />
+        </div>
+      </div>
+
+      <div className="space-y-1">
+        <label className="text-[10px] font-medium text-slate-500 uppercase tracking-wider">Question *</label>
+        <textarea
+          rows={2}
+          value={question}
+          onChange={(e) => setQuestion(e.target.value)}
+          placeholder="e.g. Is price above the 200 EMA on the weekly?"
+          className={textareaCls}
+        />
+      </div>
+
+      <div className="space-y-1">
+        <label className="text-[10px] font-medium text-slate-500 uppercase tracking-wider">
+          Guidance / Tooltip <span className="text-slate-700">(optional)</span>
+        </label>
+        <textarea
+          rows={3}
+          value={tooltip}
+          onChange={(e) => setTooltip(e.target.value)}
+          placeholder="How to read this indicator…"
+          className={textareaCls}
+        />
+      </div>
+
+      {/* Answer labels */}
+      <div>
+        <label className="text-[10px] font-medium text-slate-500 uppercase tracking-wider">Answer labels</label>
+        <div className="grid grid-cols-3 gap-2 mt-1">
+          <div className="space-y-1">
+            <label className="text-[9px] text-slate-600">🟢 Bullish</label>
+            <input type="text" value={bullish} onChange={(e) => setBullish(e.target.value)}
+              className={`${inputCls} border-emerald-500/20 bg-emerald-500/5`} />
+          </div>
+          <div className="space-y-1">
+            <label className="text-[9px] text-slate-600">🟡 Neutral</label>
+            <input type="text" value={neutral} onChange={(e) => setNeutral(e.target.value)}
+              className={`${inputCls} border-amber-500/20 bg-amber-500/5`} />
+          </div>
+          <div className="space-y-1">
+            <label className="text-[9px] text-slate-600">🔴 Bearish</label>
+            <input type="text" value={bearish} onChange={(e) => setBearish(e.target.value)}
+              className={`${inputCls} border-red-500/20 bg-red-500/5`} />
+          </div>
+        </div>
+      </div>
+
+      {err && <p className="text-[10px] text-red-400">{err}</p>}
+
+      <div className="flex items-center justify-end gap-2 pt-1">
+        <button type="button" onClick={onCancel}
+          className="text-[10px] text-slate-500 hover:text-slate-300 transition-colors">
+          Cancel
+        </button>
+        <button type="button" disabled={saving} onClick={handleSubmit}
+          className="flex items-center gap-1.5 text-[10px] bg-brand-600 hover:bg-brand-500 text-white px-3 py-1 rounded-lg transition-colors disabled:opacity-50">
+          {saving ? <Loader2 size={10} className="animate-spin" /> : <Plus size={10} />}
+          Add indicator
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // ModuleSection
 // ─────────────────────────────────────────────────────────────────────────────
 
 function ModuleSection({
-  module, indicators, configs, onToggleProfile, onSave, savingId,
+  module, indicators, configs, onToggleProfile, onSave, onDelete, onCreate, savingId,
 }: {
   module: MAModule
   indicators: MAIndicator[]
   configs: Record<number, boolean>
   onToggleProfile: (id: number, enabled: boolean) => void
   onSave: (id: number, patch: Partial<MAIndicator>) => Promise<void>
+  onDelete: (id: number) => void
+  onCreate: (moduleId: number, ind: MAIndicator) => void
   savingId: number | null
 }) {
+  const [showAdd, setShowAdd] = useState(false)
+
   const byTf = indicators.reduce<Record<string, MAIndicator[]>>((acc, ind) => {
     acc[ind.timeframe_level] = [...(acc[ind.timeframe_level] ?? []), ind]
     return acc
@@ -317,7 +566,33 @@ function ModuleSection({
           <p className="text-xs font-mono text-slate-400">{enabledCount}/{indicators.length}</p>
           <p className="text-[9px] text-slate-700">enabled for profile</p>
         </div>
+        <button
+          type="button"
+          onClick={() => setShowAdd((v) => !v)}
+          className={`flex items-center gap-1.5 text-[10px] px-2.5 py-1 rounded-lg border transition-colors ${
+            showAdd
+              ? 'border-surface-500 text-slate-400 bg-surface-700 hover:bg-surface-600'
+              : 'border-brand-500/30 text-brand-400 bg-brand-500/10 hover:bg-brand-500/15'
+          }`}
+        >
+          {showAdd ? <X size={10} /> : <Plus size={10} />}
+          {showAdd ? 'Cancel' : 'Add'}
+        </button>
       </div>
+
+      {/* Add indicator form — top so it's immediately visible */}
+      {showAdd && (
+        <div className="px-4 pt-4">
+          <AddIndicatorForm
+            moduleId={module.id}
+            onCreated={(ind) => {
+              onCreate(module.id, ind)
+              setShowAdd(false)
+            }}
+            onCancel={() => setShowAdd(false)}
+          />
+        </div>
+      )}
 
       {/* Indicators by TF */}
       <div className="p-4 space-y-6">
@@ -342,6 +617,7 @@ function ModuleSection({
                     profileEnabled={configs[ind.id] !== false}
                     onToggleProfile={onToggleProfile}
                     onSave={onSave}
+                    onDelete={onDelete}
                     savingId={savingId}
                   />
                 ))}
@@ -447,6 +723,33 @@ export function MarketAnalysisSettingsPage() {
     }
   }, [])
 
+  const handleDeleteIndicator = useCallback(async (indicatorId: number) => {
+    try {
+      await maApi.deleteIndicator(indicatorId)
+      setIndicators((prev) => {
+        const next = { ...prev }
+        for (const [modId, inds] of Object.entries(next)) {
+          next[Number(modId)] = inds.filter((i) => i.id !== indicatorId)
+        }
+        return next
+      })
+      setConfigs((prev) => {
+        const next = { ...prev }
+        delete next[indicatorId]
+        return next
+      })
+    } catch (e: unknown) {
+      setError((e as Error).message)
+    }
+  }, [])
+
+  const handleCreateIndicator = useCallback((moduleId: number, indicator: MAIndicator) => {
+    setIndicators((prev) => ({
+      ...prev,
+      [moduleId]: [...(prev[moduleId] ?? []), indicator],
+    }))
+  }, [])
+
   const allIndicators = Object.values(indicators).flat()
   const totalEnabled  = allIndicators.filter((i) => configs[i.id] !== false).length
 
@@ -455,10 +758,10 @@ export function MarketAnalysisSettingsPage() {
       <PageHeader
         icon="⚙️"
         title="Market Analysis — Indicators"
-        subtitle="Edit questions, guidance, and answer labels. Toggle indicators per profile."
+        subtitle="Manage indicators per module: edit questions, guidance, answer labels, add or delete indicators."
         badge="Phase 1"
         badgeVariant="phase"
-        info="Immutable fields (key, TV symbol, timeframe, sort order) cannot be changed here. Only UI text and toggles are editable."
+        info="Structural fields (key, timeframe, score block, TV symbol) can only be set at creation. Text fields (label, question, guidance, answers) are editable anytime. Deleting an indicator removes it from all sessions and profile configs."
         actions={
           <button
             type="button"
@@ -475,11 +778,14 @@ export function MarketAnalysisSettingsPage() {
       {/* Info banner */}
       <div className="mb-6 rounded-xl border border-brand-500/20 bg-brand-500/5 px-4 py-3 flex items-start gap-3">
         <Settings2 size={14} className="text-brand-400 mt-0.5 shrink-0" />
-        <div className="space-y-1">
-          <p className="text-xs font-medium text-slate-300">Two levels of control</p>
-          <ul className="text-[11px] text-slate-500 space-y-0.5 list-disc pl-4">
-            <li><strong className="text-slate-400">Default enabled</strong> — global default for all new profiles. Edit via the indicator row.</li>
-            <li><strong className="text-slate-400">Profile On/Off</strong> — per-profile override. Affects <em>only</em> the currently active profile: <span className="text-brand-400">{activeProfile?.name ?? '(none selected)'}</span></li>
+        <div className="space-y-1.5">
+          <p className="text-xs font-medium text-slate-300">How indicators work</p>
+          <ul className="text-[11px] text-slate-500 space-y-1 list-disc pl-4">
+            <li><strong className="text-slate-400">Edit</strong> — expand a row to edit its label, question, guidance and answer labels. These changes survive restarts and deploys.</li>
+            <li><strong className="text-slate-400">Add</strong> — click the <span className="text-brand-400">Add</span> button on a module to create a new indicator. Structural fields (key, timeframe, score block) are fixed after creation.</li>
+            <li><strong className="text-slate-400">Delete</strong> — removes the indicator permanently, including all past session answers for it.</li>
+            <li><strong className="text-slate-400">Default enabled</strong> — global default applied to all new profiles.</li>
+            <li><strong className="text-slate-400">Profile On/Off</strong> — per-profile override, affects only <span className="text-brand-400">{activeProfile?.name ?? '(no profile selected)'}</span>.</li>
           </ul>
         </div>
       </div>
@@ -517,6 +823,8 @@ export function MarketAnalysisSettingsPage() {
               configs={configs}
               onToggleProfile={handleToggleProfile}
               onSave={handleSaveIndicator}
+              onDelete={handleDeleteIndicator}
+              onCreate={handleCreateIndicator}
               savingId={savingId}
             />
           ))}

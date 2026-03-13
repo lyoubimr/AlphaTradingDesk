@@ -4,7 +4,9 @@ Market Analysis router — Step 7 / Step 13-B (v2 conclusion).
 Routes:
   GET  /api/market-analysis/modules
   GET  /api/market-analysis/modules/{module_id}/indicators
+  POST /api/market-analysis/modules/{module_id}/indicators
   PATCH /api/market-analysis/indicators/{id}
+  DELETE /api/market-analysis/indicators/{id}
   POST /api/market-analysis/sessions
   GET  /api/market-analysis/sessions              (global — no profile filter required)
   GET  /api/market-analysis/sessions/{session_id}
@@ -18,7 +20,7 @@ Routes:
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Query, Response, status
 from sqlalchemy.orm import Session
 
 from src.core.deps import get_db
@@ -26,6 +28,7 @@ from src.market_analysis import service
 from src.market_analysis.schemas import (
     IndicatorConfigItem,
     IndicatorConfigOut,
+    IndicatorCreate,
     IndicatorOut,
     IndicatorUpdate,
     ModuleOut,
@@ -75,6 +78,30 @@ def patch_indicator(
     Immutable fields (key, module_id, tv_symbol, etc.) are ignored.
     """
     return service.patch_indicator(db, indicator_id, data)
+
+
+@ma_router.post(
+    "/modules/{module_id}/indicators",
+    response_model=IndicatorOut,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_indicator(
+    module_id: int,
+    data: IndicatorCreate,
+    db: Session = Depends(get_db),
+) -> object:
+    """Create a new custom indicator for a module."""
+    return service.create_indicator(db, module_id, data)
+
+
+@ma_router.delete("/indicators/{indicator_id}", status_code=status.HTTP_204_NO_CONTENT, response_model=None)
+def delete_indicator(
+    indicator_id: int,
+    db: Session = Depends(get_db),
+) -> Response:
+    """Delete an indicator. Also removes all profile toggles and session answers for it."""
+    service.delete_indicator(db, indicator_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 # ── Sessions ──────────────────────────────────────────────────────────────────

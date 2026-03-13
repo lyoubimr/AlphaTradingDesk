@@ -81,11 +81,6 @@ class StrategyCreate(BaseModel):
     rules: str | None = None
     emoji: str | None = Field(default=None, max_length=10)
     color: str | None = Field(default=None, max_length=7)
-    image_url: str | None = Field(
-        default=None,
-        max_length=500,
-        description="Direct URL to strategy chart/screenshot. Upload support in Phase 2+.",
-    )
 
 
 class StrategyUpdate(BaseModel):
@@ -96,7 +91,6 @@ class StrategyUpdate(BaseModel):
     rules: str | None = None
     emoji: str | None = Field(default=None, max_length=10)
     color: str | None = Field(default=None, max_length=7)
-    image_url: str | None = Field(default=None, max_length=500)
     min_trades_for_stats: int | None = Field(default=None, ge=1)
     status: str | None = Field(default=None, pattern="^(active|archived)$")
 
@@ -113,7 +107,7 @@ class StrategyOut(BaseModel):
     rules: str | None
     emoji: str | None
     color: str | None
-    image_url: str | None
+    screenshot_urls: list[str] | None = None
     status: str
     trades_count: int
     win_count: int

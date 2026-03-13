@@ -61,7 +61,8 @@ class Strategy(Base):
     rules: Mapped[str | None] = mapped_column(Text)
     color: Mapped[str | None] = mapped_column(String(7))
     emoji: Mapped[str | None] = mapped_column(String(10))
-    image_url: Mapped[str | None] = mapped_column(String(500))
+    # Multiple chart/example screenshots
+    screenshot_urls: Mapped[list | None] = mapped_column(ARRAY(Text))
     status: Mapped[str] = mapped_column(String(50), nullable=False, default="active")
 
     # Stats — updated atomically on trade close

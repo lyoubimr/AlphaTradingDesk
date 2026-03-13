@@ -34,7 +34,7 @@ DRY_RUN=false
 
 # ── Config ────────────────────────────────────────────────────────────────────
 DELL_SSH_ALIAS="atd"
-DELL_COMPOSE="$HOME/apps/docker-compose.prod.yml"
+DELL_COMPOSE='~/apps/docker-compose.prod.yml'  # literal ~ — expands on the Dell, not the Mac
 PROD_DB_NAME="atd_prod"
 PROD_DB_USER="atd"
 
@@ -45,8 +45,8 @@ DEV_DB_PASSWORD="dev_password"
 DEV_DB_SERVICE="db"
 DEV_BACKEND_SERVICE="backend"
 
-DUMP_REMOTE="/tmp/atd_prod_sync_$(date +%Y%m%d_%H%M%S).sql.gz"
-DUMP_LOCAL="/tmp/atd_prod_sync_$(date +%Y%m%d_%H%M%S).sql.gz"
+_TS="$(date +%Y%m%d_%H%M%S)"
+DUMP_LOCAL="/tmp/atd_prod_sync_${_TS}.dump"
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 log()  { echo "  $*"; }
@@ -85,20 +85,29 @@ if ! docker compose -f "${DEV_COMPOSE_FILE}" exec -T "${DEV_DB_SERVICE}" \
 fi
 log "✅  Local dev DB running"
 
-# ── Step 1 — Dump prod DB on Dell ─────────────────────────────────────────────
-step "Step 1 — pg_dump on Dell → ${DUMP_REMOTE}"
-run "ssh ${DELL_SSH_ALIAS} \"
-  export GHCR_OWNER=placeholder IMAGE_TAG=latest
-  docker compose -f ${DELL_COMPOSE} exec -T ${DEV_DB_SERVICE/db/db} \
-    pg_dump -U ${PROD_DB_USER} ${PROD_DB_NAME} | gzip > ${DUMP_REMOTE}
-  echo \\\"  Dump size: \\\$(du -sh ${DUMP_REMOTE} | cut -f1)\\\"
-\""
+# ── Step 1 — Stream prod dump directly from Dell to Mac via SSH stdout ─────────
+# Avoids remote temp file and $HOME path confusion: pg_dump stdout → SSH → local file.
+step "Step 1 — pg_dump -Fc: Dell → ${DUMP_LOCAL} (via SSH stdout)"
+if $DRY_RUN; then
+  log "[DRY-RUN] ssh ${DELL_SSH_ALIAS} pg_dump -Fc ${PROD_DB_NAME} > ${DUMP_LOCAL}"
+else
+  ssh "${DELL_SSH_ALIAS}" \
+    "export GHCR_OWNER=placeholder IMAGE_TAG=latest
+     docker compose -f ${DELL_COMPOSE} exec -T db \
+       pg_dump -U ${PROD_DB_USER} -Fc ${PROD_DB_NAME}" \
+    > "${DUMP_LOCAL}"
+  if [[ ! -s "${DUMP_LOCAL}" ]]; then
+    echo "  ❌  Dump is empty — check Dell containers:"
+    echo "      ssh ${DELL_SSH_ALIAS} 'docker compose -f ${DELL_COMPOSE} ps'"
+    exit 1
+  fi
+  log "  Dump size: $(du -sh "${DUMP_LOCAL}" | cut -f1)"
+  log "✅  Dump complete"
+fi
 
-# ── Step 2 — Transfer dump to Mac ─────────────────────────────────────────────
-step "Step 2 — Transfer dump → ${DUMP_LOCAL}"
-run "scp ${DELL_SSH_ALIAS}:${DUMP_REMOTE} ${DUMP_LOCAL}"
-run "ssh ${DELL_SSH_ALIAS} rm -f ${DUMP_REMOTE}"
-log "✅  Transfer complete"
+# ── Step 2 — (no scp needed — dump landed directly on Mac in Step 1) ──────────
+step "Step 2 — Dump already at ${DUMP_LOCAL}"
+log "✅  (streamed directly in Step 1)"
 
 # ── Step 3 — Stop local backend (release DB connections) ──────────────────────
 step "Step 3 — Stop local backend"
@@ -114,11 +123,27 @@ run "docker compose -f ${DEV_COMPOSE_FILE} exec -T ${DEV_DB_SERVICE} \
 log "✅  Database recreated"
 
 # ── Step 5 — Restore dump ─────────────────────────────────────────────────────
-step "Step 5 — Restore prod dump into atd_dev"
-run "zcat ${DUMP_LOCAL} | \
-  docker compose -f ${DEV_COMPOSE_FILE} exec -T ${DEV_DB_SERVICE} \
-  psql -U ${DEV_DB_USER} -d ${DEV_DB_NAME} -q"
+step "Step 5 — Copy dump into container then pg_restore"
+# Copy the binary dump file directly into the db container (avoids stdin piping issues)
+run "docker compose -f ${DEV_COMPOSE_FILE} cp ${DUMP_LOCAL} ${DEV_DB_SERVICE}:/tmp/restore.dump"
+run "docker compose -f ${DEV_COMPOSE_FILE} exec -T ${DEV_DB_SERVICE} \
+  pg_restore -U ${DEV_DB_USER} -d ${DEV_DB_NAME} \
+  --no-owner --no-privileges --exit-on-error \
+  /tmp/restore.dump"
+run "docker compose -f ${DEV_COMPOSE_FILE} exec -T ${DEV_DB_SERVICE} rm -f /tmp/restore.dump"
 log "✅  Restore complete"
+
+# Quick sanity check — prod profiles should be present
+if ! $DRY_RUN; then
+  PROF=$(docker compose -f "${DEV_COMPOSE_FILE}" exec -T "${DEV_DB_SERVICE}" \
+    psql -U "${DEV_DB_USER}" -d "${DEV_DB_NAME}" -tAq \
+    -c "SELECT COUNT(*) FROM profiles;" 2>/dev/null || echo "0")
+  log "Profiles in dev DB: ${PROF}"
+  if [ "${PROF}" = "0" ]; then
+    echo "  ❌  Restore produced 0 profiles — check dump content and retry"
+    exit 1
+  fi
+fi
 
 # Clean up local dump
 run "rm -f ${DUMP_LOCAL}"

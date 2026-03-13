@@ -86,6 +86,18 @@ export interface Instrument {
   is_active: boolean
 }
 
+export interface InstrumentCreate {
+  symbol: string
+  display_name: string
+  asset_class: string
+  base_currency?: string
+  quote_currency?: string
+  pip_size?: string
+  tick_value?: string
+  min_lot?: string
+  max_leverage?: number
+}
+
 // ── Trades ────────────────────────────────────────────────────────────────
 
 /** One TP target sent to POST /api/trades */
@@ -228,6 +240,7 @@ export interface Strategy {
   emoji: string | null
   color: string | null
   image_url: string | null
+  screenshot_urls: string[] | null
   status: string
   trades_count: number
   win_count: number
@@ -240,7 +253,6 @@ export interface StrategyCreate {
   rules?: string | null
   emoji?: string | null
   color?: string | null
-  image_url?: string | null
 }
 
 export interface StrategyUpdate {
@@ -249,7 +261,6 @@ export interface StrategyUpdate {
   rules?: string | null
   emoji?: string | null
   color?: string | null
-  image_url?: string | null
   min_trades_for_stats?: number
   status?: 'active' | 'archived'
 }
@@ -438,6 +449,23 @@ export interface MAIndicatorUpdate {
   answer_partial?: string
   answer_bearish?: string
   default_enabled?: boolean
+}
+
+export interface MAIndicatorCreate {
+  key: string
+  label: string
+  asset_target: 'a' | 'b' | 'single'
+  tv_symbol?: string
+  tv_timeframe?: string
+  timeframe_level: 'htf' | 'mtf' | 'ltf'
+  score_block: 'trend' | 'momentum' | 'participation'
+  question: string
+  tooltip?: string | null
+  answer_bullish?: string
+  answer_partial?: string
+  answer_bearish?: string
+  default_enabled?: boolean
+  sort_order?: number
 }
 
 export interface MAAnswerIn {

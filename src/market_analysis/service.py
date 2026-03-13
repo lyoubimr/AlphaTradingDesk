@@ -45,6 +45,7 @@ from src.core.models.market_analysis import (
 from src.market_analysis.schemas import (
     AnswerIn,
     IndicatorConfigItem,
+    IndicatorCreate,
     IndicatorUpdate,
     SessionCreate,
     StalenessItem,
@@ -438,6 +439,45 @@ def patch_indicator(
     db.commit()
     db.refresh(ind)
     return ind
+
+
+def create_indicator(
+    db: Session, module_id: int, data: IndicatorCreate
+) -> MarketAnalysisIndicator:
+    _get_module_or_404(db, module_id)
+    existing = (
+        db.query(MarketAnalysisIndicator)
+        .filter(
+            MarketAnalysisIndicator.module_id == module_id,
+            MarketAnalysisIndicator.key == data.key,
+        )
+        .first()
+    )
+    if existing:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Indicator key '{data.key}' already exists in this module.",
+        )
+    ind = MarketAnalysisIndicator(module_id=module_id, **data.model_dump())
+    db.add(ind)
+    db.commit()
+    db.refresh(ind)
+    return ind
+
+
+def delete_indicator(db: Session, indicator_id: int) -> None:
+    ind = (
+        db.query(MarketAnalysisIndicator)
+        .filter(MarketAnalysisIndicator.id == indicator_id)
+        .first()
+    )
+    if not ind:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Indicator {indicator_id} not found.",
+        )
+    db.delete(ind)
+    db.commit()
 
 
 def get_indicator_config(db: Session, profile_id: int) -> tuple[int, list[IndicatorConfigItem]]:
