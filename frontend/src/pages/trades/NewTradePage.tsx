@@ -26,7 +26,7 @@ import type React from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   TrendingUp, TrendingDown, Loader2,
-  AlertTriangle, ChevronDown, ChevronUp, Search, X, Info, Clock, Plus, ShieldAlert, ImagePlus, Trash2,
+  AlertTriangle, ChevronDown, ChevronUp, Search, X, Info, Clock, Plus, ShieldAlert, ImagePlus, Trash2, Star,
 } from 'lucide-react'
 import { PageHeader } from '../../components/ui/PageHeader'
 import { useProfile } from '../../context/ProfileContext'
@@ -34,7 +34,7 @@ import { instrumentsApi, tradesApi, strategiesApi, statsApi, goalsApi } from '..
 import { useRiskCalc } from '../../hooks/useRiskCalc'
 import type { RiskCalcResult } from '../../hooks/useRiskCalc'
 import { cn } from '../../lib/cn'
-import type { Instrument, Profile, Strategy, WinRateStats, GoalProgressItem } from '../../types/api'
+import type { Instrument, InstrumentCreate, Profile, Strategy, WinRateStats, GoalProgressItem } from '../../types/api'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Shared styles
@@ -207,30 +207,131 @@ const CLASS_COLORS: Record<string, string> = {
   Indices:     'text-purple-400 bg-purple-500/10',
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Instrument favorites — persisted in browser localStorage
+// ─────────────────────────────────────────────────────────────────────────────
+
+const FAVORITES_KEY = 'atd_instrument_favorites'
+
+function useInstrumentFavorites() {
+  const [favorites, setFavorites] = useState<Set<string>>(() => {
+    try {
+      const raw = localStorage.getItem(FAVORITES_KEY)
+      return new Set(raw ? (JSON.parse(raw) as string[]) : [])
+    } catch {
+      return new Set()
+    }
+  })
+
+  const toggle = useCallback((symbol: string, e: React.MouseEvent) => {
+    e.stopPropagation()
+    setFavorites((prev) => {
+      const next = new Set(prev)
+      next.has(symbol) ? next.delete(symbol) : next.add(symbol)
+      try { localStorage.setItem(FAVORITES_KEY, JSON.stringify([...next])) } catch { /* quota */ }
+      return next
+    })
+  }, [])
+
+  return { favorites, toggle }
+}
+
 function InstrumentPicker({
-  instruments, value, onChange,
+  instruments, value, onChange, brokerId, onCreated,
 }: {
-  instruments: Instrument[]; value: Instrument | null; onChange: (i: Instrument | null) => void
+  instruments: Instrument[]
+  value: Instrument | null
+  onChange: (i: Instrument | null) => void
+  brokerId: number | null
+  onCreated: (i: Instrument) => void
 }) {
-  const [query, setQuery] = useState('')
-  const [open, setOpen]   = useState(false)
-  const ref               = useRef<HTMLDivElement>(null)
+  const [query, setQuery]       = useState('')
+  const [open, setOpen]         = useState(false)
+  const [adding, setAdding]     = useState(false)
+  const [saving, setSaving]     = useState(false)
+  const [addErr, setAddErr]     = useState<string | null>(null)
+  const [form, setForm]         = useState({
+    symbol: '', display_name: '', asset_class: 'Forex',
+    tick_value: '', pip_size: '', min_lot: '', max_leverage: '',
+  })
+  const ref                     = useRef<HTMLDivElement>(null)
+  const { favorites, toggle }   = useInstrumentFavorites()
 
   useEffect(() => {
     const h = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+      if (ref.current && !ref.current.contains(e.target as Node)) {
+        setOpen(false); setAdding(false); setAddErr(null)
+      }
     }
     document.addEventListener('mousedown', h)
     return () => document.removeEventListener('mousedown', h)
   }, [])
 
-  const filtered = useMemo(() => {
-    if (!query.trim()) return instruments.slice(0, 40)
-    const q = query.toLowerCase()
-    return instruments
-      .filter((i) => i.symbol.toLowerCase().includes(q) || i.display_name.toLowerCase().includes(q))
-      .slice(0, 40)
-  }, [instruments, query])
+  const { favList, otherList } = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    const pool = q
+      ? instruments.filter((i) =>
+          i.symbol.toLowerCase().includes(q) || i.display_name.toLowerCase().includes(q)
+        )
+      : instruments
+    if (q) return { favList: [] as Instrument[], otherList: pool.slice(0, 40) }
+    const favL   = pool.filter((i) => favorites.has(i.symbol))
+    const otherL = pool.filter((i) => !favorites.has(i.symbol)).slice(0, 40 - favL.length)
+    return { favList: favL, otherList: otherL }
+  }, [instruments, query, favorites])
+
+  const handleCreate = async () => {
+    if (!brokerId || !form.symbol.trim() || !form.display_name.trim()) return
+    setSaving(true); setAddErr(null)
+    try {
+      const payload: InstrumentCreate = {
+        symbol:       form.symbol.trim().toUpperCase(),
+        display_name: form.display_name.trim(),
+        asset_class:  form.asset_class,
+        ...(form.tick_value   && { tick_value:   form.tick_value }),
+        ...(form.pip_size     && { pip_size:     form.pip_size }),
+        ...(form.min_lot      && { min_lot:      form.min_lot }),
+        ...(form.max_leverage && { max_leverage: parseInt(form.max_leverage, 10) }),
+      }
+      const created = await instrumentsApi.create(brokerId, payload)
+      onCreated(created)
+      onChange(created)
+      setOpen(false); setAdding(false)
+      setForm({ symbol: '', display_name: '', asset_class: 'Forex', tick_value: '', pip_size: '', min_lot: '', max_leverage: '' })
+    } catch (e) {
+      setAddErr(e instanceof Error ? e.message : 'Error creating instrument')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const renderRow = (i: Instrument) => {
+    const isFav = favorites.has(i.symbol)
+    return (
+      <div key={i.id} className="flex items-center group hover:bg-surface-700 transition-colors">
+        <button type="button"
+          onClick={() => { onChange(i); setOpen(false); setQuery('') }}
+          className="flex-1 flex items-center gap-2 px-3 py-2.5 text-left">
+          <span className={cn('shrink-0 px-1.5 py-0.5 rounded text-[9px] font-semibold', CLASS_COLORS[i.asset_class] ?? 'text-slate-400 bg-surface-700')}>
+            {i.asset_class}
+          </span>
+          <span className="text-xs font-medium text-slate-200 flex-1 truncate">{i.display_name}</span>
+          <span className="text-[10px] text-slate-500 shrink-0">{i.symbol}</span>
+          {i.max_leverage && <span className="text-[10px] text-slate-600 shrink-0">×{i.max_leverage}</span>}
+        </button>
+        <button
+          type="button"
+          onClick={(e) => toggle(i.symbol, e)}
+          title={isFav ? 'Remove from favorites' : 'Add to favorites'}
+          className="px-3 py-2.5 shrink-0 opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity">
+          <Star
+            size={12}
+            className={isFav ? 'fill-amber-400 text-amber-400' : 'text-slate-600 hover:text-amber-400'}
+          />
+        </button>
+      </div>
+    )
+  }
 
   return (
     <div ref={ref} className="relative">
@@ -243,6 +344,7 @@ function InstrumentPicker({
             </span>
             <span className="font-medium text-slate-100 truncate">{value.display_name}</span>
             <span className="text-slate-500 text-xs shrink-0">{value.symbol}</span>
+            {favorites.has(value.symbol) && <Star size={10} className="shrink-0 fill-amber-400 text-amber-400" />}
           </span>
         ) : (
           <span className="flex items-center gap-2 text-slate-500">
@@ -255,32 +357,124 @@ function InstrumentPicker({
       {open && (
         <div className="absolute top-full left-0 right-0 mt-1 z-50
           bg-surface-800 border border-surface-600 rounded-xl shadow-2xl overflow-hidden">
-          <div className="p-2 border-b border-surface-700">
-            <div className="flex items-center gap-2 px-2 py-1.5 rounded-lg bg-surface-700">
-              <Search size={13} className="text-slate-500 shrink-0" />
-              <input autoFocus value={query} onChange={(e) => setQuery(e.target.value)}
-                placeholder="BTC, ETH, EUR/USD, XAU…"
-                className="flex-1 bg-transparent text-sm text-slate-200 placeholder-slate-600 focus:outline-none" />
-              {query && <button type="button" onClick={() => setQuery('')}><X size={12} className="text-slate-500 hover:text-slate-300" /></button>}
+
+          {/* Search bar */}
+          {!adding && (
+            <div className="p-2 border-b border-surface-700">
+              <div className="flex items-center gap-2 px-2 py-1.5 rounded-lg bg-surface-700">
+                <Search size={13} className="text-slate-500 shrink-0" />
+                <input autoFocus value={query} onChange={(e) => setQuery(e.target.value)}
+                  placeholder="BTC, ETH, EUR/USD, XAU…"
+                  className="flex-1 bg-transparent text-sm text-slate-200 placeholder-slate-600 focus:outline-none" />
+                {query && <button type="button" onClick={() => setQuery('')}><X size={12} className="text-slate-500 hover:text-slate-300" /></button>}
+              </div>
             </div>
-          </div>
-          <div className="max-h-60 overflow-y-auto">
-            {filtered.length === 0
-              ? <p className="px-4 py-3 text-xs text-slate-500">No instruments found</p>
-              : filtered.map((i) => (
-                <button key={i.id} type="button"
-                  onClick={() => { onChange(i); setOpen(false); setQuery('') }}
-                  className="w-full flex items-center gap-2 px-4 py-2.5 hover:bg-surface-700 transition-colors text-left">
-                  <span className={cn('shrink-0 px-1.5 py-0.5 rounded text-[9px] font-semibold', CLASS_COLORS[i.asset_class] ?? 'text-slate-400 bg-surface-700')}>
-                    {i.asset_class}
-                  </span>
-                  <span className="text-xs font-medium text-slate-200 flex-1 truncate">{i.display_name}</span>
-                  <span className="text-[10px] text-slate-500 shrink-0">{i.symbol}</span>
-                  {i.max_leverage && <span className="text-[10px] text-slate-600 shrink-0">×{i.max_leverage}</span>}
+          )}
+
+          {/* Inline add-instrument form */}
+          {adding ? (
+            <div className="p-3 space-y-2">
+              <p className="text-xs font-semibold text-slate-300 mb-2">Add custom instrument</p>
+              <div className="grid grid-cols-2 gap-2">
+                <input
+                  autoFocus
+                  value={form.symbol}
+                  onChange={(e) => setForm((f) => ({ ...f, symbol: e.target.value.toUpperCase() }))}
+                  placeholder="Symbol *"
+                  maxLength={30}
+                  className={cn(inputCls, 'text-xs py-1.5')}
+                />
+                <input
+                  value={form.display_name}
+                  onChange={(e) => setForm((f) => ({ ...f, display_name: e.target.value }))}
+                  placeholder="Display name *"
+                  maxLength={100}
+                  className={cn(inputCls, 'text-xs py-1.5')}
+                />
+              </div>
+              <select
+                value={form.asset_class}
+                onChange={(e) => setForm((f) => ({ ...f, asset_class: e.target.value }))}
+                className={cn(inputCls, 'text-xs py-1.5')}
+              >
+                <option value="Forex">Forex</option>
+                <option value="Crypto">Crypto</option>
+                <option value="Commodities">Commodities</option>
+                <option value="Indices">Indices</option>
+              </select>
+              <div className="grid grid-cols-2 gap-2">
+                <input
+                  value={form.tick_value}
+                  onChange={(e) => setForm((f) => ({ ...f, tick_value: e.target.value }))}
+                  placeholder="Tick value (e.g. 10)"
+                  className={cn(inputCls, 'text-xs py-1.5')}
+                />
+                <input
+                  value={form.pip_size}
+                  onChange={(e) => setForm((f) => ({ ...f, pip_size: e.target.value }))}
+                  placeholder="Pip size (e.g. 0.0001)"
+                  className={cn(inputCls, 'text-xs py-1.5')}
+                />
+                <input
+                  value={form.min_lot}
+                  onChange={(e) => setForm((f) => ({ ...f, min_lot: e.target.value }))}
+                  placeholder="Min lot (e.g. 0.01)"
+                  className={cn(inputCls, 'text-xs py-1.5')}
+                />
+                <input
+                  value={form.max_leverage}
+                  onChange={(e) => setForm((f) => ({ ...f, max_leverage: e.target.value }))}
+                  placeholder="Max leverage (e.g. 50)"
+                  className={cn(inputCls, 'text-xs py-1.5')}
+                />
+              </div>
+              {addErr && <p className="text-xs text-red-400">{addErr}</p>}
+              <div className="flex gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={handleCreate}
+                  disabled={saving || !form.symbol.trim() || !form.display_name.trim()}
+                  className="flex-1 py-1.5 rounded-lg bg-brand-600 hover:bg-brand-500 disabled:opacity-40 text-xs font-medium text-white transition-colors flex items-center justify-center gap-1">
+                  {saving ? <Loader2 size={11} className="animate-spin" /> : <Plus size={11} />}
+                  {saving ? 'Saving…' : 'Create'}
                 </button>
-              ))
-            }
-          </div>
+                <button
+                  type="button"
+                  onClick={() => { setAdding(false); setAddErr(null) }}
+                  className="px-3 py-1.5 rounded-lg bg-surface-700 hover:bg-surface-600 text-xs text-slate-400 transition-colors">
+                  Cancel
+                </button>
+              </div>
+            </div>
+          ) : (
+            <>
+              <div className="max-h-56 overflow-y-auto">
+                {favList.length === 0 && otherList.length === 0 && (
+                  <p className="px-4 py-3 text-xs text-slate-500">No instruments found</p>
+                )}
+                {favList.length > 0 && (
+                  <>
+                    <p className="px-4 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-wider text-amber-500/70 flex items-center gap-1">
+                      <Star size={9} className="fill-amber-500/70 text-amber-500/70" /> Favorites
+                    </p>
+                    {favList.map(renderRow)}
+                    {otherList.length > 0 && <div className="mx-3 my-1 border-t border-surface-700" />}
+                  </>
+                )}
+                {otherList.map(renderRow)}
+              </div>
+              {brokerId && (
+                <div className="border-t border-surface-700">
+                  <button
+                    type="button"
+                    onClick={() => { setAdding(true); setQuery('') }}
+                    className="w-full flex items-center gap-2 px-4 py-2.5 text-xs text-slate-500 hover:text-slate-300 hover:bg-surface-700 transition-colors">
+                    <Plus size={12} /> Add missing instrument…
+                  </button>
+                </div>
+              )}
+            </>
+          )}
         </div>
       )}
     </div>
@@ -1261,7 +1455,13 @@ export function NewTradePage() {
           <Field label="Search & select *">
             {instrLoading
               ? <div className="flex items-center gap-2 px-3 py-2 text-sm text-slate-500"><Loader2 size={13} className="animate-spin" /> Loading instruments…</div>
-              : <InstrumentPicker instruments={instruments} value={instrument} onChange={setInstrument} />
+              : <InstrumentPicker
+                  instruments={instruments}
+                  value={instrument}
+                  onChange={setInstrument}
+                  brokerId={activeProfile.broker_id ?? null}
+                  onCreated={(i) => setInstruments((prev) => [...prev, i])}
+                />
             }
           </Field>
           {instrument && (
