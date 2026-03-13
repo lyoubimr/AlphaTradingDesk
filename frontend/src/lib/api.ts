@@ -5,13 +5,13 @@
 
 import type {
   Profile, ProfileCreate, ProfileUpdate,
-  Broker, Instrument,
+  Broker, Instrument, InstrumentCreate,
   TradeOpen, TradeClose, TradePartialClose, TradeUpdate, TradeListItem, TradeOut,
   Strategy, StrategyCreate, StrategyUpdate,
   WinRateStats,
   TradingStyle,
   GoalOut, GoalCreate, GoalUpdate, GoalProgressItem, GoalOverrideCreate, GoalOverrideOut,
-  MAModule, MAIndicator, MAIndicatorConfig, MAIndicatorConfigOut, MAIndicatorUpdate,
+  MAModule, MAIndicator, MAIndicatorConfig, MAIndicatorConfigOut, MAIndicatorUpdate, MAIndicatorCreate,
   MASessionCreate, MASessionOut, MASessionListItem, MAStalenessItem, MATradeConclusion,
 } from '../types/api'
 
@@ -83,6 +83,12 @@ export const brokersApi = {
 export const instrumentsApi = {
   listByBroker: (brokerId: number): Promise<Instrument[]> =>
     request(`/brokers/${brokerId}/instruments`),
+
+  create: (brokerId: number, data: InstrumentCreate): Promise<Instrument> =>
+    request(`/brokers/${brokerId}/instruments`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
 }
 
 // ── Strategies (global + profile-specific) ───────────────────────────────
@@ -376,6 +382,17 @@ export const maApi = {
       method: 'PATCH',
       body: JSON.stringify(data),
     }),
+
+  /** POST /api/market-analysis/modules/{id}/indicators */
+  createIndicator: (moduleId: number, data: MAIndicatorCreate): Promise<MAIndicator> =>
+    request(`/market-analysis/modules/${moduleId}/indicators`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  /** DELETE /api/market-analysis/indicators/{id} */
+  deleteIndicator: (indicatorId: number): Promise<void> =>
+    request(`/market-analysis/indicators/${indicatorId}`, { method: 'DELETE' }),
 
   /** GET /api/profiles/{id}/market-analysis/staleness (profile-scoped, for dashboard widget) */
   getStaleness: (profileId: number): Promise<MAStalenessItem[]> =>

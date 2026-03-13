@@ -1,9 +1,9 @@
 # 🛠️ Phase 1 — Implementation Plan
 
 **Date:** March 1, 2026  
-**Updated:** March 14, 2026  
-**Version:** 2.8  
-**Status:** Phase 1 COMPLETE — v1.0.0 tagged → Step 14 (Dell prod deploy) DONE
+**Updated:** March 13, 2026  
+**Version:** 2.9  
+**Status:** Phase 1 COMPLETE — v1.0.0 tagged → Step 14 DONE → Post-Phase 1 MA improvements ongoing
 
 > This document describes **what to build, in what order**.  
 > Each step is a working, testable increment — nothing is left dangling.
@@ -28,7 +28,41 @@
 
 ---
 
-## ✅ Completed work log
+## 🔧 Post-Phase 1 — MA Settings improvements (2026-03-13)
+
+Applied on `develop` after v1.0.0, before Phase 2 kickoff.
+
+### MA-1 — Add / Delete indicators from UI ✅ DONE
+
+**Backend:**
+- `src/market_analysis/schemas.py` — new `IndicatorCreate` schema (all fields: key, label, asset_target, tv_symbol, tv_timeframe, timeframe_level, score_block, question, tooltip, answer_*, default_enabled, sort_order)
+- `src/market_analysis/service.py` — `create_indicator()` (409 on duplicate key) + `delete_indicator()` (FK cascades)
+- `src/market_analysis/router.py` — `POST /modules/{module_id}/indicators` (201) + `DELETE /indicators/{indicator_id}` (204, `response_model=None`)
+
+**Frontend:**
+- `frontend/src/types/api.ts` — `MAIndicatorCreate` interface
+- `frontend/src/lib/api.ts` — `maApi.createIndicator(moduleId, data)` + `maApi.deleteIndicator(indicatorId)`
+- `frontend/src/pages/settings/MarketAnalysisSettingsPage.tsx`:
+  - `IndicatorRow` — delete button with inline confirm (Trash2 icon → "Confirm / ✕")
+  - `AddIndicatorForm` — shown at top of module (above indicator list), auto-scrolls into view on open; fields: label (auto-slugs key), key, timeframe, score block, asset target (with explanation), TV symbol, TV timeframe, question, guidance/tooltip, answer labels ×3
+  - `ModuleSection` — "Add / Cancel" toggle button in module header
+  - Main page — `handleDeleteIndicator` + `handleCreateIndicator` handlers update local state
+
+### MA-2 — Seed + Settings page improvements ✅ DONE
+
+- `database/migrations/seeds/seed_market_analysis.py` — module `description` fields cleared (was hardcoded trading methodology text)
+- `MarketAnalysisSettingsPage.tsx` — PageHeader subtitle + info tooltip updated; banner rewritten with 5 clear bullets (Edit / Add / Delete / Default enabled / Profile On/Off)
+- Bug fixed: `DELETE /indicators/{id}` route had `-> None` instead of `-> Response` + missing `response_model=None` → FastAPI assertion error at startup → backend crashed on restart
+
+### Score calculation — not impacted ✅
+
+Adding/deleting indicators does not break the score calculation:
+- `_get_enabled_indicator_ids()` queries DB live — no hardcoded count
+- `_score_pct(total, count)` uses `count * 2` where count = enabled indicators in bucket
+- `_compute_scores()` skips any answer where `ind_id not in enabled_ids`
+- Composite v2 weights auto-adjust: `total_weight = sum(weights for non-empty blocks)`
+
+---
 
 ### Step 1 — DONE (2026-03-01)
 - `pyproject.toml` + Poetry venv (Python 3.11)

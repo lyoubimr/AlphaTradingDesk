@@ -75,7 +75,7 @@ logger = logging.getLogger(__name__)
 MODULES: list[dict] = [
     {
         "name": "Crypto",
-        "description": "Top-down: BTC + Alts — 1D Trend (HH/HL + TOTAL/TOTAL2) · 4H S/R reaction · Volume/OBV · BTC.D / USDT.D macro filter · BTC↔BTC.D correlation",
+        "description": "",
         "is_dual": True,
         "asset_a": "BTC",
         "asset_b": "Alts",
@@ -84,7 +84,7 @@ MODULES: list[dict] = [
     },
     {
         "name": "Gold",
-        "description": "Top-down: XAUUSD — 1D Structure · 4H S/R · Volume/OBV · DXY / Yields / VIX macro drivers · 1H entry timing",
+        "description": "",
         "is_dual": False,
         "asset_a": "XAUUSD",
         "asset_b": None,
@@ -1123,31 +1123,40 @@ GOLD_INDICATORS: list[dict] = [
 # Seed function
 # ---------------------------------------------------------------------------
 
-#: Fields that are always synced on upsert (everything except the PK / conflict key).
+#: Structural fields synced on every upsert — safe to overwrite because they are
+#: never edited by the user through the UI.
 _UPSERT_SYNC_FIELDS = [
-    "label",
     "asset_target",
     "tv_symbol",
     "tv_timeframe",
     "timeframe_level",
     "score_block",
+    "default_enabled",
+    "sort_order",
+]
+
+#: Text fields seeded only on INSERT — user edits via the Settings UI survive
+#: restarts and CD deploys.
+_INSERT_ONLY_FIELDS = [
+    "label",
     "question",
     "tooltip",
     "answer_bullish",
     "answer_partial",
     "answer_bearish",
-    "default_enabled",
-    "sort_order",
 ]
 
 
 def seed_market_analysis(session: Session) -> None:
     """Insert or update modules and indicators.
 
-    Strategy: ON CONFLICT DO UPDATE on the unique keys so that every
-    seed run keeps metadata (sort_order, question, default_enabled …)
-    in sync with the canonical definitions above.  Rows in the DB that
-    no longer exist in the seed are left untouched (safe for prod data).
+    Strategy:
+    - Structural fields (tv_symbol, score_block, sort_order …) are always
+      synced via ON CONFLICT DO UPDATE so the seed stays canonical.
+    - Text fields edited by the user (label, question, tooltip, answer_*)
+      are only written on first INSERT — user changes survive restarts and
+      CD deploys.
+    - Rows in the DB that no longer exist in the seed are left untouched.
     """
     # ── Step 1 — modules (upsert description / flags) ──────────────────
     set_module = {
@@ -1171,7 +1180,7 @@ def seed_market_analysis(session: Session) -> None:
     crypto_id = module_ids["Crypto"]
     gold_id   = module_ids["Gold"]
 
-    # ── Step 3 — indicators (upsert all metadata fields) ───────────────
+    # ── Step 3 — indicators (insert all fields; update structural fields only) ──
     crypto_rows = [{**ind, "module_id": crypto_id} for ind in CRYPTO_INDICATORS]
     gold_rows   = [{**ind, "module_id": gold_id}   for ind in GOLD_INDICATORS]
 
