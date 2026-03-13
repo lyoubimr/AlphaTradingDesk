@@ -17,10 +17,11 @@
 // ──────────────────────────────────────────────────────────────────────────
 
 import { useEffect, useState, useCallback, useRef } from 'react'
+import type React from 'react'
 import { Link } from 'react-router-dom'
 import {
   BarChart2, Plus, Loader2, RefreshCw, Trash2,
-  Pencil, X, Check, BookOpen, Upload, ImageOff, ExternalLink, Globe, User,
+  Pencil, X, Check, BookOpen, Upload, ImageOff, ExternalLink, Globe, User, ImagePlus, Maximize2,
 } from 'lucide-react'
 import { PageHeader } from '../../components/ui/PageHeader'
 import { useProfile } from '../../context/ProfileContext'
@@ -186,6 +187,148 @@ function ImageUploader({
         className="hidden"
         onChange={handleFile}
       />
+
+      {error && (
+        <p className="text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">{error}</p>
+      )}
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// StrategySnapshotGallery — multi-screenshot gallery (chart walk-throughs etc.)
+// ─────────────────────────────────────────────────────────────────────────────
+
+function StrategySnapshotGallery({
+  strategy,
+  profileId,
+  onUpdated,
+}: {
+  strategy: Strategy
+  /** null = global strategy */
+  profileId: number | null
+  onUpdated: (s: Strategy) => void
+}) {
+  const [uploading, setUploading] = useState(false)
+  const [deleting,  setDeleting]  = useState<string | null>(null)
+  const [error,     setError]     = useState<string | null>(null)
+  const [lightbox,  setLightbox]  = useState<string | null>(null)
+
+  const list = strategy.screenshot_urls ?? []
+
+  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setUploading(true); setError(null)
+    try {
+      const updated = profileId === null
+        ? await strategiesApi.addGlobalScreenshot(strategy.id, file)
+        : await strategiesApi.addScreenshot(profileId, strategy.id, file)
+      onUpdated(updated)
+    } catch (ex: unknown) {
+      setError((ex as Error).message)
+    } finally {
+      setUploading(false)
+      e.target.value = ''
+    }
+  }
+
+  const handleDelete = async (url: string) => {
+    setDeleting(url); setError(null)
+    try {
+      const updated = profileId === null
+        ? await strategiesApi.removeGlobalScreenshot(strategy.id, url)
+        : await strategiesApi.removeScreenshot(profileId, strategy.id, url)
+      onUpdated(updated)
+    } catch (ex: unknown) {
+      setError((ex as Error).message)
+    } finally {
+      setDeleting(null)
+    }
+  }
+
+  return (
+    <div className="space-y-2">
+      <label className="text-[10px] text-slate-500 uppercase tracking-wide flex items-center gap-1">
+        <ImagePlus size={10} /> Screenshots
+        <span className="text-slate-600 normal-case">(charts, examples · multiple allowed)</span>
+      </label>
+
+      {/* Lightbox */}
+      {lightbox && (
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/85 backdrop-blur-sm"
+          onClick={() => setLightbox(null)}
+        >
+          <img
+            src={lightbox}
+            alt="screenshot"
+            className="max-w-[90vw] max-h-[90vh] object-contain rounded-xl shadow-2xl"
+          />
+          <button
+            type="button"
+            onClick={() => setLightbox(null)}
+            className="absolute top-4 right-4 text-slate-400 hover:text-white bg-black/50 rounded-full p-2"
+          >
+            <X size={18} />
+          </button>
+        </div>
+      )}
+
+      {/* Grid */}
+      <div className="flex flex-wrap gap-2">
+        {list.map((url) => (
+          <div
+            key={url}
+            className="relative group w-24 h-24 rounded-lg overflow-hidden border border-surface-600 bg-surface-700 shrink-0"
+          >
+            <img
+              src={url}
+              alt="screenshot"
+              className="w-full h-full object-cover cursor-pointer"
+              onClick={() => setLightbox(url)}
+            />
+            <button
+              type="button"
+              onClick={() => setLightbox(url)}
+              className="absolute top-1 left-1 opacity-0 group-hover:opacity-100 bg-black/60 text-white rounded p-0.5 transition-opacity"
+            >
+              <Maximize2 size={11} />
+            </button>
+            <button
+              type="button"
+              onClick={() => void handleDelete(url)}
+              disabled={deleting === url}
+              className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 bg-red-600/80 text-white rounded p-0.5 transition-opacity disabled:opacity-40"
+            >
+              {deleting === url ? <Loader2 size={11} className="animate-spin" /> : <X size={11} />}
+            </button>
+          </div>
+        ))}
+
+        {/* Upload button */}
+        <label className={cn(
+          'flex flex-col items-center justify-center gap-1 w-24 h-24 rounded-lg border-2 border-dashed cursor-pointer shrink-0 transition-colors',
+          uploading
+            ? 'border-brand-500/40 bg-brand-500/5 cursor-wait'
+            : 'border-surface-600 hover:border-brand-500/50 hover:bg-brand-500/5',
+        )}>
+          {uploading
+            ? <Loader2 size={18} className="text-brand-400 animate-spin" />
+            : <ImagePlus size={18} className="text-slate-500" />
+          }
+          <span className="text-[9px] text-slate-600 text-center leading-tight">
+            {uploading ? 'Uploading…' : 'Add\nscreenshot'}
+          </span>
+          <input
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={(e) => void handleUpload(e)}
+            disabled={uploading}
+          />
+        </label>
+      </div>
 
       {error && (
         <p className="text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">{error}</p>
@@ -387,7 +530,7 @@ function StrategyRow({
 
       {/* Image preview (outside edit mode) */}
       {!editing && strategy.image_url && (
-        <div className="px-4 pb-4">
+        <div className="px-4 pb-3">
           <div className="rounded-xl overflow-hidden border border-surface-700 bg-surface-900/60 flex items-center justify-center" style={{ maxHeight: 320 }}>
             <img
               src={strategy.image_url}
@@ -395,6 +538,25 @@ function StrategyRow({
               className="w-full h-full object-contain"
               style={{ maxHeight: 320 }}
             />
+          </div>
+        </div>
+      )}
+
+      {/* Screenshot gallery read-view */}
+      {!editing && strategy.screenshot_urls && strategy.screenshot_urls.length > 0 && (
+        <div className="px-4 pb-4">
+          <p className="text-[10px] text-slate-600 uppercase tracking-wide mb-1.5">Screenshots</p>
+          <div className="flex flex-wrap gap-2">
+            {strategy.screenshot_urls.map((url) => (
+              <div
+                key={url}
+                className="w-20 h-20 rounded-lg overflow-hidden border border-surface-700 bg-surface-900 cursor-pointer"
+                onClick={() => window.open(url, '_blank')}
+                title="Open full size"
+              >
+                <img src={url} alt="screenshot" className="w-full h-full object-cover" />
+              </div>
+            ))}
           </div>
         </div>
       )}
@@ -448,6 +610,10 @@ function StrategyRow({
           {!isGlobal
             ? <ImageUploader strategy={strategy} profileId={profileId} onUpdated={onUpdated} />
             : <ImageUploader strategy={strategy} profileId={null} onUpdated={onUpdated} />
+          }
+          {!isGlobal
+            ? <StrategySnapshotGallery strategy={strategy} profileId={profileId} onUpdated={onUpdated} />
+            : <StrategySnapshotGallery strategy={strategy} profileId={null} onUpdated={onUpdated} />
           }
         </div>
       )}

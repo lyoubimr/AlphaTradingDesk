@@ -143,3 +143,33 @@ def delete_strategy_image(
 ) -> object:
     """Remove the strategy image (deletes file, sets image_url = null)."""
     return service.delete_strategy_image(db, profile_id, strategy_id)
+
+
+@router.post(
+    "/{profile_id}/strategies/{strategy_id}/screenshots",
+    response_model=StrategyOut,
+)
+def add_strategy_screenshot(
+    profile_id: int,
+    strategy_id: int,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+) -> object:
+    """Append a screenshot to a profile strategy's screenshot gallery."""
+    return service.add_strategy_screenshot(db, profile_id, strategy_id, file)
+
+
+@router.delete(
+    "/{profile_id}/strategies/{strategy_id}/screenshots/{url_b64}",
+    response_model=StrategyOut,
+)
+def remove_strategy_screenshot(
+    profile_id: int,
+    strategy_id: int,
+    url_b64: str,
+    db: Session = Depends(get_db),
+) -> object:
+    """Remove a screenshot from a profile strategy (base64url-encoded URL)."""
+    import base64
+    url = base64.urlsafe_b64decode(url_b64 + "==").decode("utf-8")
+    return service.remove_strategy_screenshot(db, profile_id, strategy_id, url)

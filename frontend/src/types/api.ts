@@ -240,6 +240,7 @@ export interface Strategy {
   emoji: string | null
   color: string | null
   image_url: string | null
+  screenshot_urls: string[] | null
   status: string
   trades_count: number
   win_count: number

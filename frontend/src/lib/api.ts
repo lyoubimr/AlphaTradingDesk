@@ -144,6 +144,27 @@ export const strategiesApi = {
   deleteGlobalImage: (strategyId: number): Promise<Strategy> =>
     request(`/strategies/${strategyId}/image`, { method: 'DELETE' }),
 
+  /** Append a screenshot to a global strategy's gallery. */
+  addGlobalScreenshot: async (strategyId: number, file: File): Promise<Strategy> => {
+    const form = new FormData()
+    form.append('file', file)
+    const res = await fetch(`${BASE}/strategies/${strategyId}/screenshots`, {
+      method: 'POST',
+      body: form,
+    })
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({ detail: res.statusText }))
+      throw new Error(typeof body.detail === 'string' ? body.detail : JSON.stringify(body.detail))
+    }
+    return res.json() as Promise<Strategy>
+  },
+
+  /** Remove a screenshot from a global strategy. */
+  removeGlobalScreenshot: (strategyId: number, url: string): Promise<Strategy> => {
+    const b64 = btoa(url).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '')
+    return request(`/strategies/${strategyId}/screenshots/${b64}`, { method: 'DELETE' })
+  },
+
   /** Create a profile-specific strategy. */
   create: (profileId: number, data: StrategyCreate): Promise<Strategy> =>
     request(`/profiles/${profileId}/strategies`, {
@@ -170,6 +191,27 @@ export const strategiesApi = {
   // Image upload is done directly with fetch + FormData (multipart) in the component.
   deleteImage: (profileId: number, strategyId: number): Promise<Strategy> =>
     request(`/profiles/${profileId}/strategies/${strategyId}/image`, { method: 'DELETE' }),
+
+  /** Append a screenshot to a profile strategy's gallery. */
+  addScreenshot: async (profileId: number, strategyId: number, file: File): Promise<Strategy> => {
+    const form = new FormData()
+    form.append('file', file)
+    const res = await fetch(`${BASE}/profiles/${profileId}/strategies/${strategyId}/screenshots`, {
+      method: 'POST',
+      body: form,
+    })
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({ detail: res.statusText }))
+      throw new Error(typeof body.detail === 'string' ? body.detail : JSON.stringify(body.detail))
+    }
+    return res.json() as Promise<Strategy>
+  },
+
+  /** Remove a screenshot from a profile strategy. */
+  removeScreenshot: (profileId: number, strategyId: number, url: string): Promise<Strategy> => {
+    const b64 = btoa(url).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '')
+    return request(`/profiles/${profileId}/strategies/${strategyId}/screenshots/${b64}`, { method: 'DELETE' })
+  },
 }
 
 

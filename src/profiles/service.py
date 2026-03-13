@@ -328,3 +328,98 @@ def delete_global_strategy_image(db: Session, strategy_id: int) -> Strategy:
             detail=f"Global strategy {strategy_id} not found.",
         )
     return _do_delete_strategy_image(db, strategy)
+
+
+# ── Strategy multi-screenshot helpers ─────────────────────────────────────────
+
+
+def _do_add_strategy_screenshot(db: Session, strategy: Strategy, file: UploadFile) -> Strategy:
+    """Append one screenshot to strategy.screenshot_urls. Validates MIME + size."""
+    if file.content_type not in _ALLOWED_IMAGE_TYPES:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Unsupported file type '{file.content_type}'. Allowed: jpeg, png, webp, gif.",
+        )
+
+    content = file.file.read()
+    if len(content) > _MAX_IMAGE_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"File too large ({len(content) // 1024} KB). Maximum is 5 MB.",
+        )
+
+    ext = (file.filename or "upload").rsplit(".", 1)[-1].lower()
+    if ext not in ("jpg", "jpeg", "png", "webp", "gif"):
+        ext = "jpg"
+    filename = f"strategy_{strategy.id}_ss_{uuid.uuid4().hex[:10]}.{ext}"
+
+    dest = os.path.join(_strategies_upload_dir(), filename)
+    with open(dest, "wb") as f:
+        f.write(content)
+
+    url = f"/uploads/strategies/{filename}"
+    existing = list(strategy.screenshot_urls or [])
+    existing.append(url)
+    strategy.screenshot_urls = existing
+    db.commit()
+    db.refresh(strategy)
+    return strategy
+
+
+def _do_remove_strategy_screenshot(db: Session, strategy: Strategy, url: str) -> Strategy:
+    """Remove one screenshot URL from strategy.screenshot_urls (does NOT delete file)."""
+    existing = [u for u in (strategy.screenshot_urls or []) if u != url]
+    strategy.screenshot_urls = existing if existing else None
+    db.commit()
+    db.refresh(strategy)
+    return strategy
+
+
+def add_strategy_screenshot(
+    db: Session, profile_id: int, strategy_id: int, file: UploadFile
+) -> Strategy:
+    """Upload a screenshot for a profile-specific strategy."""
+    strategy = _get_strategy_or_404(db, profile_id, strategy_id)
+    return _do_add_strategy_screenshot(db, strategy, file)
+
+
+def remove_strategy_screenshot(
+    db: Session, profile_id: int, strategy_id: int, url: str
+) -> Strategy:
+    """Remove a screenshot from a profile-specific strategy."""
+    strategy = _get_strategy_or_404(db, profile_id, strategy_id)
+    return _do_remove_strategy_screenshot(db, strategy, url)
+
+
+def add_global_strategy_screenshot(
+    db: Session, strategy_id: int, file: UploadFile
+) -> Strategy:
+    """Upload a screenshot for a global strategy (profile_id = NULL)."""
+    strategy = (
+        db.query(Strategy)
+        .filter(Strategy.id == strategy_id, Strategy.profile_id.is_(None))
+        .first()
+    )
+    if not strategy:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Global strategy {strategy_id} not found.",
+        )
+    return _do_add_strategy_screenshot(db, strategy, file)
+
+
+def remove_global_strategy_screenshot(
+    db: Session, strategy_id: int, url: str
+) -> Strategy:
+    """Remove a screenshot from a global strategy (profile_id = NULL)."""
+    strategy = (
+        db.query(Strategy)
+        .filter(Strategy.id == strategy_id, Strategy.profile_id.is_(None))
+        .first()
+    )
+    if not strategy:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Global strategy {strategy_id} not found.",
+        )
+    return _do_remove_strategy_screenshot(db, strategy, url)

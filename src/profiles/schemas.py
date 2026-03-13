@@ -114,6 +114,7 @@ class StrategyOut(BaseModel):
     emoji: str | None
     color: str | None
     image_url: str | None
+    screenshot_urls: list[str] | None = None
     status: str
     trades_count: int
     win_count: int
