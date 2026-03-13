@@ -227,7 +227,7 @@ function useInstrumentFavorites() {
     e.stopPropagation()
     setFavorites((prev) => {
       const next = new Set(prev)
-      next.has(symbol) ? next.delete(symbol) : next.add(symbol)
+      if (next.has(symbol)) { next.delete(symbol) } else { next.add(symbol) }
       try { localStorage.setItem(FAVORITES_KEY, JSON.stringify([...next])) } catch { /* quota */ }
       return next
     })
