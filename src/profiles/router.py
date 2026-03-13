@@ -12,8 +12,8 @@ Routes:
   POST   /api/profiles/{id}/strategies                      → create strategy for profile
   PUT    /api/profiles/{id}/strategies/{sid}                → update strategy fields
   DELETE /api/profiles/{id}/strategies/{sid}                → soft-delete strategy
-  POST   /api/profiles/{id}/strategies/{sid}/image          → upload strategy image (multipart)
-  DELETE /api/profiles/{id}/strategies/{sid}/image          → remove strategy image
+  POST   /api/profiles/{id}/strategies/{sid}/screenshots    → append screenshot
+  DELETE /api/profiles/{id}/strategies/{sid}/screenshots/{b64} → remove screenshot
 """
 
 from __future__ import annotations
@@ -114,35 +114,8 @@ def update_strategy(
     data: StrategyUpdate,
     db: Session = Depends(get_db),
 ) -> object:
-    """Update strategy fields (name, description, rules, emoji, color, image_url)."""
+    """Update strategy fields (name, description, rules, emoji, color)."""
     return service.update_strategy(db, profile_id, strategy_id, data)
-
-
-@router.post(
-    "/{profile_id}/strategies/{strategy_id}/image",
-    response_model=StrategyOut,
-)
-def upload_strategy_image(
-    profile_id: int,
-    strategy_id: int,
-    file: UploadFile = File(...),
-    db: Session = Depends(get_db),
-) -> object:
-    """Upload an image for a strategy. Stores the file and sets image_url."""
-    return service.upload_strategy_image(db, profile_id, strategy_id, file)
-
-
-@router.delete(
-    "/{profile_id}/strategies/{strategy_id}/image",
-    response_model=StrategyOut,
-)
-def delete_strategy_image(
-    profile_id: int,
-    strategy_id: int,
-    db: Session = Depends(get_db),
-) -> object:
-    """Remove the strategy image (deletes file, sets image_url = null)."""
-    return service.delete_strategy_image(db, profile_id, strategy_id)
 
 
 @router.post(

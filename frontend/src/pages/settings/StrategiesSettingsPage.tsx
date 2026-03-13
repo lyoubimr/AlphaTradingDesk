@@ -16,12 +16,12 @@
 //   DELETE /api/profiles/{id}/strategies/{sid}/image
 // ──────────────────────────────────────────────────────────────────────────
 
-import { useEffect, useState, useCallback, useRef } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import type React from 'react'
 import { Link } from 'react-router-dom'
 import {
   BarChart2, Plus, Loader2, RefreshCw, Trash2,
-  Pencil, X, Check, BookOpen, Upload, ImageOff, ExternalLink, Globe, User, ImagePlus, Maximize2,
+  Pencil, X, Check, BookOpen, ExternalLink, Globe, User, ImagePlus, Maximize2,
 } from 'lucide-react'
 import { PageHeader } from '../../components/ui/PageHeader'
 import { useProfile } from '../../context/ProfileContext'
@@ -55,144 +55,6 @@ function wrColor(s: Strategy): string {
   if (pct >= 45) return 'text-amber-400'
   if (pct >= 35) return 'text-orange-400'
   return 'text-red-400'
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// ImageUploader
-// ─────────────────────────────────────────────────────────────────────────────
-
-function ImageUploader({
-  strategy,
-  profileId,
-  onUpdated,
-}: {
-  strategy: Strategy
-  /** null = global strategy (uses /api/strategies/:id/image) */
-  profileId: number | null
-  onUpdated: (s: Strategy) => void
-}) {
-  const fileInputRef = useRef<HTMLInputElement>(null)
-  const [uploading, setUploading] = useState(false)
-  const [removing,  setRemoving]  = useState(false)
-  const [error,     setError]     = useState<string | null>(null)
-
-  const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file) return
-    setError(null); setUploading(true)
-    try {
-      let updated: Strategy
-      if (profileId === null) {
-        // Global strategy — use /api/strategies/:id/image
-        updated = await strategiesApi.uploadGlobalImage(strategy.id, file)
-      } else {
-        // Profile-specific strategy — use /api/profiles/:pid/strategies/:sid/image
-        const form = new FormData()
-        form.append('file', file)
-        const res = await fetch(`/api/profiles/${profileId}/strategies/${strategy.id}/image`, {
-          method: 'POST',
-          body: form,
-        })
-        if (!res.ok) {
-          const body = await res.json().catch(() => ({}))
-          throw new Error((body as { detail?: string })?.detail ?? `Upload failed (${res.status})`)
-        }
-        updated = await res.json() as Strategy
-      }
-      onUpdated(updated)
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Upload failed.')
-    } finally {
-      setUploading(false)
-      if (fileInputRef.current) fileInputRef.current.value = ''
-    }
-  }
-
-  const handleRemove = async () => {
-    setError(null); setRemoving(true)
-    try {
-      let updated: Strategy
-      if (profileId === null) {
-        updated = await strategiesApi.deleteGlobalImage(strategy.id)
-      } else {
-        updated = await strategiesApi.deleteImage(profileId, strategy.id)
-      }
-      onUpdated(updated)
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Remove failed.')
-    } finally {
-      setRemoving(false)
-    }
-  }
-
-  return (
-    <div className="space-y-2">
-      <label className="text-[10px] text-slate-500 uppercase tracking-wide flex items-center gap-1">
-        <Upload size={10} /> Strategy image
-        <span className="text-slate-600 normal-case">(jpg / png / webp · max 5 MB)</span>
-      </label>
-
-      {strategy.image_url ? (
-        <div className="relative rounded-xl overflow-hidden border border-surface-600 bg-surface-900 flex items-center justify-center" style={{ minHeight: 120, maxHeight: 280 }}>
-          <img
-            src={strategy.image_url}
-            alt="Strategy"
-            className="w-full h-full object-contain"
-            style={{ maxHeight: 280 }}
-          />
-          <div className="absolute top-2 right-2 flex gap-1.5">
-            <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              disabled={uploading}
-              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-surface-900/80 border border-surface-600 text-xs text-slate-300 hover:text-white hover:border-slate-400 transition-colors backdrop-blur-sm disabled:opacity-50"
-            >
-              {uploading ? <Loader2 size={11} className="animate-spin" /> : <Upload size={11} />}
-              Replace
-            </button>
-            <button
-              type="button"
-              onClick={handleRemove}
-              disabled={removing}
-              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-red-500/20 border border-red-500/30 text-xs text-red-400 hover:bg-red-500/30 transition-colors backdrop-blur-sm disabled:opacity-50"
-            >
-              {removing ? <Loader2 size={11} className="animate-spin" /> : <ImageOff size={11} />}
-              Remove
-            </button>
-          </div>
-        </div>
-      ) : (
-        <button
-          type="button"
-          onClick={() => fileInputRef.current?.click()}
-          disabled={uploading}
-          className={cn(
-            'w-full flex flex-col items-center gap-2 py-6 rounded-lg border-2 border-dashed',
-            'border-surface-600 hover:border-brand-500/50 text-slate-600 hover:text-slate-400',
-            'transition-colors cursor-pointer disabled:opacity-50',
-          )}
-        >
-          {uploading
-            ? <Loader2 size={20} className="animate-spin text-brand-400" />
-            : <Upload size={20} />
-          }
-          <span className="text-xs">{uploading ? 'Uploading…' : 'Click to upload an image'}</span>
-        </button>
-      )}
-
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept="image/jpeg,image/png,image/webp,image/gif"
-        className="hidden"
-        onChange={handleFile}
-      />
-
-      {error && (
-        <p className="text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">{error}</p>
-      )}
-    </div>
-  )
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -528,19 +390,7 @@ function StrategyRow({
         </div>
       </div>
 
-      {/* Image preview (outside edit mode) */}
-      {!editing && strategy.image_url && (
-        <div className="px-4 pb-3">
-          <div className="rounded-xl overflow-hidden border border-surface-700 bg-surface-900/60 flex items-center justify-center" style={{ maxHeight: 320 }}>
-            <img
-              src={strategy.image_url}
-              alt="Strategy chart"
-              className="w-full h-full object-contain"
-              style={{ maxHeight: 320 }}
-            />
-          </div>
-        </div>
-      )}
+      {/* Image preview (outside edit mode) — removed, screenshots gallery below */}
 
       {/* Screenshot gallery read-view */}
       {!editing && strategy.screenshot_urls && strategy.screenshot_urls.length > 0 && (
@@ -607,10 +457,6 @@ function StrategyRow({
               onChange={e => setMinTradesLocal(e.target.value)}
             />
           </div>
-          {!isGlobal
-            ? <ImageUploader strategy={strategy} profileId={profileId} onUpdated={onUpdated} />
-            : <ImageUploader strategy={strategy} profileId={null} onUpdated={onUpdated} />
-          }
           {!isGlobal
             ? <StrategySnapshotGallery strategy={strategy} profileId={profileId} onUpdated={onUpdated} />
             : <StrategySnapshotGallery strategy={strategy} profileId={null} onUpdated={onUpdated} />

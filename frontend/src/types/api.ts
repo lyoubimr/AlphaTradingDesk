@@ -253,7 +253,6 @@ export interface StrategyCreate {
   rules?: string | null
   emoji?: string | null
   color?: string | null
-  image_url?: string | null
 }
 
 export interface StrategyUpdate {
@@ -262,7 +261,6 @@ export interface StrategyUpdate {
   rules?: string | null
   emoji?: string | null
   color?: string | null
-  image_url?: string | null
   min_trades_for_stats?: number
   status?: 'active' | 'archived'
 }

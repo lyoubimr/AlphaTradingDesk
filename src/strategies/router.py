@@ -1,13 +1,12 @@
-"""
-Global strategies router.
+"""Global strategies router.
 
 Routes:
   GET    /api/strategies                     → list all active strategies (global + optionally profile)
   POST   /api/strategies                     → create a global strategy (profile_id = NULL)
   PUT    /api/strategies/{id}                → update a global strategy
   DELETE /api/strategies/{id}                → archive a global strategy
-  POST   /api/strategies/{id}/image          → upload image for a global strategy
-  DELETE /api/strategies/{id}/image          → remove image from a global strategy
+  POST   /api/strategies/{id}/screenshots    → append screenshot to global strategy gallery
+  DELETE /api/strategies/{id}/screenshots/{url_b64} → remove screenshot
 
 Profile-specific strategies remain under /api/profiles/{id}/strategies.
 """
@@ -83,7 +82,6 @@ def create_global_strategy(
         rules=data.rules,
         emoji=data.emoji,
         color=data.color,
-        image_url=data.image_url,
         status="active",
     )
     db.add(strategy)
@@ -117,25 +115,6 @@ def archive_global_strategy(
     strategy.status = "archived"
     db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
-
-
-@router.post("/{strategy_id}/image", response_model=StrategyOut)
-def upload_global_strategy_image(
-    strategy_id: int,
-    file: UploadFile = File(...),
-    db: Session = Depends(get_db),
-) -> object:
-    """Upload an image for a global strategy (multipart/form-data)."""
-    return profile_service.upload_global_strategy_image(db, strategy_id, file)
-
-
-@router.delete("/{strategy_id}/image", response_model=StrategyOut)
-def delete_global_strategy_image(
-    strategy_id: int,
-    db: Session = Depends(get_db),
-) -> object:
-    """Remove the image from a global strategy."""
-    return profile_service.delete_global_strategy_image(db, strategy_id)
 
 
 @router.post("/{strategy_id}/screenshots", response_model=StrategyOut)
