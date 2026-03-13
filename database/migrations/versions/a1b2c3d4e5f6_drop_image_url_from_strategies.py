@@ -12,7 +12,6 @@ gallery, image_url was a legacy single-image field.
 
 from __future__ import annotations
 
-import sqlalchemy as sa
 from alembic import op
 
 # revision identifiers, used by Alembic.
@@ -23,11 +22,8 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.drop_column("strategies", "image_url")
+    op.execute("ALTER TABLE strategies DROP COLUMN IF EXISTS image_url")
 
 
 def downgrade() -> None:
-    op.add_column(
-        "strategies",
-        sa.Column("image_url", sa.String(500), nullable=True),
-    )
+    op.execute("ALTER TABLE strategies ADD COLUMN IF NOT EXISTS image_url VARCHAR(500)")

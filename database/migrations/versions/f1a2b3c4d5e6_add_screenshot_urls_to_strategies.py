@@ -10,9 +10,7 @@ Complements image_url (single banner) with multi-screenshot gallery support.
 
 from __future__ import annotations
 
-import sqlalchemy as sa
 from alembic import op
-from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
 revision = "f1a2b3c4d5e6"
@@ -22,14 +20,9 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.add_column(
-        "strategies",
-        sa.Column(
-            "screenshot_urls",
-            postgresql.ARRAY(sa.Text()),
-            nullable=True,
-        ),
-    )
+    # IF NOT EXISTS guards against re-runs on DBs where the column already exists
+    # (e.g. prod was ahead of the migration stamp)
+    op.execute("ALTER TABLE strategies ADD COLUMN IF NOT EXISTS screenshot_urls TEXT[]")
 
 
 def downgrade() -> None:
