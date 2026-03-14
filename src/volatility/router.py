@@ -1,8 +1,9 @@
 """
-Volatility Engine — FastAPI router (P2-9, P2-10, P2-11).
+Volatility Engine — FastAPI router (P2-9, P2-10, P2-11, P2-13b).
 
 Routes
 ------
+  GET  /api/volatility/market/aggregated              ← cross-TF aggregated Market VI (Redis → DB fallback)
   GET  /api/volatility/market/{timeframe}              ← latest Market VI (Redis → DB fallback)
   GET  /api/volatility/pairs/{timeframe}               ← latest per-pair VI (Redis → DB fallback)
   GET  /api/volatility/watchlist/{timeframe}           ← latest watchlist snapshot (DB)
@@ -35,11 +36,13 @@ from src.volatility.models import (
 )
 from src.volatility.schedule import score_to_regime, get_regime_thresholds
 from src.volatility.schemas import (
+    AggregatedMarketVIOut,
     MarketVIOut,
     NotificationSettingsOut,
     NotificationSettingsPatch,
     PairVIOut,
     PairsVIOut,
+    TFComponentOut,
     VolatilitySettingsOut,
     VolatilitySettingsPatch,
     WatchlistOut,
@@ -51,6 +54,7 @@ from src.volatility.schemas import (
 router = APIRouter(prefix="/volatility", tags=["volatility"])
 
 _VALID_TIMEFRAMES = {"15m", "1h", "4h", "1d", "1w"}
+_TF_AGG_ORDER = ["15m", "1h", "4h", "1d"]
 
 
 def _check_tf(timeframe: str) -> None:
@@ -61,7 +65,85 @@ def _check_tf(timeframe: str) -> None:
         )
 
 
+def _build_tf_components(db: Session, is_weekend: bool) -> list[TFComponentOut]:
+    """Build the list of per-TF components for the aggregated response.
+
+    Reads each TF score from Redis, reads tf_weights from the first
+    VolatilitySettings row found (profile-agnostic at this point).
+    Returns an empty list if no data is available yet.
+    """
+    row = db.query(VolatilitySettings).first()
+    mv_cfg: dict = row.market_vi if row else {}
+    tf_weights_cfg: dict = mv_cfg.get("tf_weights", {})
+    day_key = "weekend" if is_weekend else "weekday"
+    weights: dict = tf_weights_cfg.get(
+        day_key,
+        {"15m": 0.25, "1h": 0.40, "4h": 0.25, "1d": 0.10},
+    )
+
+    components: list[TFComponentOut] = []
+    for tf in _TF_AGG_ORDER:
+        cached = get_cached_market_vi(tf)
+        if cached is None:
+            continue
+        components.append(
+            TFComponentOut(
+                tf=tf,
+                vi_score=float(cached["vi_score"]),
+                regime=cached["regime"],
+                weight=float(weights.get(tf, 0.0)),
+            )
+        )
+    return components
+
+
 # ── Market VI ─────────────────────────────────────────────────────────────────
+
+@router.get("/market/aggregated", response_model=AggregatedMarketVIOut)
+def get_aggregated_market_vi(db: Session = Depends(get_db)) -> AggregatedMarketVIOut:
+    """Return the cross-TF aggregated Market VI score.
+
+    Weights: weekday 25%×15m + 40%×1h + 25%×4h + 10%×1d,
+             weekend 50%×15m + 40%×1h + 10%×4h + 0%×1d.
+    Weights are configurable via volatility_settings.market_vi.tf_weights.
+
+    Reads from Redis cache first; falls back to the most recent DB row
+    with timeframe='aggregated'. Returns 404 if no data is available yet.
+    """
+    from datetime import UTC, datetime  # noqa: PLC0415
+
+    is_weekend = datetime.now(UTC).weekday() >= 5
+
+    # 1. Redis cache — aggregated key
+    cached = get_cached_market_vi("aggregated")
+    if cached:
+        return AggregatedMarketVIOut(
+            vi_score=float(cached["vi_score"]),
+            regime=cached["regime"],
+            timestamp=cached["timestamp"],
+            is_weekend=is_weekend,
+            tf_components=_build_tf_components(db, is_weekend),
+        )
+
+    # 2. DB fallback
+    row = (
+        db.query(MarketVISnapshot)
+        .filter(MarketVISnapshot.timeframe == "aggregated")
+        .order_by(MarketVISnapshot.timestamp.desc())
+        .first()
+    )
+    if row is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No aggregated Market VI data yet — engine has not run",
+        )
+    return AggregatedMarketVIOut(
+        vi_score=float(row.vi_score),
+        regime=row.regime,
+        timestamp=row.timestamp.isoformat(),
+        is_weekend=is_weekend,
+        tf_components=_build_tf_components(db, is_weekend),
+    )
 
 @router.get("/market/{timeframe}", response_model=MarketVIOut)
 def get_market_vi(timeframe: str, db: Session = Depends(get_db)) -> MarketVIOut:

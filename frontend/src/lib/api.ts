@@ -13,7 +13,7 @@ import type {
   GoalOut, GoalCreate, GoalUpdate, GoalProgressItem, GoalOverrideCreate, GoalOverrideOut,
   MAModule, MAIndicator, MAIndicatorConfig, MAIndicatorConfigOut, MAIndicatorUpdate, MAIndicatorCreate,
   MASessionCreate, MASessionOut, MASessionListItem, MAStalenessItem, MATradeConclusion,
-  MarketVIOut, PairsVIOut, WatchlistOut, LivePricesResponse,
+  MarketVIOut, AggregatedMarketVIOut, PairsVIOut, WatchlistOut, LivePricesResponse,
   VolatilitySettingsOut, NotificationSettingsOut,
 } from '../types/api'
 
@@ -427,6 +427,10 @@ export const volatilityApi = {
   /** GET /api/volatility/market/{timeframe} → latest Market VI snapshot */
   getMarketVI: (timeframe: string): Promise<MarketVIOut> =>
     request(`/volatility/market/${timeframe}`),
+
+  /** GET /api/volatility/market/aggregated → cross-TF aggregated Market VI */
+  getAggregatedMarketVI: (): Promise<AggregatedMarketVIOut> =>
+    request('/volatility/market/aggregated'),
 
   /** GET /api/volatility/pairs/{timeframe} → all per-pair VI snapshots */
   getPairsVI: (timeframe: string): Promise<PairsVIOut> =>

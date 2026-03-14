@@ -572,7 +572,11 @@ export interface MATradeConclusion {
 
 // ── Volatility (Phase 2) ──────────────────────────────────────────────────
 
-export type VIRegime = 'MORT' | 'CALME' | 'NORMAL' | 'TRENDING' | 'ACTIF' | 'EXTRÊME'
+export type VIRegime =
+  // English labels (from backend score_to_regime)
+  | 'DEAD' | 'CALM' | 'NORMAL' | 'TRENDING' | 'ACTIVE' | 'EXTREME'
+  // French display labels kept for backward-compat
+  | 'MORT' | 'CALME' | 'ACTIF' | 'EXTRÊMe'
 
 export interface MarketVIOut {
   timeframe: string
@@ -624,6 +628,21 @@ export interface LivePricesResponse {
   currency_symbol: string
   timestamp: string
   cached: boolean
+}
+
+export interface TFComponentOut {
+  tf: string
+  vi_score: number
+  regime: VIRegime
+  weight: number
+}
+
+export interface AggregatedMarketVIOut {
+  vi_score: number
+  regime: VIRegime
+  timestamp: string  // ISO-8601
+  is_weekend: boolean
+  tf_components: TFComponentOut[]
 }
 
 export interface VolatilitySettingsOut {

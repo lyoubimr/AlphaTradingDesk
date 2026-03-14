@@ -13,14 +13,15 @@ export interface RegimeConfig {
 }
 
 const REGIME_MAP: Record<string, RegimeConfig> = {
-  MORT: {
-    label: 'MORT',
+  // English labels — returned by backend score_to_regime()
+  DEAD: {
+    label: 'DEAD',
     color: 'bg-zinc-700',
     text: 'text-zinc-300',
     tooltip: 'Dead market — Avoid · Zero volume, volatility collapsed',
   },
-  CALME: {
-    label: 'CALME',
+  CALM: {
+    label: 'CALM',
     color: 'bg-sky-900',
     text: 'text-sky-300',
     tooltip: 'Calm market — Cautious scalping · Low momentum, reduce size',
@@ -37,14 +38,14 @@ const REGIME_MAP: Record<string, RegimeConfig> = {
     text: 'text-yellow-300',
     tooltip: 'Trending market — Favor trend-following · High momentum',
   },
-  ACTIF: {
-    label: 'ACTIF',
+  ACTIVE: {
+    label: 'ACTIVE',
     color: 'bg-orange-900',
     text: 'text-orange-300',
     tooltip: 'Active market — Frequent breakouts · Tight risk management',
   },
-  EXTRÊME: {
-    label: 'EXTRÊME',
+  EXTREME: {
+    label: 'EXTREME',
     color: 'bg-red-900',
     text: 'text-red-300',
     tooltip: 'Extreme volatility — Reduce positions · Gaps and false breakouts likely',

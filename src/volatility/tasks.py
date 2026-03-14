@@ -65,6 +65,9 @@ _TF_SUPERIOR: dict[str, str] = {
     # 1w has no superior — column left empty
 }
 
+# Ordered list of timeframes used in cross-TF aggregation
+_TF_AGG_ORDER = ["15m", "1h", "4h", "1d"]
+
 
 def _get_db() -> Session:
     """Open a raw SQLAlchemy session for use inside Celery tasks.
@@ -174,6 +177,69 @@ def _build_watchlist_pairs(
     for r in rows:
         del r["_rank"]
     return rows
+
+
+# ── Aggregated score helper ───────────────────────────────────────────────────
+
+def _update_aggregated_score(db: Session, mv_cfg: dict) -> None:
+    """Compute and persist the cross-TF aggregated Market VI score.
+
+    Reads each TF score from Redis cache (written by compute_market_vi),
+    applies weekday or weekend weights from settings, normalises the weighted
+    sum, and writes the result back to both DB (timeframe='aggregated') and
+    Redis (key atd:market_vi:aggregated).
+
+    Requires at least one TF to have data in Redis — returns silently otherwise.
+    """
+    from src.volatility.cache import get_cached_market_vi  # noqa: PLC0415
+
+    is_weekend = datetime.now(UTC).weekday() >= 5
+    day_key = "weekend" if is_weekend else "weekday"
+    tf_weights_cfg: dict = mv_cfg.get("tf_weights", {})
+    weights: dict = tf_weights_cfg.get(
+        day_key,
+        {"15m": 0.25, "1h": 0.40, "4h": 0.25, "1d": 0.10},  # safe fallback
+    )
+
+    total_w = 0.0
+    weighted_sum = 0.0
+    for tf in _TF_AGG_ORDER:
+        w = float(weights.get(tf, 0.0))
+        if w <= 0:
+            continue
+        cached = get_cached_market_vi(tf)
+        if cached is None:
+            continue
+        weighted_sum += w * float(cached["vi_score"])
+        total_w += w
+
+    if total_w <= 0:
+        logger.debug("_update_aggregated_score: no TF data in Redis yet — skip")
+        return
+
+    agg_score = round(weighted_sum / total_w, 3)
+    thresholds = get_regime_thresholds(db)
+    agg_regime = score_to_regime(agg_score, thresholds)
+    now = datetime.now(UTC)
+
+    # Persist — timeframe='aggregated' fits the composite PK with no migration
+    snap = MarketVISnapshot(
+        timeframe="aggregated",
+        timestamp=now,
+        vi_score=Decimal(str(agg_score)),
+        regime=agg_regime,
+        components={},
+    )
+    db.add(snap)
+    db.commit()
+
+    # Cache so the endpoint can serve it from Redis
+    cache_market_vi("aggregated", agg_score, agg_regime, now.isoformat())
+
+    logger.info(
+        "_update_aggregated_score: %.3f (%s) — %s weights applied",
+        agg_score, agg_regime, day_key,
+    )
 
 
 # ── Tasks ─────────────────────────────────────────────────────────────────────
@@ -287,7 +353,12 @@ def compute_market_vi(self, timeframe: str) -> dict:  # type: ignore[override]
 
         # ── 8. Redis cache ────────────────────────────────────────────────
         cache_market_vi(timeframe, market_vi, regime, now.isoformat())
-        # ── 9. Telegram alert (fail-silent) ───────────────────────────────
+        # ── 9. Cross-TF aggregated score (fail-silent) ────────────────────
+        try:
+            _update_aggregated_score(db, mv_cfg)
+        except Exception as agg_exc:
+            logger.warning("compute_market_vi(%s): aggregated score error — %s", timeframe, agg_exc)
+        # ── 10. Telegram alert (fail-silent) ──────────────────────────────
         try:
             from src.volatility.models import NotificationSettings
             from src.volatility.telegram import send_market_vi_alert

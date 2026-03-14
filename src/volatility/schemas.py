@@ -67,6 +67,10 @@ class WatchlistOut(BaseModel):
 _DEFAULT_MARKET_VI: dict = {
     "pairs": [],
     "weights": {},
+    "tf_weights": {
+        "weekday": {"15m": 0.25, "1h": 0.40, "4h": 0.25, "1d": 0.10},
+        "weekend": {"15m": 0.50, "1h": 0.40, "4h": 0.10, "1d": 0.00},
+    },
     "active_hours_start": "00:00",
     "active_hours_end": "23:59",
     "weekdays_only": False,
@@ -89,6 +93,25 @@ _DEFAULT_REGIMES: dict = {
     "trending_max": 0.67,
     "active_max": 0.83,
 }
+
+
+class TFComponentOut(BaseModel):
+    """Single timeframe contribution in an aggregated Market VI response."""
+
+    tf: str
+    vi_score: float
+    regime: str
+    weight: float
+
+
+class AggregatedMarketVIOut(BaseModel):
+    """Response for GET /api/volatility/market/aggregated."""
+
+    vi_score: float
+    regime: str
+    timestamp: str  # ISO-8601
+    is_weekend: bool
+    tf_components: list[TFComponentOut]
 
 
 class VolatilitySettingsOut(BaseModel):

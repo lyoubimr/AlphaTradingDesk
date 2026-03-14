@@ -1,12 +1,11 @@
 // ── MarketVIPage ─────────────────────────────────────────────────────────────
 // Page /volatility/market — Market VI dashboard.
 //
-// Layout :
-//   • TF selector (15m / 1h / 4h / 1d)
-//   • Hero card : Gauge + regime badge + timestamp
-//   • Sparkline (live session accumulated readings)
-//   • Components breakdown (RVOL / MFI / ATR / BB / EMA)
-//   • Pair context : BTC + ETH VI cards
+// Layout:
+//   • Default view: Aggregated Market VI gauge (cross-TF 25/40/25/10)
+//       + 4 TF mini-cards (15m / 1h / 4h / 1d)
+//   • TF selector: drill-down into a single timeframe
+//       → Gauge + session sparkline + components breakdown + pair context
 
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { RefreshCw, Loader2, AlertTriangle } from 'lucide-react'
@@ -15,7 +14,7 @@ import { MarketVIGauge } from '../../components/volatility/MarketVIGauge'
 import { RegimeBadge } from '../../components/volatility/RegimeBadge'
 import { VISparkline } from '../../components/volatility/VISparkline'
 import { volatilityApi } from '../../lib/api'
-import type { MarketVIOut, PairVIOut } from '../../types/api'
+import type { AggregatedMarketVIOut, MarketVIOut, PairVIOut, TFComponentOut } from '../../types/api'
 
 const TIMEFRAMES = ['15m', '1h', '4h', '1d'] as const
 type TF = typeof TIMEFRAMES[number]
@@ -79,37 +78,79 @@ function PairContextCard({ pair }: { pair: PairVIOut }) {
   )
 }
 
+// ── TF mini-card (used in aggregated view) ───────────────────────────────
+
+function TFMiniCard({ component, onClick, active }: {
+  component: TFComponentOut
+  onClick: () => void
+  active: boolean
+}) {
+  const pct = Math.round(component.vi_score * 100)
+  return (
+    <button
+      onClick={onClick}
+      className={`flex flex-col items-center gap-1.5 p-3 rounded-xl border transition-all ${
+        active
+          ? 'border-zinc-500 bg-zinc-800'
+          : 'border-zinc-800 bg-surface-900 hover:border-zinc-700 hover:bg-zinc-900'
+      }`}
+    >
+      <span className="text-xs font-mono font-semibold text-zinc-400">{component.tf}</span>
+      <span className="text-xl font-mono font-bold text-zinc-100">{pct}</span>
+      <RegimeBadge regime={component.regime} size="sm" showTooltip={false} />
+      <span className="text-xs text-zinc-600">{Math.round(component.weight * 100)}%</span>
+    </button>
+  )
+}
+
 // ── Main page component ───────────────────────────────────────────────────
 
 export function MarketVIPage() {
-  const [tf, setTf] = useState<TF>('1h')
-  const [data, setData] = useState<MarketVIOut | null>(null)
+  // null = aggregated view, otherwise a TF drill-down
+  const [activeTF, setActiveTF] = useState<TF | null>(null)
+
+  const [aggregated, setAggregated] = useState<AggregatedMarketVIOut | null>(null)
+  const [tfData, setTfData] = useState<MarketVIOut | null>(null)
   const [pairsData, setPairsData] = useState<PairVIOut[]>([])
+
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [sparkPoints, setSparkPoints] = useState<SparkPoint[]>([])
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
-  const fetchData = useCallback(async (timeframe: TF) => {
+  const fetchAggregated = useCallback(async () => {
+    try {
+      setError(null)
+      const agg = await volatilityApi.getAggregatedMarketVI()
+      setAggregated(agg)
+      setSparkPoints((prev) => {
+        const point = { score: agg.vi_score, ts: Date.now() }
+        return [...prev.slice(-47), point]
+      })
+    } catch {
+      setError('No aggregated data yet — run at least one VI compute cycle.')
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  const fetchTF = useCallback(async (tf: TF) => {
     try {
       setError(null)
       const [marketVI, pairsVI] = await Promise.allSettled([
-        volatilityApi.getMarketVI(timeframe),
-        volatilityApi.getPairsVI(timeframe),
+        volatilityApi.getMarketVI(tf),
+        volatilityApi.getPairsVI(tf),
       ])
-
       if (marketVI.status === 'fulfilled') {
         const snap = marketVI.value
-        setData(snap)
+        setTfData(snap)
         setSparkPoints((prev) => {
           const point = { score: snap.vi_score, ts: Date.now() }
-          // Keep at most 48 readings (48× 60s = ~48 min buffer)
           return [...prev.slice(-47), point]
         })
       } else {
-        setError('No data available — VI engine has not run yet.')
+        setError(`No data available for ${tf} — VI engine has not run yet.`)
       }
-
       if (pairsVI.status === 'fulfilled') {
         const btc = pairsVI.value.pairs.find((p) =>
           p.pair.toLowerCase().includes('btc') || p.pair.toLowerCase().includes('xbt')
@@ -124,38 +165,45 @@ export function MarketVIPage() {
     }
   }, [])
 
-  // Initial + auto-refresh
+  // Initial load + auto-refresh
   useEffect(() => {
     setLoading(true)
     setSparkPoints([])
-    fetchData(tf)
-    intervalRef.current = setInterval(() => fetchData(tf), REFRESH_MS)
+    if (activeTF === null) {
+      fetchAggregated()
+      intervalRef.current = setInterval(fetchAggregated, REFRESH_MS)
+    } else {
+      fetchTF(activeTF)
+      intervalRef.current = setInterval(() => fetchTF(activeTF), REFRESH_MS)
+    }
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current)
     }
-  }, [tf, fetchData])
+  }, [activeTF, fetchAggregated, fetchTF])
 
   const handleManualRefresh = () => {
     setLoading(true)
-    fetchData(tf)
+    if (activeTF === null) fetchAggregated()
+    else fetchTF(activeTF)
   }
 
-  // Components to display — read from BTC pair as proxy (MarketVIOut has no components field)
-  // numericComponents left unused intentionally — breakdown uses btcComponents below
-  // Actually read from pair components if available... but MarketVIOut doesn't expose them.
-  // Only show breakdown if we have it. MarketVIOut currently has no components field.
-  // Components are available on PairVIOut — use BTC as proxy if available.
+  // BTC components proxy for the TF drill-down view
   const btcComponents = pairsData.find((p) =>
     p.pair.toLowerCase().includes('btc') || p.pair.toLowerCase().includes('xbt')
   )?.components ?? {}
-
   const componentEntries = Object.entries(btcComponents)
     .filter(([, v]) => typeof v === 'number')
     .map(([k, v]) => ({ name: k, value: v as number }))
     .sort((a, b) => b.value - a.value)
 
+  // Display score + regime for the hero gauge
+  const heroScore = activeTF === null ? (aggregated?.vi_score ?? null) : (tfData?.vi_score ?? null)
+  const heroRegime = activeTF === null ? (aggregated?.regime ?? '') : (tfData?.regime ?? '')
+  const heroTs = activeTF === null ? (aggregated?.timestamp ?? '') : (tfData?.timestamp ?? '')
+
   return (
     <div className="space-y-6">
+      {/* Header row */}
       <div className="flex items-center justify-between">
         <PageHeader
           icon="🌊"
@@ -163,14 +211,24 @@ export function MarketVIPage() {
           subtitle="Volatility Index — aggregated market score"
         />
         <div className="flex items-center gap-2">
-          {/* TF selector */}
+          {/* View selector: Aggregated + 4 TFs */}
           <div className="flex gap-1 bg-zinc-900 border border-zinc-800 rounded-lg p-1">
+            <button
+              onClick={() => { setActiveTF(null); setSparkPoints([]) }}
+              className={`px-3 py-1 text-xs font-mono rounded-md transition-colors ${
+                activeTF === null
+                  ? 'bg-zinc-700 text-zinc-100'
+                  : 'text-zinc-400 hover:text-zinc-200'
+              }`}
+            >
+              ALL
+            </button>
             {TIMEFRAMES.map((t) => (
               <button
                 key={t}
-                onClick={() => setTf(t)}
+                onClick={() => { setActiveTF(t); setSparkPoints([]) }}
                 className={`px-3 py-1 text-xs font-mono rounded-md transition-colors ${
-                  t === tf
+                  t === activeTF
                     ? 'bg-zinc-700 text-zinc-100'
                     : 'text-zinc-400 hover:text-zinc-200'
                 }`}
@@ -202,65 +260,90 @@ export function MarketVIPage() {
         </div>
       )}
 
-      {/* Hero card */}
-      {loading && !data ? (
+      {/* Loading skeleton */}
+      {loading && heroScore === null ? (
         <div className="flex justify-center items-center h-48">
           <Loader2 size={32} className="animate-spin text-zinc-500" />
         </div>
-      ) : data ? (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-
-          {/* Gauge + regime */}
-          <div className="lg:col-span-1 bg-surface-900 border border-zinc-800 rounded-xl p-6 flex flex-col items-center gap-4">
-            <MarketVIGauge score={data.vi_score} size={180} />
-            <RegimeBadge regime={data.regime} size="lg" />
-            <p className="text-xs text-zinc-500 text-center">
-              {tf.toUpperCase()} · {new Date(data.timestamp).toLocaleString(undefined, {
-                dateStyle: 'short', timeStyle: 'short',
-              })}
-            </p>
-            <p className="text-xs text-zinc-600 text-center">
-              Auto-refresh every 60s
-            </p>
-          </div>
-
-          {/* Sparkline + components */}
-          <div className="lg:col-span-2 flex flex-col gap-4">
-
-            {/* Sparkline */}
-            <div className="bg-surface-900 border border-zinc-800 rounded-xl p-4">
-              <p className="text-xs font-medium text-zinc-400 mb-3">Session trend</p>
-              <VISparkline points={sparkPoints} width={480} height={52} />
+      ) : heroScore !== null ? (
+        <>
+          {/* ── Hero card ── */}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <div className="lg:col-span-1 bg-surface-900 border border-zinc-800 rounded-xl p-6 flex flex-col items-center gap-4">
+              <MarketVIGauge score={heroScore} size={180} />
+              <RegimeBadge regime={heroRegime} size="lg" />
+              <p className="text-xs text-zinc-500 text-center">
+                {activeTF ? activeTF.toUpperCase() : 'AGGREGATED'} ·{' '}
+                {heroTs ? new Date(heroTs).toLocaleString(undefined, {
+                  dateStyle: 'short', timeStyle: 'short',
+                }) : '—'}
+              </p>
+              {activeTF === null && aggregated?.is_weekend && (
+                <span className="text-xs text-amber-400 bg-amber-950 border border-amber-800 px-2 py-0.5 rounded-full">
+                  Weekend weights active
+                </span>
+              )}
+              <p className="text-xs text-zinc-600 text-center">Auto-refresh every 60s</p>
             </div>
 
-            {/* Components breakdown */}
-            {componentEntries.length > 0 && (
+            {/* Sparkline + secondary content */}
+            <div className="lg:col-span-2 flex flex-col gap-4">
               <div className="bg-surface-900 border border-zinc-800 rounded-xl p-4">
-                <p className="text-xs font-medium text-zinc-400 mb-4">Components — BTC proxy ({tf})</p>
-                <div className="flex flex-col gap-3">
-                  {componentEntries.map(({ name, value }) => (
-                    <ComponentBar key={name} name={name} value={value} />
-                  ))}
-                </div>
+                <p className="text-xs font-medium text-zinc-400 mb-3">Session trend</p>
+                <VISparkline points={sparkPoints} width={480} height={52} />
               </div>
-            )}
-          </div>
-        </div>
-      ) : null}
 
-      {/* Pair context */}
-      {pairsData.length > 0 && (
-        <div>
-          <p className="text-xs font-medium text-zinc-500 uppercase tracking-wider mb-3">
-            Key pairs context
-          </p>
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
-            {pairsData.map((p) => (
-              <PairContextCard key={p.pair} pair={p} />
-            ))}
+              {/* Aggregated view: 4 TF mini-cards */}
+              {activeTF === null && aggregated && aggregated.tf_components.length > 0 && (
+                <div className="bg-surface-900 border border-zinc-800 rounded-xl p-4">
+                  <p className="text-xs font-medium text-zinc-400 mb-3">
+                    per-TF breakdown — click to drill down
+                  </p>
+                  <div className="grid grid-cols-4 gap-3">
+                    {aggregated.tf_components.map((c) => (
+                      <TFMiniCard
+                        key={c.tf}
+                        component={c}
+                        active={false}
+                        onClick={() => { setActiveTF(c.tf as TF); setSparkPoints([]) }}
+                      />
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* TF drill-down view: components breakdown */}
+              {activeTF !== null && componentEntries.length > 0 && (
+                <div className="bg-surface-900 border border-zinc-800 rounded-xl p-4">
+                  <p className="text-xs font-medium text-zinc-400 mb-4">
+                    Components — BTC proxy ({activeTF})
+                  </p>
+                  <div className="flex flex-col gap-3">
+                    {componentEntries.map(({ name, value }) => (
+                      <ComponentBar key={name} name={name} value={value} />
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
-        </div>
-      )}
+
+          {/* Pair context (TF drill-down only) */}
+          {activeTF !== null && pairsData.length > 0 && (
+            <div>
+              <p className="text-xs font-medium text-zinc-500 uppercase tracking-wider mb-3">
+                Key pairs context
+              </p>
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+                {pairsData.map((p) => (
+                  <PairContextCard key={p.pair} pair={p} />
+                ))}
+              </div>
+            </div>
+          )}
+        </>
+      ) : null}
     </div>
   )
 }
+

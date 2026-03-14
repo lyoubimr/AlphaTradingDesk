@@ -136,6 +136,10 @@ class VolatilitySettings(Base):
       {
         "pairs": [],           # symbols selected for Market VI
         "weights": {},         # {symbol: weight} overrides (BTC=0.30, ETH=0.20)
+        "tf_weights": {        # cross-TF aggregation weights
+          "weekday": {"15m": 0.25, "1h": 0.40, "4h": 0.25, "1d": 0.10},
+          "weekend": {"15m": 0.50, "1h": 0.40, "4h": 0.10, "1d": 0.00}
+        },
         "active_hours_start": "00:00",
         "active_hours_end": "23:59",
         "weekdays_only": false,
