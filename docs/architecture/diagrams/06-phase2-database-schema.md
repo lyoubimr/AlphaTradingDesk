@@ -184,7 +184,7 @@ Config JSONB par profil — tout configurable depuis l'UI, aucune migration pour
 flowchart TD
     subgraph VCFG["`**volatility_settings**`"]
         direction TB
-        vk1["`profile_id UUID FK PK`"]
+        vk1["`profile_id BIGINT FK PK`"]
         vk2["`market_vi JSONB
         {
           pairs: [BTCUSDT, ETHUSDT...],
@@ -214,7 +214,7 @@ flowchart TD
 
     subgraph NCFG["`**notification_settings**`"]
         direction TB
-        nk1["`profile_id UUID FK PK`"]
+        nk1["`profile_id BIGINT FK PK`"]
         nk2["`bots JSONB
         [{bot_token, chat_id, bot_name}]`"]
         nk3["`market_vi_alerts JSONB
