@@ -30,12 +30,43 @@ Phase 2 scope :
 
 ## 🏗️ Architecture — Deux composants
 
-| Composant | Scope | Calcul | Dashboard |
-|-----------|-------|--------|-----------|
-| **Market VI** | Score global du marché, agrégé sur ~50 pairs configurés | Toutes les 15 min (Celery Beat) | `/volatility/market` |
-| **Per-Pair VI** | 317 pairs Kraken actifs, par TF | Cadencé par TF (Celery Beat) | `/volatility/pairs` |
+| Composant | Scope | Source data | Dashboard |
+|-----------|-------|-------------|----------|
+| **Market VI** | Score global du marché, agrégé sur ~50 pairs configurés | **Binance Futures** (`fapi.binance.com`) | `/volatility/market` |
+| **Per-Pair VI** | 317 pairs Kraken actifs, par TF | **Kraken Futures** (`futures.kraken.com`) | `/volatility/pairs` |
 
 Les deux alimentent le Risk Management via `GET /vi/current`.
+
+### Pourquoi sources séparées — zéro mapping
+
+- **Binance pour Market VI** : volume 10-100× Kraken → indicateurs plus fiables, meilleure représentativité. ETH/BTC = `ETHBTC` natif (pas de mapping). Les 50 pairs du Market VI sont stockés en symbols Binance natifs dans les settings (JSONB) — pas dans la table `instruments`.
+- **Kraken pour Per-Pair** : symbols `PF_BTCUSD` natifs dans `instruments` — directement utilisables pour le trading. La watchlist générée utilise ces mêmes symbols → aucune traduction nécessaire.
+- **Résultat** : aucun mapping cross-broker. Chaque client parle son propre langage natif.
+
+### MarketDataClient — Protocol abstrait
+
+```python
+# src/volatility/market_data.py
+class MarketDataClient(Protocol):
+    def fetch_ohlcv(self, symbol: str, tf: str) -> pd.DataFrame: ...
+    def fetch_orderbook(self, symbol: str) -> dict: ...
+    def fetch_ticker(self, symbol: str) -> dict: ...   # {last, change_pct_24h}
+    def fetch_all_symbols(self) -> list[str]: ...
+
+# src/volatility/binance_client.py  ← Market VI
+# src/volatility/kraken_client.py   ← Per-Pair VI + Watchlists
+```
+
+Injection dans les tasks :
+```python
+# Configurable via env vars — dev et prod utilisent la même config
+DATA_MARKET_VI_PROVIDER=binance   # toujours binance (dev et prod)
+DATA_PAIR_VI_PROVIDER=kraken      # toujours kraken
+```
+
+> **Dev = ISO prod** : pas de fallback Kraken pour le Market VI en dev.
+> Les tests unitaires utilisent des fixtures/mocks (pas de call API réel).
+> Le vrai dev env pointe sur Binance — si Binance est down, le test échoue → comportement attendu.
 
 ---
 
@@ -88,7 +119,7 @@ SELECT create_hypertable('market_vi_snapshots', 'timestamp');
 CREATE TABLE watchlist_snapshots (
     id          BIGSERIAL PRIMARY KEY,
     name        VARCHAR(100)  NOT NULL,  -- 'dec2821h_Perps_15m_v14_USD_KRAKEN'
-    timeframe   VARCHAR(10)   NOT NULL,
+    timeframe   VARCHAR(10)   NOT NULL,  -- '15m', '1h', '4h', '1d', '1W'
     regime      VARCHAR(20)   NOT NULL,  -- régime dominant de la watchlist
     pairs_count INTEGER       NOT NULL,
     pairs       JSONB         NOT NULL,  -- [{pair, vi_score, regime, ema_signal, ema_score, change_24h, tf_sup_regime, tf_sup_vi}]
@@ -143,10 +174,11 @@ CREATE TABLE notification_settings (
 | **1h** (MTF) | toutes les heures | 40% | **40%** |
 | **4h** (HTF) | toutes les 4h | 25% | **10%** |
 | **1d** (HTF2) | 1 fois/jour | 10% | **0% — exclu** |
+| **1W** (contexte) | lundi 01:00 UTC | — | **0% — exclu** |
 
 > Score agrégé final semaine = `25% × VI_15m + 40% × VI_1h + 25% × VI_4h + 10% × VI_1d`
 > Weekend (sam/dim UTC) = auto-détecté, 1d exclu, poids redistributés → configurables en settings.
-> Pas de 1W dans l'agrégation.
+> **1W = exclu de l'agrégation** (trop lent pour le score temps-réel) mais génère une watchlist hebdo. Utile comme `TF+1` pour les watchlists 1d — régime weekly à titre contextuel.
 
 ---
 
@@ -219,7 +251,7 @@ KRAKEN:TRXUSD.PM
 | # | Décision | Retenu |
 |---|---------|--------|
 | D1 | Indicateurs core | RVOL + MFI + ATR + BB Width + Depth — on/off depuis settings |
-| D2 | TFs + poids | 25/40/25/10 — pas de 1W |
+| D2 | TFs + poids | 25/40/25/10 — pas de 1W en agrégation Market VI. 1W = watchlist hebdo uniquement (lundi 01:00 UTC) |
 | D3 | Weekend logic | Auto-détection — redistribution 50/40/10/0 — configurable |
 | D4 | JSONB scalabilité | vi_score DECIMAL + components JSONB — zero migration pour add/disable indicateur |
 | D5 | TimescaleDB | Dès Phase 2 — hypertables + retention policies natifs |
@@ -253,3 +285,4 @@ KRAKEN:TRXUSD.PM
 - OI/Volume, Funding Rate dans les watchlists (Phase 3 — Kraken Futures API)
 - Multi-EMA par TF (Phase 3 — preset avancé)
 - Redis / Celery en Phase 1 (ne pas anticiper)
+- Implémentation d'un client Binance complet (WebSocket, auth, orders) — fetch OHLCV + orderbook public seulement

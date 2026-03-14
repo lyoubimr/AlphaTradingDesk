@@ -20,7 +20,7 @@
 |------|------|--------|
 | **P2-1** | Docker Compose — Redis + Celery + TimescaleDB extension | ⏳ |
 | **P2-2** | Alembic migrations — nouvelles tables Phase 2 | ⏳ |
-| **P2-3** | Celery + Beat skeleton — task registry + schedules | ⏳ |
+| **P2-3** | Celery + Beat skeleton — task registry + schedules (15m/1h/4h/1d/1W) | ⏳ |
 | **P2-4** | Kraken data fetch service — OHLCV + orderbook | ⏳ |
 | **P2-5** | Indicators engine — RVOL / MFI / ATR / BB Width + EMA Score | ⏳ |
 | **P2-6** | Orderbook Depth score | ⏳ |
@@ -98,32 +98,80 @@ src/volatility/tasks.py                   ← stubs tasks par TF
 src/volatility/scheduler.py              ← Beat schedule config
 ```
 
-**Test :** Celery Beat démarre sans erreur. Les 4 tasks apparaissent dans les logs à l'heure prévue (ou manuellement avec `delay()`).
+**Test :** Celery Beat démarre sans erreur. Les 5 tasks apparaissent dans les logs à l'heure prévue (ou manuellement avec `delay()`).
+
+```python
+# Beat schedules (celery_app.py)
+beat_schedule = {
+    'vi-15m':  {'task': 'task_15m',  'schedule': crontab(minute='*/15')},
+    'vi-1h':   {'task': 'task_1h',   'schedule': crontab(minute=5)},
+    'vi-4h':   {'task': 'task_4h',   'schedule': crontab(minute=5, hour='*/4')},
+    'vi-1d':   {'task': 'task_1d',   'schedule': crontab(minute=5, hour=0)},
+    'vi-1w':   {'task': 'task_1w',   'schedule': crontab(minute=0, hour=1, day_of_week='monday')},  # ← watchlist hebdo
+    'sync-pairs':  {'task': 'sync_kraken_pairs', 'schedule': crontab(minute=0, hour=3)},  # quotidien 03:00
+    'cleanup':     {'task': 'cleanup_old_snapshots', 'schedule': crontab(minute=0, hour=4)},
+}
+```
+
+> **1W = watchlist hebdo uniquement** — le VI 1W n'entre PAS dans le score Market VI agrégé. Utile pour les setups swing/position + comme `TF+1` des watchlists 1d.
 
 ---
 
-## Step P2-4 — Kraken data fetch service
+## Step P2-4 — MarketDataClient Protocol + clients Binance & Kraken
 
 **Quoi :**
-- Service de fetch OHLCV depuis Kraken REST API
-- Service de fetch Orderbook depth (top 10 levels)
-- Gestion des erreurs / retry (429, timeout)
-- Mapping des TFs (Kraken utilise des minutes : 15 → '15', 60 → '60', 240 → '240', 1440 → '1440')
+- Définir le `MarketDataClient` Protocol (interface commune)
+- Implémenter `BinanceClient` (Market VI) + `KrakenClient` (Per-Pair)
+- Injection via config (`DATA_MARKET_VI_PROVIDER` / `DATA_PAIR_VI_PROVIDER`)
+- **Dev = ISO prod** : pas de fallback, Binance en dev comme en prod
+- Rate limits : Binance Futures public ~1200 req/min, Kraken public ~1 req/s
 
-**Fichiers touchés :**
+**Fichiers créés :**
 ```
-src/volatility/kraken_client.py     ← NEW : fetch_ohlcv(pair, tf) → DataFrame
-                                           fetch_orderbook(pair) → dict
-                                           fetch_ticker(pair) → {last, change_pct_24h}
-                                           fetch_all_pairs() → list[str]
+src/volatility/market_data.py     ← Protocol MarketDataClient
+src/volatility/binance_client.py  ← Market VI (OHLCV + orderbook + ticker + all_symbols)
+src/volatility/kraken_client.py   ← Per-Pair VI (OHLCV + orderbook + ticker + all_pairs)
 ```
 
-**Notes :**
-- Ne pas utiliser de clé API (endpoints publics suffisants pour OHLCV + orderbook)
-- Rate limit Kraken public : ~1 req/s → gérer avec sleep ou semaphore dans les tasks Celery
-- ETH/BTC : `ETHXBT` sur Kraken (pas `ETHBTC`) → mapper dans le client
+```python
+# market_data.py
+class MarketDataClient(Protocol):
+    def fetch_ohlcv(self, symbol: str, tf: str) -> pd.DataFrame: ...
+    def fetch_orderbook(self, symbol: str) -> dict: ...
+    def fetch_ticker(self, symbol: str) -> dict: ...   # {last, change_pct_24h}
+    def fetch_all_symbols(self) -> list[str]: ...
 
-**Test :** `kraken_client.fetch_ohlcv('XXBTZUSD', '60')` → DataFrame avec colonnes OHLCV. `fetch_orderbook('XXBTZUSD')` → bids + asks.
+def get_market_vi_client() -> MarketDataClient:
+    return BinanceClient()   # DATA_MARKET_VI_PROVIDER=binance (toujours)
+
+def get_pair_vi_client() -> MarketDataClient:
+    return KrakenClient()    # DATA_PAIR_VI_PROVIDER=kraken (toujours)
+```
+
+**TF mapping (chaque client gère son propre format) :**
+
+| TF interne | Binance | Kraken |
+|-----------|---------|--------|
+| `15m` | `15m` | `15` (minutes) |
+| `1h` | `1h` | `60` |
+| `4h` | `4h` | `240` |
+| `1d` | `1d` | `1440` |
+| `1W` | `1w` | `10080` |
+
+**Test (avec fixtures — pas de call API réel) :**
+```
+□ BinanceClient.fetch_ohlcv mock → DataFrame avec colonnes OHLCV correctes
+□ KrakenClient.fetch_ohlcv mock → idem
+□ get_market_vi_client() → instance BinanceClient
+□ get_pair_vi_client() → instance KrakenClient
+```
+
+**Test d'intégration (appel API réel, dev uniquement) :**
+```
+□ BinanceClient.fetch_ohlcv('BTCUSDT', '1h') → DataFrame non-vide
+□ KrakenClient.fetch_ohlcv('PF_XBTUSD', '60') → DataFrame non-vide
+□ BinanceClient.fetch_ticker('ETHBTC') → {last: ..., change_pct_24h: ...}
+```
 
 ---
 
@@ -253,10 +301,12 @@ src/volatility/market_vi.py    ← NEW : aggregate_market_vi(pair_scores, settin
 ## Step P2-9 — Per-Pair VI + Watchlists
 
 **Quoi :**
-- 4 tasks Celery Beat (15m / 1h / 4h / 1d)
+- 5 tasks Celery Beat (15m / 1h / 4h / 1d / **1W**)
 - Pour chaque TF : calculer VI de tous les pairs watchlist configurés
 - Générer une watchlist si paires au-dessus du seuil
 - Stocker watchlist dans `watchlist_snapshots` avec rang TF+1
+- **1W** : générée le lundi 01:00 UTC — utile pour setups swing/position + comme `TF+1` des watchlists 1d
+- **1W n'entre PAS dans le Market VI agrégé** (trop lent pour le score temps-réel)
 
 **Fichiers touchés :**
 ```
@@ -274,17 +324,64 @@ src/volatility/watchlist.py         ← NEW : generate_watchlist(tf, pair_scores
 
 ---
 
-## Step P2-10 — Kraken pairs sync
+## Step P2-10 — Kraken pairs sync + instruments upsert
 
 **Quoi :**
-- Task Celery perioidique (1 fois/jour, 03:00 UTC)
+- Task Celery périodique (1 fois/jour, 03:00 UTC)
 - Endpoint on-demand : `POST /settings/volatility/sync-pairs`
-- Met à jour la table `instruments` avec les pairs Kraken actifs
+- **Upsert dans la table `instruments` existante** (même table que Phase 1)
+- Remplace le seed statique pour les pairs Kraken — les nouveaux pairs listés par Kraken sont ajoutés automatiquement
+- **Pair délisté** : `is_active = false` (jamais de DELETE — les trades historiques référencent l'instrument)
+- Les instruments Vantage (CFD) ne sont **pas touchés** (filtre sur `broker.name = 'Kraken'`)
+
+**Logique :**
+```python
+def sync_kraken_pairs():
+    pairs = kraken_client.fetch_all_symbols()  # GET /derivatives/api/v3/instruments
+    broker_id = get_broker_id('Kraken')
+    synced_symbols = []
+    for pair in pairs:
+        db.execute("""
+            INSERT INTO instruments (symbol, display_name, broker_id, asset_class, is_active, updated_at)
+            VALUES (:symbol, :display_name, :broker_id, 'crypto', true, NOW())
+            ON CONFLICT (symbol) DO UPDATE
+                SET display_name = EXCLUDED.display_name,
+                    is_active    = true,
+                    updated_at   = NOW()
+        """)
+        synced_symbols.append(pair['symbol'])
+    # Pairs absents de l'API Kraken → désactivés silencieusement
+    db.execute("""
+        UPDATE instruments SET is_active = false
+        WHERE broker_id = :broker_id AND symbol NOT IN :synced_symbols
+    """)
+```
+
+> **Le seed `seed_instruments.py` reste** pour le bootstrap dev/test. En prod, la Celery task prend le relais dès le premier run.
+
+**Synchro Binance top 100 (Market VI pairs) :**
+En parallèle, la même task synchronise le top 100 pairs Binance Futures par volume :
+```python
+def sync_binance_top_pairs():
+    # GET /fapi/v1/ticker/24hr → trié par quoteVolume DESC, top 100
+    # Stocké dans volatility_settings JSONB : 'available_market_vi_pairs'
+    # L'UI lit cette liste pour proposer le multi-select des 50 pairs Market VI
+    ...
+```
 
 **Fichiers touchés :**
 ```
-src/volatility/tasks.py        ← sync_kraken_pairs_task()
+src/volatility/tasks.py        ← sync_kraken_pairs_task() + sync_binance_top_pairs_task()
 src/volatility/router.py       ← POST /settings/volatility/sync-pairs
+```
+
+**Test :**
+```
+□ sync_kraken_pairs_task() → table instruments mise à jour
+□ Pair absent de l'API Kraken → is_active = false (jamais DELETE)
+□ Instruments Vantage non touchés
+□ sync_binance_top_pairs_task() → JSONB 'available_market_vi_pairs' contient 100 pairs
+□ POST /settings/volatility/sync-pairs → retourne {kraken_updated: N, binance_top_updated: 100}
 ```
 
 ---
@@ -443,15 +540,23 @@ frontend/src/components/volatility/
 **Quoi :** Page `/settings/volatility` + `/settings/notifications`
 
 ```
-Settings Volatility :
-□ Market VI : poids BTC, TFs actifs, poids semaine (sliders sum=100%), poids weekend
+Settings Volatility — Market VI :
+□ Source de données : badge readonly 'Binance Futures' (configurable via env, affiché en info)
+□ Poids BTC, TFs actifs, poids semaine (sliders sum=100%), poids weekend
 □ Régimes : sliders pour les 5 seuils percentile
 □ Rolling window : select 30j/60j/90j
-□ Per-pair : multi-select pairs (Market VI + watchlist séparés)
+□ Sélection des 50 pairs Market VI :
+    - Affiche les 100 top pairs Binance (triés par volume) avec son VI courant si disponible
+    - 50 pré-sélectionnés par défaut (top volume)
+    - Multi-select modifiable : checkbox par pair, indicateur de volume rank
+    - Bouton 'Réinitialiser aux 50 top volume'
+
+Settings Volatility — Per-Pair :
+□ Multi-select pairs watchlist (depuis instruments Kraken actifs)
 □ Indicateurs : toggles RVOL/MFI/ATR/BB/Depth
 □ Horaires d'exécution : par TF, plages horaires + jours
 □ Retention : snapshots + watchlists
-□ Sync Kraken pairs : bouton + date dernière sync
+□ Sync pairs : bouton + date dernière sync (Kraken + Binance top 100)
 
 Settings Notifications :
 □ Liste bots Telegram (ajout / suppression / test)
