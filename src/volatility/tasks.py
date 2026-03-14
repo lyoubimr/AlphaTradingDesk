@@ -198,7 +198,9 @@ def _update_aggregated_score(db: Session, mv_cfg: dict) -> None:
     tf_weights_cfg: dict = mv_cfg.get("tf_weights", {})
     weights: dict = tf_weights_cfg.get(
         day_key,
-        {"15m": 0.25, "1h": 0.40, "4h": 0.25, "1d": 0.10},  # safe fallback
+        # fallback if tf_weights missing entirely — should not happen with schedule.py defaults
+        {"15m": 0.75, "1h": 0.25, "4h": 0.00, "1d": 0.00} if is_weekend
+        else {"15m": 0.25, "1h": 0.40, "4h": 0.25, "1d": 0.10},
     )
 
     total_w = 0.0

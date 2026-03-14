@@ -432,6 +432,13 @@ export const volatilityApi = {
   getAggregatedMarketVI: (): Promise<AggregatedMarketVIOut> =>
     request('/volatility/market/aggregated'),
 
+  /** GET /api/volatility/market/{tf}/history → last N snapshots, oldest first */
+  getMarketVIHistory: (timeframe: string, limit = 96, since?: string): Promise<MarketVIOut[]> => {
+    const params = new URLSearchParams({ limit: String(limit) })
+    if (since) params.set('since', since)
+    return request(`/volatility/market/${timeframe}/history?${params}`)
+  },
+
   /** GET /api/volatility/pairs/{timeframe} → all per-pair VI snapshots */
   getPairsVI: (timeframe: string): Promise<PairsVIOut> =>
     request(`/volatility/pairs/${timeframe}`),

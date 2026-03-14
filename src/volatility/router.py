@@ -104,7 +104,7 @@ def get_aggregated_market_vi(db: Session = Depends(get_db)) -> AggregatedMarketV
     """Return the cross-TF aggregated Market VI score.
 
     Weights: weekday 25%×15m + 40%×1h + 25%×4h + 10%×1d,
-             weekend 50%×15m + 40%×1h + 10%×4h + 0%×1d.
+             weekend 75%×15m + 25%×1h + 0%×4h + 0%×1d.
     Weights are configurable via volatility_settings.market_vi.tf_weights.
 
     Reads from Redis cache first; falls back to the most recent DB row
@@ -144,6 +144,50 @@ def get_aggregated_market_vi(db: Session = Depends(get_db)) -> AggregatedMarketV
         is_weekend=is_weekend,
         tf_components=_build_tf_components(db, is_weekend),
     )
+
+@router.get("/market/{timeframe}/history", response_model=list[MarketVIOut])
+def get_market_vi_history(
+    timeframe: str,
+    limit: int = 96,
+    since: str | None = None,
+    db: Session = Depends(get_db),
+) -> list[MarketVIOut]:
+    """Return Market VI snapshots for a timeframe, oldest first.
+
+    Query params:
+      limit  — max rows to return (default 96, max 500)
+      since  — ISO-8601 datetime string; if provided, return rows after this
+               timestamp (takes precedence over limit for date filtering)
+
+    Accepts any value for timeframe including 'aggregated'.
+    No schedule gate — purely a DB read.
+    """
+    from datetime import UTC, datetime  # noqa: PLC0415
+
+    q = db.query(MarketVISnapshot).filter(MarketVISnapshot.timeframe == timeframe)
+
+    if since:
+        try:
+            since_dt = datetime.fromisoformat(since.replace("Z", "+00:00"))
+            q = q.filter(MarketVISnapshot.timestamp >= since_dt)
+        except ValueError:
+            pass  # bad param — ignore, fall through to limit-only query
+
+    rows = (
+        q.order_by(MarketVISnapshot.timestamp.desc())
+        .limit(min(limit, 500))
+        .all()
+    )
+    return [
+        MarketVIOut(
+            timeframe=timeframe,
+            vi_score=float(r.vi_score),
+            regime=r.regime,
+            timestamp=r.timestamp.isoformat(),
+        )
+        for r in reversed(rows)
+    ]
+
 
 @router.get("/market/{timeframe}", response_model=MarketVIOut)
 def get_market_vi(timeframe: str, db: Session = Depends(get_db)) -> MarketVIOut:

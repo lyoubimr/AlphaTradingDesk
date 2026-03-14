@@ -69,7 +69,7 @@ _DEFAULT_MARKET_VI: dict = {
     "weights": {},
     "tf_weights": {
         "weekday": {"15m": 0.25, "1h": 0.40, "4h": 0.25, "1d": 0.10},
-        "weekend": {"15m": 0.50, "1h": 0.40, "4h": 0.10, "1d": 0.00},
+        "weekend": {"15m": 0.75, "1h": 0.25, "4h": 0.00, "1d": 0.00},
     },
     "active_hours_start": "00:00",
     "active_hours_end": "23:59",

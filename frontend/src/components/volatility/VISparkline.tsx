@@ -45,16 +45,27 @@ export function VISparkline({ points, width = 320, height = 48, color = '#fb923c
   // Filled area path
   const areaD = `${d} L ${toX(points.length - 1).toFixed(1)} ${pad + h} L ${pad} ${pad + h} Z`
 
+  // Last point dot
+  const lastX = toX(points.length - 1)
+  const lastY = toY(points[points.length - 1].score)
+
   return (
-    <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`}>
+    <svg
+      viewBox={`0 0 ${width} ${height}`}
+      style={{ width: '100%', height, display: 'block' }}
+      preserveAspectRatio="none"
+    >
       <defs>
-        <linearGradient id="vi-fill" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor={color} stopOpacity={0.3} />
+        <linearGradient id={`vi-fill-${color.replace('#', '')}`} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor={color} stopOpacity={0.35} />
           <stop offset="100%" stopColor={color} stopOpacity={0} />
         </linearGradient>
       </defs>
-      <path d={areaD} fill="url(#vi-fill)" />
-      <path d={d} fill="none" stroke={color} strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" />
+      <path d={areaD} fill={`url(#vi-fill-${color.replace('#', '')})`} />
+      <path d={d} fill="none" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
+      {/* Last value dot */}
+      <circle cx={lastX} cy={lastY} r={3} fill={color} />
+      <circle cx={lastX} cy={lastY} r={6} fill={color} fillOpacity={0.2} />
     </svg>
   )
 }

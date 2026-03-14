@@ -9,12 +9,12 @@ interface Props {
 }
 
 const REGIME_COLORS = [
-  { max: 0.17, color: '#71717a' },  // zinc-500   MORT
-  { max: 0.33, color: '#38bdf8' },  // sky-400     CALME
+  { max: 0.17, color: '#a1a1aa' },  // zinc-400   DEAD  (brighter for dark theme)
+  { max: 0.33, color: '#38bdf8' },  // sky-400    CALM
   { max: 0.50, color: '#34d399' },  // emerald-400 NORMAL
   { max: 0.67, color: '#fbbf24' },  // yellow-400  TRENDING
-  { max: 0.83, color: '#fb923c' },  // orange-400  ACTIF
-  { max: 1.00, color: '#f87171' },  // red-400     EXTRÊME
+  { max: 0.83, color: '#fb923c' },  // orange-400  ACTIVE
+  { max: 1.00, color: '#f87171' },  // red-400     EXTREME
 ]
 
 function scoreColor(score: number): string {
@@ -51,24 +51,24 @@ export function MarketVIGauge({ score, size = 200 }: Props) {
   const color = scoreColor(clampedScore)
 
   return (
-    <svg width={size} height={size * 0.75} viewBox={`0 0 ${size} ${size * 0.75}`}>
-      {/* Track */}
+    <svg width={size} height={size * 0.85} viewBox={`0 0 ${size} ${size * 0.85}`}>
+      {/* Track — zinc-700 for better contrast */}
       <path
         d={arcPath(cx, cy * 0.88, r, START_DEG, END_DEG)}
         fill="none"
-        stroke="#27272a"
+        stroke="#3f3f46"
         strokeWidth={strokeW}
         strokeLinecap="round"
       />
-      {/* Fill */}
+      {/* Fill — always show at least 5° so there's visible color when score > 0 */}
       {clampedScore > 0 && (
         <path
-          d={arcPath(cx, cy * 0.88, r, START_DEG, fillEnd)}
+          d={arcPath(cx, cy * 0.88, r, START_DEG, START_DEG + Math.max(8, SWEEP * clampedScore))}
           fill="none"
           stroke={color}
           strokeWidth={strokeW}
           strokeLinecap="round"
-          style={{ filter: `drop-shadow(0 0 6px ${color}80)` }}
+          style={{ filter: `drop-shadow(0 0 10px ${color})` }}
         />
       )}
       {/* Score label */}

@@ -13,6 +13,7 @@ import { PageHeader } from '../../components/ui/PageHeader'
 import { MarketVIGauge } from '../../components/volatility/MarketVIGauge'
 import { RegimeBadge } from '../../components/volatility/RegimeBadge'
 import { VISparkline } from '../../components/volatility/VISparkline'
+import { VIHistoryChart } from '../../components/volatility/VIHistoryChart'
 import { volatilityApi } from '../../lib/api'
 import type { AggregatedMarketVIOut, MarketVIOut, PairVIOut, TFComponentOut } from '../../types/api'
 
@@ -21,6 +22,46 @@ type TF = typeof TIMEFRAMES[number]
 const REFRESH_MS = 60_000  // 60s auto-refresh
 
 interface SparkPoint { score: number; ts: number }
+
+// Regime → Tailwind text color for score numbers
+const REGIME_SCORE_COLOR: Record<string, string> = {
+  DEAD:     'text-zinc-400',
+  CALM:     'text-sky-400',
+  NORMAL:   'text-emerald-400',
+  TRENDING: 'text-yellow-400',
+  ACTIVE:   'text-orange-400',
+  EXTREME:  'text-red-400',
+}
+
+// Regime → hex color (inline style — avoids Tailwind JIT purge of dynamic class names)
+const REGIME_COLOR_HEX: Record<string, string> = {
+  DEAD:     '#a1a1aa',  // zinc-400 — brighter than zinc-500 for dark theme
+  CALM:     '#0ea5e9',
+  NORMAL:   '#10b981',
+  TRENDING: '#eab308',
+  ACTIVE:   '#f97316',
+  EXTREME:  '#ef4444',
+}
+
+// Regime → standalone emoji (hero display only)
+const REGIME_EMOJI: Record<string, string> = {
+  DEAD:     '⬜',
+  CALM:     '💧',
+  NORMAL:   '✅',
+  TRENDING: '📈',
+  ACTIVE:   '⚡',
+  EXTREME:  '🔥',
+}
+
+// Regime → one-line trading description shown in the hero card
+const REGIME_DESCRIPTION: Record<string, string> = {
+  DEAD:     'Market asleep — stay flat, zero edge',
+  CALM:     'Low momentum — reduce size, scalp only',
+  NORMAL:   'Standard conditions — apply usual strategy',
+  TRENDING: 'Strong momentum — favor trend-following',
+  ACTIVE:   'High activity — breakouts frequent, tight SL',
+  EXTREME:  'Extreme volatility — minimize exposure',
+}
 
 // ── Component label map ────────────────────────────────────────────────────
 
@@ -86,19 +127,42 @@ function TFMiniCard({ component, onClick, active }: {
   active: boolean
 }) {
   const pct = Math.round(component.vi_score * 100)
+  const scoreColor = REGIME_SCORE_COLOR[component.regime] ?? 'text-zinc-300'
+  const borderColor = REGIME_COLOR_HEX[component.regime] ?? '#71717a'
+  const emoji = REGIME_EMOJI[component.regime] ?? ''
   return (
     <button
       onClick={onClick}
-      className={`flex flex-col items-center gap-1.5 p-3 rounded-xl border transition-all ${
-        active
-          ? 'border-zinc-500 bg-zinc-800'
-          : 'border-zinc-800 bg-surface-900 hover:border-zinc-700 hover:bg-zinc-900'
+      style={{ borderLeftColor: borderColor }}
+      className={`relative text-left p-4 rounded-xl border border-zinc-800 border-l-4 transition-all ${
+        active ? 'bg-zinc-800' : 'bg-zinc-950 hover:bg-zinc-900'
       }`}
     >
-      <span className="text-xs font-mono font-semibold text-zinc-400">{component.tf}</span>
-      <span className="text-xl font-mono font-bold text-zinc-100">{pct}</span>
-      <RegimeBadge regime={component.regime} size="sm" showTooltip={false} />
-      <span className="text-xs text-zinc-600">{Math.round(component.weight * 100)}%</span>
+      {/* TF label + weight pill */}
+      <div className="flex items-center justify-between mb-3">
+        <span className="text-xs font-mono font-bold text-zinc-400 uppercase tracking-widest">{component.tf}</span>
+        <span
+          className="text-xs font-mono rounded px-1.5 py-0.5 border"
+          style={{ color: borderColor, borderColor: `${borderColor}50`, background: `${borderColor}12` }}
+        >
+          {Math.round(component.weight * 100)}%
+        </span>
+      </div>
+      {/* Score with glow */}
+      <div
+        className={`text-4xl font-black font-mono leading-none mb-1 ${scoreColor}`}
+        style={{ textShadow: `0 0 24px ${borderColor}55` }}
+      >
+        {pct}
+      </div>
+      <div className="text-xs font-mono text-zinc-600 mb-3">/100</div>
+      {/* Regime — emoji + text, no badge component = no truncation */}
+      <div className="flex items-center gap-1.5">
+        <span className="text-base leading-none">{emoji}</span>
+        <span className="text-xs font-bold tracking-wider" style={{ color: borderColor }}>
+          {component.regime}
+        </span>
+      </div>
     </button>
   )
 }
@@ -169,6 +233,15 @@ export function MarketVIPage() {
   useEffect(() => {
     setLoading(true)
     setSparkPoints([])
+
+    // Pre-populate sparkline from DB history (up to 48 points)
+    const historyTF = activeTF ?? 'aggregated'
+    volatilityApi.getMarketVIHistory(historyTF, 48)
+      .then((snaps) => {
+        setSparkPoints(snaps.map((s) => ({ score: s.vi_score, ts: new Date(s.timestamp).getTime() })))
+      })
+      .catch(() => {/* no history yet — sparkline will fill in real time */})
+
     if (activeTF === null) {
       fetchAggregated()
       intervalRef.current = setInterval(fetchAggregated, REFRESH_MS)
@@ -200,59 +273,47 @@ export function MarketVIPage() {
   const heroScore = activeTF === null ? (aggregated?.vi_score ?? null) : (tfData?.vi_score ?? null)
   const heroRegime = activeTF === null ? (aggregated?.regime ?? '') : (tfData?.regime ?? '')
   const heroTs = activeTF === null ? (aggregated?.timestamp ?? '') : (tfData?.timestamp ?? '')
+  const heroColor = REGIME_COLOR_HEX[heroRegime] ?? '#a1a1aa'
 
   return (
-    <div className="space-y-6">
-      {/* Header row */}
+    <div className="space-y-5">
+      {/* ── Topbar ── */}
       <div className="flex items-center justify-between">
         <PageHeader
-          icon="🌊"
-          title="Market VI"
-          subtitle="Volatility Index — aggregated market score"
+          icon="📊"
+          title="Crypto Market VI"
+          subtitle="Binance Futures — crypto volatility index"
         />
         <div className="flex items-center gap-2">
-          {/* View selector: Aggregated + 4 TFs */}
           <div className="flex gap-1 bg-zinc-900 border border-zinc-800 rounded-lg p-1">
             <button
               onClick={() => { setActiveTF(null); setSparkPoints([]) }}
               className={`px-3 py-1 text-xs font-mono rounded-md transition-colors ${
-                activeTF === null
-                  ? 'bg-zinc-700 text-zinc-100'
-                  : 'text-zinc-400 hover:text-zinc-200'
+                activeTF === null ? 'bg-zinc-700 text-zinc-100' : 'text-zinc-400 hover:text-zinc-200'
               }`}
-            >
-              ALL
-            </button>
+            >ALL</button>
             {TIMEFRAMES.map((t) => (
               <button
                 key={t}
                 onClick={() => { setActiveTF(t); setSparkPoints([]) }}
                 className={`px-3 py-1 text-xs font-mono rounded-md transition-colors ${
-                  t === activeTF
-                    ? 'bg-zinc-700 text-zinc-100'
-                    : 'text-zinc-400 hover:text-zinc-200'
+                  t === activeTF ? 'bg-zinc-700 text-zinc-100' : 'text-zinc-400 hover:text-zinc-200'
                 }`}
-              >
-                {t}
-              </button>
+              >{t}</button>
             ))}
           </div>
-          {/* Manual refresh */}
           <button
             onClick={handleManualRefresh}
             disabled={loading}
             className="p-2 rounded-lg text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 transition-colors disabled:opacity-50"
             title="Refresh"
           >
-            {loading
-              ? <Loader2 size={14} className="animate-spin" />
-              : <RefreshCw size={14} />
-            }
+            {loading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
           </button>
         </div>
       </div>
 
-      {/* Error state */}
+      {/* ── Error ── */}
       {error && !loading && (
         <div className="flex items-center gap-3 p-4 bg-amber-950 border border-amber-800 rounded-lg text-amber-300 text-sm">
           <AlertTriangle size={16} className="shrink-0" />
@@ -260,51 +321,87 @@ export function MarketVIPage() {
         </div>
       )}
 
-      {/* Loading skeleton */}
+      {/* ── Loading ── */}
       {loading && heroScore === null ? (
         <div className="flex justify-center items-center h-48">
           <Loader2 size={32} className="animate-spin text-zinc-500" />
         </div>
       ) : heroScore !== null ? (
         <>
-          {/* ── Hero card ── */}
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            <div className="lg:col-span-1 bg-surface-900 border border-zinc-800 rounded-xl p-6 flex flex-col items-center gap-4">
-              <MarketVIGauge score={heroScore} size={180} />
-              <RegimeBadge regime={heroRegime} size="lg" />
-              <p className="text-xs text-zinc-500 text-center">
-                {activeTF ? activeTF.toUpperCase() : 'AGGREGATED'} ·{' '}
-                {heroTs ? new Date(heroTs).toLocaleString(undefined, {
-                  dateStyle: 'short', timeStyle: 'short',
-                }) : '—'}
-              </p>
-              {activeTF === null && aggregated?.is_weekend && (
-                <span className="text-xs text-amber-400 bg-amber-950 border border-amber-800 px-2 py-0.5 rounded-full">
-                  Weekend weights active
+          {/* ── 2-col layout: hero gauge left | sparkline + cards right ── */}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+
+            {/* ── Left col — gauge card ── */}
+            <div
+              className="relative lg:col-span-1 rounded-xl border border-zinc-800 border-l-4 p-5 flex flex-col items-center gap-3"
+              style={{
+                borderLeftColor: heroColor,
+                background: `linear-gradient(160deg, ${heroColor}10 0%, transparent 60%)`,
+              }}
+            >
+              {/* Shimmer top */}
+              <div className="absolute inset-x-0 top-0 h-px opacity-50" style={{ background: `linear-gradient(90deg, transparent, ${heroColor}, transparent)` }} />
+              <MarketVIGauge score={heroScore} size={190} />
+              {/* Regime emoji + label */}
+              <div className="flex items-center gap-2">
+                <span className="text-2xl leading-none">{REGIME_EMOJI[heroRegime] ?? ''}</span>
+                <span
+                  className="text-2xl font-black tracking-tight leading-none"
+                  style={{ color: heroColor, textShadow: `0 0 30px ${heroColor}50` }}
+                >
+                  {heroRegime || '—'}
                 </span>
-              )}
-              <p className="text-xs text-zinc-600 text-center">Auto-refresh every 60s</p>
+              </div>
+              {/* Description */}
+              <p className="text-xs text-zinc-400 text-center px-2 leading-relaxed">
+                {REGIME_DESCRIPTION[heroRegime] ?? ''}
+              </p>
+              {/* Meta */}
+              <div className="w-full border-t border-zinc-800 pt-3 flex flex-col items-center gap-1.5">
+                <div className="flex flex-wrap justify-center items-center gap-2">
+                  <span
+                    className="text-xs font-mono rounded px-2 py-0.5 border"
+                    style={{ color: heroColor, borderColor: `${heroColor}40`, background: `${heroColor}10` }}
+                  >
+                    {activeTF ? activeTF.toUpperCase() : 'AGGREGATED'}
+                  </span>
+                  <span className="text-xs font-mono text-zinc-500">
+                    raw <span className="text-zinc-300">{heroScore.toFixed(3)}</span>
+                  </span>
+                </div>
+                <span className="text-xs text-zinc-600">
+                  {heroTs ? new Date(heroTs).toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' }) : '—'}
+                </span>
+                {activeTF === null && aggregated?.is_weekend && (
+                  <span className="mt-1 text-xs text-amber-400 bg-amber-950 border border-amber-800 px-2 py-0.5 rounded-full">
+                    🌙 Weekend weights (75 / 25)
+                  </span>
+                )}
+              </div>
             </div>
 
-            {/* Sparkline + secondary content */}
+            {/* ── Right col — sparkline + TF cards / components ── */}
             <div className="lg:col-span-2 flex flex-col gap-4">
-              <div className="bg-surface-900 border border-zinc-800 rounded-xl p-4">
-                <p className="text-xs font-medium text-zinc-400 mb-3">Session trend</p>
-                <VISparkline points={sparkPoints} width={480} height={52} />
+
+              {/* Sparkline */}
+              <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <span className="text-xs font-semibold text-zinc-400">📈 Session trend</span>
+                  <span className="text-xs font-mono text-zinc-600">{sparkPoints.length} pts</span>
+                </div>
+                <VISparkline points={sparkPoints} height={80} color={heroColor} />
               </div>
 
-              {/* Aggregated view: 4 TF mini-cards */}
+              {/* TF breakdown — aggregated view */}
               {activeTF === null && aggregated && aggregated.tf_components.length > 0 && (
-                <div className="bg-surface-900 border border-zinc-800 rounded-xl p-4">
-                  <p className="text-xs font-medium text-zinc-400 mb-3">
-                    per-TF breakdown — click to drill down
-                  </p>
-                  <div className="grid grid-cols-4 gap-3">
+                <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-4">
+                  <p className="text-xs font-semibold text-zinc-400 mb-3">⏱ Per-TF breakdown — click to drill down</p>
+                  <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
                     {aggregated.tf_components.map((c) => (
                       <TFMiniCard
                         key={c.tf}
                         component={c}
-                        active={false}
+                        active={activeTF === c.tf}
                         onClick={() => { setActiveTF(c.tf as TF); setSparkPoints([]) }}
                       />
                     ))}
@@ -312,12 +409,10 @@ export function MarketVIPage() {
                 </div>
               )}
 
-              {/* TF drill-down view: components breakdown */}
+              {/* Components — TF drill-down */}
               {activeTF !== null && componentEntries.length > 0 && (
-                <div className="bg-surface-900 border border-zinc-800 rounded-xl p-4">
-                  <p className="text-xs font-medium text-zinc-400 mb-4">
-                    Components — BTC proxy ({activeTF})
-                  </p>
+                <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-4">
+                  <p className="text-xs font-semibold text-zinc-400 mb-4">Components — BTC proxy ({activeTF})</p>
                   <div className="flex flex-col gap-3">
                     {componentEntries.map(({ name, value }) => (
                       <ComponentBar key={name} name={name} value={value} />
@@ -325,15 +420,14 @@ export function MarketVIPage() {
                   </div>
                 </div>
               )}
+
             </div>
           </div>
 
-          {/* Pair context (TF drill-down only) */}
+          {/* ── Pair context (TF drill-down only) ── */}
           {activeTF !== null && pairsData.length > 0 && (
             <div>
-              <p className="text-xs font-medium text-zinc-500 uppercase tracking-wider mb-3">
-                Key pairs context
-              </p>
+              <p className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-3">Key pairs context</p>
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
                 {pairsData.map((p) => (
                   <PairContextCard key={p.pair} pair={p} />
@@ -341,6 +435,25 @@ export function MarketVIPage() {
               </div>
             </div>
           )}
+
+          {/* ── History charts ── */}
+          <div>
+            <p className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-3">History</p>
+            {activeTF === null ? (
+              /* ALL view: aggregated (full-size) + 4 TF mini charts */
+              <div className="space-y-4">
+                <VIHistoryChart timeframe="aggregated" defaultColor={heroColor} />
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {TIMEFRAMES.map((tf) => (
+                    <VIHistoryChart key={tf} timeframe={tf} compact />
+                  ))}
+                </div>
+              </div>
+            ) : (
+              /* TF drill-down: single chart for that TF */
+              <VIHistoryChart timeframe={activeTF} defaultColor={heroColor} />
+            )}
+          </div>
         </>
       ) : null}
     </div>
