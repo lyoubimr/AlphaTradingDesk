@@ -138,36 +138,34 @@ def compute_ema_score(
 ) -> dict:
     """EMA position score — directional signal for watchlist ranking.
 
-    Score: 0–100 (bidirectional)
-        0   = price below all EMAs  (fully bearish)
-        50  = neutral (price above some, below others)
-        100 = price above all EMAs  (fully bullish)
+    Score: 0.0–1.0 (bidirectional, same scale as VI score)
+        0.00 = price below all EMAs  (fully bearish)
+        0.50 = neutral (price above some, below others)
+        1.00 = price above all EMAs  (fully bullish)
 
     Weights: EMA20=50%, EMA50=30%, EMA200=20%
 
-    Signal labels (EMA20-based):
-        above_all   — price > all 3 EMAs
-        below_all   — price < all 3 EMAs
-        breakout_up — price crossed EMA20 upward within last 3 bars
+    Signal labels (EMA20-based, used as the watchlist `alert` column):
+        above_all      — price > all 3 EMAs        (state, no alert)
+        below_all      — price < all 3 EMAs        (state, no alert)
+        breakout_up    — price crossed EMA20 upward within last 3 bars
         breakdown_down — price crossed EMA20 downward within last 3 bars
-        retest_up   — price ≤ 0.5% above EMA20 (testing support)
-        retest_down — price ≤ 0.5% below EMA20 (testing resistance)
-        mixed       — everything else
+        retest_up      — price ≤ 0.5% above EMA20 (testing support)
+        retest_down    — price ≤ 0.5% below EMA20 (testing resistance)
+        mixed          — everything else            (no alert)
 
     Returns:
-        {"score": float (0–100), "signal": str, "normalized": float (0–1)}
+        {"score": float (0.0–1.0), "signal": str}
 
-    Note: `normalized` = abs(score − 50) / 50 — captures directional extremity
-          for potential watchlist-boost use. NOT included in VI average.
+    NOT included in VI average — bonus signal for watchlist ranking only.
     """
     close = df["close"]
     last = float(close.iloc[-1])
     ema_weights = [0.5, 0.3, 0.2]
     emas = [float(close.ewm(span=p, adjust=False).mean().iloc[-1]) for p in periods]
 
-    # Score: sum of weights for EMAs that are BELOW current price × 100
-    score = sum(w * (1.0 if last > e else 0.0) for w, e in zip(ema_weights, emas)) * 100.0
-    score = round(score, 2)
+    # Score: sum of weights for EMAs below current price → 0.0–1.0
+    score = round(sum(w * (1.0 if last > e else 0.0) for w, e in zip(ema_weights, emas)), 2)
 
     # Signal detection — EMA20 crossover + retest
     above = [last > e for e in emas]
@@ -191,8 +189,7 @@ def compute_ema_score(
         else:
             signal = "mixed"
 
-    normalized = round(abs(score - 50.0) / 50.0, 4)
-    return {"score": score, "signal": signal, "normalized": normalized}
+    return {"score": score, "signal": signal}
 
 
 # ── VI aggregation ────────────────────────────────────────────────────────────
@@ -215,9 +212,8 @@ def compute_vi_score(
             "mfi":        float (0–1) | absent if disabled,
             "atr":        float (0–1) | absent if disabled,
             "bb_width":   float (0–1) | absent if disabled,
-            "ema_score":  float (0–100) | absent if disabled,
-            "ema_signal": str          | absent if disabled,
-            "ema_norm":   float (0–1)  | absent if disabled,
+            "ema_score":  float (0.0–1.0) | absent if disabled,
+            "ema_signal": str             | absent if disabled,
         }
         On insufficient data:
             {"vi_score": 0.5, "error": "insufficient_data", "candles": n}
@@ -257,7 +253,6 @@ def compute_vi_score(
         ema = compute_ema_score(df)
         components["ema_score"] = ema["score"]
         components["ema_signal"] = ema["signal"]
-        components["ema_norm"] = ema["normalized"]
 
     vi = round(sum(active_scores) / len(active_scores), 3) if active_scores else 0.5
     return {"vi_score": vi, **components}

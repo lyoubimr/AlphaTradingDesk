@@ -4,8 +4,8 @@ Volatility Engine — Celery tasks (Phase 2).
 Progress
 --------
   P2-3  Skeletons with schedule gate + DB session             DONE
-  P2-5  compute_market_vi — BinanceClient + indicators        DONE  ← this file
-  P2-6  compute_pair_vi   — KrakenClient + indicators         TODO
+  P2-5  compute_market_vi — BinanceClient + indicators        DONE
+  P2-6  compute_pair_vi   — KrakenClient + indicators         DONE  ← this file
   P2-10 sync_instruments  — Kraken + Binance upsert           TODO
   P2-11 cleanup_old_snapshots — TimescaleDB drop_chunks       TODO
 
@@ -27,9 +27,15 @@ from sqlalchemy.orm import Session
 
 from src.core.celery_app import celery_app
 from src.core.database import get_session_factory
-from src.volatility.cache import cache_market_vi
+from src.core.models.broker import Broker, Instrument
+from src.volatility.cache import cache_market_vi, cache_pair_vi
 from src.volatility.indicators import compute_vi_score
-from src.volatility.models import MarketVIPair, MarketVISnapshot
+from src.volatility.models import (
+    MarketVIPair,
+    MarketVISnapshot,
+    VolatilitySnapshot,
+    WatchlistSnapshot,
+)
 from src.volatility.schedule import (
     _load_settings,
     get_regime_thresholds,
@@ -38,6 +44,16 @@ from src.volatility.schedule import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Timeframe hierarchy for TF+1 column in watchlist
+# Key = current TF, Value = next higher TF to look up in DB
+_TF_SUPERIOR: dict[str, str] = {
+    "15m": "1h",
+    "1h": "4h",
+    "4h": "1d",
+    "1d": "1w",
+    # 1w has no superior — column left empty
+}
 
 
 def _get_db() -> Session:
@@ -71,6 +87,83 @@ def _build_weights(symbols: list[str], configured: dict) -> dict[str, float]:
     if total > 0:
         weights = {s: w / total for s, w in weights.items()}
     return weights
+
+
+def _build_watchlist_pairs(
+    pair_scores: dict[str, dict],
+    tickers: dict[str, dict],
+    sup_scores: dict[str, dict],
+    thresholds: dict,
+    timeframe: str,
+) -> list[dict]:
+    """Build the watchlist pairs list, ranked by vi_score (+ EMA boost).
+
+    EMA boost: pairs with `ema_signal` in (breakout_up, above_all) get a
+    small score boost for ranking only — the stored vi_score is unaffected.
+
+    Args:
+        pair_scores:  {symbol: compute_vi_score result}
+        tickers:      {symbol: {"change_pct_24h": float, ...}}
+        sup_scores:   latest vi_score + regime from the superior TF, keyed by symbol
+        thresholds:   regime thresholds dict
+        timeframe:    current computation TF (used for watchlist name)
+
+    Returns:
+        List of pair dicts sorted by rank_score DESC, each containing the
+        7 watchlist columns: pair, vi_score, regime, ema_signal, change_24h,
+        tf_sup_regime, tf_sup_vi (EMA fields come after change_24h).
+    """
+    _BOOST_SIGNALS = {"breakout_up", "above_all"}
+
+    rows = []
+    for symbol, res in pair_scores.items():
+        vi = float(res["vi_score"])
+        regime = score_to_regime(vi, thresholds)
+
+        ema_signal: str = res.get("ema_signal", "mixed")
+        ema_score: float = float(res.get("ema_score", 0.5))
+
+        # Rank score: vi_score + small EMA boost (≤ 0.05) for directional signals
+        rank_score = vi + (0.05 if ema_signal in _BOOST_SIGNALS else 0.0)
+
+        ticker = tickers.get(symbol, {})
+        change_24h = ticker.get("change_pct_24h", None)
+
+        sup = sup_scores.get(symbol, {})
+        tf_sup_regime = sup.get("regime")
+        tf_sup_vi = sup.get("vi_score")
+
+        # Alert: actionable conclusion derived from regime
+        _REGIME_ALERT: dict[str, str] = {
+            "EXTREME":  "warning_extreme",  # too hot — caution
+            "ACTIVE":   "opportunity",      # high momentum — actionable
+            "TRENDING": "setup_ready",      # sweet spot for trend-following
+            "NORMAL":   "neutral",          # baseline — nothing special
+            "CALM":     "low_activity",     # quiet market — low conviction
+            "DEAD":     "caution_dead",     # no liquidity — avoid
+        }
+        alert = _REGIME_ALERT.get(regime, "neutral")
+
+        rows.append(
+            {
+                "_rank": rank_score,
+                "pair": symbol,
+                "vi_score": round(vi, 3),
+                "regime": regime,
+                "alert": alert,
+                "change_24h": round(change_24h, 4) if change_24h is not None else None,
+                "ema_score": round(ema_score, 2),
+                "ema_signal": ema_signal,
+                "tf_sup_regime": tf_sup_regime,
+                "tf_sup_vi": round(float(tf_sup_vi), 3) if tf_sup_vi is not None else None,
+            }
+        )
+
+    rows.sort(key=lambda r: r["_rank"], reverse=True)
+    # Strip internal rank key before storing
+    for r in rows:
+        del r["_rank"]
+    return rows
 
 
 # ── Tasks ─────────────────────────────────────────────────────────────────────
@@ -214,31 +307,185 @@ def compute_market_vi(self, timeframe: str) -> dict:  # type: ignore[override]
 def compute_pair_vi(self, timeframe: str) -> dict:  # type: ignore[override]
     """Compute Per-Pair Volatility Index (Kraken Futures).
 
-    P2-3: skeleton with schedule check + DB session.
-    P2-7: KrakenClient.fetch_ohlcv() call.
-    P2-8: indicator computation per pair.
-    P2-9: INSERT volatility_snapshots + generate watchlist_snapshot.
+    Pipeline (P2-6):
+      1. Schedule gate
+      2. Load per_pair settings (enabled indicators)
+      3. Query active Kraken instruments from instruments table
+      4. KrakenClient.fetch_ohlcv() + compute_vi_score() per pair
+      5. Fetch all tickers for 24h change (one call)
+      6. Load latest superior-TF snapshots for TF+1 watchlist column
+      7. INSERT volatility_snapshots (one row per pair — hypertable)
+      8. Rank pairs → build watchlist pairs list
+      9. INSERT watchlist_snapshot
+      10. Cache pair scores in Redis
     """
     db = _get_db()
     try:
+        # ── 1. Schedule gate ──────────────────────────────────────────────
         if not is_within_schedule(db, "per_pair"):
             logger.debug("compute_pair_vi(%s): skipped (outside schedule)", timeframe)
             return {"status": "skipped", "reason": "outside_schedule", "timeframe": timeframe}
 
-        # ── TODO P2-7: fetch OHLCV + orderbook from Kraken ───────────────
-        # from src.volatility.kraken_client import KrakenClient
-        # client = KrakenClient()
-        # instruments = db.query(Instrument).filter_by(is_active=True, broker_id=KRAKEN_ID).all()
-        # ...
+        # ── 2. Load settings ──────────────────────────────────────────────
+        pp_cfg = _load_settings(db, "per_pair", None)
+        enabled: dict = pp_cfg.get(
+            "indicators",
+            {"rvol": True, "mfi": True, "atr": True, "bb": True, "ema": True},
+        )
 
-        # ── TODO P2-8: compute indicators per pair ────────────────────────
+        # ── 3. Resolve active Kraken instruments ──────────────────────────
+        kraken_broker = (
+            db.query(Broker)
+            .filter(Broker.name.ilike("%kraken%"), Broker.status == "active")
+            .first()
+        )
+        if kraken_broker is None:
+            logger.warning("compute_pair_vi(%s): no active Kraken broker found", timeframe)
+            return {"status": "skipped", "reason": "no_kraken_broker", "timeframe": timeframe}
 
-        # ── TODO P2-9: persist snapshots + watchlist generation ───────────
+        instruments_rows = (
+            db.query(Instrument)
+            .filter(
+                Instrument.broker_id == kraken_broker.id,
+                Instrument.is_active.is_(True),
+            )
+            .all()
+        )
+        if not instruments_rows:
+            logger.warning("compute_pair_vi(%s): no active Kraken instruments", timeframe)
+            return {"status": "skipped", "reason": "no_instruments", "timeframe": timeframe}
 
-        logger.info("compute_pair_vi(%s): stub — no data fetched yet", timeframe)
-        return {"status": "stub", "timeframe": timeframe}
+        symbols: list[str] = [i.symbol for i in instruments_rows]
+
+        # ── 4. Fetch OHLCV + compute VI per pair ──────────────────────────
+        from src.volatility.kraken_client import KrakenClient  # noqa: PLC0415
+
+        pair_scores: dict[str, dict] = {}
+        with KrakenClient() as client:
+            # 5a. Tickers — one call for all (band 24h change cheaply)
+            try:
+                all_tickers_list = client.fetch_all_tickers()
+                tickers: dict[str, dict] = {t["symbol"]: t for t in all_tickers_list}
+            except Exception as ticker_exc:
+                logger.warning("compute_pair_vi(%s): ticker fetch failed — %s", timeframe, ticker_exc)
+                tickers = {}
+
+            # OHLCV per pair
+            for symbol in symbols:
+                try:
+                    candles = client.fetch_ohlcv(symbol, timeframe, limit=220)
+                    result = compute_vi_score(candles, enabled)
+                    pair_scores[symbol] = result
+                except Exception as pair_exc:
+                    logger.warning(
+                        "compute_pair_vi(%s): pair %s failed — %s",
+                        timeframe, symbol, pair_exc,
+                    )
+
+        if not pair_scores:
+            logger.warning("compute_pair_vi(%s): no pair data computed", timeframe)
+            return {"status": "skipped", "reason": "no_pair_data", "timeframe": timeframe}
+
+        # ── 5. Regime thresholds ──────────────────────────────────────────
+        thresholds = get_regime_thresholds(db)
+        now = datetime.now(UTC)
+
+        # ── 6. Load TF+1 snapshots for watchlist column ───────────────────
+        sup_tf = _TF_SUPERIOR.get(timeframe)
+        sup_scores: dict[str, dict] = {}
+        if sup_tf:
+            # Fetch the single most-recent snapshot for each pair at sup_tf
+            # TimescaleDB: ORDER BY timestamp DESC LIMIT 1 per pair is efficient
+            try:
+                from sqlalchemy import func as sqlfunc  # noqa: PLC0415
+                subq = (
+                    db.query(
+                        VolatilitySnapshot.pair,
+                        sqlfunc.max(VolatilitySnapshot.timestamp).label("max_ts"),
+                    )
+                    .filter(VolatilitySnapshot.timeframe == sup_tf)
+                    .group_by(VolatilitySnapshot.pair)
+                    .subquery()
+                )
+                sup_rows = (
+                    db.query(VolatilitySnapshot)
+                    .join(
+                        subq,
+                        (VolatilitySnapshot.pair == subq.c.pair)
+                        & (VolatilitySnapshot.timestamp == subq.c.max_ts),
+                    )
+                    .filter(VolatilitySnapshot.timeframe == sup_tf)
+                    .all()
+                )
+                for row in sup_rows:
+                    sup_scores[row.pair] = {
+                        "vi_score": float(row.vi_score),
+                        "regime": score_to_regime(float(row.vi_score), thresholds),
+                    }
+            except Exception as sup_exc:
+                logger.warning("compute_pair_vi(%s): TF+1 lookup failed — %s", timeframe, sup_exc)
+
+        # ── 7. INSERT volatility_snapshots (one per pair) ─────────────────
+        for symbol, res in pair_scores.items():
+            vi = round(float(res["vi_score"]), 3)
+            components = {
+                k: res[k]
+                for k in ("rvol", "mfi", "atr", "bb_width", "ema_score", "ema_signal")
+                if k in res
+            }
+            snapshot = VolatilitySnapshot(
+                pair=symbol,
+                timeframe=timeframe,
+                timestamp=now,
+                vi_score=Decimal(str(vi)),
+                components=components,
+            )
+            db.add(snapshot)
+
+        # ── 8. Build ranked watchlist pairs list ──────────────────────────
+        watchlist_pairs = _build_watchlist_pairs(
+            pair_scores, tickers, sup_scores, thresholds, timeframe
+        )
+
+        # Dominant regime = regime of the pair with highest vi_score
+        top_vi = max(float(r["vi_score"]) for r in watchlist_pairs)
+        dominant_regime = score_to_regime(top_vi, thresholds)
+
+        # ── 9. INSERT watchlist_snapshot ──────────────────────────────────
+        wl_name = f"ATD_Perps_{timeframe}"
+        watchlist = WatchlistSnapshot(
+            name=wl_name,
+            timeframe=timeframe,
+            regime=dominant_regime,
+            pairs_count=len(watchlist_pairs),
+            pairs=watchlist_pairs,
+            generated_at=now,
+        )
+        db.add(watchlist)
+        db.commit()
+
+        logger.info(
+            "compute_pair_vi(%s): %d pairs computed — dominant regime %s",
+            timeframe, len(pair_scores), dominant_regime,
+        )
+
+        # ── 10. Cache pair scores in Redis ────────────────────────────────
+        for symbol, res in pair_scores.items():
+            vi = round(float(res["vi_score"]), 3)
+            regime = score_to_regime(vi, thresholds)
+            components = {k: res[k] for k in res if k != "vi_score"}
+            cache_pair_vi(symbol, timeframe, vi, regime, components, now.isoformat())
+
+        return {
+            "status": "ok",
+            "timeframe": timeframe,
+            "pairs_computed": len(pair_scores),
+            "dominant_regime": dominant_regime,
+            "watchlist_pairs": len(watchlist_pairs),
+        }
 
     except Exception as exc:
+        db.rollback()
         logger.exception("compute_pair_vi(%s): error — %s", timeframe, exc)
         try:
             raise self.retry(exc=exc, countdown=60 * (self.request.retries + 1))
