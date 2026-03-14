@@ -1,15 +1,16 @@
 """
-Volatility Engine — FastAPI router (P2-9, P2-10).
+Volatility Engine — FastAPI router (P2-9, P2-10, P2-11).
 
 Routes
 ------
-  GET /api/volatility/market/{timeframe}              ← latest Market VI (Redis → DB fallback)
-  GET /api/volatility/pairs/{timeframe}               ← latest per-pair VI (Redis → DB fallback)
-  GET /api/volatility/watchlist/{timeframe}           ← latest watchlist snapshot (DB)
-  GET /api/volatility/settings/{profile_id}           ← volatility settings (create with defaults if missing)
-  PUT /api/volatility/settings/{profile_id}           ← merge-patch volatility settings
-  GET /api/volatility/notifications/{profile_id}      ← notification settings (create with defaults if missing)
-  PUT /api/volatility/notifications/{profile_id}      ← merge-patch notification settings
+  GET  /api/volatility/market/{timeframe}              ← latest Market VI (Redis → DB fallback)
+  GET  /api/volatility/pairs/{timeframe}               ← latest per-pair VI (Redis → DB fallback)
+  GET  /api/volatility/watchlist/{timeframe}           ← latest watchlist snapshot (DB)
+  GET  /api/volatility/settings/{profile_id}           ← volatility settings (create with defaults if missing)
+  PUT  /api/volatility/settings/{profile_id}           ← merge-patch volatility settings
+  GET  /api/volatility/notifications/{profile_id}      ← notification settings (create with defaults if missing)
+  PUT  /api/volatility/notifications/{profile_id}      ← merge-patch notification settings
+  POST /api/volatility/notifications/{profile_id}/test ← send test Telegram message
 
 Valid timeframes: 15m | 1h | 4h | 1d | 1w
 """
@@ -350,3 +351,41 @@ def update_notification_settings(
         watchlist_alerts=row.watchlist_alerts,
         updated_at=row.updated_at,
     )
+
+
+@router.post("/notifications/{profile_id}/test", status_code=200)
+def test_notification(
+    profile_id: int,
+    db: Session = Depends(get_db),
+) -> dict:
+    """Send a test Telegram message to verify bot configuration."""
+    from src.core.models.broker import Profile
+    from src.volatility.telegram import _dispatch
+
+    if not db.query(Profile).filter(Profile.id == profile_id).first():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Profile not found")
+
+    row = _get_or_create_notif_settings(db, profile_id)
+    bots: list = row.bots or []
+    if not bots:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="No bots configured. Add at least one bot in notification settings.",
+        )
+
+    first_bot = bots[0]
+    bot_token = first_bot.get("bot_token")
+    chat_id = first_bot.get("chat_id")
+    if not bot_token or not chat_id:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="First bot is missing bot_token or chat_id.",
+        )
+
+    success = _dispatch({"bot_token": bot_token, "chat_id": chat_id}, "🔔 AlphaTradingDesk — test message OK")
+    if not success:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Telegram API call failed. Check bot_token and chat_id.",
+        )
+    return {"status": "ok", "message": "Test message sent successfully."}

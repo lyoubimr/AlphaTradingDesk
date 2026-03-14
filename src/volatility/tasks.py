@@ -46,6 +46,15 @@ from src.volatility.schedule import (
 
 logger = logging.getLogger(__name__)
 
+
+def _first_bot_token(bots: list) -> str | None:
+    return bots[0].get("bot_token") if bots else None
+
+
+def _first_chat_id(bots: list) -> str | None:
+    return bots[0].get("chat_id") if bots else None
+
+
 # Timeframe hierarchy for TF+1 column in watchlist
 # Key = current TF, Value = next higher TF to look up in DB
 _TF_SUPERIOR: dict[str, str] = {
@@ -278,7 +287,16 @@ def compute_market_vi(self, timeframe: str) -> dict:  # type: ignore[override]
 
         # ── 8. Redis cache ────────────────────────────────────────────────
         cache_market_vi(timeframe, market_vi, regime, now.isoformat())
-
+        # ── 9. Telegram alert (fail-silent) ───────────────────────────────
+        try:
+            from src.volatility.models import NotificationSettings
+            from src.volatility.telegram import send_market_vi_alert
+            notif = db.query(NotificationSettings).first()
+            if notif:
+                alert_cfg = {**notif.market_vi_alerts, "bot_token": _first_bot_token(notif.bots), "chat_id": _first_chat_id(notif.bots)}
+                send_market_vi_alert(alert_cfg, market_vi, regime, timeframe, components)
+        except Exception as tg_exc:
+            logger.warning("compute_market_vi(%s): Telegram error — %s", timeframe, tg_exc)
         return {
             "status": "ok",
             "timeframe": timeframe,
@@ -476,7 +494,16 @@ def compute_pair_vi(self, timeframe: str) -> dict:  # type: ignore[override]
             regime = score_to_regime(vi, thresholds)
             components = {k: res[k] for k in res if k != "vi_score"}
             cache_pair_vi(symbol, timeframe, vi, regime, components, now.isoformat())
-
+        # ── 11. Telegram alert (fail-silent) ──────────────────────────────
+        try:
+            from src.volatility.models import NotificationSettings
+            from src.volatility.telegram import send_watchlist_alert
+            notif = db.query(NotificationSettings).first()
+            if notif:
+                alert_cfg = {**notif.watchlist_alerts, "bot_token": _first_bot_token(notif.bots), "chat_id": _first_chat_id(notif.bots)}
+                send_watchlist_alert(alert_cfg, watchlist_pairs, timeframe, dominant_regime, 0.0)
+        except Exception as tg_exc:
+            logger.warning("compute_pair_vi(%s): Telegram error — %s", timeframe, tg_exc)
         return {
             "status": "ok",
             "timeframe": timeframe,
