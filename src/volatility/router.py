@@ -11,6 +11,7 @@ Routes
   GET  /api/volatility/notifications/{profile_id}      ← notification settings (create with defaults if missing)
   PUT  /api/volatility/notifications/{profile_id}      ← merge-patch notification settings
   POST /api/volatility/notifications/{profile_id}/test ← send test Telegram message
+  GET  /api/volatility/prices/live                     ← BTC/ETH (Kraken) + XAU (Twelve Data), cached 30s
 
 Valid timeframes: 15m | 1h | 4h | 1d | 1w
 """
@@ -389,3 +390,12 @@ def test_notification(
             detail="Telegram API call failed. Check bot_token and chat_id.",
         )
     return {"status": "ok", "message": "Test message sent successfully."}
+
+
+# ── Live Prices ───────────────────────────────────────────────────────────────
+
+@router.get("/prices/live")
+def live_prices() -> dict:
+    """Return latest BTC/USD, ETH/USD, XAU/USD prices. Cached 30s in Redis."""
+    from src.volatility.prices import get_live_prices
+    return get_live_prices()

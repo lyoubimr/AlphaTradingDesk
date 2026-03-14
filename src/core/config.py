@@ -69,6 +69,12 @@ class Settings(BaseSettings):
     def allowed_origins(self) -> list[str]:
         return [o.strip() for o in self.allowed_origins_raw.split(",") if o.strip()]
 
+    # XAU (Gold) live price — Twelve Data API
+    # XAU_API_KEY: set in .env.dev / .env.prod — leave empty to disable XAU fetch
+    # XAU_API_PROVIDER: only "twelve_data" supported in Phase 2
+    xau_api_key: str = Field("", alias="XAU_API_KEY")
+    xau_api_provider: str = Field("twelve_data", alias="XAU_API_PROVIDER")
+
     @property
     def is_dev(self) -> bool:
         return self.environment == "dev"
