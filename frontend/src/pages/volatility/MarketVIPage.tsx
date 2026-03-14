@@ -8,6 +8,7 @@
 //       → Gauge + session sparkline + components breakdown + pair context
 
 import { useEffect, useRef, useState, useCallback } from 'react'
+import { Link } from 'react-router-dom'
 import { RefreshCw, Loader2, AlertTriangle } from 'lucide-react'
 import { PageHeader } from '../../components/ui/PageHeader'
 import { MarketVIGauge } from '../../components/volatility/MarketVIGauge'
@@ -185,12 +186,23 @@ export function MarketVIPage() {
   const fetchAggregated = useCallback(async () => {
     try {
       setError(null)
-      const agg = await volatilityApi.getAggregatedMarketVI()
-      setAggregated(agg)
-      setSparkPoints((prev) => {
-        const point = { score: agg.vi_score, ts: Date.now() }
-        return [...prev.slice(-47), point]
-      })
+      const [aggResult, pairsResult] = await Promise.allSettled([
+        volatilityApi.getAggregatedMarketVI(),
+        volatilityApi.getPairsVI('1h'),
+      ])
+      if (aggResult.status === 'fulfilled') {
+        const agg = aggResult.value
+        setAggregated(agg)
+        setSparkPoints((prev) => {
+          const point = { score: agg.vi_score, ts: Date.now() }
+          return [...prev.slice(-47), point]
+        })
+      } else {
+        setError('No aggregated data yet — run at least one VI compute cycle.')
+      }
+      if (pairsResult.status === 'fulfilled') {
+        setPairsData(pairsResult.value.pairs)
+      }
     } catch {
       setError('No aggregated data yet — run at least one VI compute cycle.')
     } finally {
@@ -216,11 +228,7 @@ export function MarketVIPage() {
         setError(`No data available for ${tf} — VI engine has not run yet.`)
       }
       if (pairsVI.status === 'fulfilled') {
-        const btc = pairsVI.value.pairs.find((p) =>
-          p.pair.toLowerCase().includes('btc') || p.pair.toLowerCase().includes('xbt')
-        )
-        const eth = pairsVI.value.pairs.find((p) => p.pair.toLowerCase().includes('eth'))
-        setPairsData([btc, eth].filter(Boolean) as PairVIOut[])
+        setPairsData(pairsVI.value.pairs)  // store ALL pairs
       }
     } catch {
       setError('Network error — check that the backend is reachable.')
@@ -424,14 +432,20 @@ export function MarketVIPage() {
             </div>
           </div>
 
-          {/* ── Pair context (TF drill-down only) ── */}
+          {/* ── Pair context (TF drill-down only — BTC/ETH) ── */}
           {activeTF !== null && pairsData.length > 0 && (
             <div>
               <p className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-3">Key pairs context</p>
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
-                {pairsData.map((p) => (
-                  <PairContextCard key={p.pair} pair={p} />
-                ))}
+                {pairsData
+                  .filter((p) =>
+                    p.pair.toLowerCase().includes('btc') ||
+                    p.pair.toLowerCase().includes('xbt') ||
+                    p.pair.toLowerCase().includes('eth')
+                  )
+                  .map((p) => (
+                    <PairContextCard key={p.pair} pair={p} />
+                  ))}
               </div>
             </div>
           )}
@@ -454,6 +468,75 @@ export function MarketVIPage() {
               <VIHistoryChart timeframe={activeTF} defaultColor={heroColor} />
             )}
           </div>
+
+          {/* ── Top Pairs ranked table ── */}
+          {pairsData.length > 0 && (
+            <div>
+              <div className="flex items-center justify-between mb-3">
+                <p className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">
+                  🏆 Top Pairs — {activeTF ? activeTF.toUpperCase() : '1H'}
+                </p>
+                <Link
+                  to="/volatility/pairs"
+                  className="text-xs text-zinc-500 hover:text-zinc-300 transition-colors"
+                >
+                  View full watchlist →
+                </Link>
+              </div>
+              <div className="rounded-xl border border-zinc-800 bg-zinc-950 overflow-hidden">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="border-b border-zinc-800 bg-zinc-900/50">
+                      <th className="px-3 py-2 text-left text-zinc-600 font-mono w-8">#</th>
+                      <th className="px-3 py-2 text-left text-zinc-500 font-mono">PAIR</th>
+                      <th className="px-3 py-2 text-left text-zinc-500 font-mono">VI</th>
+                      <th className="px-3 py-2 text-left text-zinc-500 font-mono">REGIME</th>
+                      <th className="px-3 py-2 text-left text-zinc-500 font-mono">EMA</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {[...pairsData]
+                      .sort((a, b) => b.vi_score - a.vi_score)
+                      .slice(0, 10)
+                      .map((p, i) => {
+                        const viPct = Math.round(p.vi_score * 100)
+                        const rColor = REGIME_COLOR_HEX[p.regime] ?? '#71717a'
+                        const base = p.pair.endsWith('USDT') ? p.pair.slice(0, -4) : p.pair
+                        const emaSig = (p.components?.ema_signal as string | undefined) ?? 'mixed'
+                        const EMA_SYMBOL: Record<string, string> = {
+                          above_all: '▲', below_all: '▼', breakout_up: '🚀', mixed: '∿',
+                        }
+                        const EMA_COLOR: Record<string, string> = {
+                          above_all: '#10b981', below_all: '#ef4444', breakout_up: '#0ea5e9', mixed: '#71717a',
+                        }
+                        return (
+                          <tr key={p.pair} className="border-b border-zinc-900 hover:bg-zinc-900/40 transition-colors">
+                            <td className="px-3 py-2 text-zinc-700 font-mono">{i + 1}</td>
+                            <td className="px-3 py-2 font-mono font-bold text-zinc-200">
+                              {base}<span className="text-zinc-600 text-xs font-normal">USDT</span>
+                            </td>
+                            <td className="px-3 py-2">
+                              <div className="flex items-center gap-1.5">
+                                <div className="w-12 h-1.5 bg-zinc-800 rounded-full overflow-hidden">
+                                  <div className="h-full rounded-full" style={{ width: `${viPct}%`, background: rColor }} />
+                                </div>
+                                <span className="font-mono font-black w-5 text-right" style={{ color: rColor }}>{viPct}</span>
+                              </div>
+                            </td>
+                            <td className="px-3 py-2 font-mono font-bold" style={{ color: rColor }}>
+                              {REGIME_EMOJI[p.regime]} {p.regime}
+                            </td>
+                            <td className="px-3 py-2 font-mono" style={{ color: EMA_COLOR[emaSig] ?? '#71717a' }}>
+                              {EMA_SYMBOL[emaSig] ?? '∿'} {emaSig}
+                            </td>
+                          </tr>
+                        )
+                      })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
         </>
       ) : null}
     </div>

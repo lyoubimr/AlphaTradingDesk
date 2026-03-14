@@ -68,7 +68,7 @@ const NAV_GROUPS: NavGroup[] = [
         icon: <Activity size={16} />,
       },
       {
-        to: '/watchlist',
+        to: '/volatility/pairs',
         label: 'Watchlist',
         icon: <Eye size={16} />,
       },

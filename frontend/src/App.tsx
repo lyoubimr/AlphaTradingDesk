@@ -14,6 +14,7 @@ import { MarketAnalysisSettingsPage } from './pages/settings/MarketAnalysisSetti
 import { GoalsSettingsPage } from './pages/settings/GoalsSettingsPage'
 import { StrategiesSettingsPage } from './pages/settings/StrategiesSettingsPage'
 import { MarketVIPage } from './pages/volatility/MarketVIPage'
+import { WatchlistsPage } from './pages/volatility/WatchlistsPage'
 
 export default function App() {
   return (
@@ -36,6 +37,7 @@ export default function App() {
         {/* Phase 2 — Volatility */}
         <Route path="/volatility" element={<Navigate to="/volatility/market" replace />} />
         <Route path="/volatility/market" element={<MarketVIPage />} />
+        <Route path="/volatility/pairs" element={<WatchlistsPage />} />
       </Route>
     </Routes>
   )
