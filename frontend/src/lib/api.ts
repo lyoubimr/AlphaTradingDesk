@@ -13,6 +13,8 @@ import type {
   GoalOut, GoalCreate, GoalUpdate, GoalProgressItem, GoalOverrideCreate, GoalOverrideOut,
   MAModule, MAIndicator, MAIndicatorConfig, MAIndicatorConfigOut, MAIndicatorUpdate, MAIndicatorCreate,
   MASessionCreate, MASessionOut, MASessionListItem, MAStalenessItem, MATradeConclusion,
+  MarketVIOut, PairsVIOut, WatchlistOut, LivePricesResponse,
+  VolatilitySettingsOut, NotificationSettingsOut,
 } from '../types/api'
 
 const BASE = '/api'
@@ -417,4 +419,50 @@ export const maApi = {
   /** GET /api/market-analysis/staleness (global — last session per module across all profiles) */
   getStalenessGlobal: (): Promise<MAStalenessItem[]> =>
     request('/market-analysis/staleness'),
+}
+
+// ── Volatility (Phase 2) ──────────────────────────────────────────────────
+
+export const volatilityApi = {
+  /** GET /api/volatility/market/{timeframe} → latest Market VI snapshot */
+  getMarketVI: (timeframe: string): Promise<MarketVIOut> =>
+    request(`/volatility/market/${timeframe}`),
+
+  /** GET /api/volatility/pairs/{timeframe} → all per-pair VI snapshots */
+  getPairsVI: (timeframe: string): Promise<PairsVIOut> =>
+    request(`/volatility/pairs/${timeframe}`),
+
+  /** GET /api/volatility/watchlist/{timeframe} → latest watchlist snapshot */
+  getWatchlist: (timeframe: string): Promise<WatchlistOut> =>
+    request(`/volatility/watchlist/${timeframe}`),
+
+  /** GET /api/volatility/prices/live → BTC + ETH + XAU (cached 30s) */
+  getLivePrices: (): Promise<LivePricesResponse> =>
+    request('/volatility/prices/live'),
+
+  /** GET /api/volatility/settings/{profileId} */
+  getSettings: (profileId: number): Promise<VolatilitySettingsOut> =>
+    request(`/volatility/settings/${profileId}`),
+
+  /** PUT /api/volatility/settings/{profileId} */
+  updateSettings: (profileId: number, patch: object): Promise<VolatilitySettingsOut> =>
+    request(`/volatility/settings/${profileId}`, {
+      method: 'PUT',
+      body: JSON.stringify(patch),
+    }),
+
+  /** GET /api/volatility/notifications/{profileId} */
+  getNotificationSettings: (profileId: number): Promise<NotificationSettingsOut> =>
+    request(`/volatility/notifications/${profileId}`),
+
+  /** PUT /api/volatility/notifications/{profileId} */
+  updateNotificationSettings: (profileId: number, patch: object): Promise<NotificationSettingsOut> =>
+    request(`/volatility/notifications/${profileId}`, {
+      method: 'PUT',
+      body: JSON.stringify(patch),
+    }),
+
+  /** POST /api/volatility/notifications/{profileId}/test */
+  testNotification: (profileId: number): Promise<{ status: string; message: string }> =>
+    request(`/volatility/notifications/${profileId}/test`, { method: 'POST' }),
 }

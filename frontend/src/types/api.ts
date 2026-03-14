@@ -569,3 +569,75 @@ export interface MATradeConclusion {
   size_advice: string // "normal (100%)" | "reduced (50%)"
   color: 'green' | 'amber' | 'red' | 'neutral'
 }
+
+// ── Volatility (Phase 2) ──────────────────────────────────────────────────
+
+export type VIRegime = 'MORT' | 'CALME' | 'NORMAL' | 'TRENDING' | 'ACTIF' | 'EXTRÊME'
+
+export interface MarketVIOut {
+  timeframe: string
+  vi_score: number
+  regime: VIRegime
+  timestamp: string  // ISO-8601
+}
+
+export interface PairVIOut {
+  pair: string
+  timeframe: string
+  vi_score: number
+  regime: VIRegime
+  components: Record<string, number | string | null>
+  timestamp: string
+}
+
+export interface PairsVIOut {
+  timeframe: string
+  pairs: PairVIOut[]
+  count: number
+}
+
+export interface WatchlistPairOut {
+  pair: string
+  vi_score: number
+  regime: VIRegime
+  alert: string | null
+  change_24h: number | null
+  ema_score: number
+  ema_signal: string
+  tf_sup_regime: string | null
+  tf_sup_vi: number | null
+}
+
+export interface WatchlistOut {
+  timeframe: string
+  regime: VIRegime
+  pairs_count: number
+  pairs: WatchlistPairOut[]
+  generated_at: string
+}
+
+export interface LivePricesResponse {
+  btc: number | null
+  eth: number | null
+  xau: number | null
+  currency: string
+  currency_symbol: string
+  timestamp: string
+  cached: boolean
+}
+
+export interface VolatilitySettingsOut {
+  profile_id: number
+  market_vi: Record<string, unknown>
+  per_pair: Record<string, unknown>
+  regimes: Record<string, number>
+  updated_at: string
+}
+
+export interface NotificationSettingsOut {
+  profile_id: number
+  bots: Array<{ bot_name?: string; bot_token: string; chat_id: string }>
+  market_vi_alerts: Record<string, unknown>
+  watchlist_alerts: Record<string, unknown>
+  updated_at: string
+}

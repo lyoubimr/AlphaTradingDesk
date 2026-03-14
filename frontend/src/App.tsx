@@ -13,6 +13,7 @@ import { ProfilesPage } from './pages/settings/ProfilesPage'
 import { MarketAnalysisSettingsPage } from './pages/settings/MarketAnalysisSettingsPage'
 import { GoalsSettingsPage } from './pages/settings/GoalsSettingsPage'
 import { StrategiesSettingsPage } from './pages/settings/StrategiesSettingsPage'
+import { MarketVIPage } from './pages/volatility/MarketVIPage'
 
 export default function App() {
   return (
@@ -32,6 +33,9 @@ export default function App() {
         <Route path="/settings/market-analysis" element={<MarketAnalysisSettingsPage />} />
         <Route path="/settings/goals" element={<GoalsSettingsPage />} />
         <Route path="/settings/strategies" element={<StrategiesSettingsPage />} />
+        {/* Phase 2 — Volatility */}
+        <Route path="/volatility" element={<Navigate to="/volatility/market" replace />} />
+        <Route path="/volatility/market" element={<MarketVIPage />} />
       </Route>
     </Routes>
   )
