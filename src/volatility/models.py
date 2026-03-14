@@ -70,7 +70,7 @@ class MarketVISnapshot(Base):
         DateTime(timezone=True), primary_key=True
     )
     vi_score: Mapped[Decimal] = mapped_column(Numeric(5, 3), nullable=False)
-    # MORT | CALME | NORMAL | ACTIF | EXTREME
+    # DEAD | CALM | NORMAL | TRENDING | ACTIVE | EXTREME
     regime: Mapped[str] = mapped_column(String(20), nullable=False)
     # {symbol: vi_score, ...} for all ~50 Binance pairs
     components: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
@@ -153,7 +153,8 @@ class VolatilitySettings(Base):
       }
 
     regimes JSONB default:
-      {"mort_max": 0.20, "calme_max": 0.40, "normal_max": 0.60, "actif_max": 0.80}
+      {"dead_max": 0.17, "calm_max": 0.33, "normal_max": 0.50,
+       "trending_max": 0.67, "active_max": 0.83}
     """
 
     __tablename__ = "volatility_settings"
