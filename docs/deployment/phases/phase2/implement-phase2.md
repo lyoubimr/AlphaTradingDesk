@@ -29,7 +29,7 @@
 | **P2-9** | API endpoints VI — market / pairs / watchlist | ✅ `cf18619` |
 | **P2-10** | Settings backend — volatility + notifications GET/PUT (merge-patch) | ✅ `19b1716` |
 | **P2-11** | Telegram alerting service — Market VI + Watchlists | ✅ `28531ee` |
-| **P2-12** | Live Prices backend proxy — BTC/ETH (Kraken) + XAU (API tierce) | ⏳ |
+| **P2-12** | Live Prices backend proxy — BTC/ETH (Kraken) + XAU (API tierce) | ✅ `89ddf80` |
 | **P2-13** | Frontend — Market VI dashboard (`/volatility/market`) | ⏳ |
 | **P2-14** | Frontend — Per-pair watchlists UI (`/volatility/pairs`) | ⏳ |
 | **P2-15** | Frontend — Settings Volatility + Notifications UI | ⏳ |
