@@ -18,27 +18,25 @@
 
 | Step | Quoi | Statut |
 |------|------|--------|
-| **P2-1** | Docker Compose — Redis + Celery + TimescaleDB extension | ⏳ |
-| **P2-2** | Alembic migrations — nouvelles tables Phase 2 | ⏳ |
-| **P2-3** | Celery + Beat skeleton — task registry + schedules (15m/1h/4h/1d/1W) | ⏳ |
-| **P2-4** | Kraken data fetch service — OHLCV + orderbook | ⏳ |
-| **P2-5** | Indicators engine — RVOL / MFI / ATR / BB Width + EMA Score | ⏳ |
-| **P2-6** | Orderbook Depth score | ⏳ |
-| **P2-7** | VI Score aggregator — normalisé dynamiquement sur indicateurs actifs | ⏳ |
-| **P2-8** | Market VI — agrégation pond. 50 pairs + régimes | ⏳ |
-| **P2-9** | Per-Pair VI — cadencé par TF + stockage watchlists | ⏳ |
-| **P2-10** | Kraken pairs sync — Celery task + endpoint manuel | ⏳ |
-| **P2-11** | API endpoints VI — market / pairs / pair on-demand / watchlists | ⏳ |
-| **P2-12** | Settings backend — volatility + notifications routes | ⏳ |
-| **P2-13** | Telegram alerting service — Market VI + Watchlists | ⏳ |
-| **P2-14** | Live Prices backend proxy — BTC/ETH (Kraken) + XAU (API tierce) | ⏳ |
-| **P2-15** | Frontend — Market VI dashboard (`/volatility/market`) | ⏳ |
-| **P2-16** | Frontend — Per-pair watchlists UI (`/volatility/pairs`) | ⏳ |
-| **P2-17** | Frontend — Settings Volatility + Notifications UI | ⏳ |
-| **P2-18** | Frontend — Dashboard home : Sessions + Live Prices Banner + VI widget | ⏳ |
-| **P2-19** | Risk × Volatility integration — vi_multiplier dans formulaire trade | ⏳ |
-| **P2-20** | QA full pass (lint + tests + manual E2E) | ⏳ |
-| **P2-21** | Deploy prod Dell | ⏳ |
+| **P2-1** | Docker Compose — Redis + Celery + TimescaleDB extension | ✅ `d9f2807` |
+| **P2-2** | Alembic migrations — nouvelles tables Phase 2 | ✅ `7d69b77` |
+| **P2-3** | Celery + Beat skeleton — task registry + schedules (15m/1h/4h/1d/1W) | ✅ `4235c14` |
+| **P2-4** | MarketDataClient Protocol + BinanceClient + KrakenClient | ✅ `bf96552` |
+| **P2-5** | Indicators engine — RVOL / MFI / ATR / BB Width + EMA Score + compute_market_vi | ✅ `8cf5f85` |
+| **P2-6** | compute_pair_vi — KrakenClient + snapshots + watchlist (ema_score 0-1, regime alerts) | ✅ `e537aad` |
+| **P2-7** | sync_instruments — Kraken perpetuals upsert + Binance top-100 | ✅ `25c3b94` |
+| **P2-8** | cleanup_old_snapshots — TimescaleDB drop_chunks + watchlist DELETE | ✅ `5b454b8` |
+| **P2-9** | API endpoints VI — market / pairs / watchlist | ✅ `cf18619` |
+| **P2-10** | Settings backend — volatility + notifications GET/PUT (merge-patch) | ✅ `19b1716` |
+| **P2-11** | Telegram alerting service — Market VI + Watchlists | ⏳ |
+| **P2-12** | Live Prices backend proxy — BTC/ETH (Kraken) + XAU (API tierce) | ⏳ |
+| **P2-13** | Frontend — Market VI dashboard (`/volatility/market`) | ⏳ |
+| **P2-14** | Frontend — Per-pair watchlists UI (`/volatility/pairs`) | ⏳ |
+| **P2-15** | Frontend — Settings Volatility + Notifications UI | ⏳ |
+| **P2-16** | Frontend — Dashboard home : Sessions + Live Prices Banner + VI widget | ⏳ |
+| **P2-17** | Risk × Volatility integration — vi_multiplier dans formulaire trade | ⏳ |
+| **P2-18** | QA full pass (lint + tests + manual E2E) | ⏳ |
+| **P2-19** | Deploy prod Dell | ⏳ |
 
 ---
 
