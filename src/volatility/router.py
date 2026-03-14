@@ -1,11 +1,15 @@
 """
-Volatility Engine — FastAPI router (P2-9).
+Volatility Engine — FastAPI router (P2-9, P2-10).
 
 Routes
 ------
-  GET /api/volatility/market/{timeframe}    ← latest Market VI (Redis → DB fallback)
-  GET /api/volatility/pairs/{timeframe}     ← latest per-pair VI (Redis → DB fallback)
-  GET /api/volatility/watchlist/{timeframe} ← latest watchlist snapshot (DB)
+  GET /api/volatility/market/{timeframe}              ← latest Market VI (Redis → DB fallback)
+  GET /api/volatility/pairs/{timeframe}               ← latest per-pair VI (Redis → DB fallback)
+  GET /api/volatility/watchlist/{timeframe}           ← latest watchlist snapshot (DB)
+  GET /api/volatility/settings/{profile_id}           ← volatility settings (create with defaults if missing)
+  PUT /api/volatility/settings/{profile_id}           ← merge-patch volatility settings
+  GET /api/volatility/notifications/{profile_id}      ← notification settings (create with defaults if missing)
+  PUT /api/volatility/notifications/{profile_id}      ← merge-patch notification settings
 
 Valid timeframes: 15m | 1h | 4h | 1d | 1w
 """
@@ -22,11 +26,25 @@ from src.volatility.cache import (
 )
 from src.volatility.models import (
     MarketVISnapshot,
+    NotificationSettings,
+    VolatilitySettings,
     VolatilitySnapshot,
     WatchlistSnapshot,
 )
 from src.volatility.schedule import score_to_regime, get_regime_thresholds
-from src.volatility.schemas import MarketVIOut, PairVIOut, PairsVIOut, WatchlistOut
+from src.volatility.schemas import (
+    MarketVIOut,
+    NotificationSettingsOut,
+    NotificationSettingsPatch,
+    PairVIOut,
+    PairsVIOut,
+    VolatilitySettingsOut,
+    VolatilitySettingsPatch,
+    WatchlistOut,
+    _DEFAULT_MARKET_VI,
+    _DEFAULT_PER_PAIR,
+    _DEFAULT_REGIMES,
+)
 
 router = APIRouter(prefix="/volatility", tags=["volatility"])
 
@@ -180,4 +198,155 @@ def get_watchlist(timeframe: str, db: Session = Depends(get_db)) -> WatchlistOut
         pairs_count=row.pairs_count,
         pairs=row.pairs or [],
         generated_at=row.generated_at,
+    )
+
+
+# ── Volatility Settings ───────────────────────────────────────────────────────
+
+def _get_or_create_vol_settings(db: Session, profile_id: int) -> VolatilitySettings:
+    """Return existing VolatilitySettings row, or insert defaults and return it."""
+    row = db.query(VolatilitySettings).filter(
+        VolatilitySettings.profile_id == profile_id
+    ).first()
+    if row is None:
+        row = VolatilitySettings(
+            profile_id=profile_id,
+            market_vi=_DEFAULT_MARKET_VI.copy(),
+            per_pair=_DEFAULT_PER_PAIR.copy(),
+            regimes=_DEFAULT_REGIMES.copy(),
+        )
+        db.add(row)
+        db.commit()
+        db.refresh(row)
+    return row
+
+
+@router.get("/settings/{profile_id}", response_model=VolatilitySettingsOut)
+def get_volatility_settings(
+    profile_id: int, db: Session = Depends(get_db)
+) -> VolatilitySettingsOut:
+    """Return volatility settings for a profile.
+
+    Creates a row with defaults on first access — no 404 ever.
+    """
+    from src.core.models.broker import Profile  # late import to avoid circular
+
+    if not db.query(Profile).filter(Profile.id == profile_id).first():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Profile not found")
+
+    row = _get_or_create_vol_settings(db, profile_id)
+    return VolatilitySettingsOut(
+        profile_id=row.profile_id,
+        market_vi=row.market_vi,
+        per_pair=row.per_pair,
+        regimes=row.regimes,
+        updated_at=row.updated_at,
+    )
+
+
+@router.put("/settings/{profile_id}", response_model=VolatilitySettingsOut)
+def update_volatility_settings(
+    profile_id: int,
+    patch: VolatilitySettingsPatch,
+    db: Session = Depends(get_db),
+) -> VolatilitySettingsOut:
+    """Merge-patch volatility settings. Only provided keys are updated."""
+    from src.core.models.broker import Profile
+
+    if not db.query(Profile).filter(Profile.id == profile_id).first():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Profile not found")
+
+    row = _get_or_create_vol_settings(db, profile_id)
+
+    if patch.market_vi is not None:
+        row.market_vi = {**row.market_vi, **patch.market_vi}
+    if patch.per_pair is not None:
+        row.per_pair = {**row.per_pair, **patch.per_pair}
+    if patch.regimes is not None:
+        row.regimes = {**row.regimes, **patch.regimes}
+
+    from datetime import UTC, datetime
+    row.updated_at = datetime.now(UTC)
+    db.commit()
+    db.refresh(row)
+    return VolatilitySettingsOut(
+        profile_id=row.profile_id,
+        market_vi=row.market_vi,
+        per_pair=row.per_pair,
+        regimes=row.regimes,
+        updated_at=row.updated_at,
+    )
+
+
+# ── Notification Settings ─────────────────────────────────────────────────────
+
+def _get_or_create_notif_settings(db: Session, profile_id: int) -> NotificationSettings:
+    """Return existing NotificationSettings row, or insert defaults and return it."""
+    row = db.query(NotificationSettings).filter(
+        NotificationSettings.profile_id == profile_id
+    ).first()
+    if row is None:
+        row = NotificationSettings(
+            profile_id=profile_id,
+            bots=[],
+            market_vi_alerts={},
+            watchlist_alerts={},
+        )
+        db.add(row)
+        db.commit()
+        db.refresh(row)
+    return row
+
+
+@router.get("/notifications/{profile_id}", response_model=NotificationSettingsOut)
+def get_notification_settings(
+    profile_id: int, db: Session = Depends(get_db)
+) -> NotificationSettingsOut:
+    """Return notification settings for a profile. Creates with defaults on first access."""
+    from src.core.models.broker import Profile
+
+    if not db.query(Profile).filter(Profile.id == profile_id).first():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Profile not found")
+
+    row = _get_or_create_notif_settings(db, profile_id)
+    return NotificationSettingsOut(
+        profile_id=row.profile_id,
+        bots=row.bots,
+        market_vi_alerts=row.market_vi_alerts,
+        watchlist_alerts=row.watchlist_alerts,
+        updated_at=row.updated_at,
+    )
+
+
+@router.put("/notifications/{profile_id}", response_model=NotificationSettingsOut)
+def update_notification_settings(
+    profile_id: int,
+    patch: NotificationSettingsPatch,
+    db: Session = Depends(get_db),
+) -> NotificationSettingsOut:
+    """Merge-patch notification settings. Only provided keys are updated."""
+    from src.core.models.broker import Profile
+
+    if not db.query(Profile).filter(Profile.id == profile_id).first():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Profile not found")
+
+    row = _get_or_create_notif_settings(db, profile_id)
+
+    if patch.bots is not None:
+        row.bots = patch.bots
+    if patch.market_vi_alerts is not None:
+        row.market_vi_alerts = {**row.market_vi_alerts, **patch.market_vi_alerts}
+    if patch.watchlist_alerts is not None:
+        row.watchlist_alerts = {**row.watchlist_alerts, **patch.watchlist_alerts}
+
+    from datetime import UTC, datetime
+    row.updated_at = datetime.now(UTC)
+    db.commit()
+    db.refresh(row)
+    return NotificationSettingsOut(
+        profile_id=row.profile_id,
+        bots=row.bots,
+        market_vi_alerts=row.market_vi_alerts,
+        watchlist_alerts=row.watchlist_alerts,
+        updated_at=row.updated_at,
     )
