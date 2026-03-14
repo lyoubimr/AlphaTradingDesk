@@ -29,7 +29,7 @@
 | **P2-9** | API endpoints VI — market / pairs / watchlist | ✅ `cf18619` |
 | **P2-10** | Settings backend — volatility + notifications GET/PUT (merge-patch) | ✅ `19b1716` |
 | **P2-11** | Telegram alerting service — Market VI + Watchlists | ✅ `28531ee` |
-| **P2-12** | Live Prices backend proxy — BTC/ETH (Kraken) + XAU (API tierce) | ✅ `89ddf80` |
+| **P2-12** | Live Prices backend proxy — BTC/ETH (Kraken) + XAU (API tierce) | ✅ `b6e1131` |
 | **P2-13** | Frontend — Market VI dashboard (`/volatility/market`) | ⏳ |
 | **P2-14** | Frontend — Per-pair watchlists UI (`/volatility/pairs`) | ⏳ |
 | **P2-15** | Frontend — Settings Volatility + Notifications UI | ⏳ |
@@ -212,7 +212,7 @@ src/volatility/indicators.py    ← NEW
 
 ---
 
-## Step P2-6 — Orderbook Depth score
+## ~~Step P2-6~~ — Orderbook Depth score *(absorbé dans P2-5 — indicators.py)*
 
 **Quoi :**
 - Calculer un score de liquidité à partir du top 10 bid/ask
@@ -234,7 +234,7 @@ src/volatility/indicators.py    ← ajouter compute_depth_score(orderbook: dict)
 
 ---
 
-## Step P2-7 — VI Score aggregator
+## ~~Step P2-7~~ — VI Score aggregator *(absorbé dans P2-5/P2-6 — indicators.py + tasks.py)*
 
 **Quoi :**
 - Assembler les composantes → `vi_score` final
@@ -271,7 +271,7 @@ def compute_and_store_vi(pair, tf, settings):
 
 ---
 
-## Step P2-8 — Market VI
+## ~~Step P2-8~~ — Market VI *(absorbé dans P2-5 — compute_market_vi dans tasks.py)*
 
 **Quoi :**
 - Task Celery Beat toutes les 15 min
@@ -296,7 +296,7 @@ src/volatility/market_vi.py    ← NEW : aggregate_market_vi(pair_scores, settin
 
 ---
 
-## Step P2-9 — Per-Pair VI + Watchlists
+## Step P2-6 — Per-Pair VI + Watchlists
 
 **Quoi :**
 - 5 tasks Celery Beat (15m / 1h / 4h / 1d / **1W**)
@@ -322,7 +322,7 @@ src/volatility/watchlist.py         ← NEW : generate_watchlist(tf, pair_scores
 
 ---
 
-## Step P2-10 — Kraken pairs sync + instruments upsert
+## Step P2-7 — sync_instruments (Kraken perpetuals + Binance top-100)
 
 **Quoi :**
 - Task Celery périodique (1 fois/jour, 03:00 UTC)
@@ -384,7 +384,18 @@ src/volatility/router.py       ← POST /settings/volatility/sync-pairs
 
 ---
 
-## Step P2-11 — API endpoints VI
+## Step P2-8 — cleanup_old_snapshots
+
+**Quoi :** Task Celery quotidienne (04:00 UTC) — purge des vieilles snapshots volatilité.
+- TimescaleDB `drop_chunks` sur `volatility_snapshots` + `market_vi_snapshots` (>90j)
+- DELETE sur `watchlist_snapshots` non-TimescaleDB (>90j)
+- Retention configurable via `VolatilitySettings.retention_days`
+
+**Commit :** `5b454b8`
+
+---
+
+## Step P2-9 — API endpoints VI
 
 **Quoi :** Exposer les données de volatilité au frontend.
 
@@ -408,7 +419,7 @@ GET  /prices/live                  → LivePricesResponse (BTC, ETH, XAU)
 
 ---
 
-## Step P2-12 — Settings backend
+## Step P2-10 — Settings backend
 
 **Quoi :**
 ```
@@ -425,7 +436,7 @@ src/volatility/service.py    ← get/update settings avec validation
 
 ---
 
-## Step P2-13 — Telegram alerting
+## Step P2-11 — Telegram alerting
 
 **Quoi :**
 - Service envoi message Telegram (via `httpx` → Telegram Bot API)
@@ -466,7 +477,7 @@ Conclusion: marché actif, EXTRÊME concentré sur ETH+SOL — favoriser LTF sur
 
 ---
 
-## Step P2-14 — Live Prices backend proxy
+## Step P2-12 — Live Prices backend proxy
 
 **Quoi :**
 - `GET /prices/live` → BTC + ETH depuis Kraken Ticker + XAU depuis API tierce
@@ -484,7 +495,7 @@ src/core/config.py           ← XAU_API_KEY + XAU_API_PROVIDER settings
 
 ---
 
-## Step P2-15 — Frontend : Market VI dashboard
+## Step P2-13 — Frontend : Market VI dashboard
 
 **Quoi :** Page `/volatility/market`
 
@@ -510,7 +521,7 @@ frontend/src/types/api.ts  ← MarketVIResponse, PairVIResponse, WatchlistRespon
 
 ---
 
-## Step P2-16 — Frontend : Watchlists UI
+## Step P2-14 — Frontend : Watchlists UI
 
 **Quoi :** Page `/volatility/pairs`
 
@@ -533,7 +544,7 @@ frontend/src/components/volatility/
 
 ---
 
-## Step P2-17 — Frontend : Settings Volatility + Notifications
+## Step P2-15 — Frontend : Settings Volatility + Notifications
 
 **Quoi :** Page `/settings/volatility` + `/settings/notifications`
 
@@ -564,7 +575,7 @@ Settings Notifications :
 
 ---
 
-## Step P2-18 — Frontend : Dashboard home enrichi
+## Step P2-16 — Frontend : Dashboard home enrichi
 
 **Quoi :**
 
@@ -597,7 +608,7 @@ frontend/src/layouts/MainLayout.tsx    ← intégrer LivePricesBanner dans le he
 
 ---
 
-## Step P2-19 — Risk × Volatility integration
+## Step P2-17 — Risk × Volatility integration
 
 **Quoi :**
 - Formulaire de trade : afficher le vi_multiplier calculé
@@ -626,7 +637,7 @@ frontend/src/pages/trades/
 
 ---
 
-## Step P2-20 — QA full pass
+## Step P2-18 — QA full pass
 
 **Automatisé :**
 ```
@@ -654,6 +665,6 @@ frontend/src/pages/trades/
 
 ---
 
-## Step P2-21 — Deploy prod Dell
+## Step P2-19 — Deploy prod Dell
 
 Voir `post-implement-phase2.md` — Section Déploiement.
