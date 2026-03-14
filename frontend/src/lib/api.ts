@@ -13,7 +13,7 @@ import type {
   GoalOut, GoalCreate, GoalUpdate, GoalProgressItem, GoalOverrideCreate, GoalOverrideOut,
   MAModule, MAIndicator, MAIndicatorConfig, MAIndicatorConfigOut, MAIndicatorUpdate, MAIndicatorCreate,
   MASessionCreate, MASessionOut, MASessionListItem, MAStalenessItem, MATradeConclusion,
-  MarketVIOut, AggregatedMarketVIOut, PairsVIOut, WatchlistOut, LivePricesResponse,
+  MarketVIOut, AggregatedMarketVIOut, PairsVIOut, WatchlistOut, WatchlistMetaOut, LivePricesResponse,
   VolatilitySettingsOut, NotificationSettingsOut,
 } from '../types/api'
 
@@ -450,6 +450,28 @@ export const volatilityApi = {
   /** GET /api/volatility/prices/live → BTC + ETH + XAU (cached 30s) */
   getLivePrices: (): Promise<LivePricesResponse> =>
     request('/volatility/prices/live'),
+
+  /**
+   * POST /api/volatility/run/{task} — manually queue a background task.
+   * task      : 'market-vi' | 'pairs' | 'sync'
+   * timeframe : required for 'market-vi' and 'pairs' (e.g. '1h')
+   * Returns 202 immediately; data appears after ~15-60 s.
+   */
+  runTask: (
+    task: 'market-vi' | 'pairs' | 'sync',
+    timeframe?: string,
+  ): Promise<{ status: string; task: string; timeframes: string[] | null; task_ids: string[] }> => {
+    const params = timeframe ? `?timeframe=${timeframe}` : ''
+    return request(`/volatility/run/${task}${params}`, { method: 'POST' })
+  },
+
+  /** GET /api/volatility/watchlists?days=N → lightweight snapshot metadata for tree view */
+  listWatchlists: (days = 7): Promise<WatchlistMetaOut[]> =>
+    request(`/volatility/watchlists?days=${days}`),
+
+  /** GET /api/volatility/watchlist/snapshot/{id} → full snapshot with pairs */
+  getWatchlistById: (snapshotId: number): Promise<WatchlistOut> =>
+    request(`/volatility/watchlist/snapshot/${snapshotId}`),
 
   /** GET /api/volatility/settings/{profileId} */
   getSettings: (profileId: number): Promise<VolatilitySettingsOut> =>

@@ -45,6 +45,7 @@ from src.volatility.schemas import (
     TFComponentOut,
     VolatilitySettingsOut,
     VolatilitySettingsPatch,
+    WatchlistMetaOut,
     WatchlistOut,
     _DEFAULT_MARKET_VI,
     _DEFAULT_PER_PAIR,
@@ -300,6 +301,60 @@ def get_pairs_vi(timeframe: str, db: Session = Depends(get_db)) -> PairsVIOut:
 
 # ── Watchlist ─────────────────────────────────────────────────────────────────
 
+# NOTE: /watchlist/snapshot/{id} MUST be registered before /watchlist/{timeframe}.
+# FastAPI matches routes in registration order; without this ordering,
+# "snapshot" is swallowed as the {timeframe} path parameter.
+
+@router.get("/watchlist/snapshot/{snapshot_id}", response_model=WatchlistOut)
+def get_watchlist_by_id(
+    snapshot_id: int, db: Session = Depends(get_db)
+) -> WatchlistOut:
+    """Return a specific watchlist snapshot by its primary key."""
+    row = db.query(WatchlistSnapshot).filter(WatchlistSnapshot.id == snapshot_id).first()
+    if row is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Snapshot {snapshot_id} not found",
+        )
+    return WatchlistOut(
+        id=row.id,
+        timeframe=row.timeframe,
+        regime=row.regime,
+        pairs_count=row.pairs_count,
+        pairs=row.pairs or [],
+        generated_at=row.generated_at,
+    )
+
+
+@router.get("/watchlists", response_model=list[WatchlistMetaOut])
+def list_watchlists(days: int = 7, db: Session = Depends(get_db)) -> list[WatchlistMetaOut]:
+    """Return lightweight metadata for all watchlist snapshots in the last N days (default 7).
+
+    Used by the tree/folder view in the frontend.
+    """
+    from datetime import UTC, datetime, timedelta  # noqa: PLC0415
+
+    since = datetime.now(UTC) - timedelta(days=days)
+    rows = (
+        db.query(WatchlistSnapshot)
+        .filter(WatchlistSnapshot.generated_at >= since)
+        .order_by(WatchlistSnapshot.generated_at.desc())
+        .limit(500)
+        .all()
+    )
+    return [
+        WatchlistMetaOut(
+            id=r.id,
+            timeframe=r.timeframe,
+            name=r.name,
+            regime=r.regime,
+            pairs_count=r.pairs_count,
+            generated_at=r.generated_at,
+        )
+        for r in rows
+    ]
+
+
 @router.get("/watchlist/{timeframe}", response_model=WatchlistOut)
 def get_watchlist(timeframe: str, db: Session = Depends(get_db)) -> WatchlistOut:
     """Return the latest watchlist snapshot for a given timeframe.
@@ -321,6 +376,7 @@ def get_watchlist(timeframe: str, db: Session = Depends(get_db)) -> WatchlistOut
             detail=f"No watchlist data yet for timeframe '{timeframe}'",
         )
     return WatchlistOut(
+        id=row.id,
         timeframe=row.timeframe,
         regime=row.regime,
         pairs_count=row.pairs_count,
@@ -516,6 +572,73 @@ def test_notification(
             detail="Telegram API call failed. Check bot_token and chat_id.",
         )
     return {"status": "ok", "message": "Test message sent successfully."}
+
+
+# ── Manual task trigger ───────────────────────────────────────────────────────
+
+_RUNNABLE_TASKS = {"market-vi", "pairs", "sync"}
+_TF_ALL = ["15m", "1h", "4h", "1d"]
+
+
+@router.post("/run/{task}", status_code=202)
+def run_task_now(
+    task: str,
+    timeframe: str = "1h",
+) -> dict:
+    """Manually queue a background Celery task.
+
+    task      : 'market-vi' | 'pairs' | 'sync'
+    timeframe : '15m' | '1h' | '4h' | '1d' | 'all' (default '1h')
+                'all' queues one task per TF (4 tasks in parallel).
+
+    Returns 202 Accepted immediately — tasks run asynchronously.
+    """
+    if task not in _RUNNABLE_TASKS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Unknown task '{task}'. Valid: {sorted(_RUNNABLE_TASKS)}",
+        )
+
+    # Resolve timeframes to compute
+    if task in {"market-vi", "pairs"}:
+        if timeframe == "all":
+            tfs_to_run = _TF_ALL
+        elif timeframe in _VALID_TIMEFRAMES:
+            tfs_to_run = [timeframe]
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid timeframe '{timeframe}'. Valid: {sorted(_VALID_TIMEFRAMES)} or 'all'",
+            )
+    else:
+        tfs_to_run = []
+
+    from src.volatility.tasks import compute_market_vi, compute_pair_vi, sync_instruments  # noqa: PLC0415
+
+    if task == "market-vi":
+        results = [compute_market_vi.delay(tf) for tf in tfs_to_run]
+        return {
+            "status": "queued",
+            "task": task,
+            "timeframes": tfs_to_run,
+            "task_ids": [r.id for r in results],
+        }
+    elif task == "pairs":
+        results = [compute_pair_vi.apply_async((tf,), {"force": True}) for tf in tfs_to_run]
+        return {
+            "status": "queued",
+            "task": task,
+            "timeframes": tfs_to_run,
+            "task_ids": [r.id for r in results],
+        }
+    else:
+        celery_result = sync_instruments.delay()
+        return {
+            "status": "queued",
+            "task": "sync",
+            "timeframes": None,
+            "task_ids": [celery_result.id],
+        }
 
 
 # ── Live Prices ───────────────────────────────────────────────────────────────

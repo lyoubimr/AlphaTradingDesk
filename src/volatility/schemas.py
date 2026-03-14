@@ -55,10 +55,22 @@ class WatchlistPairOut(BaseModel):
 class WatchlistOut(BaseModel):
     """Response for GET /api/volatility/watchlist/{timeframe}."""
 
+    id: int | None = None  # snapshot DB id (None for legacy Redis-only responses)
     timeframe: str
     regime: str
     pairs_count: int
     pairs: list[WatchlistPairOut]
+    generated_at: datetime
+
+
+class WatchlistMetaOut(BaseModel):
+    """Lightweight watchlist metadata (no pairs payload) — used for the history tree."""
+
+    id: int
+    timeframe: str
+    name: str
+    regime: str
+    pairs_count: int
     generated_at: datetime
 
 

@@ -49,16 +49,17 @@ logger = logging.getLogger(__name__)
 
 _BASE_URL = "https://futures.kraken.com"
 
-# ATD timeframe string → Kraken resolution (minutes as string)
+# ATD timeframe string → Kraken resolution (new format: e.g. "15m", "1h", "1d")
+# Kraken retired the integer-minutes format (e.g. "60") in favour of human-readable strings.
 _TF_MAP: dict[str, str] = {
-    "1m": "1",
-    "5m": "5",
-    "15m": "15",
-    "30m": "30",
-    "1h": "60",
-    "4h": "240",
-    "1d": "1440",
-    "1w": "10080",
+    "1m":  "1m",
+    "5m":  "5m",
+    "15m": "15m",
+    "30m": "30m",
+    "1h":  "1h",
+    "4h":  "4h",
+    "1d":  "1d",
+    "1w":  "1w",
 }
 
 # Kraken chart tick type — "trade" gives OHLCV based on executed trades
@@ -219,15 +220,23 @@ class KrakenClient:
         return {"bids": bids, "asks": asks}
 
     def fetch_all_symbols(self) -> list[dict]:
-        """Fetch all Kraken Futures instruments.
+        """Fetch all Kraken Futures perpetual instruments.
 
-        Filters to active perpetuals (tradeable=True, type contains "perpetual").
-        Used by sync_instruments (P2-10).
+        Kraken symbol prefixes:
+          PF_ — Perpetual Flexible (linear perpetual, e.g. PF_SOLUSD)
+          PI_ — Perpetual Inverse  (inverse perpetual, e.g. PI_XBTUSD)
+          FF_ — Fixed Futures      (expiring contract — EXCLUDED)
+
+        Both PF_ and PI_ instruments are tradeable perpetuals with no expiry.
+        FF_ contracts (flexible_futures type with a date suffix) are excluded.
 
         Returns:
             [{"symbol": str, "base": str, "quote": str,
               "is_active": bool, "quote_volume_24h": float}]
         """
+        # Only accept Kraken perpetual prefixes — safest filter vs. changing type names
+        _PERP_PREFIXES = ("PF_", "PI_")
+
         info = self._get("/derivatives/api/v3/instruments")
         instruments: list[dict] = info.get("instruments", [])
 
@@ -241,16 +250,19 @@ class KrakenClient:
 
         result = []
         for inst in instruments:
-            symbol = inst.get("symbol", "")
+            symbol    = inst.get("symbol", "")
             is_active = inst.get("tradeable", False)
-            inst_type: str = inst.get("type", "")
-            if "perpetual" not in inst_type.lower():
+            # Exclude everything that is not a perpetual (FF_ = expiring futures)
+            if not symbol.startswith(_PERP_PREFIXES):
                 continue
+            # API returns "base"/"quote" directly (new) or "underlying"/"quoteCurrency" (legacy)
+            base  = inst.get("base") or inst.get("underlying", symbol)
+            quote = inst.get("quote") or inst.get("quoteCurrency", "USD")
             result.append(
                 {
                     "symbol": symbol,
-                    "base": inst.get("underlying", symbol),
-                    "quote": inst.get("quoteCurrency", "USD"),
+                    "base": base,
+                    "quote": quote,
                     "is_active": bool(is_active),
                     "quote_volume_24h": volumes.get(symbol, 0.0),
                 }

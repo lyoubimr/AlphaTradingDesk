@@ -396,11 +396,11 @@ def compute_market_vi(self, timeframe: str) -> dict:  # type: ignore[override]
     max_retries=3,
     default_retry_delay=60,
 )
-def compute_pair_vi(self, timeframe: str) -> dict:  # type: ignore[override]
+def compute_pair_vi(self, timeframe: str, force: bool = False) -> dict:  # type: ignore[override]
     """Compute Per-Pair Volatility Index (Kraken Futures).
 
     Pipeline (P2-6):
-      1. Schedule gate
+      1. Schedule gate (skipped when force=True — manual runs from /run/ endpoint)
       2. Load per_pair settings (enabled indicators)
       3. Query active Kraken instruments from instruments table
       4. KrakenClient.fetch_ohlcv() + compute_vi_score() per pair
@@ -414,7 +414,7 @@ def compute_pair_vi(self, timeframe: str) -> dict:  # type: ignore[override]
     db = _get_db()
     try:
         # ── 1. Schedule gate ──────────────────────────────────────────────
-        if not is_within_schedule(db, "per_pair"):
+        if not force and not is_within_schedule(db, "per_pair"):
             logger.debug("compute_pair_vi(%s): skipped (outside schedule)", timeframe)
             return {"status": "skipped", "reason": "outside_schedule", "timeframe": timeframe}
 
@@ -444,8 +444,44 @@ def compute_pair_vi(self, timeframe: str) -> dict:  # type: ignore[override]
             .all()
         )
         if not instruments_rows:
-            logger.warning("compute_pair_vi(%s): no active Kraken instruments", timeframe)
-            return {"status": "skipped", "reason": "no_instruments", "timeframe": timeframe}
+            # Auto-bootstrap: run sync_instruments inline so the first manual
+            # "Run" click always works without a separate Sync step.
+            logger.info(
+                "compute_pair_vi(%s): no instruments found — auto-running sync_instruments",
+                timeframe,
+            )
+            try:
+                sync_instruments.apply()  # synchronous inline call
+            except Exception as sync_exc:
+                logger.error(
+                    "compute_pair_vi(%s): auto-sync failed — %s", timeframe, sync_exc
+                )
+                return {
+                    "status": "error",
+                    "reason": "auto_sync_failed",
+                    "detail": str(sync_exc),
+                    "timeframe": timeframe,
+                }
+            # Re-query after sync
+            instruments_rows = (
+                db.query(Instrument)
+                .filter(
+                    Instrument.broker_id == kraken_broker.id,
+                    Instrument.is_active.is_(True),
+                )
+                .all()
+            )
+            if not instruments_rows:
+                logger.error(
+                    "compute_pair_vi(%s): still no instruments after sync — Kraken may be unreachable",
+                    timeframe,
+                )
+                return {
+                    "status": "error",
+                    "reason": "no_instruments_after_sync",
+                    "detail": "Sync ran but returned 0 instruments. Check Kraken API connectivity.",
+                    "timeframe": timeframe,
+                }
 
         symbols: list[str] = [i.symbol for i in instruments_rows]
 

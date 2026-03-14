@@ -613,10 +613,20 @@ export interface WatchlistPairOut {
 }
 
 export interface WatchlistOut {
+  id: number | null
   timeframe: string
   regime: VIRegime
   pairs_count: number
   pairs: WatchlistPairOut[]
+  generated_at: string
+}
+
+export interface WatchlistMetaOut {
+  id: number
+  timeframe: string
+  name: string
+  regime: VIRegime
+  pairs_count: number
   generated_at: string
 }
 
