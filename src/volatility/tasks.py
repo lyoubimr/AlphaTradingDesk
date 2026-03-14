@@ -6,8 +6,8 @@ Progress
   P2-3  Skeletons with schedule gate + DB session             DONE
   P2-5  compute_market_vi — BinanceClient + indicators        DONE
   P2-6  compute_pair_vi   — KrakenClient + indicators         DONE  ← this file
-  P2-10 sync_instruments  — Kraken + Binance upsert           TODO
-  P2-11 cleanup_old_snapshots — TimescaleDB drop_chunks       TODO
+  P2-7  sync_instruments  — Kraken + Binance upsert           DONE  ← this file
+  P2-8  cleanup_old_snapshots — TimescaleDB drop_chunks       TODO
 
 On skip:  returns {"status": "skipped", "reason": "..."}
 On error: retries up to max_retries with exponential backoff
@@ -23,6 +23,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 
 from celery.exceptions import MaxRetriesExceededError
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from src.core.celery_app import celery_app
@@ -504,20 +505,134 @@ def compute_pair_vi(self, timeframe: str) -> dict:  # type: ignore[override]
 def sync_instruments(self) -> dict:  # type: ignore[override]
     """Sync instrument catalog from Kraken + Binance.
 
-    Kraken: upsert all active pairs into instruments table.
-           Delisted pairs → is_active=False (never DELETE, historical trades reference them).
-    Binance: upsert top-100 by 24h quoteVolume into market_vi_pairs.
-             Pre-select top-50 if not yet configured.
+    Kraken: upsert all active perpetuals → instruments table.
+           Delisted pairs → is_active=False (never DELETE — historical trades FK).
+    Binance: upsert top-100 by 24h quoteVolume → market_vi_pairs.
+             Bootstrap is_selected=True for top-50 on first run.
 
     P2-3: skeleton.
-    P2-10: full implementation.
+    P2-7: full implementation.
     """
+    from src.volatility.binance_client import BinanceClient
+    from src.volatility.kraken_client import KrakenClient
+
     db = _get_db()
     try:
-        # ── TODO P2-10: Kraken pairs upsert ──────────────────────────────
-        # ── TODO P2-10: Binance top-100 upsert ───────────────────────────
-        logger.info("sync_instruments: stub — no sync yet")
-        return {"status": "stub"}
+        now = datetime.now(UTC)
+
+        # ── 1. Kraken perpetuals upsert ───────────────────────────────────
+        kraken_broker = (
+            db.query(Broker)
+            .filter(Broker.name.ilike("%kraken%"), Broker.status == "active")
+            .first()
+        )
+        kraken_upserted = 0
+        kraken_deactivated = 0
+
+        if kraken_broker is None:
+            logger.warning("sync_instruments: no active Kraken broker in DB — skipping Kraken sync")
+        else:
+            with KrakenClient() as kc:
+                kraken_symbols = kc.fetch_all_symbols()
+
+            active_symbols: set[str] = set()
+            for sym in kraken_symbols:
+                active_symbols.add(sym["symbol"])
+                stmt = (
+                    pg_insert(Instrument)
+                    .values(
+                        broker_id=kraken_broker.id,
+                        symbol=sym["symbol"],
+                        display_name=sym["symbol"],
+                        asset_class="crypto",
+                        base_currency=sym.get("base"),
+                        quote_currency=sym.get("quote"),
+                        is_predefined=True,
+                        is_active=sym["is_active"],
+                    )
+                    .on_conflict_do_update(
+                        index_elements=["broker_id", "symbol"],
+                        set_={
+                            "is_active": sym["is_active"],
+                            "base_currency": sym.get("base"),
+                            "quote_currency": sym.get("quote"),
+                        },
+                    )
+                )
+                db.execute(stmt)
+                kraken_upserted += 1
+
+            # Mark delisted pairs inactive (never in API response anymore)
+            delisted = (
+                db.query(Instrument)
+                .filter(
+                    Instrument.broker_id == kraken_broker.id,
+                    Instrument.is_active.is_(True),
+                    Instrument.symbol.notin_(active_symbols),
+                )
+                .all()
+            )
+            for inst in delisted:
+                inst.is_active = False
+                kraken_deactivated += 1
+
+        # ── 2. Binance top-100 upsert ─────────────────────────────────────
+        with BinanceClient() as bc:
+            all_binance = bc.fetch_all_symbols()
+
+        # Sort by volume DESC, keep top-100
+        top_100 = sorted(all_binance, key=lambda x: x["quote_volume_24h"], reverse=True)[:100]
+        top_50_symbols = {s["symbol"] for s in top_100[:50]}
+
+        # Detect first-run (table empty before this sync)
+        existing_count: int = db.query(MarketVIPair).count()
+        is_first_run = existing_count == 0
+
+        binance_upserted = 0
+        for rank, sym in enumerate(top_100, start=1):
+            auto_select = is_first_run and sym["symbol"] in top_50_symbols
+            stmt = (
+                pg_insert(MarketVIPair)
+                .values(
+                    symbol=sym["symbol"],
+                    display_name=sym["symbol"],
+                    quote_volume_24h=Decimal(str(sym["quote_volume_24h"])),
+                    volume_rank=rank,
+                    is_selected=auto_select,
+                )
+                .on_conflict_do_update(
+                    index_elements=["symbol"],
+                    set_={
+                        "quote_volume_24h": Decimal(str(sym["quote_volume_24h"])),
+                        "volume_rank": rank,
+                        "updated_at": now,
+                        # Never override a user's manual is_selected on re-sync
+                    },
+                )
+            )
+            db.execute(stmt)
+            binance_upserted += 1
+
+        # Deselect symbols that have fallen out of top-100
+        top_100_symbols = {s["symbol"] for s in top_100}
+        db.query(MarketVIPair).filter(
+            MarketVIPair.is_selected.is_(True),
+            MarketVIPair.symbol.notin_(top_100_symbols),
+        ).update({"is_selected": False}, synchronize_session=False)
+
+        db.commit()
+        logger.info(
+            "sync_instruments: kraken upserted=%d deactivated=%d | "
+            "binance upserted=%d first_run=%s",
+            kraken_upserted, kraken_deactivated, binance_upserted, is_first_run,
+        )
+        return {
+            "status": "ok",
+            "kraken_upserted": kraken_upserted,
+            "kraken_deactivated": kraken_deactivated,
+            "binance_upserted": binance_upserted,
+            "binance_selected": len(top_50_symbols) if is_first_run else None,
+        }
 
     except Exception as exc:
         logger.exception("sync_instruments: error — %s", exc)
