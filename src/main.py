@@ -18,6 +18,7 @@ from src.profiles.router import router as profiles_router
 from src.stats.router import router as stats_router
 from src.strategies.router import router as strategies_router
 from src.trades.router import router as trades_router
+from src.volatility.router import router as volatility_router
 
 app = FastAPI(
     title="AlphaTradingDesk",
@@ -67,6 +68,7 @@ app.include_router(stats_router, prefix=API_PREFIX)
 app.include_router(strategies_router, prefix=API_PREFIX)
 app.include_router(ma_router, prefix=API_PREFIX)
 app.include_router(profiles_ma_router, prefix=API_PREFIX)
+app.include_router(volatility_router, prefix=API_PREFIX)
 
 
 @app.get("/api/health")
