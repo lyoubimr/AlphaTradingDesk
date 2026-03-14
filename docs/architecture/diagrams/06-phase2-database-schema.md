@@ -134,8 +134,8 @@ flowchart LR
         col2["`timeframe VARCHAR(10)
         TF du calcul`"]
         col3["`regime VARCHAR(20)
-        MORT / CALME / NORMAL
-        ACTIF / EXTREME`"]
+        DEAD / CALM / NORMAL
+        TRENDING / ACTIVE / EXTREME`"]
         col4["`components JSONB
         { BTCUSDT: 0.71
         ETHUSDT: 0.68
@@ -204,10 +204,11 @@ flowchart TD
         }`"]
         vk4["`regimes JSONB
         {
-          mort_max: 0.20,
-          calme_max: 0.40,
-          normal_max: 0.60,
-          actif_max: 0.80
+          dead_max: 0.17,
+          calm_max: 0.33,
+          normal_max: 0.50,
+          trending_max: 0.67,
+          active_max: 0.83
         }`"]
         vk5["`updated_at TIMESTAMPTZ`"]
     end
@@ -222,7 +223,7 @@ flowchart TD
           enabled: true,
           bot_name: ATD_Market,
           cooldown_min: 60,
-          regimes: [EXTREME, MORT]
+          regimes: [EXTREME, ACTIVE]
         }`"]
         nk4["`watchlist_alerts JSONB
         {

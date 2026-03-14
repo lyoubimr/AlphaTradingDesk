@@ -103,14 +103,24 @@ def _load_settings(db: Session, component: str, profile_id: int | None) -> dict:
 def get_regime_thresholds(db: Session, profile_id: int | None = None) -> dict:
     """Return regime percentile thresholds from settings.
 
+    6-band layout (each band ~0.167):
+        DEAD      [0.00 – dead_max]      default 0.17
+        CALM      [dead_max – calm_max]  default 0.33
+        NORMAL    [calm_max – normal_max]  default 0.50
+        TRENDING  [normal_max – trending_max]  default 0.67  ← best R:R zone
+        ACTIVE    [trending_max – active_max]  default 0.83
+        EXTREME   [active_max – 1.00]
+
     Returns:
-        {"mort_max": 0.20, "calme_max": 0.40, "normal_max": 0.60, "actif_max": 0.80}
+        {"dead_max": 0.17, "calm_max": 0.33, "normal_max": 0.50,
+         "trending_max": 0.67, "active_max": 0.83}
     """
     defaults = {
-        "mort_max": 0.20,
-        "calme_max": 0.40,
-        "normal_max": 0.60,
-        "actif_max": 0.80,
+        "dead_max": 0.17,
+        "calm_max": 0.33,
+        "normal_max": 0.50,
+        "trending_max": 0.67,
+        "active_max": 0.83,
     }
     try:
         query = db.query(VolatilitySettings)
@@ -128,18 +138,21 @@ def score_to_regime(vi_score: float, thresholds: dict) -> str:
     """Map a VI score (0.0–1.0) to a regime label.
 
     Regime boundaries (configurable, defaults):
-        MORT    : 0.00 – mort_max  (0.20)
-        CALME   : mort_max – calme_max (0.40)
-        NORMAL  : calme_max – normal_max (0.60)
-        ACTIF   : normal_max – actif_max (0.80)
-        EXTREME : actif_max – 1.00
+        DEAD     : 0.00 – dead_max      (0.17)
+        CALM     : dead_max – calm_max  (0.33)
+        NORMAL   : calm_max – normal_max (0.50)
+        TRENDING : normal_max – trending_max (0.67)  ← directional move, best R:R
+        ACTIVE   : trending_max – active_max (0.83)
+        EXTREME  : active_max – 1.00
     """
-    if vi_score <= thresholds["mort_max"]:
-        return "MORT"
-    if vi_score <= thresholds["calme_max"]:
-        return "CALME"
+    if vi_score <= thresholds["dead_max"]:
+        return "DEAD"
+    if vi_score <= thresholds["calm_max"]:
+        return "CALM"
     if vi_score <= thresholds["normal_max"]:
         return "NORMAL"
-    if vi_score <= thresholds["actif_max"]:
-        return "ACTIF"
+    if vi_score <= thresholds["trending_max"]:
+        return "TRENDING"
+    if vi_score <= thresholds["active_max"]:
+        return "ACTIVE"
     return "EXTREME"
