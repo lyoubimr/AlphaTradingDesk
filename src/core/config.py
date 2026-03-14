@@ -38,6 +38,9 @@ class Settings(BaseSettings):
     # Database — always from env, no default (fails fast if missing)
     database_url: str
 
+    # Redis — used by Celery (Phase 2+)
+    redis_url: str = Field("redis://localhost:6379/0", alias="REDIS_URL")
+
     # Security
     secret_key: str
     encryption_key: str
