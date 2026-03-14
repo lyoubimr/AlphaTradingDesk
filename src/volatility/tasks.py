@@ -7,7 +7,7 @@ Progress
   P2-5  compute_market_vi — BinanceClient + indicators        DONE
   P2-6  compute_pair_vi   — KrakenClient + indicators         DONE  ← this file
   P2-7  sync_instruments  — Kraken + Binance upsert           DONE  ← this file
-  P2-8  cleanup_old_snapshots — TimescaleDB drop_chunks       TODO
+  P2-8  cleanup_old_snapshots — TimescaleDB drop_chunks       DONE  ← this file
 
 On skip:  returns {"status": "skipped", "reason": "..."}
 On error: retries up to max_retries with exponential backoff
@@ -653,20 +653,49 @@ def sync_instruments(self) -> dict:  # type: ignore[override]
 def cleanup_old_snapshots(self) -> dict:  # type: ignore[override]
     """Delete snapshots older than volatility_settings.per_pair.retention_days.
 
-    Uses TimescaleDB drop_chunks() for hypertables — much faster than DELETE.
-    Falls back to DELETE for watchlist_snapshots (regular table).
+    Uses TimescaleDB drop_chunks() for hypertables (volatility_snapshots,
+    market_vi_snapshots) — much faster than DELETE on large time-series data.
+    Falls back to a plain DELETE for watchlist_snapshots (regular table).
 
     P2-3: skeleton.
-    P2-11: full implementation.
+    P2-8: full implementation.
     """
+    from sqlalchemy import text
+
     db = _get_db()
     try:
-        # ── TODO P2-11: read retention_days from settings ─────────────────
-        # ── TODO P2-11: SELECT drop_chunks('volatility_snapshots', NOW()-INTERVAL %s) ──
-        # ── TODO P2-11: SELECT drop_chunks('market_vi_snapshots', ...) ────
-        # ── TODO P2-11: DELETE FROM watchlist_snapshots WHERE generated_at < ... ──
-        logger.info("cleanup_old_snapshots: stub — no cleanup yet")
-        return {"status": "stub"}
+        # ── 1. Read retention_days from settings (default 30) ─────────────
+        per_pair_cfg = _load_settings(db, "per_pair", None)
+        retention_days: int = int(per_pair_cfg.get("retention_days", 30))
+        cutoff = f"NOW() - INTERVAL '{retention_days} days'"
+
+        # ── 2. TimescaleDB drop_chunks for hypertables ────────────────────
+        # drop_chunks() returns one row per chunk dropped.
+        vol_chunks = db.execute(
+            text(f"SELECT drop_chunks('volatility_snapshots', {cutoff})")
+        ).fetchall()
+        mvi_chunks = db.execute(
+            text(f"SELECT drop_chunks('market_vi_snapshots', {cutoff})")
+        ).fetchall()
+
+        # ── 3. Plain DELETE for watchlist_snapshots (regular table) ───────
+        deleted_watchlist = db.execute(
+            text(f"DELETE FROM watchlist_snapshots WHERE generated_at < {cutoff}")
+        ).rowcount
+
+        db.commit()
+        logger.info(
+            "cleanup_old_snapshots: retention=%d days | "
+            "vol_chunks=%d mvi_chunks=%d watchlist_rows=%d",
+            retention_days, len(vol_chunks), len(mvi_chunks), deleted_watchlist,
+        )
+        return {
+            "status": "ok",
+            "retention_days": retention_days,
+            "volatility_chunks_dropped": len(vol_chunks),
+            "market_vi_chunks_dropped": len(mvi_chunks),
+            "watchlist_rows_deleted": deleted_watchlist,
+        }
 
     except Exception as exc:
         logger.exception("cleanup_old_snapshots: error — %s", exc)
