@@ -28,7 +28,7 @@
 | **P2-8** | cleanup_old_snapshots — TimescaleDB drop_chunks + watchlist DELETE | ✅ `5b454b8` |
 | **P2-9** | API endpoints VI — market / pairs / watchlist | ✅ `cf18619` |
 | **P2-10** | Settings backend — volatility + notifications GET/PUT (merge-patch) | ✅ `19b1716` |
-| **P2-11** | Telegram alerting service — Market VI + Watchlists | ⏳ |
+| **P2-11** | Telegram alerting service — Market VI + Watchlists | ✅ `28531ee` |
 | **P2-12** | Live Prices backend proxy — BTC/ETH (Kraken) + XAU (API tierce) | ⏳ |
 | **P2-13** | Frontend — Market VI dashboard (`/volatility/market`) | ⏳ |
 | **P2-14** | Frontend — Per-pair watchlists UI (`/volatility/pairs`) | ⏳ |
