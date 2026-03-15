@@ -64,9 +64,9 @@ docker pull "${FRONTEND_IMAGE}:${VERSION}"
 export IMAGE_TAG="${VERSION}"
 export GHCR_OWNER="${GHCR_OWNER}"
 
-# ── 3. Rolling restart (backend + frontend only — DB untouched) ───────────────
-echo "♻️   Rolling restart (backend + frontend)…"
-docker compose -f "${COMPOSE_FILE}" up -d --no-build backend frontend
+# ── 3. Rolling restart (backend + frontend + celery — DB and Redis untouched) ──
+echo "♻️   Rolling restart (backend + celery + frontend)…"
+docker compose -f "${COMPOSE_FILE}" up -d --no-build redis backend celery-worker celery-beat frontend
 
 # ── 4. Run pending Alembic migrations ─────────────────────────────────────────
 # The entrypoint already runs alembic upgrade head + seed_all, but we run them
