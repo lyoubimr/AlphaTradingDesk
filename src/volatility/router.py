@@ -220,11 +220,24 @@ def get_market_vi(timeframe: str, db: Session = Depends(get_db)) -> MarketVIOut:
     # 1. Redis cache
     cached = get_cached_market_vi(timeframe)
     if cached:
+        comps = cached.get("components") or {}
+        # If Redis has an empty components dict (stale cache artefact), supplement
+        # from the latest DB snapshot — components should never be empty for a real TF.
+        if not comps and timeframe != "aggregated":
+            row = (
+                db.query(MarketVISnapshot)
+                .filter(MarketVISnapshot.timeframe == timeframe)
+                .order_by(MarketVISnapshot.timestamp.desc())
+                .first()
+            )
+            if row and row.components:
+                comps = row.components
         return MarketVIOut(
             timeframe=timeframe,
             vi_score=float(cached["vi_score"]),
             regime=cached["regime"],
             timestamp=cached["timestamp"],
+            components=comps,
         )
 
     # 2. DB fallback — latest row for this timeframe
@@ -244,6 +257,7 @@ def get_market_vi(timeframe: str, db: Session = Depends(get_db)) -> MarketVIOut:
         vi_score=float(row.vi_score),
         regime=row.regime,
         timestamp=row.timestamp.isoformat(),
+        components=row.components or {},
     )
 
 
@@ -458,14 +472,36 @@ def update_volatility_settings(
     if not db.query(Profile).filter(Profile.id == profile_id).first():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Profile not found")
 
+    from sqlalchemy.orm.attributes import flag_modified  # noqa: PLC0415
+
     row = _get_or_create_vol_settings(db, profile_id)
 
     if patch.market_vi is not None:
         row.market_vi = {**row.market_vi, **patch.market_vi}
+        flag_modified(row, "market_vi")
+        # Sync market_vi_pairs.is_selected when pairs_count changes
+        new_count = patch.market_vi.get("pairs_count")
+        if new_count is not None and isinstance(new_count, int) and new_count > 0:
+            from src.volatility.models import MarketVIPair  # noqa: PLC0415
+            db.query(MarketVIPair).update({"is_selected": False}, synchronize_session=False)
+            top_n_ids = [
+                r.id for r in (
+                    db.query(MarketVIPair)
+                    .order_by(MarketVIPair.volume_rank)
+                    .limit(new_count)
+                    .all()
+                )
+            ]
+            if top_n_ids:
+                db.query(MarketVIPair).filter(
+                    MarketVIPair.id.in_(top_n_ids)
+                ).update({"is_selected": True}, synchronize_session=False)
     if patch.per_pair is not None:
         row.per_pair = {**row.per_pair, **patch.per_pair}
+        flag_modified(row, "per_pair")
     if patch.regimes is not None:
         row.regimes = {**row.regimes, **patch.regimes}
+        flag_modified(row, "regimes")
 
     from datetime import UTC, datetime
     row.updated_at = datetime.now(UTC)

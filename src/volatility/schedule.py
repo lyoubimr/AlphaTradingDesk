@@ -36,6 +36,8 @@ _DEFAULT_PER_PAIR: dict = {
     "active_hours_start": "00:00",
     "active_hours_end": "23:59",
     "weekdays_only": False,
+    # EMA reference per TF (overridable in settings UI)
+    "ema_ref_periods": {"15m": 50, "1h": 100, "4h": 200, "1d": 200, "1w": 50},
 }
 
 

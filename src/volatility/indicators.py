@@ -135,6 +135,7 @@ def compute_bb_width(df: pd.DataFrame, period: int = 20, std_dev: float = 2.0) -
 def compute_ema_score(
     df: pd.DataFrame,
     periods: tuple[int, int, int] = (20, 50, 200),
+    ema_ref: int | None = None,
 ) -> dict:
     """EMA position score — directional signal for watchlist ranking.
 
@@ -145,17 +146,21 @@ def compute_ema_score(
 
     Weights: EMA20=50%, EMA50=30%, EMA200=20%
 
-    Signal labels (EMA20-based, used as the watchlist `alert` column):
-        above_all      — price > all 3 EMAs        (state, no alert)
-        below_all      — price < all 3 EMAs        (state, no alert)
-        breakout_up    — price crossed EMA20 upward within last 3 bars
-        breakdown_down — price crossed EMA20 downward within last 3 bars
-        retest_up      — price ≤ 0.5% above EMA20 (testing support)
-        retest_down    — price ≤ 0.5% below EMA20 (testing resistance)
-        mixed          — everything else            (no alert)
+    ema_ref: TF-specific reference EMA for crossover/retest signal detection.
+        Defaults to periods[0] when not supplied.
+        Recommended per TF: 15m→50, 1h→100, 4h→200, 1d→200.
+
+    Signal labels (ema_ref-based, used as the watchlist `ema_signal` column):
+        above_all      — price > all 3 scoring EMAs  (state, no alert)
+        below_all      — price < all 3 scoring EMAs  (state, no alert)
+        breakout_up    — price crossed ema_ref upward within last 3 bars
+        breakdown_down — price crossed ema_ref downward within last 3 bars
+        retest_up      — price ≤ 0.5% above ema_ref (testing support)
+        retest_down    — price ≤ 0.5% below ema_ref (testing resistance)
+        mixed          — everything else              (no alert)
 
     Returns:
-        {"score": float (0.0–1.0), "signal": str}
+        {"score": float (0.0–1.0), "signal": str, "ema_ref_period": int}
 
     NOT included in VI average — bonus signal for watchlist ranking only.
     """
@@ -167,29 +172,40 @@ def compute_ema_score(
     # Score: sum of weights for EMAs below current price → 0.0–1.0
     score = round(sum(w * (1.0 if last > e else 0.0) for w, e in zip(ema_weights, emas)), 2)
 
-    # Signal detection — EMA20 crossover + retest
+    # Signal detection — ref EMA crossover + retest take priority over positional state.
+    # ema_ref: TF-specific reference EMA (15m→50, 1h→100, 4h/1d→200, 1w→50)
+    # NOTE: checked BEFORE above_all / below_all so retest_up/down on EMA200 is not
+    # swallowed by above_all when price is just above EMA200 (and also above EMA20/50).
+    ref = ema_ref if ema_ref is not None else periods[0]
     above = [last > e for e in emas]
-    if all(above):
-        signal = "above_all"
-    elif not any(above):
-        signal = "below_all"
+    ref_ema_series = close.ewm(span=ref, adjust=False).mean()
+    ref_ema_val = float(ref_ema_series.iloc[-1])
+    if len(ref_ema_series) >= 3:
+        prev_close_3 = float(close.iloc[-3])
+        prev_ref_ema_3 = float(ref_ema_series.iloc[-3])
+        if prev_close_3 < prev_ref_ema_3 and last > ref_ema_val:
+            signal = "breakout_up"
+        elif prev_close_3 > prev_ref_ema_3 and last < ref_ema_val:
+            signal = "breakdown_down"
+        elif ref_ema_val > 0 and abs(last - ref_ema_val) / ref_ema_val < 0.005:
+            # ≤ 0.5% away from ref EMA — retest regardless of other EMAs
+            signal = "retest_up" if last >= ref_ema_val else "retest_down"
+        elif all(above):
+            signal = "above_all"
+        elif not any(above):
+            signal = "below_all"
+        else:
+            signal = "mixed"
     else:
-        ema20_series = close.ewm(span=periods[0], adjust=False).mean()
-        if len(ema20_series) >= 3:
-            prev_close_3 = float(close.iloc[-3])
-            prev_ema20_3 = float(ema20_series.iloc[-3])
-            if prev_close_3 < prev_ema20_3 and last > emas[0]:
-                signal = "breakout_up"
-            elif prev_close_3 > prev_ema20_3 and last < emas[0]:
-                signal = "breakdown_down"
-            elif emas[0] > 0 and abs(last - emas[0]) / emas[0] < 0.005:
-                signal = "retest_up" if last >= emas[0] else "retest_down"
-            else:
-                signal = "mixed"
+        # Fallback when not enough bars for crossover check
+        if all(above):
+            signal = "above_all"
+        elif not any(above):
+            signal = "below_all"
         else:
             signal = "mixed"
 
-    return {"score": score, "signal": signal}
+    return {"score": score, "signal": signal, "ema_ref_period": ref}
 
 
 # ── VI aggregation ────────────────────────────────────────────────────────────
@@ -197,6 +213,7 @@ def compute_ema_score(
 def compute_vi_score(
     candles: list[dict],
     enabled: dict | None = None,
+    ema_ref: int | None = None,
 ) -> dict:
     """Compute VI score for a single instrument from OHLCV candles.
 
@@ -250,9 +267,10 @@ def compute_vi_score(
     # EMA: computed and stored, but NOT included in VI average
     # (watchlist ranking boost — dotted arrow in architecture doc)
     if cfg.get("ema", True):
-        ema = compute_ema_score(df)
+        ema = compute_ema_score(df, ema_ref=ema_ref)
         components["ema_score"] = ema["score"]
         components["ema_signal"] = ema["signal"]
+        components["ema_ref_period"] = ema["ema_ref_period"]
 
     vi = round(sum(active_scores) / len(active_scores), 3) if active_scores else 0.5
     return {"vi_score": vi, **components}

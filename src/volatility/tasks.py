@@ -29,7 +29,7 @@ from sqlalchemy.orm import Session
 from src.core.celery_app import celery_app
 from src.core.database import get_session_factory
 from src.core.models.broker import Broker, Instrument
-from src.volatility.cache import cache_market_vi, cache_pair_vi
+from src.volatility.cache import cache_market_vi, cache_pair_vi, get_cached_market_vi
 from src.volatility.indicators import compute_vi_score
 from src.volatility.models import (
     MarketVIPair,
@@ -67,6 +67,17 @@ _TF_SUPERIOR: dict[str, str] = {
 
 # Ordered list of timeframes used in cross-TF aggregation
 _TF_AGG_ORDER = ["15m", "1h", "4h", "1d"]
+
+# Reference EMA per TF for crossover/retest signal detection (fallback defaults)
+# Spec: 15m→EMA50 / 1h→EMA100 / 4h→EMA200 / 1d→EMA200 / 1w→EMA50
+# Overridable per-profile via per_pair settings: {"ema_ref_periods": {"15m": 50, ...}}
+_TF_EMA_REF: dict[str, int] = {
+    "15m": 50,
+    "1h": 100,
+    "4h": 200,
+    "1d": 200,
+    "1w": 50,
+}
 
 
 def _get_db() -> Session:
@@ -307,8 +318,9 @@ def compute_market_vi(self, timeframe: str) -> dict:  # type: ignore[override]
             for symbol in symbols:
                 try:
                     # 220 candles: covers EMA-200 convergence + 20-bar RVOL window
+                    ema_ref = (mv_cfg.get("ema_ref_periods") or {}).get(timeframe) or _TF_EMA_REF.get(timeframe, 50)
                     candles = client.fetch_ohlcv(symbol, timeframe, limit=220)
-                    result = compute_vi_score(candles, enabled)
+                    result = compute_vi_score(candles, enabled, ema_ref)
                     pair_scores[symbol] = result
                 except Exception as pair_exc:
                     logger.warning(
@@ -354,7 +366,7 @@ def compute_market_vi(self, timeframe: str) -> dict:  # type: ignore[override]
         )
 
         # ── 8. Redis cache ────────────────────────────────────────────────
-        cache_market_vi(timeframe, market_vi, regime, now.isoformat())
+        cache_market_vi(timeframe, market_vi, regime, now.isoformat(), components)
         # ── 9. Cross-TF aggregated score (fail-silent) ────────────────────
         try:
             _update_aggregated_score(db, mv_cfg)
@@ -424,6 +436,21 @@ def compute_pair_vi(self, timeframe: str, force: bool = False) -> dict:  # type:
             "indicators",
             {"rvol": True, "mfi": True, "atr": True, "bb": True, "ema": True},
         )
+
+        # ── 2b. Gate par execution_hours du TF (config par TF dans schedules) ──
+        # Si l'utilisateur a défini des heures d'exécution pour ce TF, on vérifie
+        # que l'heure courante UTC est autorisée avant de lancer le calcul.
+        if not force:
+            tf_sched: dict = (pp_cfg.get("schedules") or {}).get(timeframe, {})
+            exec_hours: list = tf_sched.get("execution_hours", [])
+            if exec_hours:
+                current_hour = datetime.now(UTC).hour
+                if current_hour not in exec_hours:
+                    logger.debug(
+                        "compute_pair_vi(%s): skipped (heure %dh hors execution_hours %s)",
+                        timeframe, current_hour, exec_hours,
+                    )
+                    return {"status": "skipped", "reason": "outside_execution_hours", "timeframe": timeframe}
 
         # ── 3. Resolve active Kraken instruments ──────────────────────────
         kraken_broker = (
@@ -501,8 +528,9 @@ def compute_pair_vi(self, timeframe: str, force: bool = False) -> dict:  # type:
             # OHLCV per pair
             for symbol in symbols:
                 try:
+                    ema_ref = (pp_cfg.get("ema_ref_periods") or {}).get(timeframe) or _TF_EMA_REF.get(timeframe, 50)
                     candles = client.fetch_ohlcv(symbol, timeframe, limit=220)
-                    result = compute_vi_score(candles, enabled)
+                    result = compute_vi_score(candles, enabled, ema_ref)
                     pair_scores[symbol] = result
                 except Exception as pair_exc:
                     logger.warning(
@@ -575,8 +603,27 @@ def compute_pair_vi(self, timeframe: str, force: bool = False) -> dict:  # type:
             pair_scores, tickers, sup_scores, thresholds, timeframe
         )
 
+        # Regime content filter: keep only pairs whose own regime matches the
+        # configured filter.  Applied always (including force=True runs) because
+        # this controls WHAT appears in the watchlist, not whether to run at all.
+        _content_filter: list = (
+            (pp_cfg.get("schedules") or {}).get(timeframe, {}).get("regime_filter", [])
+        )
+        if _content_filter:
+            before = len(watchlist_pairs)
+            watchlist_pairs = [p for p in watchlist_pairs if p["regime"] in _content_filter]
+            logger.info(
+                "compute_pair_vi(%s): regime content filter %s → %d/%d pairs kept",
+                timeframe, _content_filter, len(watchlist_pairs), before,
+            )
+        else:
+            logger.info(
+                "compute_pair_vi(%s): no regime content filter configured — all %d pairs kept",
+                timeframe, len(watchlist_pairs),
+            )
+
         # Dominant regime = regime of the pair with highest vi_score
-        top_vi = max(float(r["vi_score"]) for r in watchlist_pairs)
+        top_vi = max((float(r["vi_score"]) for r in watchlist_pairs), default=0.0)
         dominant_regime = score_to_regime(top_vi, thresholds)
 
         # ── 9. INSERT watchlist_snapshot ──────────────────────────────────
@@ -800,23 +847,30 @@ def cleanup_old_snapshots(self) -> dict:  # type: ignore[override]
 
     db = _get_db()
     try:
-        # ── 1. Read retention_days from settings (default 30) ─────────────
+        # ── 1. Read retention_days from settings ─────────────────────────
         per_pair_cfg = _load_settings(db, "per_pair", None)
-        retention_days: int = int(per_pair_cfg.get("retention_days", 30))
-        cutoff = f"NOW() - INTERVAL '{retention_days} days'"
+        mv_cfg = _load_settings(db, "market_vi", None)
+        # per_pair retention → volatility_snapshots + watchlist_snapshots
+        pp_retention: int = int(per_pair_cfg.get("retention_days", 30))
+        # market_vi retention → market_vi_snapshots only
+        mvi_retention: int = int(mv_cfg.get("retention_days", 90))
+        pp_cutoff  = f"NOW() - INTERVAL '{pp_retention} days'"
+        mvi_cutoff = f"NOW() - INTERVAL '{mvi_retention} days'"
+        retention_days = max(pp_retention, mvi_retention)  # for log/return only
 
         # ── 2. TimescaleDB drop_chunks for hypertables ────────────────────
         # drop_chunks() returns one row per chunk dropped.
         vol_chunks = db.execute(
-            text(f"SELECT drop_chunks('volatility_snapshots', {cutoff})")
+            text(f"SELECT drop_chunks('volatility_snapshots', {pp_cutoff})")
         ).fetchall()
         mvi_chunks = db.execute(
-            text(f"SELECT drop_chunks('market_vi_snapshots', {cutoff})")
+            text(f"SELECT drop_chunks('market_vi_snapshots', {mvi_cutoff})")
         ).fetchall()
 
         # ── 3. Plain DELETE for watchlist_snapshots (regular table) ───────
+        # Uses per_pair retention — watchlist is the output of the per-pair pipeline
         deleted_watchlist = db.execute(
-            text(f"DELETE FROM watchlist_snapshots WHERE generated_at < {cutoff}")
+            text(f"DELETE FROM watchlist_snapshots WHERE generated_at < {pp_cutoff}")
         ).rowcount
 
         db.commit()

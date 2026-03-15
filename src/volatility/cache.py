@@ -45,13 +45,19 @@ def cache_market_vi(
     vi_score: float,
     regime: str,
     timestamp: str,
+    components: dict | None = None,
 ) -> None:
     """Write the latest Market VI snapshot to Redis."""
     try:
         r = _get_redis()
         key = f"atd:market_vi:{timeframe}"
         payload = json.dumps(
-            {"vi_score": vi_score, "regime": regime, "timestamp": timestamp}
+            {
+                "vi_score": vi_score,
+                "regime": regime,
+                "timestamp": timestamp,
+                "components": components or {},
+            }
         )
         r.setex(key, _TTL_MAP.get(timeframe, _DEFAULT_TTL), payload)
     except Exception:
