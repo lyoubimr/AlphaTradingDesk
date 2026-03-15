@@ -12,6 +12,7 @@ import {
   Users,
   SlidersHorizontal,
   Crosshair,
+  Bell,
 } from 'lucide-react'
 import { cn } from '../../lib/cn'
 import { Badge } from '../ui/Badge'
@@ -96,6 +97,16 @@ const NAV_GROUPS: NavGroup[] = [
         to: '/settings/market-analysis',
         label: 'Indicator Editor',
         icon: <SlidersHorizontal size={16} />,
+      },
+      {
+        to: '/settings/volatility',
+        label: 'Volatility Settings',
+        icon: <Activity size={16} />,
+      },
+      {
+        to: '/settings/notifications',
+        label: 'Notifications',
+        icon: <Bell size={16} />,
       },
       {
         to: '/settings',

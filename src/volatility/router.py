@@ -85,13 +85,31 @@ def _build_tf_components(db: Session, is_weekend: bool) -> list[TFComponentOut]:
     components: list[TFComponentOut] = []
     for tf in _TF_AGG_ORDER:
         cached = get_cached_market_vi(tf)
-        if cached is None:
+        if cached is not None:
+            components.append(
+                TFComponentOut(
+                    tf=tf,
+                    vi_score=float(cached["vi_score"]),
+                    regime=cached["regime"],
+                    weight=float(weights.get(tf, 0.0)),
+                )
+            )
             continue
+        # Redis empty (e.g. after container restart) — fall back to DB
+        db_row = (
+            db.query(MarketVISnapshot)
+            .filter(MarketVISnapshot.timeframe == tf)
+            .order_by(MarketVISnapshot.timestamp.desc())
+            .first()
+        )
+        if db_row is None:
+            continue
+        thresholds = get_regime_thresholds(db)
         components.append(
             TFComponentOut(
                 tf=tf,
-                vi_score=float(cached["vi_score"]),
-                regime=cached["regime"],
+                vi_score=float(db_row.vi_score),
+                regime=score_to_regime(float(db_row.vi_score), thresholds),
                 weight=float(weights.get(tf, 0.0)),
             )
         )

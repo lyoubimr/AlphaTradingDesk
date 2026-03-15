@@ -319,7 +319,7 @@ export function MarketVIPage() {
     p.pair.toLowerCase().includes('btc') || p.pair.toLowerCase().includes('xbt')
   )?.components ?? {}
   const componentEntries = Object.entries(btcComponents)
-    .filter(([, v]) => typeof v === 'number')
+    .filter(([k, v]) => typeof v === 'number' && k !== 'ema_score')
     .map(([k, v]) => ({ name: k, value: v as number }))
     .sort((a, b) => b.value - a.value)
 
@@ -530,7 +530,7 @@ export function MarketVIPage() {
                 <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-4">
                   <div className="flex items-center gap-2 mb-4">
                     <p className="text-xs font-semibold text-zinc-400">Indicator breakdown — BTC proxy ({activeTF})</p>
-                    <Tooltip text="Indicator breakdown for BTC proxy. RVOL: relative volume vs 20-period avg. MFI: money flow intensity. ATR: normalised average true range. BB Width: Bollinger band expansion. EMA Score: price alignment vs EMA 20/50/100/200 — stored for context but NOT part of the VI formula." maxWidth={260} />
+                    <Tooltip text="Indicator breakdown for BTC proxy. RVOL: relative volume vs 20-period avg. MFI: money flow intensity. ATR: normalised average true range. BB Width: Bollinger band expansion." maxWidth={240} />
                   </div>
                   <div className="flex flex-col gap-3">
                     {componentEntries.map(({ name, value }) => (

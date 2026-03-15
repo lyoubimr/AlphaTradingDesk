@@ -1,5 +1,5 @@
 // ── Settings page ──────────────────────────────────────────────────────────
-import { User, Database, Bell, Shield, Info, Palette, BarChart2 } from 'lucide-react'
+import { User, Database, Bell, Shield, Info, Palette, BarChart2, Activity } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { PageHeader } from '../../components/ui/PageHeader'
 import { Badge } from '../../components/ui/Badge'
@@ -195,16 +195,43 @@ export function SettingsPage() {
           </div>
         </SettingsSection>
 
+        {/* ── Volatility ───────────────────────────────────────────────── */}
+        <SettingsSection
+          icon={<Activity size={16} />}
+          title="Volatility"
+          description="Market VI engine, per-pair indicators, and regime thresholds"
+        >
+          <SettingRow label="Source"          value="Kraken Futures"           info="All volatility data is sourced from Kraken Perpetual Futures via the ccxt adapter." />
+          <SettingRow label="Timeframes"       value="15m · 1h · 4h · 1d"       info="Each timeframe is computed independently then aggregated with configurable weights." />
+          <SettingRow label="Indicators"       value="RVOL · MFI · ATR · BB · EMA" info="Per-pair composite VI is built from 5 indicators. Each can be toggled globally." />
+          <SettingRow label="Regime bands"     value="6 regimes"                info="DEAD → CALM → NORMAL → TRENDING → ACTIVE → EXTREME. Thresholds are user-configurable." />
+          <div className="pt-2">
+            <Link
+              to="/settings/volatility"
+              className="inline-flex items-center gap-1.5 text-xs text-brand-400 hover:text-brand-300 transition-colors underline underline-offset-2"
+            >
+              Open Volatility Settings →
+            </Link>
+          </div>
+        </SettingsSection>
+
         {/* ── Notifications ───────────────────────────────────────────── */}
         <SettingsSection
           icon={<Bell size={16} />}
           title="Notifications"
-          description="Alerts for risk, goals, and stale analysis"
-          badge="Coming Soon"
+          description="Telegram alerts for volatility regimes and watchlist events"
         >
-          <SettingRow label="Stale analysis alert" value="—" info="Notify when a module hasn't been analysed in 7+ days." />
-          <SettingRow label="Risk limit alert"     value="—" info="Notify when daily risk budget is consumed." />
-          <SettingRow label="Goal milestone alert" value="—" info="Notify when a goal reaches 50%, 75%, 100%." />
+          <SettingRow label="Bots"              value="Configurable"  info="Add one or more Telegram bots. Each can be targeted by a specific alert type." />
+          <SettingRow label="Market VI alerts"  value="Toggle + regimes" info="Notify when aggregate VI enters a configured regime. Cooldown-based deduplication." />
+          <SettingRow label="Watchlist alerts"  value="Per-TF"        info="Alert per timeframe when a new watchlist is generated. VI minimum threshold configurable." />
+          <div className="pt-2">
+            <Link
+              to="/settings/notifications"
+              className="inline-flex items-center gap-1.5 text-xs text-brand-400 hover:text-brand-300 transition-colors underline underline-offset-2"
+            >
+              Open Notification Settings →
+            </Link>
+          </div>
         </SettingsSection>
 
         {/* ── System / API info ────────────────────────────────────────── */}
