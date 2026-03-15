@@ -8,7 +8,6 @@ import { useTheme } from '../../context/ThemeContext'
 import { statsApi, volatilityApi } from '../../lib/api'
 import type { WinRateStats, LivePricesResponse } from '../../types/api'
 
-type TopbarProps = Record<string, never>
 
 // ── Capital + PnL chip ────────────────────────────────────────────────────
 // Shows active profile's current capital and overall PnL% inline in the topbar.
@@ -95,7 +94,7 @@ function LocalClock() {
   )
 }
 
-export function Topbar(_props: TopbarProps) {
+export function Topbar() {
   return (
     <header className="
       h-12 shrink-0

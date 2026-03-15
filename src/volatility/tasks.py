@@ -183,7 +183,7 @@ def _build_watchlist_pairs(
             }
         )
 
-    rows.sort(key=lambda r: r["_rank"], reverse=True)
+    rows.sort(key=lambda r: float(r["_rank"]), reverse=True)  # type: ignore[arg-type]
     # Strip internal rank key before storing
     for r in rows:
         del r["_rank"]
@@ -872,7 +872,7 @@ def cleanup_old_snapshots(self) -> dict:  # type: ignore[override]
         # Uses per_pair retention — watchlist is the output of the per-pair pipeline
         deleted_watchlist = db.execute(
             text(f"DELETE FROM watchlist_snapshots WHERE generated_at < {pp_cutoff}")
-        ).rowcount
+        ).rowcount  # type: ignore[attr-defined]
 
         db.commit()
         logger.info(

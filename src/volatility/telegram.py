@@ -276,14 +276,14 @@ def send_watchlist_alert(
 
 # ── Bot dispatch helper ───────────────────────────────────────────────────────
 
-def _dispatch(notification_cfg: dict, text: str) -> None:
-    """Resolve bot credentials from notification_cfg and send."""
+def _dispatch(notification_cfg: dict, text: str) -> bool:
+    """Resolve bot credentials from notification_cfg and send. Returns True on success."""
     # notification_cfg may contain inline credentials OR a bot_name to look up
     bot_token: str | None = notification_cfg.get("bot_token")
     chat_id: str | None = notification_cfg.get("chat_id")
 
     if not bot_token or not chat_id:
         logger.warning("Telegram dispatch: missing bot_token or chat_id in notification config")
-        return
+        return False
 
-    _send(bot_token, chat_id, text)
+    return _send(bot_token, chat_id, text)

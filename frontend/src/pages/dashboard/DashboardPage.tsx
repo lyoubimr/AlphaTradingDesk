@@ -11,7 +11,7 @@
 import { useEffect, useState, useMemo, useCallback } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import {
-  TrendingUp, TrendingDown, Target, BarChart3, Activity,
+  TrendingUp, TrendingDown, Target, Activity,
   Loader2, RefreshCw, AlertTriangle, ChevronRight,
   CheckCircle2, Minus, Plus, ShieldAlert,
   Zap,
@@ -21,11 +21,10 @@ import { StatCard }    from '../../components/ui/StatCard'
 import { useProfile }  from '../../context/ProfileContext'
 import { MarketVIWidget }  from '../../components/dashboard/MarketVIWidget'
 import {
-  goalsApi, maApi, tradesApi,
+  goalsApi, tradesApi,
 } from '../../lib/api'
 import type {
-  GoalProgressItem,
-  MAStalenessItem, TradeListItem, MASessionListItem, MAModule, MABias,
+  GoalProgressItem, TradeListItem,
 } from '../../types/api'
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -254,119 +253,6 @@ function GoalsWidget({ profileId }: { profileId: number }) {
         <p className="text-[9px] text-slate-700 tabular-nums">
           {filtered[0]?.period_start} → {filtered[filtered.length - 1]?.period_end}
         </p>
-      )}
-    </div>
-  )
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// 2. MARKET ANALYSIS WIDGET — shows HTF/MTF/LTF scores inline
-// ─────────────────────────────────────────────────────────────────────────────
-
-const BIAS_EMOJI: Record<MABias, string> = { bullish: '🟢', neutral: '🟡', bearish: '🔴' }
-
-function TFBadge({ label, score, bias }: { label: string; score: string | null; bias: MABias | null }) {
-  if (score === null) return null
-  const val = Math.round(parseFloat(score))
-  const ringCls = bias === 'bullish'
-    ? 'border-emerald-500 text-emerald-300'
-    : bias === 'bearish'
-      ? 'border-red-500 text-red-300'
-      : 'border-amber-400 text-amber-300'
-  const bgCls = bias === 'bullish'
-    ? 'bg-emerald-900/30'
-    : bias === 'bearish'
-      ? 'bg-red-900/30'
-      : 'bg-amber-900/20'
-  return (
-    <div className="flex flex-col items-center gap-0.5">
-      <div className={`w-9 h-9 rounded-full border-2 flex items-center justify-center text-[11px] font-bold tabular-nums ${ringCls} ${bgCls}`}>
-        {val}
-      </div>
-      <span className="text-[9px] text-slate-600 uppercase tracking-wide font-medium">{label}</span>
-    </div>
-  )
-}
-
-interface MAModuleCardProps {
-  staleness: MAStalenessItem
-  lastSession: MASessionListItem | undefined
-  module: MAModule | undefined
-}
-
-// Extracted outside MAModuleCard to avoid "component created during render" lint error
-function BadgeRow({
-  suffix,
-  lastSession,
-}: {
-  suffix: 'a' | 'b'
-  lastSession: MASessionListItem
-}) {
-  return (
-    <div className="flex items-center gap-3">
-      <TFBadge label="HTF" score={lastSession[`score_htf_${suffix}`] ?? null} bias={lastSession[`bias_htf_${suffix}`] as MABias | null ?? null} />
-      <TFBadge label="MTF" score={lastSession[`score_mtf_${suffix}`] ?? null} bias={lastSession[`bias_mtf_${suffix}`] as MABias | null ?? null} />
-      <TFBadge label="LTF" score={lastSession[`score_ltf_${suffix}`] ?? null} bias={lastSession[`bias_ltf_${suffix}`] as MABias | null ?? null} />
-    </div>
-  )
-}
-
-function MAModuleCard({ staleness, lastSession, module }: MAModuleCardProps) {
-  const hasData = staleness.last_analyzed_at !== null
-  const isStale = staleness.is_stale
-  const daysOld = staleness.days_old
-
-  const ageLabel = !hasData ? 'Never' : daysOld === 0 ? 'Today' : daysOld === 1 ? '1d ago' : `${daysOld}d ago`
-  const isDual = module?.is_dual ?? false
-
-  const borderCls = !hasData
-    ? 'border-surface-600'
-    : isStale
-      ? 'border-amber-500/40'
-      : 'border-emerald-500/20'
-
-  const headerDot = !hasData ? BIAS_EMOJI.neutral : isStale ? BIAS_EMOJI.neutral : BIAS_EMOJI.bullish
-
-  return (
-    <div className={`rounded-lg bg-surface-700/40 border ${borderCls} px-3 py-2.5 flex items-center justify-between gap-3`}>
-      {/* Left: module name + age */}
-      <div className="flex items-center gap-2 min-w-0">
-        <span className="text-[11px] shrink-0">{headerDot}</span>
-        <div className="min-w-0">
-          <div className="flex items-center gap-1.5">
-            <span className="text-xs font-semibold text-slate-200 truncate">{staleness.module_name}</span>
-            {isDual && module && (
-              <span className="text-[9px] text-slate-600 shrink-0">{module.asset_a}/{module.asset_b}</span>
-            )}
-          </div>
-          <span className={`text-[9px] font-mono ${isStale ? 'text-amber-400/70' : 'text-slate-600'}`}>{ageLabel}</span>
-        </div>
-      </div>
-
-      {/* Right: badge rows */}
-      {lastSession ? (
-        <div className="flex flex-col gap-2 shrink-0">
-          {isDual && module?.asset_b && lastSession.score_htf_b ? (
-            <>
-              <div className="flex items-center gap-2">
-                <span className="text-[9px] text-slate-600 w-8 text-right shrink-0">{module.asset_a}</span>
-                <BadgeRow suffix="a" lastSession={lastSession} />
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="text-[9px] text-slate-600 w-8 text-right shrink-0">{module.asset_b}</span>
-                <BadgeRow suffix="b" lastSession={lastSession} />
-              </div>
-            </>
-
-          ) : (
-            <BadgeRow suffix="a" lastSession={lastSession} />
-          )}
-        </div>
-      ) : (
-        <div className="flex items-center gap-1.5 text-[10px] text-amber-400/70 bg-amber-900/10 border border-amber-800/20 rounded px-2 py-1 shrink-0">
-          <AlertTriangle size={10} className="shrink-0" />
-          <Link to="/market-analysis/new" className="underline">Run analysis</Link>
-        </div>
       )}
     </div>
   )

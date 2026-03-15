@@ -120,7 +120,6 @@ export function VIHistoryChart({ timeframe, defaultColor = '#a1a1aa', compact = 
     let cancelled = false
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoading(true)
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     setError(null)
 
     const since = new Date(Date.now() - RANGE_MS[range]).toISOString()

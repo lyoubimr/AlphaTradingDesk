@@ -90,7 +90,7 @@ def _fetch_xau() -> float | None:
             r = _get_redis()
             cached_xau = r.get(_XAU_PRICE_KEY)
             if cached_xau is not None:
-                return float(cached_xau)
+                return float(cached_xau)  # type: ignore[arg-type]
         except Exception:
             pass
 
@@ -155,7 +155,7 @@ def get_live_prices() -> dict[str, Any]:
         r = _get_redis()
         raw = r.get(_CACHE_KEY)
         if raw is not None:
-            cached = json.loads(raw)
+            cached = json.loads(raw)  # type: ignore[arg-type]
             cached["cached"] = True
             return cached
     except Exception as exc:
@@ -168,14 +168,14 @@ def get_live_prices() -> dict[str, Any]:
     # ── Variation BTC / ETH depuis l'ouverture du jour (midnight UTC) ─────────
     btc_change_pct: float | None = None
     eth_change_pct: float | None = None
-    if crypto["btc"] and crypto.get("btc_open") and crypto["btc_open"] > 0:
-        btc_change_pct = round(
-            (crypto["btc"] - crypto["btc_open"]) / crypto["btc_open"] * 100, 2
-        )
-    if crypto["eth"] and crypto.get("eth_open") and crypto["eth_open"] > 0:
-        eth_change_pct = round(
-            (crypto["eth"] - crypto["eth_open"]) / crypto["eth_open"] * 100, 2
-        )
+    btc = crypto["btc"]
+    btc_open = crypto.get("btc_open")
+    if btc is not None and btc_open is not None and btc_open > 0:
+        btc_change_pct = round((btc - btc_open) / btc_open * 100, 2)
+    eth = crypto["eth"]
+    eth_open = crypto.get("eth_open")
+    if eth is not None and eth_open is not None and eth_open > 0:
+        eth_change_pct = round((eth - eth_open) / eth_open * 100, 2)
 
     # ── XAU daily change: base price stored in Redis (TTL 24h) ─────────────────
     xau_change_pct: float | None = None
@@ -184,7 +184,7 @@ def get_live_prices() -> dict[str, Any]:
         xau_open_raw = r_xau.get(_XAU_OPEN_KEY)
         if xau is not None:
             if xau_open_raw is not None:
-                xau_open = float(xau_open_raw)
+                xau_open = float(xau_open_raw)  # type: ignore[arg-type]
                 if xau_open > 0:
                     xau_change_pct = round((xau - xau_open) / xau_open * 100, 2)
             else:

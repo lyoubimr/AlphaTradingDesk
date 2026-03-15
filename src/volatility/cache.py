@@ -69,7 +69,7 @@ def get_cached_market_vi(timeframe: str) -> dict | None:
     try:
         r = _get_redis()
         raw = r.get(f"atd:market_vi:{timeframe}")
-        return json.loads(raw) if raw is not None else None
+        return json.loads(raw) if raw is not None else None  # type: ignore[arg-type]
     except Exception:
         logger.warning("get_cached_market_vi(%s): Redis read failed", timeframe)
         return None
@@ -110,7 +110,7 @@ def get_cached_pair_vi(symbol: str, timeframe: str) -> dict | None:
     try:
         r = _get_redis()
         raw = r.get(f"atd:pair_vi:{symbol}:{timeframe}")
-        return json.loads(raw) if raw is not None else None
+        return json.loads(raw) if raw is not None else None  # type: ignore[arg-type]
     except Exception:
         logger.warning(
             "get_cached_pair_vi(%s %s): Redis read failed", symbol, timeframe
