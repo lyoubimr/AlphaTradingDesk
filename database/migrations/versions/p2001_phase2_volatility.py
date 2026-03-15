@@ -31,10 +31,21 @@ depends_on = None
 
 
 def upgrade() -> None:
-    # ── 1. TimescaleDB extension ──────────────────────────────────────────────
-    # Requires timescale/timescaledb image (Phase 2 docker-compose).
-    # IF NOT EXISTS: safe on DBs where the extension is already installed.
-    op.execute("CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE")
+    # ── 1. TimescaleDB extension (optional) ──────────────────────────────────
+    # Installed only when timescale/timescaledb image is used.
+    # On plain postgres:16 (e.g. first prod deploy), the DO block is a no-op
+    # and all tables are created as regular PostgreSQL tables — Phase 2 works
+    # fully, just without time-series chunk optimisation.
+    op.execute("""
+        DO $$
+        BEGIN
+            IF EXISTS (
+                SELECT 1 FROM pg_available_extensions WHERE name = 'timescaledb'
+            ) THEN
+                CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE;
+            END IF;
+        END $$
+    """)
 
     # ── 2. volatility_snapshots — Per-Pair VI (hypertable) ───────────────────
     # Stores computed VI scores per pair + timeframe.
@@ -51,14 +62,18 @@ def upgrade() -> None:
         )
     """)
 
-    # Create hypertable — 3rd arg (if_not_exists) prevents error on replay
+    # Convert to hypertable only when TimescaleDB is available
     op.execute("""
-        SELECT create_hypertable(
-            'volatility_snapshots',
-            'timestamp',
-            if_not_exists => TRUE,
-            chunk_time_interval => INTERVAL '1 day'
-        )
+        DO $$
+        BEGIN
+            IF EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'timescaledb') THEN
+                PERFORM create_hypertable(
+                    'volatility_snapshots', 'timestamp',
+                    if_not_exists => TRUE,
+                    chunk_time_interval => INTERVAL '1 day'
+                );
+            END IF;
+        END $$
     """)
 
     # Index on vi_score for fast ranking queries (watchlist ORDER BY vi_score DESC)
@@ -86,12 +101,16 @@ def upgrade() -> None:
     """)
 
     op.execute("""
-        SELECT create_hypertable(
-            'market_vi_snapshots',
-            'timestamp',
-            if_not_exists => TRUE,
-            chunk_time_interval => INTERVAL '1 day'
-        )
+        DO $$
+        BEGIN
+            IF EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'timescaledb') THEN
+                PERFORM create_hypertable(
+                    'market_vi_snapshots', 'timestamp',
+                    if_not_exists => TRUE,
+                    chunk_time_interval => INTERVAL '1 day'
+                );
+            END IF;
+        END $$
     """)
 
     op.execute("""
