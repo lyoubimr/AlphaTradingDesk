@@ -2,14 +2,13 @@
 import { useEffect, useRef, useState } from 'react'
 import { Bell, TrendingUp, Palette } from 'lucide-react'
 import { ProfilePicker } from './ProfilePicker'
+import { SessionsIndicator } from '../dashboard/TradingSessions'
 import { useProfile } from '../../context/ProfileContext'
 import { useTheme } from '../../context/ThemeContext'
-import { statsApi } from '../../lib/api'
-import type { WinRateStats } from '../../types/api'
+import { statsApi, volatilityApi } from '../../lib/api'
+import type { WinRateStats, LivePricesResponse } from '../../types/api'
 
-interface TopbarProps {
-  currentTime?: string
-}
+type TopbarProps = Record<string, never>
 
 // ── Capital + PnL chip ────────────────────────────────────────────────────
 // Shows active profile's current capital and overall PnL% inline in the topbar.
@@ -24,7 +23,7 @@ function CapitalChip() {
   const pnlPos     = pnlPct >= 0
   const currency   = activeProfile.currency ?? 'USD'
 
-  const capitalFmt = capital.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })
+  const capitalFmt = capital.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })
 
   return (
     <div className="hidden sm:flex items-center gap-2 px-3 py-1 rounded-lg bg-surface-800 border border-surface-700 text-xs tabular-nums">
@@ -78,7 +77,25 @@ function GlobalWRPill() {
   )
 }
 
-export function Topbar({ currentTime }: TopbarProps) {
+// ── Local clock ───────────────────────────────────────────────────────────
+function LocalClock() {
+  const [now, setNow] = useState(() => new Date())
+  useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), 1000)
+    return () => clearInterval(id)
+  }, [])
+  const hhmm = now.toLocaleTimeString('default', { hour: '2-digit', minute: '2-digit', hour12: false })
+  const tz   = new Intl.DateTimeFormat('default', { timeZoneName: 'short' }).formatToParts(now)
+    .find((p) => p.type === 'timeZoneName')?.value ?? ''
+  return (
+    <div className="hidden lg:flex items-center gap-1.5 text-xs tabular-nums">
+      <span className="text-slate-300 font-mono font-semibold">{hhmm}</span>
+      <span className="text-slate-600 text-[10px]">{tz}</span>
+    </div>
+  )
+}
+
+export function Topbar(_: TopbarProps) {
   return (
     <header className="
       h-12 shrink-0
@@ -86,10 +103,11 @@ export function Topbar({ currentTime }: TopbarProps) {
       bg-surface-900 border-b border-surface-800
       sticky top-0 z-40
     ">
-      {/* ── Left: profile picker + capital chip ───────────────────────── */}
+      {/* ── Left: profile picker + capital chip + sessions indicator ─── */}
       <div className="flex items-center gap-3">
         <ProfilePicker />
         <CapitalChip />
+        <SessionsIndicator />
       </div>
 
       {/* ── Right: WR pill + market pills + clock + theme picker + bell ── */}
@@ -97,19 +115,11 @@ export function Topbar({ currentTime }: TopbarProps) {
         {/* Global win-rate across all profiles */}
         <GlobalWRPill />
 
-        {/* Market summary pills (indicative — static placeholder for now) */}
-        <div className="hidden md:flex items-center gap-3">
-          <MarketPill symbol="BTC" value="~65,420" change="+1.4%" bull />
-          <MarketPill symbol="ETH" value="~3,210" change="-0.3%" />
-          <MarketPill symbol="XAU" value="~2,340" change="+0.7%" bull />
-          <span className="text-[10px] text-slate-700">· Indicative</span>
-        </div>
+        {/* Live market prices — polls /api/volatility/prices/live every 30s */}
+        <LivePricesBar />
 
-        {currentTime && (
-          <span className="text-xs font-mono text-slate-600 tabular-nums hidden lg:inline">
-            {currentTime}
-          </span>
-        )}
+        {/* Local time + timezone */}
+        <LocalClock />
 
         {/* Theme picker */}
         <ThemePicker />
@@ -123,6 +133,48 @@ export function Topbar({ currentTime }: TopbarProps) {
         </button>
       </div>
     </header>
+  )
+}
+
+// ── Live prices bar ───────────────────────────────────────────────────────
+// Polls /api/volatility/prices/live every 30s. Silent on error (keeps last known).
+function LivePricesBar() {
+  const [prices, setPrices] = useState<LivePricesResponse | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    const poll = () => {
+      volatilityApi.getLivePrices()
+        .then((d) => { if (!cancelled) setPrices(d) })
+        .catch(() => { /* silent — keep last known */ })
+    }
+    poll()
+    const id = setInterval(poll, 30_000)
+    return () => { cancelled = true; clearInterval(id) }
+  }, [])
+
+  if (!prices) return null
+
+  const sym = prices.currency_symbol ?? prices.currency ?? '$'
+  const fmt = (v: number) =>
+    v >= 1_000
+      ? v.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })
+      : v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+
+  const fmtChg = (v: number | null | undefined): string | undefined => {
+    if (v == null) return undefined
+    return `${v >= 0 ? '+' : ''}${v.toFixed(2)}%`
+  }
+
+  return (
+    <div className="hidden md:flex items-center gap-3">
+      <MarketPill symbol="BTC" value={`${sym}${fmt(prices.btc ?? 0)}`}
+        change={fmtChg(prices.btc_change_pct)} bull={(prices.btc_change_pct ?? 0) >= 0} />
+      <MarketPill symbol="ETH" value={`${sym}${fmt(prices.eth ?? 0)}`}
+        change={fmtChg(prices.eth_change_pct)} bull={(prices.eth_change_pct ?? 0) >= 0} />
+      <MarketPill symbol="XAU" value={`${sym}${fmt(prices.xau ?? 0)}`}
+        change={fmtChg(prices.xau_change_pct)} bull={(prices.xau_change_pct ?? 0) >= 0} />
+    </div>
   )
 }
 
@@ -196,7 +248,7 @@ function ThemePicker() {
 interface MarketPillProps {
   symbol: string
   value: string
-  change: string
+  change?: string
   bull?: boolean
 }
 
@@ -205,7 +257,9 @@ function MarketPill({ symbol, value, change, bull = false }: MarketPillProps) {
     <div className="flex items-center gap-1.5 text-xs">
       <span className="text-slate-500 font-medium">{symbol}</span>
       <span className="text-slate-400 tabular-nums font-mono">{value}</span>
-      <span className={bull ? 'text-green-500' : 'text-red-400'}>{change}</span>
+      {change && (
+        <span className={bull ? 'text-green-500' : 'text-red-400'}>{change}</span>
+      )}
     </div>
   )
 }

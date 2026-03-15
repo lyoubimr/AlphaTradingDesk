@@ -1131,10 +1131,10 @@ export function NewTradePage() {
   // └────────────────────────────────────────────────────────────────────────┘
 
   const CRYPTO_MMR = 0.005  // 0.5% — maintenance margin rate tier-1 standard
-  // MARGIN_SAFETY_BUFFER est maintenant l'état `safetyBuffer` (configurable dans l'UI)
+  // MARGIN_SAFETY_BUFFER is controlled by the `safetyBuffer` state (configurable in the UI)
 
   // ── Notional value ────────────────────────────────────────────────────────
-  // = lot_size × entry_price  (contract_size = 1 pour tous les instruments Phase 1)
+  // = lot_size × entry_price  (contract_size = 1 for all crypto instruments)
   const notional = useMemo((): number | null => {
     if (!isCrypto || calc.lot_size == null || entryNum == null) return null
     return calc.lot_size * entryNum

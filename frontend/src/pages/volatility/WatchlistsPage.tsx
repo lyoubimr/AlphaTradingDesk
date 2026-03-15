@@ -4,14 +4,15 @@
 // Left panel  : snapshots grouped by date → TF, click item to load pairs
 // Right panel : pair table for selected snapshot + regime filter + Kraken export
 
-import { useEffect, useState, useMemo, useCallback } from 'react'
+import { useEffect, useState, useMemo, useCallback, useRef } from 'react'
 import { Link } from 'react-router-dom'
 import {
   RefreshCw, Loader2, AlertTriangle, Download, ArrowUpDown, Play,
-  ChevronDown, ChevronRight,
+  ChevronDown, ChevronRight, BookOpen,
 } from 'lucide-react'
 import { PageHeader } from '../../components/ui/PageHeader'
 import { Tooltip } from '../../components/ui/Tooltip'
+import { VolatilityLegendPanel } from '../../components/volatility/VolatilityLegendPanel'
 import { volatilityApi } from '../../lib/api'
 import type { WatchlistOut, WatchlistPairOut, WatchlistMetaOut } from '../../types/api'
 
@@ -20,17 +21,22 @@ type TF = typeof TIMEFRAMES[number]
 
 const REGIMES = ['ALL', 'DEAD', 'CALM', 'NORMAL', 'TRENDING', 'ACTIVE', 'EXTREME'] as const
 
+// Reference EMA per TF used for signal detection (matches backend _TF_EMA_REF)
+const TF_EMA_REF: Record<string, number> = { '15m': 50, '1h': 100, '4h': 200, '1d': 200, '1w': 50 }
+// Superior TF mapping for TF+1 column header label
+const TF_NEXT: Record<string, string> = { '15m': '1h', '1h': '4h', '4h': '1d', '1d': '1w' }
+
 const REGIME_COLOR_HEX: Record<string, string> = {
   DEAD:     '#a1a1aa',
   CALM:     '#0ea5e9',
   NORMAL:   '#10b981',
-  TRENDING: '#059669',  // emerald-600 — darker green — strong momentum = good range
+  TRENDING: '#818cf8',  // indigo-400 — gem color — sweet spot trading regime
   ACTIVE:   '#f59e0b',  // amber-400  — elevated but not alarming
   EXTREME:  '#ef4444',
 }
 
 const REGIME_EMOJI: Record<string, string> = {
-  DEAD: '⬜', CALM: '💧', NORMAL: '✅', TRENDING: '📈', ACTIVE: '⚡', EXTREME: '🔥',
+  DEAD: '⬜', CALM: '💧', NORMAL: '📊', TRENDING: '💎', ACTIVE: '⚠️', EXTREME: '🚫',
 }
 
 const EMA_DISPLAY: Record<string, { label: string; color: string; symbol: string }> = {
@@ -53,13 +59,13 @@ const REGIME_DESCRIPTION: Record<string, string> = {
 }
 
 const EMA_TOOLTIP: Record<string, string> = {
-  above_all:      'Price above EMA 20, 50, 100 & 200 — full bull alignment',
-  below_all:      'Price below EMA 20, 50, 100 & 200 — full bear alignment',
-  breakout_up:    'Price crossed above EMA 20 in the last 3 bars — momentum up',
-  breakdown_down: 'Price crossed below EMA 20 in the last 3 bars — momentum down',
-  retest_up:      'Price ≤ 0.5% above EMA 20 — testing EMA 20 as support',
-  retest_down:    'Price ≤ 0.5% below EMA 20 — testing EMA 20 as resistance',
-  mixed:          'Price position mixed relative to EMAs 20/50/100/200',
+  above_all:      'Price above EMA 20, 50 & 200 — full bull alignment',
+  below_all:      'Price below EMA 20, 50 & 200 — full bear alignment',
+  breakout_up:    'Price crossed above ref EMA (EMA 50 on 15m · EMA 100 on 1h · EMA 200 on 4h/1d) in the last 3 bars',
+  breakdown_down: 'Price crossed below ref EMA (EMA 50 on 15m · EMA 100 on 1h · EMA 200 on 4h/1d) in the last 3 bars',
+  retest_up:      'Price ≤ 0.5% above ref EMA — testing it as support',
+  retest_down:    'Price ≤ 0.5% below ref EMA — testing it as resistance',
+  mixed:          'Price position mixed relative to EMAs 20 / 50 / 200',
 }
 
 type SortKey = 'vi_score' | 'change_24h' | 'pair'
@@ -76,19 +82,35 @@ function alertIcon(p: WatchlistPairOut): string {
 function formatPair(symbol: string): { base: string; quote: string } {
   // Kraken Futures: PF_XBTUSD, PI_ETHUSD, FF_SOLUSD, etc.
   const kf = symbol.match(/^(?:PF|PI|FF)_([A-Z0-9]+?)(USD|USDT|EUR|GBP|XBT)$/)
-  if (kf) return { base: kf[1], quote: kf[2] }
+  if (kf) return { base: kf[1].replace('XBT', 'BTC'), quote: kf[2] }
   if (symbol.endsWith('USDT')) return { base: symbol.slice(0, -4), quote: 'USDT' }
   if (symbol.endsWith('BUSD')) return { base: symbol.slice(0, -4), quote: 'BUSD' }
-  return { base: symbol, quote: '' }
+  // Plain Kraken perps: XBTUSD, ETHUSD, SOLUSD, etc.
+  if (symbol.endsWith('USD'))  return { base: symbol.slice(0, -3).replace('XBT', 'BTC'), quote: 'USD' }
+  if (symbol.endsWith('EUR'))  return { base: symbol.slice(0, -3).replace('XBT', 'BTC'), quote: 'EUR' }
+  return { base: symbol.replace('XBT', 'BTC'), quote: '' }
 }
 
 function downloadKraken(pairs: WatchlistPairOut[], tf: string, dateStr: string) {
-  const lines = pairs.map((p) => `KRAKEN:${p.pair}`).join('\n')
+  // TradingView Kraken Futures format: strip PF_/PI_/FF_ prefix, XBT→BTC, add .PM suffix
+  const toTV = (sym: string) =>
+    `KRAKEN:${sym.replace(/^(?:PF|PI|FF)_/, '').replace('XBT', 'BTC').replace('XBT', 'BTC')}.PM`
+  const lines = pairs.map((p) => toTV(p.pair)).join('\n')
+
+  // Derive quote currency from first pair (e.g. BTCUSD → USD, ETHUSD → USD)
+  const firstSym = pairs[0]?.pair ?? ''
+  const quoteMatch = firstSym.replace(/^(?:PF|PI|FF)_/, '').match(/(USDT|USDC|USD|EUR|GBP)$/)
+  const devise = quoteMatch ? quoteMatch[1] : 'USD'
+
+  // Filename: kraken_1h_2026-03-15_1430_USD.txt
+  const now = new Date()
+  const hhmm = `${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}`
+
   const blob  = new Blob([lines], { type: 'text/plain' })
   const url   = URL.createObjectURL(blob)
   const a     = document.createElement('a')
   a.href      = url
-  a.download  = `kraken_${tf}_${dateStr}.txt`
+  a.download  = `kraken_${tf}_${dateStr}_${hhmm}_${devise}.txt`
   a.click()
   URL.revokeObjectURL(url)
 }
@@ -112,6 +134,7 @@ function SortTh({
   desc,
   onClick,
   className,
+  tooltip,
 }: {
   label: string
   col: SortKey
@@ -119,6 +142,7 @@ function SortTh({
   desc: boolean
   onClick: () => void
   className?: string
+  tooltip?: React.ReactNode
 }) {
   return (
     <th
@@ -132,6 +156,7 @@ function SortTh({
         ) : (
           <ArrowUpDown size={9} className="text-zinc-700" />
         )}
+        {tooltip}
       </span>
     </th>
   )
@@ -151,6 +176,7 @@ export function WatchlistsPage() {
   const [expandedDates, setExpandedDates] = useState<Set<string>>(new Set())
   const [expandedTFs, setExpandedTFs]     = useState<Set<string>>(new Set())
   const [regimeFilters, setRegimeFilters] = useState<Set<string>>(new Set(['ALL']))
+  const [emaFilters, setEmaFilters]       = useState<Set<string>>(new Set(['ALL']))
   const [sortKey, setSortKey]             = useState<SortKey>('vi_score')
   const [sortDesc, setSortDesc]           = useState(true)
   const [showGenerateModal, setShowGenerateModal] = useState(false)
@@ -158,12 +184,22 @@ export function WatchlistsPage() {
   const [modalViMax, setModalViMax]   = useState(100)
   const [modalRegimes, setModalRegimes]   = useState<Set<string>>(new Set(['ALL']))
   const [viRange, setViRange]         = useState<[number, number]>([0, 100])
+  const [showLegend, setShowLegend]   = useState(false)
+  const [regimeSameAsTFSup, setRegimeSameAsTFSup] = useState(false)
+  // Track whether the initial auto-selection has already been done.
+  // Manual refreshes should NOT override the user's current selection.
+  const initialLoadedRef = useRef(false)
+
   // ── Load snapshot list ───────────────────────────────────────────────────
 
-  const handleSelectSnapshot = useCallback(async (id: number) => {
+  const handleSelectSnapshot = useCallback(async (id: number, keepFilters = false) => {
     setSelectedId(id)
     setSelectedData(null)
-    setRegimeFilters(new Set(['ALL']))
+    if (!keepFilters) {
+      setRegimeFilters(new Set(['ALL']))
+      setEmaFilters(new Set(['ALL']))
+      setRegimeSameAsTFSup(false)
+    }
     setLoadingDetail(true)
     try {
       const data = await volatilityApi.getWatchlistById(id)
@@ -178,7 +214,10 @@ export function WatchlistsPage() {
     try {
       const data = await volatilityApi.listWatchlists(30)
       setSnapshots(data)
-      if (data.length > 0) {
+      // Auto-select the newest snapshot only on the very first load.
+      // Manual refreshes keep the current selection intact.
+      if (data.length > 0 && !initialLoadedRef.current) {
+        initialLoadedRef.current = true
         const firstDate  = toDateKey(data[0].generated_at)
         const firstTFKey = `${firstDate}:${data[0].timeframe}`
         setExpandedDates(new Set([firstDate]))
@@ -227,22 +266,22 @@ export function WatchlistsPage() {
             const dk = toDateKey(newest.generated_at)
             setExpandedDates((prev) => new Set([...prev, dk]))
             setExpandedTFs((prev) => new Set([...prev, `${dk}:${newest.timeframe}`]))
-            handleSelectSnapshot(newest.id)
+            handleSelectSnapshot(newest.id, true /* keepFilters */)
             setRunStatus(
               `✅ ${tfBefore.toUpperCase()} watchlist ready — ${newest.pairs_count} pairs · regime: ${newest.regime}`,
             )
-          } else if (attempt < 2) {
-            setTimeout(() => checkResult(attempt + 1), 20_000)
+          } else if (attempt < 6) {
+            setTimeout(() => checkResult(attempt + 1), 30_000)
           } else {
             setRunStatus(
-              '⚠️ No new snapshot detected after ~65 s — Celery worker may be down or still computing',
+              '⚠️ No new snapshot detected after ~3 min — Celery worker may be down or still computing',
             )
           }
         } catch {
           setRunStatus('⚠️ Could not verify result — try refreshing manually')
         }
       }
-      setTimeout(() => checkResult(1), 25_000)
+      setTimeout(() => checkResult(1), 30_000)
     } catch {
       setRunStatus('❌ Failed to queue task — check backend logs')
     } finally {
@@ -293,6 +332,8 @@ export function WatchlistsPage() {
     if (!selectedData) return []
     let rows = [...selectedData.pairs]
     if (!regimeFilters.has('ALL')) rows = rows.filter((p) => regimeFilters.has(p.regime))
+    if (!emaFilters.has('ALL')) rows = rows.filter((p) => emaFilters.has(p.ema_signal ?? 'mixed'))
+    if (regimeSameAsTFSup) rows = rows.filter((p) => p.tf_sup_regime != null && p.regime === p.tf_sup_regime)
     const [viMin, viMax] = viRange
     if (viMin > 0 || viMax < 100) {
       rows = rows.filter((p) => {
@@ -309,12 +350,21 @@ export function WatchlistsPage() {
       return sortDesc ? bv - av : av - bv
     })
     return rows
-  }, [selectedData, regimeFilters, viRange, sortKey, sortDesc])
+  }, [selectedData, regimeFilters, emaFilters, regimeSameAsTFSup, viRange, sortKey, sortDesc])
 
   const regimeCounts = useMemo(() => {
     if (!selectedData) return {}
     return selectedData.pairs.reduce<Record<string, number>>((acc, p) => {
       acc[p.regime] = (acc[p.regime] ?? 0) + 1
+      return acc
+    }, {})
+  }, [selectedData])
+
+  const emaCounts = useMemo(() => {
+    if (!selectedData) return {}
+    return selectedData.pairs.reduce<Record<string, number>>((acc, p) => {
+      const sig = p.ema_signal ?? 'mixed'
+      acc[sig] = (acc[sig] ?? 0) + 1
       return acc
     }, {})
   }, [selectedData])
@@ -372,6 +422,18 @@ export function WatchlistsPage() {
           >
             {loading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
           </button>
+
+          {/* ── Legend ── */}
+          <div className="relative">
+            <button
+              onClick={() => setShowLegend((v) => !v)}
+              title="Legend — Regimes & EMA signals explained"
+              className={`p-1.5 rounded-lg transition-colors ${showLegend ? 'text-zinc-200 bg-zinc-800' : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800'}`}
+            >
+              <BookOpen size={14} />
+            </button>
+            {showLegend && <VolatilityLegendPanel variant="watchlist" onClose={() => setShowLegend(false)} />}
+          </div>
         </div>
       </div>
 
@@ -640,9 +702,9 @@ export function WatchlistsPage() {
           ) : (
             <>
               {/* ── Detail header ── */}
-              <div className="flex flex-col gap-1.5 px-4 py-2.5 border-b border-zinc-800 shrink-0">
-                {/* Row 1: regime filter pills + meta + export */}
-                <div className="flex flex-wrap items-center gap-2">
+              <div className="flex flex-col gap-1 px-4 py-2.5 border-b border-zinc-800 shrink-0">
+                {/* Row 1: regime filter pills */}
+                <div className="flex flex-wrap items-center gap-1.5">
                   {/* regime filter pills — multi-select */}
                   <div className="flex gap-1 flex-wrap">
                     {REGIMES.map((r) => {
@@ -672,8 +734,10 @@ export function WatchlistsPage() {
                       )
                     })}
                   </div>
+                </div>
 
-                  <div className="ml-auto flex items-center gap-3">
+                {/* Row 2: meta + export — single line, right-aligned */}
+                <div className="flex items-center justify-end gap-3">
                   <span className="text-xs font-mono text-zinc-600">
                     {filteredPairs.length === selectedData.pairs_count
                       ? `${selectedData.pairs_count} pairs`
@@ -687,17 +751,60 @@ export function WatchlistsPage() {
                   )}
                   <button
                     onClick={() => downloadKraken(
-                      selectedData.pairs,
+                      filteredPairs,
                       selectedData.timeframe,
                       toDateKey(selectedData.generated_at),
                     )}
                     className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-mono rounded border border-zinc-700 text-zinc-400 hover:text-zinc-200 hover:border-zinc-500 transition-colors"
-                    title="Download TradingView watchlist — KRAKEN:PAIR format (.txt)"
+                    title="Download TradingView watchlist — active filters applied — KRAKEN:PAIR format (.txt)"
                   >
                     <Download size={11} />
                     Kraken Export
                   </button>
                 </div>
+
+                {/* Row 3: EMA filter pills */}
+                <div className="flex gap-1 flex-wrap items-center">
+                  {(['ALL', ...Object.keys(EMA_DISPLAY)]).map((sig) => {
+                    const count    = sig === 'ALL' ? selectedData.pairs_count : (emaCounts[sig] ?? 0)
+                    const ema      = sig !== 'ALL' ? EMA_DISPLAY[sig] : undefined
+                    const isActive = emaFilters.has('ALL') ? sig === 'ALL' : emaFilters.has(sig)
+                    if (sig !== 'ALL' && count === 0) return null
+                    return (
+                      <button
+                        key={sig}
+                        onClick={() => setEmaFilters((prev) => {
+                          if (sig === 'ALL') return new Set(['ALL'])
+                          const next = new Set(prev)
+                          next.delete('ALL')
+                          if (next.has(sig)) { next.delete(sig); if (next.size === 0) return new Set(['ALL']) }
+                          else next.add(sig)
+                          return next
+                        })}
+                        title={EMA_TOOLTIP[sig] ?? 'Show all EMA signals'}
+                        className={`px-2 py-0.5 rounded text-xs font-mono transition-colors ${
+                          isActive ? 'bg-zinc-700 text-zinc-100' : 'text-zinc-500 hover:text-zinc-300'
+                        }`}
+                        style={isActive && ema ? { color: ema.color } : {}}
+                      >
+                        {ema ? `${ema.symbol} ${ema.label}` : 'ALL EMA'}
+                        {sig !== 'ALL' && count > 0 && <span className="ml-1 opacity-60">{count}</span>}
+                      </button>
+                    )
+                  })}
+                  {/* Same-regime filter — immediately after ALL EMA, separated by a divider */}
+                  <span className="text-zinc-800 select-none mx-0.5">|</span>
+                  <button
+                    onClick={() => setRegimeSameAsTFSup(p => !p)}
+                    title="Only pairs where regime at this TF = regime at TF+1 (strong confluence)"
+                    className={`px-2 py-0.5 rounded text-xs font-mono border transition-colors ${
+                      regimeSameAsTFSup
+                        ? 'bg-zinc-700 border-zinc-500 text-zinc-100'
+                        : 'border-zinc-700 text-zinc-600 hover:text-zinc-400'
+                    }`}
+                  >
+                    = TF+1
+                  </button>
                 </div>
               </div>
 
@@ -708,12 +815,9 @@ export function WatchlistsPage() {
                     <tr className="border-b border-zinc-800">
                       <th className="px-3 py-2.5 text-left text-zinc-600 font-mono w-8">#</th>
                       <SortTh label="PAIR"  col="pair"       active={sortKey === 'pair'}       desc={sortDesc} onClick={() => handleSort('pair')}       className="w-28" />
-                      <th className="px-3 py-2.5 text-left text-zinc-500 font-mono">
-                        <span className="flex items-center gap-1">
-                          <SortTh label="VI" col="vi_score" active={sortKey === 'vi_score'} desc={sortDesc} onClick={() => handleSort('vi_score')} />
-                          <Tooltip text="Volatility Index 0–100. Formula: mean(RVOL, MFI, ATR, Bollinger Width). EMA score is NOT included — stored for context and ranking boost only." />
-                        </span>
-                      </th>
+                      <SortTh label="VI" col="vi_score" active={sortKey === 'vi_score'} desc={sortDesc} onClick={() => handleSort('vi_score')}
+                        tooltip={<Tooltip text="Volatility Index 0–100. Formula: mean(RVOL, MFI, ATR, Bollinger Width). EMA score is NOT included — stored for context and ranking boost only." />}
+                      />
                       <th className="px-3 py-2.5 text-left text-zinc-500 font-mono">
                         <span className="flex items-center gap-1">
                           REGIME
@@ -722,14 +826,14 @@ export function WatchlistsPage() {
                       </th>
                       <th className="px-3 py-2.5 text-left text-zinc-500 font-mono">
                         <span className="flex items-center gap-1">
-                          EMA
-                          <Tooltip text="Price vs EMA 20/50/100/200. ▲ above all · ▼ below all · 🚀 breakout ↑ · 💥 breakdown ↓ · 🔄🔁 retest · ∿ mixed" />
+                          EMA{selectedData ? ` (${TF_EMA_REF[selectedData.timeframe] ?? ''})` : ''}
+                          <Tooltip text="Price vs EMA 20/50/200 (scoring). Breakout/retest uses ref EMA per TF: 50 on 15m · 100 on 1h · 200 on 4h/1d/1w. ▲ above all · ▼ below all · 🚀 breakout · 💥 breakdown · 🔄🔁 retest · ∿ mixed" maxWidth={300} />
                         </span>
                       </th>
                       <SortTh label="24H%" col="change_24h" active={sortKey === 'change_24h'} desc={sortDesc} onClick={() => handleSort('change_24h')} className="w-20" />
                       <th className="px-3 py-2.5 text-left text-zinc-500 font-mono">
                         <span className="flex items-center gap-1">
-                          TF+1
+                          TF+1{selectedData && TF_NEXT[selectedData.timeframe] ? ` (${TF_NEXT[selectedData.timeframe]})` : ''}
                           <Tooltip text="Regime at the next-higher timeframe. Confirms or contradicts the signal." />
                         </span>
                       </th>
@@ -783,6 +887,9 @@ export function WatchlistsPage() {
                               <div className="flex items-center gap-1">
                                 <span className="text-xs">{REGIME_EMOJI[p.tf_sup_regime] ?? ''}</span>
                                 <span className="font-mono text-xs" style={{ color: tfSupColor }}>{p.tf_sup_regime}</span>
+                                {p.tf_sup_vi != null && (
+                                  <span className="font-mono text-xs text-zinc-600">({Math.round(p.tf_sup_vi * 100)})</span>
+                                )}
                               </div>
                             ) : <span className="text-zinc-700">—</span>}
                           </td>

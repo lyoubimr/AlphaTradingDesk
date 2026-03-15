@@ -1,5 +1,5 @@
-// ── Dashboard — Step 12 (enhanced) ───────────────────────────────────────
-// Goals widget spec (pre-implement-phase1.md):
+// ── Dashboard ─────────────────────────────────────────────────────────────────────
+// Goals widget:
 //   • Style selector (persisted in localStorage per profile)
 //   • ALL 3 periods (daily / weekly / monthly) shown simultaneously
 //   • When trade_count === 0 → greyed "No trades [this period]" row, no bars
@@ -19,6 +19,7 @@ import {
 import { PageHeader }  from '../../components/ui/PageHeader'
 import { StatCard }    from '../../components/ui/StatCard'
 import { useProfile }  from '../../context/ProfileContext'
+import { MarketVIWidget }  from '../../components/dashboard/MarketVIWidget'
 import {
   goalsApi, maApi, tradesApi,
 } from '../../lib/api'
@@ -937,8 +938,6 @@ export function DashboardPage() {
         icon="📈"
         title="Dashboard"
         subtitle={activeProfile ? `Overview for ${activeProfile.name}` : 'Overview of your trading activity'}
-        badge="Phase 1"
-        badgeVariant="phase"
       />
 
       {/* No profile selected */}
@@ -957,10 +956,10 @@ export function DashboardPage() {
           {/* ── KPI bar ─────────────────────────────────────────────────── */}
           <KpiBar trades={trades} loading={tLoading} profile={activeProfile} />
 
-          {/* ── 2-column widget grid ─────────────────────────────────── */}
+          {/* ── 2-column widget grid ─────────────────────────────────────────── */}
           <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
+            <MarketVIWidget profileId={activeProfile.id} />
             <GoalsWidget    profileId={activeProfile.id} />
-            <MAWidget       profileId={activeProfile.id} />
             <PositionsWidget  trades={trades} loading={tLoading} error={tError} />
             <PerformanceWidget trades={trades} loading={tLoading} error={tError} />
           </div>

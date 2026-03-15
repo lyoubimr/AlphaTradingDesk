@@ -409,8 +409,6 @@ export function MarketAnalysisPage() {
         icon="🧭"
         title="Market Analysis"
         subtitle="Structured indicator checklist — compute bias scores per module"
-        badge="Phase 1"
-        badgeVariant="phase"
         info="Scores 0–39 = Bearish · 40–60 = Neutral · 61–100 = Bullish. Sessions older than 7 days are flagged stale."
         actions={
           <>

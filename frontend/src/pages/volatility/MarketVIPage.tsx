@@ -9,13 +9,13 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { Link } from 'react-router-dom'
-import { RefreshCw, Loader2, AlertTriangle, Play } from 'lucide-react'
+import { RefreshCw, Loader2, AlertTriangle, Play, BookOpen } from 'lucide-react'
 import { PageHeader } from '../../components/ui/PageHeader'
 import { Tooltip } from '../../components/ui/Tooltip'
 import { MarketVIGauge } from '../../components/volatility/MarketVIGauge'
-import { RegimeBadge } from '../../components/volatility/RegimeBadge'
 import { VISparkline } from '../../components/volatility/VISparkline'
 import { VIHistoryChart } from '../../components/volatility/VIHistoryChart'
+import { VolatilityLegendPanel } from '../../components/volatility/VolatilityLegendPanel'
 import { volatilityApi } from '../../lib/api'
 import type { AggregatedMarketVIOut, MarketVIOut, PairVIOut, TFComponentOut } from '../../types/api'
 
@@ -30,7 +30,7 @@ const REGIME_SCORE_COLOR: Record<string, string> = {
   DEAD:     'text-zinc-400',
   CALM:     'text-sky-400',
   NORMAL:   'text-emerald-400',
-  TRENDING: 'text-emerald-600',   // darker green — strong trend = good range
+  TRENDING: 'text-indigo-400',    // indigo — gem color — sweet spot trading regime
   ACTIVE:   'text-amber-400',     // amber — elevated but not alarming
   EXTREME:  'text-red-400',
 }
@@ -40,7 +40,7 @@ const REGIME_COLOR_HEX: Record<string, string> = {
   DEAD:     '#a1a1aa',  // zinc-400 — brighter than zinc-500 for dark theme
   CALM:     '#0ea5e9',
   NORMAL:   '#10b981',  // emerald-500 — standard green
-  TRENDING: '#059669',  // emerald-600 — darker green — strong momentum = good range
+  TRENDING: '#818cf8',  // indigo-400 — gem color — sweet spot trading regime
   ACTIVE:   '#f59e0b',  // amber-400  — elevated but not alarming
   EXTREME:  '#ef4444',
 }
@@ -49,10 +49,10 @@ const REGIME_COLOR_HEX: Record<string, string> = {
 const REGIME_EMOJI: Record<string, string> = {
   DEAD:     '⬜',
   CALM:     '💧',
-  NORMAL:   '✅',
-  TRENDING: '📈',
-  ACTIVE:   '⚡',
-  EXTREME:  '🔥',
+  NORMAL:   '📊',
+  TRENDING: '💎',
+  ACTIVE:   '⚠️',
+  EXTREME:  '🚫',
 }
 
 // Regime → one-line trading description shown in the hero card
@@ -65,81 +65,26 @@ const REGIME_DESCRIPTION: Record<string, string> = {
   EXTREME:  'Extreme volatility — minimize exposure',
 }
 
-// ── Component label map ────────────────────────────────────────────────────
-
-const COMPONENT_LABELS: Record<string, string> = {
-  rvol:      'Relative Volume',
-  mfi:       'Money Flow Index',
-  atr:       'ATR Normalised',
-  bb_width:  'Bollinger Width',
-  ema_score: 'EMA Score',
-  depth:     'Order Book Depth',
-}
-
 // ── Sub-components ─────────────────────────────────────────────────────────
-
-function ComponentBar({ name, value }: { name: string; value: number }) {
-  const pct = Math.round(Math.max(0, Math.min(1, value)) * 100)
-  const barColor =
-    pct >= 80 ? 'bg-red-400' :
-    pct >= 60 ? 'bg-orange-400' :
-    pct >= 40 ? 'bg-yellow-400' :
-    pct >= 20 ? 'bg-emerald-400' :
-                'bg-zinc-500'
-
-  return (
-    <div className="flex items-center gap-3">
-      <span className="w-36 text-xs text-zinc-400 truncate">{COMPONENT_LABELS[name] ?? name}</span>
-      <div className="flex-1 h-2 bg-zinc-800 rounded-full overflow-hidden">
-        <div
-          className={`h-full rounded-full transition-all duration-500 ${barColor}`}
-          style={{ width: `${pct}%` }}
-        />
-      </div>
-      <span className="w-8 text-right text-xs font-mono text-zinc-300">{pct}</span>
-    </div>
-  )
-}
 
 // ── Pair symbol formatter (Kraken Futures: PF_XBTUSD → XBT/USD) ──────────
 function formatPair(symbol: string): { base: string; quote: string } {
   const kf = symbol.match(/^(?:PF|PI|FF)_([A-Z0-9]+?)(USD|USDT|EUR|GBP|XBT)$/)
-  if (kf) return { base: kf[1], quote: kf[2] }
+  if (kf) return { base: kf[1].replace('XBT', 'BTC'), quote: kf[2] }
   if (symbol.endsWith('USDT')) return { base: symbol.slice(0, -4), quote: 'USDT' }
   if (symbol.endsWith('BTC'))  return { base: symbol.slice(0, -3), quote: 'BTC'  }
-  return { base: symbol, quote: '' }
-}
-
-function PairContextCard({ pair }: { pair: PairVIOut }) {
-  const { base, quote } = formatPair(pair.pair)
-  return (
-    <div className="bg-surface-900 border border-zinc-800 rounded-lg p-4 flex flex-col gap-2">
-      <div className="flex items-center justify-between">
-        <span className="text-sm font-semibold text-zinc-200">
-          {base}<span className="text-zinc-500 font-normal text-xs">{quote}</span>
-        </span>
-        <RegimeBadge regime={pair.regime} size="sm" />
-      </div>
-      <div className="text-2xl font-mono font-bold text-zinc-100">
-        {(pair.vi_score * 100).toFixed(0)}
-        <span className="text-sm font-normal text-zinc-500 ml-1">/ 100</span>
-      </div>
-      {pair.components?.ema_signal && (
-        <span className="text-xs text-zinc-400">
-          EMA: {String(pair.components.ema_signal).replace(/_/g, ' ')}
-        </span>
-      )}
-    </div>
-  )
+  // Plain Kraken perps: XBTUSD, ETHUSD, etc.
+  if (symbol.endsWith('USD'))  return { base: symbol.slice(0, -3).replace('XBT', 'BTC'), quote: 'USD' }
+  if (symbol.endsWith('EUR'))  return { base: symbol.slice(0, -3).replace('XBT', 'BTC'), quote: 'EUR' }
+  return { base: symbol.replace('XBT', 'BTC'), quote: '' }
 }
 
 // ── TF mini-card (used in aggregated view) ───────────────────────────────
 
-function TFMiniCard({ component, onClick, active, isWeekend }: {
+function TFMiniCard({ component, onClick, active }: {
   component: TFComponentOut
   onClick: () => void
   active: boolean
-  isWeekend: boolean
 }) {
   const pct = Math.round(component.vi_score * 100)
   const scoreColor = REGIME_SCORE_COLOR[component.regime] ?? 'text-zinc-300'
@@ -187,6 +132,8 @@ function TFMiniCard({ component, onClick, active, isWeekend }: {
 export function MarketVIPage() {
   // null = aggregated view, otherwise a TF drill-down
   const [activeTF, setActiveTF] = useState<TF | null>(null)
+  const [showLegend, setShowLegend] = useState(false)
+  const [showAllPairs, setShowAllPairs] = useState(false)
 
   const [aggregated, setAggregated] = useState<AggregatedMarketVIOut | null>(null)
   const [tfData, setTfData] = useState<MarketVIOut | null>(null)
@@ -261,6 +208,7 @@ export function MarketVIPage() {
   useEffect(() => {
     setLoading(true)
     setSparkPoints([])
+    setPairsData([])  // reset stale cross-TF pairs on every TF switch
 
     // Pre-populate sparkline from DB history (up to 48 points)
     const historyTF = activeTF ?? 'aggregated'
@@ -313,15 +261,6 @@ export function MarketVIPage() {
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTF])
-
-  // BTC components proxy for the TF drill-down view
-  const btcComponents = pairsData.find((p) =>
-    p.pair.toLowerCase().includes('btc') || p.pair.toLowerCase().includes('xbt')
-  )?.components ?? {}
-  const componentEntries = Object.entries(btcComponents)
-    .filter(([k, v]) => typeof v === 'number' && k !== 'ema_score')
-    .map(([k, v]) => ({ name: k, value: v as number }))
-    .sort((a, b) => b.value - a.value)
 
   // Display score + regime for the hero gauge
   const heroScore = activeTF === null ? (aggregated?.vi_score ?? null) : (tfData?.vi_score ?? null)
@@ -376,6 +315,19 @@ export function MarketVIPage() {
           >
             {loading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
           </button>
+          {/* Legend panel */}
+          <div className="relative">
+            <button
+              onClick={() => setShowLegend((v) => !v)}
+              className={`p-2 rounded-lg transition-colors ${
+                showLegend ? 'text-zinc-200 bg-zinc-700' : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800'
+              }`}
+              title="Legend — Regimes & EMA signals"
+            >
+              <BookOpen size={14} />
+            </button>
+            {showLegend && <VolatilityLegendPanel onClose={() => setShowLegend(false)} />}
+          </div>
         </div>
       </div>
 
@@ -517,24 +469,9 @@ export function MarketVIPage() {
                         key={c.tf}
                         component={c}
                         active={activeTF === c.tf}
-                        isWeekend={aggregated.is_weekend}
+
                         onClick={() => { setActiveTF(c.tf as TF); setSparkPoints([]) }}
                       />
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Components — TF drill-down */}
-              {activeTF !== null && componentEntries.length > 0 && (
-                <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-4">
-                  <div className="flex items-center gap-2 mb-4">
-                    <p className="text-xs font-semibold text-zinc-400">Indicator breakdown — BTC proxy ({activeTF})</p>
-                    <Tooltip text="Indicator breakdown for BTC proxy. RVOL: relative volume vs 20-period avg. MFI: money flow intensity. ATR: normalised average true range. BB Width: Bollinger band expansion." maxWidth={240} />
-                  </div>
-                  <div className="flex flex-col gap-3">
-                    {componentEntries.map(({ name, value }) => (
-                      <ComponentBar key={name} name={name} value={value} />
                     ))}
                   </div>
                 </div>
@@ -543,29 +480,10 @@ export function MarketVIPage() {
             </div>
           </div>
 
-          {/* ── Pair context (TF drill-down only — BTC/ETH) ── */}
-          {activeTF !== null && pairsData.length > 0 && (
-            <div>
-              <p className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-3">Key pairs context</p>
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
-                {pairsData
-                  .filter((p) =>
-                    p.pair.toLowerCase().includes('btc') ||
-                    p.pair.toLowerCase().includes('xbt') ||
-                    p.pair.toLowerCase().includes('eth')
-                  )
-                  .map((p) => (
-                    <PairContextCard key={p.pair} pair={p} />
-                  ))}
-              </div>
-            </div>
-          )}
-
           {/* ── History charts ── */}
           <div>
             <p className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-3">History</p>
             {activeTF === null ? (
-              /* ALL view: aggregated (full-size) + 4 TF mini charts */
               <div className="space-y-4">
                 <VIHistoryChart timeframe="aggregated" defaultColor={heroColor} />
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -575,10 +493,108 @@ export function MarketVIPage() {
                 </div>
               </div>
             ) : (
-              /* TF drill-down: single chart for that TF */
               <VIHistoryChart timeframe={activeTF} defaultColor={heroColor} />
             )}
           </div>
+
+          {/* ── Binance key pairs context (BTC + ETH) ── */}
+          {activeTF !== null && tfData?.components && (() => {
+            const KEY_SYMBOLS = ['BTCUSDT', 'ETHUSDT']
+            const cards = KEY_SYMBOLS
+              .map((sym) => ({ sym, vi: tfData.components?.[sym] }))
+              .filter(({ vi }) => typeof vi === 'number') as { sym: string; vi: number }[]
+            if (cards.length === 0) return null
+            return (
+              <div>
+                <p className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-3">Key pairs context — Binance</p>
+                <div className="grid grid-cols-2 gap-3">
+                  {cards.map(({ sym, vi }) => {
+                    const base = sym.replace(/USDT$/, '')
+                    const viPct = Math.round(vi * 100)
+                    const color = viPct >= 70 ? '#ef4444' : viPct >= 50 ? '#f59e0b' : viPct >= 30 ? '#0ea5e9' : '#71717a'
+                    return (
+                      <div key={sym} className="bg-zinc-900 border border-zinc-800 rounded-lg p-4 flex flex-col gap-2">
+                        <span className="text-sm font-semibold text-zinc-200">
+                          {base}<span className="text-zinc-500 font-normal text-xs">USDT</span>
+                        </span>
+                        <div className="text-2xl font-mono font-bold" style={{ color }}>
+                          {viPct}<span className="text-sm font-normal text-zinc-500 ml-1">/ 100</span>
+                        </div>
+                        <div className="w-full h-1.5 bg-zinc-800 rounded-full overflow-hidden">
+                          <div className="h-full rounded-full transition-all" style={{ width: `${viPct}%`, background: color }} />
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            )
+          })()}
+
+          {/* ── Binance pairs — Market VI input ── */}
+          {activeTF !== null && tfData?.components && Object.keys(tfData.components).length > 0 && (() => {
+            const sorted = Object.entries(tfData.components)
+              .filter(([, v]) => v !== null)
+              .map(([symbol, vi]) => ({ symbol, vi: vi as number }))
+              .sort((a, b) => b.vi - a.vi)
+            const rows = showAllPairs ? sorted : sorted.slice(0, 10)
+            return (
+              <div>
+                <div className="flex items-center gap-2 mb-3">
+                  <p className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">
+                    Binance pairs — Market VI input ({sorted.length} pairs)
+                  </p>
+                  <Tooltip text="The ~50 Binance Futures pairs used to compute the Market VI. Each pair contributes its own VI score to the weighted average." maxWidth={240} />
+                </div>
+                <div className="rounded-xl border border-zinc-800 bg-zinc-950 overflow-hidden">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="border-b border-zinc-800 bg-zinc-900/60">
+                        <th className="px-3 py-2 text-left text-zinc-600 font-mono w-8">#</th>
+                        <th className="px-3 py-2 text-left text-zinc-500 font-mono">PAIR</th>
+                        <th className="px-3 py-2 text-right text-zinc-400 font-mono font-bold">VI</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {rows.map(({ symbol, vi }, i) => {
+                        const viPct = Math.round(vi * 100)
+                        const barColor = viPct >= 70 ? '#ef4444' : viPct >= 50 ? '#f59e0b' : viPct >= 30 ? '#0ea5e9' : '#71717a'
+                        return (
+                          <tr key={symbol} className="border-b border-zinc-900 hover:bg-zinc-900/40 transition-colors">
+                            <td className="px-3 py-2 text-zinc-700 font-mono">{i + 1}</td>
+                            <td className="px-3 py-2 font-mono font-bold text-zinc-200">
+                              {symbol.replace(/USDT$/, '')}<span className="text-zinc-600 font-normal text-[11px]">USDT</span>
+                            </td>
+                            <td className="px-3 py-2 text-right">
+                              <div className="flex items-center justify-end gap-2">
+                                <div className="w-16 h-1.5 bg-zinc-800 rounded-full overflow-hidden">
+                                  <div className="h-full rounded-full" style={{ width: `${viPct}%`, background: barColor }} />
+                                </div>
+                                <span className="font-mono font-black w-5 text-right tabular-nums" style={{ color: barColor }}>{viPct}</span>
+                              </div>
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                  {sorted.length > 10 && (
+                    <div className="border-t border-zinc-800 px-4 py-2.5 flex items-center justify-between">
+                      <span className="text-xs text-zinc-600 font-mono">
+                        {showAllPairs ? `All ${sorted.length} pairs shown` : `Showing 10 / ${sorted.length}`}
+                      </span>
+                      <button
+                        onClick={() => setShowAllPairs((v) => !v)}
+                        className="text-xs font-mono text-zinc-400 hover:text-zinc-200 transition-colors"
+                      >
+                        {showAllPairs ? '▲ Show top 10' : `▼ Show all ${sorted.length} pairs`}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )
+          })()}
 
           {/* ── Top Pairs ranked table ── */}
           {pairsData.length > 0 && (
@@ -658,4 +674,3 @@ export function MarketVIPage() {
     </div>
   )
 }
-

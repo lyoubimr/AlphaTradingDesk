@@ -578,8 +578,6 @@ export function GoalsSettingsPage() {
         icon="🎯"
         title="Goals"
         subtitle="P&L targets and discipline limits — global across all styles"
-        badge="Phase 1"
-        badgeVariant="phase"
         actions={
           <>
             <button type="button" className="atd-btn-ghost" onClick={fetchGoals} disabled={loading} title="Refresh">

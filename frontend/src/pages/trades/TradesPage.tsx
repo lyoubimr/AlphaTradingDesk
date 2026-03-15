@@ -128,8 +128,6 @@ export function TradesPage() {
         icon="📒"
         title="Trade Journal"
         subtitle="Log, review, and analyse every trade you take"
-        badge="Phase 1"
-        badgeVariant="phase"
         info="Each trade can have multiple take-profit positions (multi-TP). Win rate is only shown after 5+ trades."
         actions={
           <>

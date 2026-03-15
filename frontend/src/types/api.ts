@@ -583,6 +583,7 @@ export interface MarketVIOut {
   vi_score: number
   regime: VIRegime
   timestamp: string  // ISO-8601
+  components?: Record<string, number | null>  // {symbol: vi_score} for Binance pairs
 }
 
 export interface PairVIOut {
@@ -634,6 +635,9 @@ export interface LivePricesResponse {
   btc: number | null
   eth: number | null
   xau: number | null
+  btc_change_pct: number | null
+  eth_change_pct: number | null
+  xau_change_pct: number | null
   currency: string
   currency_symbol: string
   timestamp: string
