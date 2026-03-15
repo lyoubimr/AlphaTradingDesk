@@ -17,6 +17,7 @@ class MarketVIOut(BaseModel):
     vi_score: float
     regime: str
     timestamp: str  # ISO-8601
+    components: dict[str, float] = {}  # {symbol: vi_score} for all Binance pairs
 
 
 class PairVIOut(BaseModel):
@@ -87,7 +88,9 @@ _DEFAULT_MARKET_VI: dict = {
     "active_hours_end": "23:59",
     "weekdays_only": False,
     "rolling_window": 20,
+    "pairs_count": 50,
     "enabled": True,
+    "retention_days": 90,  # market_vi_snapshots + watchlist_snapshots retention
 }
 
 _DEFAULT_PER_PAIR: dict = {
