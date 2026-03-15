@@ -47,7 +47,6 @@ export function MarketVIGauge({ score, size = 200 }: Props) {
   const strokeW = size * 0.07
 
   const clampedScore = Math.max(0, Math.min(1, score))
-  const fillEnd = START_DEG + SWEEP * clampedScore
   const color = scoreColor(clampedScore)
 
   return (
