@@ -39,7 +39,8 @@ class Settings(BaseSettings):
     database_url: str
 
     # Redis — used by Celery (Phase 2+)
-    redis_url: str = Field("redis://localhost:6379/0", alias="REDIS_URL")
+    # Default points to the Docker service name — override via REDIS_URL env var
+    redis_url: str = Field("redis://redis:6379/0", alias="REDIS_URL")
 
     # Security
     secret_key: str

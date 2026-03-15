@@ -64,6 +64,20 @@ docker pull "${FRONTEND_IMAGE}:${VERSION}"
 export IMAGE_TAG="${VERSION}"
 export GHCR_OWNER="${GHCR_OWNER}"
 
+# Load POSTGRES_PASSWORD from its secure location so docker compose can
+# interpolate ${POSTGRES_PASSWORD} in DATABASE_URL for backend/celery services.
+# The password never leaves /srv/atd/.env.db — it is NOT stored in ~/apps/.env.
+DB_ENV_FILE="/srv/atd/.env.db"
+if [[ -f "${DB_ENV_FILE}" ]]; then
+    set -a
+    # shellcheck source=/dev/null
+    source "${DB_ENV_FILE}"
+    set +a
+else
+    echo "❌  ${DB_ENV_FILE} not found — DATABASE_URL will be missing POSTGRES_PASSWORD"
+    exit 1
+fi
+
 # ── 3. Rolling restart (backend + frontend + celery — DB and Redis untouched) ──
 echo "♻️   Rolling restart (backend + celery + frontend)…"
 docker compose -f "${COMPOSE_FILE}" up -d --no-build redis backend celery-worker celery-beat frontend
