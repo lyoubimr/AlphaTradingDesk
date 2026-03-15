@@ -129,7 +129,6 @@ function toTimeLabel(iso: string): string {
 
 function SortTh({
   label,
-  col: _col,
   active,
   desc,
   onClick,
@@ -310,14 +309,14 @@ export function WatchlistsPage() {
   const toggleDate = (dk: string) =>
     setExpandedDates((prev) => {
       const next = new Set(prev)
-      next.has(dk) ? next.delete(dk) : next.add(dk)
+      if (next.has(dk)) next.delete(dk); else next.add(dk)
       return next
     })
 
   const toggleTF = (key: string) =>
     setExpandedTFs((prev) => {
       const next = new Set(prev)
-      next.has(key) ? next.delete(key) : next.add(key)
+      if (next.has(key)) next.delete(key); else next.add(key)
       return next
     })
 

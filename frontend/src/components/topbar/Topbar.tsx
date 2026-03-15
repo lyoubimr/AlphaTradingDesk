@@ -95,7 +95,7 @@ function LocalClock() {
   )
 }
 
-export function Topbar(_: TopbarProps) {
+export function Topbar(_props: TopbarProps) {
   return (
     <header className="
       h-12 shrink-0
