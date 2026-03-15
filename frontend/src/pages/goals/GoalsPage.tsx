@@ -322,8 +322,6 @@ export function GoalsPage() {
         icon="🎯"
         title="Goals"
         subtitle="Live progress for the current period"
-        badge="Phase 1"
-        badgeVariant="phase"
         actions={
           <>
             <button type="button" className="atd-btn-ghost" onClick={fetchAll} disabled={isLoading} title="Refresh">

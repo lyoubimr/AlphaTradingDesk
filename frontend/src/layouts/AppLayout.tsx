@@ -13,25 +13,6 @@ interface HealthData {
   environment: string
 }
 
-function useClock() {
-  const formatTime = () => {
-    const now = new Date()
-    const localTime = now.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
-    const utcTime = now.toUTCString().slice(17, 22) + ' UTC'
-    // Get short timezone abbreviation
-    const tzAbbr = Intl.DateTimeFormat(undefined, { timeZoneName: 'short' })
-      .formatToParts(now)
-      .find((p) => p.type === 'timeZoneName')?.value ?? ''
-    return `${localTime} ${tzAbbr}  ·  ${utcTime}`
-  }
-  const [time, setTime] = useState(formatTime)
-  useEffect(() => {
-    const id = setInterval(() => setTime(formatTime()), 1_000)
-    return () => clearInterval(id)
-  }, [])
-  return time
-}
-
 function useApiHealth(): { status: ApiStatus; environment?: string } {
   const [status, setStatus] = useState<ApiStatus>('connecting')
   const [environment, setEnvironment] = useState<string | undefined>()
@@ -63,7 +44,6 @@ function useApiHealth(): { status: ApiStatus; environment?: string } {
 }
 
 export function AppLayout() {
-  const time = useClock()
   const { status: apiStatus, environment } = useApiHealth()
 
   return (
@@ -72,7 +52,7 @@ export function AppLayout() {
         <Sidebar apiStatus={apiStatus} environment={environment} />
 
         <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
-          <Topbar currentTime={time} />
+          <Topbar />
 
           <main className="flex-1 overflow-y-auto">
             <div className="max-w-7xl mx-auto px-6 py-6">

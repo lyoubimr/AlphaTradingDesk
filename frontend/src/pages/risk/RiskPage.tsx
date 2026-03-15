@@ -71,8 +71,6 @@ export function RiskPage() {
         icon="🛡️"
         title="Risk Manager"
         subtitle="Size your positions, protect your capital"
-        badge="Phase 1"
-        badgeVariant="phase"
         info="All risk calculations use the Fixed Fractional method. Risk per trade is capped by your profile settings."
       />
 
@@ -111,7 +109,7 @@ export function RiskPage() {
 
       <ComingSoon
         feature="Risk rules engine, daily limit enforcement, multi-position exposure chart"
-        phase="Phase 1 — Step 9+"
+        phase="Coming soon"
       />
     </div>
   )

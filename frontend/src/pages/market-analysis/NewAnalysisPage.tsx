@@ -901,8 +901,6 @@ export function NewAnalysisPage() {
         icon="🧭"
         title="New Analysis"
         subtitle="Complete the indicator checklist to compute your market bias"
-        badge="Phase 1"
-        badgeVariant="phase"
         actions={
           <button type="button" className="atd-btn-ghost" onClick={() => navigate('/market-analysis')}>
             <ArrowLeft size={14} /> Back

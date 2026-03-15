@@ -38,6 +38,9 @@ class Settings(BaseSettings):
     # Database — always from env, no default (fails fast if missing)
     database_url: str
 
+    # Redis — used by Celery (Phase 2+)
+    redis_url: str = Field("redis://localhost:6379/0", alias="REDIS_URL")
+
     # Security
     secret_key: str
     encryption_key: str
@@ -57,6 +60,10 @@ class Settings(BaseSettings):
     # In prod Docker: bind-mounted to /srv/atd/logs/app on the Dell
     log_dir: str = Field("/app/logs", alias="LOG_DIR")
 
+    # App version — injected at Docker build time via APP_VERSION build-arg
+    # In dev: defaults to "dev" | In prod: set to the git semver tag (e.g. "v2.0.0")
+    app_version: str = Field("dev", alias="APP_VERSION")
+
     # CORS — comma-separated list of allowed origins
     # Override via ALLOWED_ORIGINS env var for any deployment
     # e.g. ALLOWED_ORIGINS=https://myapp.example.com,https://app2.example.com
@@ -65,6 +72,12 @@ class Settings(BaseSettings):
     @property
     def allowed_origins(self) -> list[str]:
         return [o.strip() for o in self.allowed_origins_raw.split(",") if o.strip()]
+
+    # XAU (Gold) live price — Twelve Data API
+    # XAU_API_KEY: set in .env.dev / .env.prod — leave empty to disable XAU fetch
+    # XAU_API_PROVIDER: only "twelve_data" supported in Phase 2
+    xau_api_key: str = Field("", alias="XAU_API_KEY")
+    xau_api_provider: str = Field("twelve_data", alias="XAU_API_PROVIDER")
 
     @property
     def is_dev(self) -> bool:

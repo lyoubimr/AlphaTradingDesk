@@ -24,6 +24,11 @@ COPY alembic.ini ./alembic.ini
 COPY scripts/entrypoint.sh ./entrypoint.sh
 RUN chmod +x ./entrypoint.sh
 
+# App version — injected at build time via: docker build --build-arg APP_VERSION=v2.0.0
+# Baked into the image as an env var so the running container always knows its version.
+ARG APP_VERSION=dev
+ENV APP_VERSION=${APP_VERSION}
+
 EXPOSE 8000
 
 # entrypoint: wait-for-db → migrate → seed → uvicorn

@@ -1,5 +1,5 @@
-// ── Dashboard — Step 12 (enhanced) ───────────────────────────────────────
-// Goals widget spec (pre-implement-phase1.md):
+// ── Dashboard ─────────────────────────────────────────────────────────────────────
+// Goals widget:
 //   • Style selector (persisted in localStorage per profile)
 //   • ALL 3 periods (daily / weekly / monthly) shown simultaneously
 //   • When trade_count === 0 → greyed "No trades [this period]" row, no bars
@@ -11,7 +11,7 @@
 import { useEffect, useState, useMemo, useCallback } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import {
-  TrendingUp, TrendingDown, Target, BarChart3, Activity,
+  TrendingUp, TrendingDown, Target, Activity,
   Loader2, RefreshCw, AlertTriangle, ChevronRight,
   CheckCircle2, Minus, Plus, ShieldAlert,
   Zap,
@@ -19,12 +19,12 @@ import {
 import { PageHeader }  from '../../components/ui/PageHeader'
 import { StatCard }    from '../../components/ui/StatCard'
 import { useProfile }  from '../../context/ProfileContext'
+import { MarketVIWidget }  from '../../components/dashboard/MarketVIWidget'
 import {
-  goalsApi, maApi, tradesApi,
+  goalsApi, tradesApi,
 } from '../../lib/api'
 import type {
-  GoalProgressItem,
-  MAStalenessItem, TradeListItem, MASessionListItem, MAModule, MABias,
+  GoalProgressItem, TradeListItem,
 } from '../../types/api'
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -253,203 +253,6 @@ function GoalsWidget({ profileId }: { profileId: number }) {
         <p className="text-[9px] text-slate-700 tabular-nums">
           {filtered[0]?.period_start} → {filtered[filtered.length - 1]?.period_end}
         </p>
-      )}
-    </div>
-  )
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// 2. MARKET ANALYSIS WIDGET — shows HTF/MTF/LTF scores inline
-// ─────────────────────────────────────────────────────────────────────────────
-
-const BIAS_EMOJI: Record<MABias, string> = { bullish: '🟢', neutral: '🟡', bearish: '🔴' }
-
-function TFBadge({ label, score, bias }: { label: string; score: string | null; bias: MABias | null }) {
-  if (score === null) return null
-  const val = Math.round(parseFloat(score))
-  const ringCls = bias === 'bullish'
-    ? 'border-emerald-500 text-emerald-300'
-    : bias === 'bearish'
-      ? 'border-red-500 text-red-300'
-      : 'border-amber-400 text-amber-300'
-  const bgCls = bias === 'bullish'
-    ? 'bg-emerald-900/30'
-    : bias === 'bearish'
-      ? 'bg-red-900/30'
-      : 'bg-amber-900/20'
-  return (
-    <div className="flex flex-col items-center gap-0.5">
-      <div className={`w-9 h-9 rounded-full border-2 flex items-center justify-center text-[11px] font-bold tabular-nums ${ringCls} ${bgCls}`}>
-        {val}
-      </div>
-      <span className="text-[9px] text-slate-600 uppercase tracking-wide font-medium">{label}</span>
-    </div>
-  )
-}
-
-interface MAModuleCardProps {
-  staleness: MAStalenessItem
-  lastSession: MASessionListItem | undefined
-  module: MAModule | undefined
-}
-
-// Extracted outside MAModuleCard to avoid "component created during render" lint error
-function BadgeRow({
-  suffix,
-  lastSession,
-}: {
-  suffix: 'a' | 'b'
-  lastSession: MASessionListItem
-}) {
-  return (
-    <div className="flex items-center gap-3">
-      <TFBadge label="HTF" score={lastSession[`score_htf_${suffix}`] ?? null} bias={lastSession[`bias_htf_${suffix}`] as MABias | null ?? null} />
-      <TFBadge label="MTF" score={lastSession[`score_mtf_${suffix}`] ?? null} bias={lastSession[`bias_mtf_${suffix}`] as MABias | null ?? null} />
-      <TFBadge label="LTF" score={lastSession[`score_ltf_${suffix}`] ?? null} bias={lastSession[`bias_ltf_${suffix}`] as MABias | null ?? null} />
-    </div>
-  )
-}
-
-function MAModuleCard({ staleness, lastSession, module }: MAModuleCardProps) {
-  const hasData = staleness.last_analyzed_at !== null
-  const isStale = staleness.is_stale
-  const daysOld = staleness.days_old
-
-  const ageLabel = !hasData ? 'Never' : daysOld === 0 ? 'Today' : daysOld === 1 ? '1d ago' : `${daysOld}d ago`
-  const isDual = module?.is_dual ?? false
-
-  const borderCls = !hasData
-    ? 'border-surface-600'
-    : isStale
-      ? 'border-amber-500/40'
-      : 'border-emerald-500/20'
-
-  const headerDot = !hasData ? BIAS_EMOJI.neutral : isStale ? BIAS_EMOJI.neutral : BIAS_EMOJI.bullish
-
-  return (
-    <div className={`rounded-lg bg-surface-700/40 border ${borderCls} px-3 py-2.5 flex items-center justify-between gap-3`}>
-      {/* Left: module name + age */}
-      <div className="flex items-center gap-2 min-w-0">
-        <span className="text-[11px] shrink-0">{headerDot}</span>
-        <div className="min-w-0">
-          <div className="flex items-center gap-1.5">
-            <span className="text-xs font-semibold text-slate-200 truncate">{staleness.module_name}</span>
-            {isDual && module && (
-              <span className="text-[9px] text-slate-600 shrink-0">{module.asset_a}/{module.asset_b}</span>
-            )}
-          </div>
-          <span className={`text-[9px] font-mono ${isStale ? 'text-amber-400/70' : 'text-slate-600'}`}>{ageLabel}</span>
-        </div>
-      </div>
-
-      {/* Right: badge rows */}
-      {lastSession ? (
-        <div className="flex flex-col gap-2 shrink-0">
-          {isDual && module?.asset_b && lastSession.score_htf_b ? (
-            <>
-              <div className="flex items-center gap-2">
-                <span className="text-[9px] text-slate-600 w-8 text-right shrink-0">{module.asset_a}</span>
-                <BadgeRow suffix="a" lastSession={lastSession} />
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="text-[9px] text-slate-600 w-8 text-right shrink-0">{module.asset_b}</span>
-                <BadgeRow suffix="b" lastSession={lastSession} />
-              </div>
-            </>
-
-          ) : (
-            <BadgeRow suffix="a" lastSession={lastSession} />
-          )}
-        </div>
-      ) : (
-        <div className="flex items-center gap-1.5 text-[10px] text-amber-400/70 bg-amber-900/10 border border-amber-800/20 rounded px-2 py-1 shrink-0">
-          <AlertTriangle size={10} className="shrink-0" />
-          <Link to="/market-analysis/new" className="underline">Run analysis</Link>
-        </div>
-      )}
-    </div>
-  )
-}
-
-function MAWidget({ profileId }: { profileId: number }) {
-  const [staleness, setStaleness]   = useState<MAStalenessItem[]>([])
-  const [sessions,  setSessions]    = useState<MASessionListItem[]>([])
-  const [modules,   setModules]     = useState<MAModule[]>([])
-  const [loading,   setLoading]     = useState(true)
-  const [error,     setError]       = useState<string | null>(null)
-
-  const load = useCallback(async () => {
-    setLoading(true); setError(null)
-    try {
-      const [stale, sess, mods] = await Promise.all([
-        maApi.getStaleness(profileId),
-        maApi.listSessions(undefined, 10),   // global — no profile filter
-        maApi.listModules(),
-      ])
-      setStaleness(stale)
-      setSessions(sess)
-      setModules(mods)
-    } catch (e) { setError((e as Error).message) }
-    finally { setLoading(false) }
-  }, [profileId])
-
-  useEffect(() => { void load() }, [load])
-
-  const staleCount = staleness.filter((s) => s.is_stale).length
-  const neverCount = staleness.filter((s) => s.last_analyzed_at === null).length
-
-  // Last session per module
-  const lastByMod = useMemo(() => {
-    const map: Record<number, MASessionListItem> = {}
-    for (const s of [...sessions].reverse()) map[s.module_id] = s
-    return map
-  }, [sessions])
-
-  return (
-    <div className="rounded-xl bg-surface-800 border border-surface-700 p-5 flex flex-col gap-4">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <BarChart3 size={14} className="text-purple-400" />
-          <h2 className="text-sm font-semibold text-slate-200">Market Analysis</h2>
-          {!loading && staleCount > 0 && (
-            <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-900/30 text-amber-400 border border-amber-700/40">
-              {staleCount} stale
-            </span>
-          )}
-        </div>
-        <div className="flex items-center gap-2">
-          <button type="button" onClick={() => void load()} className="text-slate-600 hover:text-slate-400 transition-colors"><RefreshCw size={12} /></button>
-          <Link to="/market-analysis" className="text-[10px] text-purple-400 hover:text-purple-300 flex items-center gap-0.5">Full view <ChevronRight size={10} /></Link>
-        </div>
-      </div>
-
-      {loading ? (
-        <div className="flex items-center justify-center py-6"><Loader2 size={16} className="text-slate-600 animate-spin" /></div>
-      ) : error ? (
-        <div className="text-xs text-red-400">{error}</div>
-      ) : staleness.length === 0 ? (
-        <p className="text-xs text-slate-600 text-center py-4">No modules configured.</p>
-      ) : (
-        <div className="grid grid-cols-1 gap-3">
-          {staleness.map((s) => (
-            <MAModuleCard
-              key={s.module_id}
-              staleness={s}
-              lastSession={lastByMod[s.module_id]}
-              module={modules.find((m) => m.id === s.module_id)}
-            />
-          ))}
-        </div>
-      )}
-
-      {!loading && neverCount > 0 && (
-        <div className="flex items-start gap-2 text-xs text-amber-400/80 bg-amber-900/10 border border-amber-800/20 rounded-lg px-3 py-2">
-          <AlertTriangle size={12} className="mt-0.5 shrink-0" />
-          <span>
-            {neverCount} module{neverCount > 1 ? 's' : ''} never analyzed —{' '}
-            <Link to="/market-analysis/new" className="underline">run analysis →</Link>
-          </span>
-        </div>
       )}
     </div>
   )
@@ -937,8 +740,6 @@ export function DashboardPage() {
         icon="📈"
         title="Dashboard"
         subtitle={activeProfile ? `Overview for ${activeProfile.name}` : 'Overview of your trading activity'}
-        badge="Phase 1"
-        badgeVariant="phase"
       />
 
       {/* No profile selected */}
@@ -957,10 +758,10 @@ export function DashboardPage() {
           {/* ── KPI bar ─────────────────────────────────────────────────── */}
           <KpiBar trades={trades} loading={tLoading} profile={activeProfile} />
 
-          {/* ── 2-column widget grid ─────────────────────────────────── */}
+          {/* ── 2-column widget grid ─────────────────────────────────────────── */}
           <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
+            <MarketVIWidget profileId={activeProfile.id} />
             <GoalsWidget    profileId={activeProfile.id} />
-            <MAWidget       profileId={activeProfile.id} />
             <PositionsWidget  trades={trades} loading={tLoading} error={tError} />
             <PerformanceWidget trades={trades} loading={tLoading} error={tError} />
           </div>

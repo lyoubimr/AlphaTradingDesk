@@ -759,8 +759,6 @@ export function MarketAnalysisSettingsPage() {
         icon="⚙️"
         title="Market Analysis — Indicators"
         subtitle="Manage indicators per module: edit questions, guidance, answer labels, add or delete indicators."
-        badge="Phase 1"
-        badgeVariant="phase"
         info="Structural fields (key, timeframe, score block, TV symbol) can only be set at creation. Text fields (label, question, guidance, answers) are editable anytime. Deleting an indicator removes it from all sessions and profile configs."
         actions={
           <button

@@ -12,6 +12,7 @@ import {
   Users,
   SlidersHorizontal,
   Crosshair,
+  Bell,
 } from 'lucide-react'
 import { cn } from '../../lib/cn'
 import { Badge } from '../ui/Badge'
@@ -63,18 +64,14 @@ const NAV_GROUPS: NavGroup[] = [
         icon: <BarChart2 size={16} />,
       },
       {
-        to: '/volatility',
+        to: '/volatility/market',
         label: 'Volatility',
         icon: <Activity size={16} />,
-        badge: 'Phase 2',
-        badgeVariant: 'phase',
       },
       {
-        to: '/watchlist',
+        to: '/volatility/pairs',
         label: 'Watchlist',
         icon: <Eye size={16} />,
-        badge: 'Phase 3',
-        badgeVariant: 'phase',
       },
     ],
   },
@@ -100,6 +97,16 @@ const NAV_GROUPS: NavGroup[] = [
         to: '/settings/market-analysis',
         label: 'Indicator Editor',
         icon: <SlidersHorizontal size={16} />,
+      },
+      {
+        to: '/settings/volatility',
+        label: 'Volatility Settings',
+        icon: <Activity size={16} />,
+      },
+      {
+        to: '/settings/notifications',
+        label: 'Notifications',
+        icon: <Bell size={16} />,
       },
       {
         to: '/settings',
@@ -143,7 +150,6 @@ export function Sidebar({ apiStatus, environment }: SidebarProps) {
             <span className="text-brand-400 font-bold text-sm tracking-tight">α</span>
             <span className="text-slate-100 font-semibold text-sm tracking-tight">TradingDesk</span>
           </div>
-          <span className="text-[9px] text-slate-600 tracking-widest uppercase">Phase 1</span>
         </div>
       </div>
 

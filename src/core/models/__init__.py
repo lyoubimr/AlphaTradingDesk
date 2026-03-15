@@ -18,5 +18,6 @@ from src.core.models import (  # noqa: F401
     sessions,
     trade,
 )
+from src.volatility import models as _volatility_models  # noqa: F401
 
 __all__ = ["Base"]

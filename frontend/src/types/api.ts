@@ -569,3 +569,108 @@ export interface MATradeConclusion {
   size_advice: string // "normal (100%)" | "reduced (50%)"
   color: 'green' | 'amber' | 'red' | 'neutral'
 }
+
+// ── Volatility (Phase 2) ──────────────────────────────────────────────────
+
+export type VIRegime =
+  // English labels (from backend score_to_regime)
+  | 'DEAD' | 'CALM' | 'NORMAL' | 'TRENDING' | 'ACTIVE' | 'EXTREME'
+  // French display labels kept for backward-compat
+  | 'MORT' | 'CALME' | 'ACTIF' | 'EXTRÊMe'
+
+export interface MarketVIOut {
+  timeframe: string
+  vi_score: number
+  regime: VIRegime
+  timestamp: string  // ISO-8601
+  components?: Record<string, number | null>  // {symbol: vi_score} for Binance pairs
+}
+
+export interface PairVIOut {
+  pair: string
+  timeframe: string
+  vi_score: number
+  regime: VIRegime
+  components: Record<string, number | string | null>
+  timestamp: string
+}
+
+export interface PairsVIOut {
+  timeframe: string
+  pairs: PairVIOut[]
+  count: number
+}
+
+export interface WatchlistPairOut {
+  pair: string
+  vi_score: number
+  regime: VIRegime
+  alert: string | null
+  change_24h: number | null
+  ema_score: number
+  ema_signal: string
+  tf_sup_regime: string | null
+  tf_sup_vi: number | null
+}
+
+export interface WatchlistOut {
+  id: number | null
+  timeframe: string
+  regime: VIRegime
+  pairs_count: number
+  pairs: WatchlistPairOut[]
+  generated_at: string
+}
+
+export interface WatchlistMetaOut {
+  id: number
+  timeframe: string
+  name: string
+  regime: VIRegime
+  pairs_count: number
+  generated_at: string
+}
+
+export interface LivePricesResponse {
+  btc: number | null
+  eth: number | null
+  xau: number | null
+  btc_change_pct: number | null
+  eth_change_pct: number | null
+  xau_change_pct: number | null
+  currency: string
+  currency_symbol: string
+  timestamp: string
+  cached: boolean
+}
+
+export interface TFComponentOut {
+  tf: string
+  vi_score: number
+  regime: VIRegime
+  weight: number
+}
+
+export interface AggregatedMarketVIOut {
+  vi_score: number
+  regime: VIRegime
+  timestamp: string  // ISO-8601
+  is_weekend: boolean
+  tf_components: TFComponentOut[]
+}
+
+export interface VolatilitySettingsOut {
+  profile_id: number
+  market_vi: Record<string, unknown>
+  per_pair: Record<string, unknown>
+  regimes: Record<string, number>
+  updated_at: string
+}
+
+export interface NotificationSettingsOut {
+  profile_id: number
+  bots: Array<{ bot_name?: string; bot_token: string; chat_id: string }>
+  market_vi_alerts: Record<string, unknown>
+  watchlist_alerts: Record<string, unknown>
+  updated_at: string
+}

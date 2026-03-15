@@ -2,16 +2,29 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # AlphaTradingDesk — Backend entrypoint
 #
-# Runs on every container start (dev, prod, CI):
-#   1. Wait for PostgreSQL to be ready
-#   2. Run Alembic migrations (idempotent — safe if already at head)
-#   3. Run reference data seed (idempotent — skips existing rows)
-#   4. Start uvicorn
+# Modes (set via docker-compose command):
+#   (no arg / --reload)  → migrate + seed + uvicorn   (API server)
+#   celery-worker        → celery worker (Phase 2+)
+#   celery-beat          → celery beat scheduler (Phase 2+)
 #
 # The seed only inserts brokers, instruments, trading_styles, sessions, etc.
 # It never touches user data (profiles, trades).
 # ─────────────────────────────────────────────────────────────────────────────
 set -e
+
+# ── Celery short-circuit ─────────────────────────────────────────────────────
+# Celery worker/beat depend on db+redis (already healthchecked by Docker).
+# They share the same image but skip migration/seed — the backend handles that.
+if [ "$1" = "celery-worker" ]; then
+  echo "🔧 Starting Celery worker…"
+  exec celery -A src.core.celery_app worker --loglevel=info -c 2
+fi
+
+if [ "$1" = "celery-beat" ]; then
+  echo "⏰ Starting Celery beat scheduler…"
+  exec celery -A src.core.celery_app beat --loglevel=info --scheduler celery.beat:PersistentScheduler
+fi
+# ─────────────────────────────────────────────────────────────────────────────
 
 echo "⏳ Waiting for PostgreSQL…"
 until python -c "

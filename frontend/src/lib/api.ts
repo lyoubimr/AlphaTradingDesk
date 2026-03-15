@@ -13,6 +13,8 @@ import type {
   GoalOut, GoalCreate, GoalUpdate, GoalProgressItem, GoalOverrideCreate, GoalOverrideOut,
   MAModule, MAIndicator, MAIndicatorConfig, MAIndicatorConfigOut, MAIndicatorUpdate, MAIndicatorCreate,
   MASessionCreate, MASessionOut, MASessionListItem, MAStalenessItem, MATradeConclusion,
+  MarketVIOut, AggregatedMarketVIOut, PairsVIOut, WatchlistOut, WatchlistMetaOut, LivePricesResponse,
+  VolatilitySettingsOut, NotificationSettingsOut,
 } from '../types/api'
 
 const BASE = '/api'
@@ -417,4 +419,83 @@ export const maApi = {
   /** GET /api/market-analysis/staleness (global — last session per module across all profiles) */
   getStalenessGlobal: (): Promise<MAStalenessItem[]> =>
     request('/market-analysis/staleness'),
+}
+
+// ── Volatility (Phase 2) ──────────────────────────────────────────────────
+
+export const volatilityApi = {
+  /** GET /api/volatility/market/{timeframe} → latest Market VI snapshot */
+  getMarketVI: (timeframe: string): Promise<MarketVIOut> =>
+    request(`/volatility/market/${timeframe}`),
+
+  /** GET /api/volatility/market/aggregated → cross-TF aggregated Market VI */
+  getAggregatedMarketVI: (): Promise<AggregatedMarketVIOut> =>
+    request('/volatility/market/aggregated'),
+
+  /** GET /api/volatility/market/{tf}/history → last N snapshots, oldest first */
+  getMarketVIHistory: (timeframe: string, limit = 96, since?: string): Promise<MarketVIOut[]> => {
+    const params = new URLSearchParams({ limit: String(limit) })
+    if (since) params.set('since', since)
+    return request(`/volatility/market/${timeframe}/history?${params}`)
+  },
+
+  /** GET /api/volatility/pairs/{timeframe} → all per-pair VI snapshots */
+  getPairsVI: (timeframe: string): Promise<PairsVIOut> =>
+    request(`/volatility/pairs/${timeframe}`),
+
+  /** GET /api/volatility/watchlist/{timeframe} → latest watchlist snapshot */
+  getWatchlist: (timeframe: string): Promise<WatchlistOut> =>
+    request(`/volatility/watchlist/${timeframe}`),
+
+  /** GET /api/volatility/prices/live → BTC + ETH + XAU (cached 30s) */
+  getLivePrices: (): Promise<LivePricesResponse> =>
+    request('/volatility/prices/live'),
+
+  /**
+   * POST /api/volatility/run/{task} — manually queue a background task.
+   * task      : 'market-vi' | 'pairs' | 'sync'
+   * timeframe : required for 'market-vi' and 'pairs' (e.g. '1h')
+   * Returns 202 immediately; data appears after ~15-60 s.
+   */
+  runTask: (
+    task: 'market-vi' | 'pairs' | 'sync',
+    timeframe?: string,
+  ): Promise<{ status: string; task: string; timeframes: string[] | null; task_ids: string[] }> => {
+    const params = timeframe ? `?timeframe=${timeframe}` : ''
+    return request(`/volatility/run/${task}${params}`, { method: 'POST' })
+  },
+
+  /** GET /api/volatility/watchlists?days=N → lightweight snapshot metadata for tree view */
+  listWatchlists: (days = 7): Promise<WatchlistMetaOut[]> =>
+    request(`/volatility/watchlists?days=${days}`),
+
+  /** GET /api/volatility/watchlist/snapshot/{id} → full snapshot with pairs */
+  getWatchlistById: (snapshotId: number): Promise<WatchlistOut> =>
+    request(`/volatility/watchlist/snapshot/${snapshotId}`),
+
+  /** GET /api/volatility/settings/{profileId} */
+  getSettings: (profileId: number): Promise<VolatilitySettingsOut> =>
+    request(`/volatility/settings/${profileId}`),
+
+  /** PUT /api/volatility/settings/{profileId} */
+  updateSettings: (profileId: number, patch: object): Promise<VolatilitySettingsOut> =>
+    request(`/volatility/settings/${profileId}`, {
+      method: 'PUT',
+      body: JSON.stringify(patch),
+    }),
+
+  /** GET /api/volatility/notifications/{profileId} */
+  getNotificationSettings: (profileId: number): Promise<NotificationSettingsOut> =>
+    request(`/volatility/notifications/${profileId}`),
+
+  /** PUT /api/volatility/notifications/{profileId} */
+  updateNotificationSettings: (profileId: number, patch: object): Promise<NotificationSettingsOut> =>
+    request(`/volatility/notifications/${profileId}`, {
+      method: 'PUT',
+      body: JSON.stringify(patch),
+    }),
+
+  /** POST /api/volatility/notifications/{profileId}/test */
+  testNotification: (profileId: number): Promise<{ status: string; message: string }> =>
+    request(`/volatility/notifications/${profileId}/test`, { method: 'POST' }),
 }
