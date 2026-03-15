@@ -32,6 +32,7 @@ interface MarketVICfg {
   pairs_count: number         // number of Binance Futures pairs used for Market VI (10–100)
   weights: Record<string, number>  // anchor weights as fractions 0.0–1.0; e.g. {"BTCUSDT": 0.30}
   retention_days: number       // market_vi_snapshots retention in days
+  indicator_weights: { rvol: number; mfi: number; atr: number; bb_width: number }
 }
 
 // 0=Mon … 6=Sun (Python weekday() convention)
@@ -78,6 +79,7 @@ const D_MVI: MarketVICfg = {
   pairs_count: 50,
   weights: {},
   retention_days: 90,
+  indicator_weights: { rvol: 0.35, mfi: 0.10, atr: 0.35, bb_width: 0.20 },
 }
 
 // Pairs eligible for anchor weight in the Market VI engine
@@ -128,6 +130,7 @@ function hydrateMVI(raw: Record<string, unknown>): MarketVICfg {
     pairs_count: (raw.pairs_count as number | undefined) ?? D_MVI.pairs_count,
     weights: (raw.weights as Record<string, number> | undefined) ?? D_MVI.weights,
     retention_days: (raw.retention_days as number | undefined) ?? D_MVI.retention_days,
+    indicator_weights: { ...D_MVI.indicator_weights, ...((raw.indicator_weights as Partial<typeof D_MVI['indicator_weights']> | undefined) ?? {}) },
   }
 }
 
@@ -651,6 +654,49 @@ export function VolatilitySettingsPage() {
                   </button>
                 )}
               </div>
+            </div>
+
+            <hr className="border-surface-700" />
+
+            {/* Indicator weights */}
+            <div>
+              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">
+                Indicator Weights
+              </p>
+              <p className="text-xs text-slate-600 mt-0.5 mb-3">
+                Relative weight of each indicator in the VI score. Weights are renormalized automatically when indicators are disabled.
+              </p>
+              <div className="space-y-2">
+                {([
+                  { key: 'rvol',     label: 'RVOL' },
+                  { key: 'mfi',      label: 'MFI'  },
+                  { key: 'atr',      label: 'ATR'  },
+                  { key: 'bb_width', label: 'BB'   },
+                ] as { key: keyof typeof D_MVI['indicator_weights']; label: string }[]).map(({ key, label }) => {
+                  const pct = Math.round((mvi.indicator_weights[key] ?? D_MVI.indicator_weights[key]) * 100)
+                  return (
+                    <div key={key} className="flex items-center justify-between">
+                      <span className="text-sm text-slate-300 font-mono">{label}</span>
+                      <div className="flex items-center gap-1.5">
+                        <input
+                          type="number" min={0} max={100} step={5} value={pct}
+                          onChange={e => {
+                            const v = Math.min(100, Math.max(0, Number(e.target.value))) / 100
+                            setMVI(p => ({ ...p, indicator_weights: { ...p.indicator_weights, [key]: v } }))
+                          }}
+                          className="w-16 bg-surface-700 border border-surface-600 text-xs text-slate-300 rounded-lg px-2 py-1.5 text-right focus:outline-none focus:border-brand-500/60"
+                        />
+                        <span className="text-xs text-slate-500">%</span>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+              {Math.round(Object.values(mvi.indicator_weights).reduce((a, v) => a + v, 0) * 100) !== 100 && (
+                <p className="text-xs text-amber-400 mt-2">
+                  Total: {Math.round(Object.values(mvi.indicator_weights).reduce((a, v) => a + v, 0) * 100)}% — weights will be renormalized automatically.
+                </p>
+              )}
             </div>
 
             <hr className="border-surface-700" />
