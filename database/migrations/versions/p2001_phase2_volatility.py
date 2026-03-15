@@ -50,16 +50,26 @@ def upgrade() -> None:
     # ── 2. volatility_snapshots — Per-Pair VI (hypertable) ───────────────────
     # Stores computed VI scores per pair + timeframe.
     # Partition key: timestamp (daily chunks, auto-compressed after 7 days).
+    # DO block: fully idempotent — handles orphaned sequences from partial rollbacks.
     op.execute("""
-        CREATE TABLE IF NOT EXISTS volatility_snapshots (
-            id          BIGSERIAL,
-            pair        VARCHAR(20)     NOT NULL,
-            timeframe   VARCHAR(10)     NOT NULL,
-            vi_score    DECIMAL(5,3)    NOT NULL,
-            components  JSONB           NOT NULL DEFAULT '{}',
-            timestamp   TIMESTAMPTZ     NOT NULL,
-            PRIMARY KEY (pair, timeframe, timestamp)
-        )
+        DO $$
+        BEGIN
+            IF NOT EXISTS (
+                SELECT 1 FROM information_schema.tables
+                WHERE table_schema = 'public' AND table_name = 'volatility_snapshots'
+            ) THEN
+                DROP SEQUENCE IF EXISTS volatility_snapshots_id_seq;
+                CREATE TABLE volatility_snapshots (
+                    id          BIGSERIAL,
+                    pair        VARCHAR(20)     NOT NULL,
+                    timeframe   VARCHAR(10)     NOT NULL,
+                    vi_score    DECIMAL(5,3)    NOT NULL,
+                    components  JSONB           NOT NULL DEFAULT '{}',
+                    timestamp   TIMESTAMPTZ     NOT NULL,
+                    PRIMARY KEY (pair, timeframe, timestamp)
+                );
+            END IF;
+        END $$
     """)
 
     # Convert to hypertable only when TimescaleDB is available
@@ -89,15 +99,24 @@ def upgrade() -> None:
     # ── 3. market_vi_snapshots — Market VI global (hypertable) ───────────────
     # Stores the aggregated market score per timeframe.
     op.execute("""
-        CREATE TABLE IF NOT EXISTS market_vi_snapshots (
-            id          BIGSERIAL,
-            timeframe   VARCHAR(10)     NOT NULL,
-            vi_score    DECIMAL(5,3)    NOT NULL,
-            regime      VARCHAR(20)     NOT NULL,
-            components  JSONB           NOT NULL DEFAULT '{}',
-            timestamp   TIMESTAMPTZ     NOT NULL,
-            PRIMARY KEY (timeframe, timestamp)
-        )
+        DO $$
+        BEGIN
+            IF NOT EXISTS (
+                SELECT 1 FROM information_schema.tables
+                WHERE table_schema = 'public' AND table_name = 'market_vi_snapshots'
+            ) THEN
+                DROP SEQUENCE IF EXISTS market_vi_snapshots_id_seq;
+                CREATE TABLE market_vi_snapshots (
+                    id          BIGSERIAL,
+                    timeframe   VARCHAR(10)     NOT NULL,
+                    vi_score    DECIMAL(5,3)    NOT NULL,
+                    regime      VARCHAR(20)     NOT NULL,
+                    components  JSONB           NOT NULL DEFAULT '{}',
+                    timestamp   TIMESTAMPTZ     NOT NULL,
+                    PRIMARY KEY (timeframe, timestamp)
+                );
+            END IF;
+        END $$
     """)
 
     op.execute("""
@@ -122,16 +141,25 @@ def upgrade() -> None:
     # Top-100 Binance Futures pairs (synced by sync_instruments task).
     # is_selected: controlled from Settings UI (default top-50 by volume).
     op.execute("""
-        CREATE TABLE IF NOT EXISTS market_vi_pairs (
-            id              BIGSERIAL       PRIMARY KEY,
-            symbol          VARCHAR(30)     NOT NULL UNIQUE,
-            display_name    VARCHAR(50),
-            quote_volume_24h DECIMAL(20,2),
-            volume_rank     INTEGER,
-            is_selected     BOOLEAN         NOT NULL DEFAULT FALSE,
-            created_at      TIMESTAMPTZ     NOT NULL DEFAULT NOW(),
-            updated_at      TIMESTAMPTZ     NOT NULL DEFAULT NOW()
-        )
+        DO $$
+        BEGIN
+            IF NOT EXISTS (
+                SELECT 1 FROM information_schema.tables
+                WHERE table_schema = 'public' AND table_name = 'market_vi_pairs'
+            ) THEN
+                DROP SEQUENCE IF EXISTS market_vi_pairs_id_seq;
+                CREATE TABLE market_vi_pairs (
+                    id              BIGSERIAL       PRIMARY KEY,
+                    symbol          VARCHAR(30)     NOT NULL UNIQUE,
+                    display_name    VARCHAR(50),
+                    quote_volume_24h DECIMAL(20,2),
+                    volume_rank     INTEGER,
+                    is_selected     BOOLEAN         NOT NULL DEFAULT FALSE,
+                    created_at      TIMESTAMPTZ     NOT NULL DEFAULT NOW(),
+                    updated_at      TIMESTAMPTZ     NOT NULL DEFAULT NOW()
+                );
+            END IF;
+        END $$
     """)
 
     op.execute("""
@@ -144,15 +172,24 @@ def upgrade() -> None:
     # pairs JSONB: [{pair, vi_score, regime, ema_signal, ema_score,
     #                change_24h, tf_sup_regime, tf_sup_vi}]
     op.execute("""
-        CREATE TABLE IF NOT EXISTS watchlist_snapshots (
-            id              BIGSERIAL       PRIMARY KEY,
-            name            VARCHAR(100)    NOT NULL,
-            timeframe       VARCHAR(10)     NOT NULL,
-            regime          VARCHAR(20)     NOT NULL,
-            pairs_count     INTEGER         NOT NULL DEFAULT 0,
-            pairs           JSONB           NOT NULL DEFAULT '[]',
-            generated_at    TIMESTAMPTZ     NOT NULL DEFAULT NOW()
-        )
+        DO $$
+        BEGIN
+            IF NOT EXISTS (
+                SELECT 1 FROM information_schema.tables
+                WHERE table_schema = 'public' AND table_name = 'watchlist_snapshots'
+            ) THEN
+                DROP SEQUENCE IF EXISTS watchlist_snapshots_id_seq;
+                CREATE TABLE watchlist_snapshots (
+                    id              BIGSERIAL       PRIMARY KEY,
+                    name            VARCHAR(100)    NOT NULL,
+                    timeframe       VARCHAR(10)     NOT NULL,
+                    regime          VARCHAR(20)     NOT NULL,
+                    pairs_count     INTEGER         NOT NULL DEFAULT 0,
+                    pairs           JSONB           NOT NULL DEFAULT '[]',
+                    generated_at    TIMESTAMPTZ     NOT NULL DEFAULT NOW()
+                );
+            END IF;
+        END $$
     """)
 
     op.execute("""
