@@ -1,5 +1,6 @@
 // ── Settings page ──────────────────────────────────────────────────────────
-import { User, Database, Bell, Shield, Info, Palette, BarChart2, Activity } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { User, Database, Bell, Shield, Info, Palette, BarChart2, Activity, CheckCircle2, XCircle, Loader2, RefreshCw } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { PageHeader } from '../../components/ui/PageHeader'
 import { Badge } from '../../components/ui/Badge'
@@ -51,6 +52,113 @@ function SettingRow({ label, value, info }: { label: string; value: string; info
       </div>
       <span className="text-xs font-mono text-slate-400">{value}</span>
     </div>
+  )
+}
+
+// ── System health check ───────────────────────────────────────────────────
+type ServiceStatus = { status: 'ok' | 'error'; detail?: string; latency_ms?: number }
+type HealthData = { status: 'ok' | 'degraded'; services: Record<string, ServiceStatus> }
+
+const SERVICE_LABELS: Record<string, string> = {
+  postgres: 'PostgreSQL',
+  redis:    'Redis',
+  celery:   'Celery worker',
+  binance:  'Binance API',
+  kraken:   'Kraken API',
+}
+
+function SystemHealthSection() {
+  const [data, setData]       = useState<HealthData | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [lastCheck, setLastCheck] = useState<Date | null>(null)
+
+  const check = () => {
+    setLoading(true)
+    fetch('/api/system/status')
+      .then(r => r.json())
+      .then((d: HealthData) => { setData(d); setLastCheck(new Date()) })
+      .catch(() => setData(null))
+      .finally(() => setLoading(false))
+  }
+
+  // Auto-check on mount
+  useEffect(() => { check() }, [])
+
+  return (
+    <SettingsSection
+      icon={<Activity size={16} />}
+      title="System Health"
+      description="Live status of all backend services and external APIs"
+    >
+      <div className="space-y-1.5">
+        {/* Status header */}
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-2">
+            {loading && <Loader2 size={13} className="text-slate-500 animate-spin" />}
+            {!loading && data && (
+              <span className={cn(
+                'text-xs font-semibold px-2 py-0.5 rounded-full',
+                data.status === 'ok'
+                  ? 'bg-bull-dim/40 text-bull border border-bull/20'
+                  : 'bg-bear-dim/40 text-bear border border-bear/20',
+              )}>
+                {data.status === 'ok' ? '✓ All systems operational' : '⚠ Degraded'}
+              </span>
+            )}
+            {!loading && !data && (
+              <span className="text-xs text-slate-600">No data</span>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            {lastCheck && (
+              <span className="text-[10px] text-slate-600">
+                {lastCheck.toLocaleTimeString()}
+              </span>
+            )}
+            <button
+              type="button"
+              onClick={check}
+              disabled={loading}
+              className="p-1 rounded text-slate-500 hover:text-slate-300 hover:bg-surface-700 transition-colors disabled:opacity-40"
+              title="Refresh"
+            >
+              <RefreshCw size={12} />
+            </button>
+          </div>
+        </div>
+
+        {/* Services list */}
+        {data && Object.entries(data.services).map(([key, svc]) => (
+          <div key={key} className="flex items-center justify-between py-1.5 border-b border-surface-700/60 last:border-none">
+            <div className="flex items-center gap-2">
+              {svc.status === 'ok'
+                ? <CheckCircle2 size={13} className="text-bull shrink-0" />
+                : <XCircle     size={13} className="text-bear shrink-0" />
+              }
+              <span className="text-xs text-slate-300">{SERVICE_LABELS[key] ?? key}</span>
+              {svc.detail && (
+                <span className="text-[10px] text-slate-600 truncate max-w-[180px]" title={svc.detail}>
+                  {svc.detail}
+                </span>
+              )}
+            </div>
+            {svc.latency_ms != null && (
+              <span className={cn(
+                'text-[10px] font-mono tabular-nums',
+                svc.latency_ms < 50  ? 'text-bull' :
+                svc.latency_ms < 200 ? 'text-neutral-amber' : 'text-bear',
+              )}>
+                {svc.latency_ms}ms
+              </span>
+            )}
+          </div>
+        ))}
+
+        {!data && !loading && (
+          <p className="text-xs text-slate-600 py-2">Could not reach backend. Is it running?</p>
+        )}
+      </div>
+    </SettingsSection>
   )
 }
 
@@ -234,6 +342,9 @@ export function SettingsPage() {
           </div>
         </SettingsSection>
 
+        {/* ── System Health ────────────────────────────────────────────── */}
+        <SystemHealthSection />
+
         {/* ── System / API info ────────────────────────────────────────── */}
         <SettingsSection
           icon={<Database size={16} />}
@@ -244,7 +355,6 @@ export function SettingsPage() {
           <SettingRow label="Database"   value="PostgreSQL 16" />
           <SettingRow label="ORM"        value="SQLAlchemy 2.0 + Alembic" />
           <SettingRow label="Frontend"   value="React 19 + Vite + Tailwind v4" />
-          <SettingRow label="Phase"      value="Phase 1 — Step 8" />
           <SettingRow label="API health" value="/api/health" info="Live health endpoint. Returns status and current environment." />
         </SettingsSection>
 
@@ -253,7 +363,7 @@ export function SettingsPage() {
       <div className="mt-6">
         <ComingSoon
           feature="Settings forms, profile switching, preference persistence"
-          phase="Phase 1 — Step 9+"
+          phase="Coming soon"
         />
       </div>
     </div>
