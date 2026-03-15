@@ -55,26 +55,7 @@ html, body, #root {
    Default (no attribute) = Indigo Night (original)
    ══════════════════════════════════════════════════════════════════════════ */
 
-/* ── 1. Emerald Oasis (green brand, deep teal surfaces) ─────────────────── */
-[data-theme="emerald"] {
-  --color-brand-50:  #ecfdf5;
-  --color-brand-100: #d1fae5;
-  --color-brand-200: #a7f3d0;
-  --color-brand-400: #34d399;
-  --color-brand-500: #10b981;
-  --color-brand-600: #059669;
-  --color-brand-700: #047857;
-  --color-brand-900: #022c22;
-  --color-surface-950: #010d0a;
-  --color-surface-900: #071610;
-  --color-surface-800: #0d231a;
-  --color-surface-700: #132e22;
-  --color-surface-600: #1a3b2c;
-  --color-surface-500: #254d39;
-  --color-surface-400: #366650;
-}
-
-/* ── 2. Amber Desert (golden brand, warm dark surfaces) ─────────────────── */
+/* ── 1. Amber Desert (golden brand, warm dark surfaces) ────────────────── */
 [data-theme="amber"] {
   --color-brand-50:  #fffbeb;
   --color-brand-100: #fef3c7;
@@ -93,26 +74,7 @@ html, body, #root {
   --color-surface-400: #6b4210;
 }
 
-/* ── 3. Rose Blaze (pink-rose brand, near-black surfaces) ───────────────── */
-[data-theme="rose"] {
-  --color-brand-50:  #fff1f2;
-  --color-brand-100: #ffe4e6;
-  --color-brand-200: #fecdd3;
-  --color-brand-400: #fb7185;
-  --color-brand-500: #f43f5e;
-  --color-brand-600: #e11d48;
-  --color-brand-700: #be123c;
-  --color-brand-900: #4c0519;
-  --color-surface-950: #0e0007;
-  --color-surface-900: #180010;
-  --color-surface-800: #220018;
-  --color-surface-700: #2c0020;
-  --color-surface-600: #3a0029;
-  --color-surface-500: #4d0037;
-  --color-surface-400: #6b0050;
-}
-
-/* ── 4. Cyan Terminal (cyan-sky brand, true-black terminal surfaces) ─────── */
+/* ── 2. Cyan Terminal (cyan-sky brand, true-black terminal surfaces) ─────── */
 [data-theme="cyan"] {
   --color-brand-50:  #ecfeff;
   --color-brand-100: #cffafe;
@@ -131,7 +93,7 @@ html, body, #root {
   --color-surface-400: #1e4660;
 }
 
-/* ── 5. Night Black (pure black surfaces, white/slate brand) ────────────── */
+/* ── 3. Night Black (pure black surfaces, white/slate brand) ──────────── */
 [data-theme="night"] {
   --color-brand-50:  #f8fafc;
   --color-brand-100: #f1f5f9;
@@ -150,60 +112,65 @@ html, body, #root {
   --color-surface-400: #444444;
 }
 
-/* ── 6. Navy Pro (deep navy surfaces, blue brand) ───────────────────────── */
-[data-theme="navy"] {
-  --color-brand-50:  #eff6ff;
-  --color-brand-100: #dbeafe;
-  --color-brand-200: #bfdbfe;
-  --color-brand-400: #60a5fa;
-  --color-brand-500: #3b82f6;
-  --color-brand-600: #2563eb;
-  --color-brand-700: #1d4ed8;
-  --color-brand-900: #1e3a5f;
-  --color-surface-950: #020817;
-  --color-surface-900: #050f1f;
-  --color-surface-800: #091628;
-  --color-surface-700: #0d1d33;
-  --color-surface-600: #12273f;
-  --color-surface-500: #183350;
-  --color-surface-400: #1e4068;
+/* ── 4. Obsidian Gold — cool obsidian-black + warm 18k gold ─────────────── */
+/* Bloomberg terminal: volcanic glass blacks + institutional gold */
+[data-theme="obsidian"] {
+  --color-brand-50:  #fefce8;
+  --color-brand-100: #fef9c3;
+  --color-brand-200: #fef08a;
+  --color-brand-400: #eab308;
+  --color-brand-500: #ca8a04;
+  --color-brand-600: #a16207;
+  --color-brand-700: #854d0e;
+  --color-brand-900: #431c03;
+  --color-surface-950: #000000;
+  --color-surface-900: #04040a;
+  --color-surface-800: #0a0a14;
+  --color-surface-700: #12121f;
+  --color-surface-600: #1a1a2a;
+  --color-surface-500: #252535;
+  --color-surface-400: #343448;
 }
 
-/* ── 7. Light (clean white, indigo brand) ───────────────────────────────── */
-[data-theme="light"] {
-  --color-brand-50:  #eef2ff;
-  --color-brand-100: #e0e7ff;
-  --color-brand-200: #c7d2fe;
-  --color-brand-400: #818cf8;
-  --color-brand-500: #6366f1;
-  --color-brand-600: #4f46e5;
-  --color-brand-700: #4338ca;
-  --color-brand-900: #1e1b4b;
-  --color-surface-950: #f8fafc;
-  --color-surface-900: #f1f5f9;
-  --color-surface-800: #ffffff;
-  --color-surface-700: #f1f5f9;
-  --color-surface-600: #e2e8f0;
-  --color-surface-500: #cbd5e1;
-  --color-surface-400: #94a3b8;
+/* ── 5. Aurora — deep space purple + electric violet ─────────────────── */
+/* Cosmic/quant: near-void purple depths + vivid violet accent */
+[data-theme="aurora"] {
+  --color-brand-50:  #faf5ff;
+  --color-brand-100: #f3e8ff;
+  --color-brand-200: #e9d5ff;
+  --color-brand-400: #c084fc;
+  --color-brand-500: #a855f7;
+  --color-brand-600: #9333ea;
+  --color-brand-700: #7e22ce;
+  --color-brand-900: #2e1065;
+  --color-surface-950: #040008;
+  --color-surface-900: #0c0218;
+  --color-surface-800: #150525;
+  --color-surface-700: #1f0c33;
+  --color-surface-600: #281640;
+  --color-surface-500: #352153;
+  --color-surface-400: #462d6b;
 }
 
-/* Light theme text + bg overrides */
-[data-theme="light"] html,
-[data-theme="light"] body,
-html[data-theme="light"],
-html[data-theme="light"] body {
-  background-color: #f8fafc;
-  color: #0f172a;
+/* ── 6. Graphite — gunmetal neutral + vivid lime ───────────────────── */
+/* Algo/quant terminal: zero-tint gunmetal black + raw lime-green pop */
+[data-theme="graphite"] {
+  --color-brand-50:  #f7fee7;
+  --color-brand-100: #ecfccb;
+  --color-brand-200: #d9f99d;
+  --color-brand-400: #a3e635;
+  --color-brand-500: #84cc16;
+  --color-brand-600: #65a30d;
+  --color-brand-700: #4d7c0f;
+  --color-brand-900: #1a2e05;
+  --color-surface-950: #020202;
+  --color-surface-900: #090909;
+  --color-surface-800: #111111;
+  --color-surface-700: #1a1a1a;
+  --color-surface-600: #232323;
+  --color-surface-500: #303030;
+  --color-surface-400: #424242;
 }
-[data-theme="light"] .text-slate-200  { color: #1e293b; }
-[data-theme="light"] .text-slate-300  { color: #334155; }
-[data-theme="light"] .text-slate-400  { color: #475569; }
-[data-theme="light"] .text-slate-500  { color: #64748b; }
-[data-theme="light"] .text-slate-600  { color: #94a3b8; }
-[data-theme="light"] .text-slate-700  { color: #cbd5e1; }
-[data-theme="light"] .border-surface-700 { border-color: #e2e8f0; }
-[data-theme="light"] .border-surface-600 { border-color: #cbd5e1; }
 
 /* ── Utility button classes ─────────────────────────────────────────────── */
 .atd-btn-primary {

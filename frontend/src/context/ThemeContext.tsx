@@ -3,11 +3,13 @@
 // Applies the theme by setting data-theme="<id>" on <html>.
 //
 // Available themes:
-//   indigo  → Indigo Night  (default, original brand)
-//   emerald → Emerald Oasis (green, teal surfaces)
-//   amber   → Amber Desert  (golden, warm dark surfaces)
-//   rose    → Rose Blaze    (pink-rose, near-black surfaces)
-//   cyan    → Cyan Terminal (cyan-sky, true-black terminal surfaces)
+//   indigo   → Indigo Night   (default, original brand)
+//   amber    → Amber Desert   (golden, warm dark surfaces)
+//   cyan     → Cyan Terminal  (cyan-sky, true-black terminal surfaces)
+//   night    → Night Black    (pure black, OLED-friendly)
+//   obsidian → Obsidian Gold  (obsidian-black + refined gold, Bloomberg terminal)
+//   aurora   → Aurora         (deep space purple + electric violet)
+//   graphite → Graphite       (gunmetal neutral + vivid lime, algo/quant)
 
 import {
   createContext,
@@ -19,7 +21,7 @@ import {
 
 // ── Types ─────────────────────────────────────────────────────────────────
 
-export type ThemeId = 'indigo' | 'emerald' | 'amber' | 'rose' | 'cyan' | 'night' | 'navy' | 'light'
+export type ThemeId = 'indigo' | 'amber' | 'cyan' | 'night' | 'obsidian' | 'aurora' | 'graphite'
 
 export interface ThemeMeta {
   id: ThemeId
@@ -40,25 +42,11 @@ export const THEMES: ThemeMeta[] = [
     swatch: '#6366f1',
   },
   {
-    id: 'emerald',
-    label: 'Emerald Oasis',
-    emoji: '🌿',
-    description: 'Cool green — growth, balance, Islamic green',
-    swatch: '#10b981',
-  },
-  {
     id: 'amber',
     label: 'Amber Desert',
     emoji: '🏜️',
     description: 'Warm gold — desert warmth, patience, wealth',
     swatch: '#f59e0b',
-  },
-  {
-    id: 'rose',
-    label: 'Rose Blaze',
-    emoji: '🌹',
-    description: 'Bold rose-red — aggressive, high conviction',
-    swatch: '#f43f5e',
   },
   {
     id: 'cyan',
@@ -75,18 +63,25 @@ export const THEMES: ThemeMeta[] = [
     swatch: '#f8fafc',
   },
   {
-    id: 'navy',
-    label: 'Navy Pro',
-    emoji: '🌊',
-    description: 'Deep navy — professional trading terminal look',
-    swatch: '#3b82f6',
+    id: 'obsidian',
+    label: 'Obsidian Gold',
+    emoji: '🏆',
+    description: 'Obsidian-black + refined gold — institutional terminal',
+    swatch: '#ca8a04',
   },
   {
-    id: 'light',
-    label: 'Light',
-    emoji: '☀️',
-    description: 'Clean white — bright, minimal, day mode',
-    swatch: '#6366f1',
+    id: 'aurora',
+    label: 'Aurora',
+    emoji: '🔮',
+    description: 'Deep space purple + electric violet — cosmic precision',
+    swatch: '#a855f7',
+  },
+  {
+    id: 'graphite',
+    label: 'Graphite',
+    emoji: '⚡',
+    description: 'Gunmetal black + vivid lime — raw algorithmic power',
+    swatch: '#84cc16',
   },
 ]
 
