@@ -60,6 +60,10 @@ class Settings(BaseSettings):
     # In prod Docker: bind-mounted to /srv/atd/logs/app on the Dell
     log_dir: str = Field("/app/logs", alias="LOG_DIR")
 
+    # App version — injected at Docker build time via APP_VERSION build-arg
+    # In dev: defaults to "dev" | In prod: set to the git semver tag (e.g. "v2.0.0")
+    app_version: str = Field("dev", alias="APP_VERSION")
+
     # CORS — comma-separated list of allowed origins
     # Override via ALLOWED_ORIGINS env var for any deployment
     # e.g. ALLOWED_ORIGINS=https://myapp.example.com,https://app2.example.com

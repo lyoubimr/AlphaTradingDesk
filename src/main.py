@@ -28,7 +28,7 @@ from src.volatility.router import router as volatility_router
 
 app = FastAPI(
     title="AlphaTradingDesk",
-    version="0.1.0",
+    version=settings.app_version,
     description="Multi-asset trading platform — risk management, trade journal, market analysis",
 )
 
@@ -148,4 +148,4 @@ def system_status() -> dict:
         services["kraken"] = {"status": "error", "detail": str(exc)[:120]}
 
     overall = "ok" if all(s["status"] == "ok" for s in services.values()) else "degraded"
-    return {"status": overall, "services": services}
+    return {"status": overall, "version": settings.app_version, "services": services}

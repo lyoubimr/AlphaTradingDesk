@@ -57,7 +57,7 @@ function SettingRow({ label, value, info }: { label: string; value: string; info
 
 // ── System health check ───────────────────────────────────────────────────
 type ServiceStatus = { status: 'ok' | 'error'; detail?: string; latency_ms?: number }
-type HealthData = { status: 'ok' | 'degraded'; services: Record<string, ServiceStatus> }
+type HealthData = { status: 'ok' | 'degraded'; version?: string; services: Record<string, ServiceStatus> }
 
 const SERVICE_LABELS: Record<string, string> = {
   postgres: 'PostgreSQL',
@@ -103,6 +103,11 @@ function SystemHealthSection() {
                   : 'bg-bear-dim/40 text-bear border border-bear/20',
               )}>
                 {data.status === 'ok' ? '✓ All systems operational' : '⚠ Degraded'}
+              </span>
+            )}
+            {!loading && data?.version && (
+              <span className="text-[10px] font-mono text-slate-600 bg-surface-700 px-1.5 py-0.5 rounded">
+                {data.version}
               </span>
             )}
             {!loading && !data && (
