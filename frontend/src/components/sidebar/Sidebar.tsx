@@ -150,7 +150,6 @@ export function Sidebar({ apiStatus, environment }: SidebarProps) {
             <span className="text-brand-400 font-bold text-sm tracking-tight">α</span>
             <span className="text-slate-100 font-semibold text-sm tracking-tight">TradingDesk</span>
           </div>
-          <span className="text-[9px] text-slate-600 tracking-widest uppercase">v1.0</span>
         </div>
       </div>
 
