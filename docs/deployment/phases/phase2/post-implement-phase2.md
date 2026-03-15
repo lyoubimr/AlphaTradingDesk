@@ -1,8 +1,30 @@
 # ✅ Phase 2 — Post-Implementation Checklist
 
 **Date:** 14 mars 2026
-**Version:** 1.0
-**Status:** À faire après `implement-phase2.md` complété
+**Version:** 1.1
+**Status:** ✅ Phase 2 COMPLETE — post-improvements livrés (voir section 0)
+
+---
+
+## 0. ✅ Post-Phase 2 improvements (livrés)
+
+Ces améliorations ont été développées après la fin de l'implémentation initiale et sont **toutes commitées** sur `develop`.
+
+| # | Amélioration | Commit |
+|---|---|---|
+| 1 | Suppression du regime gate erroné sur watchlist (bloquait les auto-runs) | `6000bb4` |
+| 2 | Fallback DB 1d pour composantes vides | `6000bb4` |
+| 3 | Suppression du breakdown Kraken sur la page Market VI | `a773ac1` |
+| 4 | Fix stale pairsData sur changement de TF | `6000bb4` |
+| 5 | `retention_days` configurable pour Market VI (défaut 90j) | `c857174` |
+| 6 | Poids ancre BTC à 40% — D6 (D16 : ETH/BTC exclu de l'agrégation) | `c857174` |
+| 7 | Hint equal-weight sur les ancres pair UI | `c857174` |
+| 8 | Rétention watchlist_snapshots liée à la config per-pair (et non Market VI) | `c857174` |
+| 9 | Cache Redis séparé pour XAU (TTL 300s) — max ~288 calls/jour vs limite 800 | `8400439` |
+| 10 | Nettoyage thèmes : suppression emerald/rose/navy/light | `cb5a9a7` |
+| 11 | 3 nouveaux thèmes premium : Obsidian Gold, Aurora (violet), Graphite (lime) | `cb5a9a7` |
+| 12 | Endpoint `/api/system/status` — santé postgres/redis/celery/binance/kraken | `a77664c` |
+| 13 | `SystemHealthSection` UI dans Settings — status en live + latency | `a77664c` |
 
 > Ce document couvre ce qu'il faut faire **après** que Phase 2 tourne localement.
 > Référence scope : `pre-implement-phase2.md`

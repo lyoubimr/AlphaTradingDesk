@@ -2,7 +2,7 @@
 
 **Date:** 14 mars 2026
 **Version:** 1.0
-**Status:** 🔄 Prêt à démarrer — design validé
+**Status:** ✅ Phase 2 COMPLETE — prod deploy pending (P2-19)
 
 > Ce document décrit **quoi construire, dans quel ordre**.
 > Chaque step est un incrément testable — rien n'est laissé en suspend.
@@ -31,10 +31,10 @@
 | **P2-11** | Telegram alerting service — Market VI + Watchlists | ✅ `28531ee` |
 | **P2-12** | Live Prices backend proxy — BTC/ETH (Kraken) + XAU (API tierce) | ✅ `b6e1131` |
 | **P2-13** | Frontend — Market VI dashboard (`/volatility/market`) | ✅ `3c52ecd` |
-| **P2-14** | Frontend — Per-pair watchlists UI (`/volatility/pairs`) | ⏳ |
-| **P2-15** | Frontend — Settings Volatility + Notifications UI | ⏳ |
-| **P2-16** | Frontend — Dashboard home : Sessions + Live Prices Banner + VI widget | ⏳ |
-| **P2-17** | Risk × Volatility integration — vi_multiplier dans formulaire trade | ⏳ |
+| **P2-14** | Frontend — Per-pair watchlists UI (`/volatility/pairs`) | ✅ `5c2fd05` |
+| **P2-15** | Frontend — Settings Volatility + Notifications UI | ✅ `79bbc02` |
+| **P2-16** | Frontend — Dashboard home : Sessions + Live Prices Banner + VI widget | ✅ `a773ac1` |
+| **P2-17** | Risk × Volatility integration — vi_multiplier dans formulaire trade | ✅ `a773ac1` |
 | **P2-18** | QA full pass (lint + tests + manual E2E) | ⏳ |
 | **P2-19** | Deploy prod Dell | ⏳ |
 
