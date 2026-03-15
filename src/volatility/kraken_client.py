@@ -90,7 +90,7 @@ class KrakenClient:
 
     # ── Context manager ───────────────────────────────────────────────────────
 
-    def __enter__(self) -> "KrakenClient":
+    def __enter__(self) -> KrakenClient:
         return self
 
     def __exit__(self, *args: Any) -> None:

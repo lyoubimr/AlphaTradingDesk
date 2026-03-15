@@ -788,7 +788,6 @@ export function VolatilitySettingsPage() {
                   { key: 'bb_width', label: 'BB'    },
                 ] as { key: keyof typeof D_PP['indicator_weights']; label: string }[]).map(({ key, label }) => {
                   const pct = Math.round((pp.indicator_weights[key] ?? D_PP.indicator_weights[key]) * 100)
-                  const total = Math.round(Object.values(pp.indicator_weights).reduce((a, v) => a + v, 0) * 100)
                   return (
                     <div key={key} className="flex items-center justify-between">
                       <span className="text-sm text-slate-300 font-mono">{label}</span>

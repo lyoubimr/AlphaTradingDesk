@@ -5,7 +5,6 @@ Pydantic schemas for Volatility Engine endpoints (P2-9).
 from __future__ import annotations
 
 from datetime import datetime
-from decimal import Decimal
 
 from pydantic import BaseModel
 

@@ -76,7 +76,7 @@ class BinanceClient:
 
     # ── Context manager ───────────────────────────────────────────────────────
 
-    def __enter__(self) -> "BinanceClient":
+    def __enter__(self) -> BinanceClient:
         return self
 
     def __exit__(self, *args: Any) -> None:

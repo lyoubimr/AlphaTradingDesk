@@ -18,7 +18,6 @@ from sqlalchemy.orm import Session
 
 from src.volatility.models import VolatilitySettings
 
-
 # ── Defaults (used when DB has no settings row or key is missing) ─────────────
 _DEFAULT_MARKET_VI: dict = {
     "enabled": True,

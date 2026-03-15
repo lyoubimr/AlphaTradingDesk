@@ -202,7 +202,6 @@ def _update_aggregated_score(db: Session, mv_cfg: dict) -> None:
 
     Requires at least one TF to have data in Redis — returns silently otherwise.
     """
-    from src.volatility.cache import get_cached_market_vi  # noqa: PLC0415
 
     is_weekend = datetime.now(UTC).weekday() >= 5
     day_key = "weekend" if is_weekend else "weekday"

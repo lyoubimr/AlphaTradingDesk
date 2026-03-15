@@ -34,22 +34,22 @@ from src.volatility.models import (
     VolatilitySnapshot,
     WatchlistSnapshot,
 )
-from src.volatility.schedule import score_to_regime, get_regime_thresholds
+from src.volatility.schedule import get_regime_thresholds, score_to_regime
 from src.volatility.schemas import (
+    _DEFAULT_MARKET_VI,
+    _DEFAULT_PER_PAIR,
+    _DEFAULT_REGIMES,
     AggregatedMarketVIOut,
     MarketVIOut,
     NotificationSettingsOut,
     NotificationSettingsPatch,
-    PairVIOut,
     PairsVIOut,
+    PairVIOut,
     TFComponentOut,
     VolatilitySettingsOut,
     VolatilitySettingsPatch,
     WatchlistMetaOut,
     WatchlistOut,
-    _DEFAULT_MARKET_VI,
-    _DEFAULT_PER_PAIR,
-    _DEFAULT_REGIMES,
 )
 
 router = APIRouter(prefix="/volatility", tags=["volatility"])
@@ -181,7 +181,7 @@ def get_market_vi_history(
     Accepts any value for timeframe including 'aggregated'.
     No schedule gate — purely a DB read.
     """
-    from datetime import UTC, datetime  # noqa: PLC0415
+    from datetime import datetime  # noqa: PLC0415
 
     q = db.query(MarketVISnapshot).filter(MarketVISnapshot.timeframe == timeframe)
 
@@ -667,7 +667,11 @@ def run_task_now(
     else:
         tfs_to_run = []
 
-    from src.volatility.tasks import compute_market_vi, compute_pair_vi, sync_instruments  # noqa: PLC0415
+    from src.volatility.tasks import (  # noqa: PLC0415
+        compute_market_vi,
+        compute_pair_vi,
+        sync_instruments,
+    )
 
     if task == "market-vi":
         results = [compute_market_vi.delay(tf) for tf in tfs_to_run]
