@@ -91,10 +91,12 @@ _DEFAULT_MARKET_VI: dict = {
     "pairs_count": 50,
     "enabled": True,
     "retention_days": 90,  # market_vi_snapshots + watchlist_snapshots retention
+    "indicator_weights": {"rvol": 0.35, "mfi": 0.10, "atr": 0.35, "bb_width": 0.20},
 }
 
 _DEFAULT_PER_PAIR: dict = {
     "indicators": {"rvol": True, "mfi": True, "atr": True, "bb": True, "ema": True},
+    "indicator_weights": {"rvol": 0.35, "mfi": 0.10, "atr": 0.35, "bb_width": 0.20},
     "retention_days": 30,
     "active_hours_start": "00:00",
     "active_hours_end": "23:59",

@@ -48,6 +48,7 @@ interface TFSchedule {
 
 interface PerPairCfg {
   indicators: { rvol: boolean; mfi: boolean; atr: boolean; bb: boolean; ema: boolean }
+  indicator_weights: { rvol: number; mfi: number; atr: number; bb_width: number }
   retention_days: number
   enabled: boolean
   schedules: Partial<Record<TFKey, TFSchedule>>
@@ -95,6 +96,7 @@ const D_TF_SCHEDULE: TFSchedule = {
 
 const D_PP: PerPairCfg = {
   indicators: { rvol: true, mfi: true, atr: true, bb: true, ema: true },
+  indicator_weights: { rvol: 0.35, mfi: 0.10, atr: 0.35, bb_width: 0.20 },
   retention_days: 30,
   enabled: true,
   schedules: {},
@@ -138,6 +140,7 @@ function hydratePerPair(raw: Record<string, unknown>): PerPairCfg {
   }
   return {
     indicators: { ...D_PP.indicators, ...ind },
+    indicator_weights: { ...D_PP.indicator_weights, ...((raw.indicator_weights as Partial<typeof D_PP['indicator_weights']> | undefined) ?? {}) },
     retention_days: (raw.retention_days as number | undefined) ?? D_PP.retention_days,
     enabled: (raw.enabled as boolean | undefined) ?? D_PP.enabled,
     schedules,
@@ -720,6 +723,49 @@ export function VolatilitySettingsPage() {
                   </div>
                 ))}
               </div>
+            </div>
+
+            <hr className="border-surface-700" />
+
+            <div>
+              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">
+                Indicator Weights
+              </p>
+              <p className="text-xs text-slate-600 mt-0.5 mb-3">
+                Relative weight of each indicator in the VI score. Weights are renormalized automatically when indicators are disabled.
+              </p>
+              <div className="space-y-2">
+                {([
+                  { key: 'rvol',     label: 'RVOL'  },
+                  { key: 'mfi',      label: 'MFI'   },
+                  { key: 'atr',      label: 'ATR'   },
+                  { key: 'bb_width', label: 'BB'    },
+                ] as { key: keyof typeof D_PP['indicator_weights']; label: string }[]).map(({ key, label }) => {
+                  const pct = Math.round((pp.indicator_weights[key] ?? D_PP.indicator_weights[key]) * 100)
+                  const total = Math.round(Object.values(pp.indicator_weights).reduce((a, v) => a + v, 0) * 100)
+                  return (
+                    <div key={key} className="flex items-center justify-between">
+                      <span className="text-sm text-slate-300 font-mono">{label}</span>
+                      <div className="flex items-center gap-1.5">
+                        <input
+                          type="number" min={0} max={100} step={5} value={pct}
+                          onChange={e => {
+                            const v = Math.min(100, Math.max(0, Number(e.target.value))) / 100
+                            setPP(p => ({ ...p, indicator_weights: { ...p.indicator_weights, [key]: v } }))
+                          }}
+                          className="w-16 bg-surface-700 border border-surface-600 text-xs text-slate-300 rounded-lg px-2 py-1.5 text-right focus:outline-none focus:border-brand-500/60"
+                        />
+                        <span className="text-xs text-slate-500">%</span>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+              {Math.round(Object.values(pp.indicator_weights).reduce((a, v) => a + v, 0) * 100) !== 100 && (
+                <p className="text-xs text-amber-400 mt-2">
+                  Total: {Math.round(Object.values(pp.indicator_weights).reduce((a, v) => a + v, 0) * 100)}% — weights will be renormalized automatically.
+                </p>
+              )}
             </div>
 
             <hr className="border-surface-700" />

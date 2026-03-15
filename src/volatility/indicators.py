@@ -210,21 +210,35 @@ def compute_ema_score(
 
 # ── VI aggregation ────────────────────────────────────────────────────────────
 
+# Default indicator weights — stored in DB under per_pair.indicator_weights.
+# Override via volatility settings UI: Settings → Volatility → Per-pair indicators.
+_DEFAULT_INDICATOR_WEIGHTS: dict[str, float] = {
+    "rvol": 0.35,      # Relative Volume  — primary volume signal
+    "mfi": 0.10,       # Money Flow Index — reduced (noisy on crypto perps)
+    "atr": 0.35,       # ATR %            — primary range/volatility signal
+    "bb_width": 0.20,  # BB Width         — compression detector
+}
+
+
 def compute_vi_score(
     candles: list[dict],
     enabled: dict | None = None,
     ema_ref: int | None = None,
+    indicator_weights: dict | None = None,
 ) -> dict:
     """Compute VI score for a single instrument from OHLCV candles.
 
     Args:
-        candles: list of OHLCV dicts, ordered oldest → newest.
-                 220 candles recommended (covers EMA-200 convergence).
-        enabled: indicator on/off flags — defaults to all True.
+        candles:            list of OHLCV dicts, ordered oldest → newest.
+                            220 candles recommended (covers EMA-200 convergence).
+        enabled:            indicator on/off flags — defaults to all True.
+        indicator_weights:  per-indicator weights from DB settings (per_pair.indicator_weights).
+                            Falls back to _DEFAULT_INDICATOR_WEIGHTS when absent.
+                            Disabled indicators are excluded and weights are renormalized.
 
     Returns:
         {
-            "vi_score":   float (0.000–1.000),  ← mean of active RVOL/MFI/ATR/BB
+            "vi_score":   float (0.000–1.000),  ← weighted avg of active RVOL/MFI/ATR/BB
             "rvol":       float (0–1) | absent if disabled,
             "mfi":        float (0–1) | absent if disabled,
             "atr":        float (0–1) | absent if disabled,
@@ -272,5 +286,15 @@ def compute_vi_score(
         components["ema_signal"] = ema["signal"]
         components["ema_ref_period"] = ema["ema_ref_period"]
 
-    vi = round(sum(active_scores) / len(active_scores), 3) if active_scores else 0.5
+    # Weighted average — weights come from DB settings (per_pair.indicator_weights).
+    # Falls back to _DEFAULT_INDICATOR_WEIGHTS. Disabled indicators are excluded
+    # and remaining weights are renormalized to sum = 1.0 automatically.
+    weights = {**_DEFAULT_INDICATOR_WEIGHTS, **(indicator_weights or {})}
+    _KEYS = ["rvol", "mfi", "atr", "bb_width"]  # canonical order
+    active_keys = [k for k in _KEYS if k in components and isinstance(components.get(k), float)]
+    if active_keys:
+        raw_total = sum(weights.get(k, 0.25) for k in active_keys)
+        vi = round(sum(weights.get(k, 0.25) / raw_total * components[k] for k in active_keys), 3)
+    else:
+        vi = 0.5
     return {"vi_score": vi, **components}

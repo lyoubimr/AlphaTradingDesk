@@ -62,7 +62,7 @@ def _fetch_btc_eth() -> dict[str, float | None]:
             logger.warning("prices: Kraken error — %s", data["error"])
             return {"btc": None, "eth": None, "btc_open": None, "eth_open": None}
         result = data.get("result", {})
-        # Clés internes Kraken : XXBTZUSD, XETHZUSD
+        # Kraken internal keys: XXBTZUSD, XETHZUSD
         btc_entry = result.get("XXBTZUSD") or result.get("XBTUSD")
         eth_entry = result.get("XETHZUSD") or result.get("ETHUSD")
         btc      = float(btc_entry["c"][0]) if btc_entry else None
@@ -177,7 +177,7 @@ def get_live_prices() -> dict[str, Any]:
             (crypto["eth"] - crypto["eth_open"]) / crypto["eth_open"] * 100, 2
         )
 
-    # ── Variation XAU : base quotidienne stockée dans Redis (TTL 24h) ─────────
+    # ── XAU daily change: base price stored in Redis (TTL 24h) ─────────────────
     xau_change_pct: float | None = None
     try:
         r_xau = _get_redis()
@@ -188,7 +188,7 @@ def get_live_prices() -> dict[str, Any]:
                 if xau_open > 0:
                     xau_change_pct = round((xau - xau_open) / xau_open * 100, 2)
             else:
-                # Premier appel du jour — prix courant devient la référence
+                # First call of the day — current price becomes the daily reference
                 r_xau.setex(_XAU_OPEN_KEY, _XAU_OPEN_TTL, str(xau))
                 xau_change_pct = 0.0
     except Exception as exc:
@@ -210,7 +210,7 @@ def get_live_prices() -> dict[str, Any]:
     # ── Cache write ───────────────────────────────────────────────────────────
     try:
         r = _get_redis()
-        # On stocke sans le flag "cached" pour l'ajouter à la lecture
+        # Store without the "cached" flag — it is injected on read
         to_store = {k: v for k, v in payload.items() if k != "cached"}
         r.setex(_CACHE_KEY, _CACHE_TTL, json.dumps(to_store))
     except Exception as exc:

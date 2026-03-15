@@ -289,6 +289,7 @@ def compute_market_vi(self, timeframe: str) -> dict:  # type: ignore[override]
             "indicators", {"rvol": True, "mfi": True, "atr": True, "bb": True, "ema": True}
         )
         configured_weights: dict = mv_cfg.get("weights", {})
+        indicator_weights: dict = mv_cfg.get("indicator_weights", {})
 
         # ── 3. Resolve selected pairs ─────────────────────────────────────
         pairs_rows = (
@@ -320,7 +321,7 @@ def compute_market_vi(self, timeframe: str) -> dict:  # type: ignore[override]
                     # 220 candles: covers EMA-200 convergence + 20-bar RVOL window
                     ema_ref = (mv_cfg.get("ema_ref_periods") or {}).get(timeframe) or _TF_EMA_REF.get(timeframe, 50)
                     candles = client.fetch_ohlcv(symbol, timeframe, limit=220)
-                    result = compute_vi_score(candles, enabled, ema_ref)
+                    result = compute_vi_score(candles, enabled, ema_ref, indicator_weights)
                     pair_scores[symbol] = result
                 except Exception as pair_exc:
                     logger.warning(
@@ -436,10 +437,11 @@ def compute_pair_vi(self, timeframe: str, force: bool = False) -> dict:  # type:
             "indicators",
             {"rvol": True, "mfi": True, "atr": True, "bb": True, "ema": True},
         )
+        indicator_weights: dict = pp_cfg.get("indicator_weights", {})
 
-        # ── 2b. Gate par execution_hours du TF (config par TF dans schedules) ──
-        # Si l'utilisateur a défini des heures d'exécution pour ce TF, on vérifie
-        # que l'heure courante UTC est autorisée avant de lancer le calcul.
+        # ── 2b. Gate by execution_hours for this TF (configured per TF in schedules) ──
+        # If the user has defined allowed execution hours for this TF, check that
+        # the current UTC hour is permitted before running the computation.
         if not force:
             tf_sched: dict = (pp_cfg.get("schedules") or {}).get(timeframe, {})
             exec_hours: list = tf_sched.get("execution_hours", [])
@@ -447,7 +449,7 @@ def compute_pair_vi(self, timeframe: str, force: bool = False) -> dict:  # type:
                 current_hour = datetime.now(UTC).hour
                 if current_hour not in exec_hours:
                     logger.debug(
-                        "compute_pair_vi(%s): skipped (heure %dh hors execution_hours %s)",
+                        "compute_pair_vi(%s): skipped (hour %dh outside execution_hours %s)",
                         timeframe, current_hour, exec_hours,
                     )
                     return {"status": "skipped", "reason": "outside_execution_hours", "timeframe": timeframe}
@@ -530,7 +532,7 @@ def compute_pair_vi(self, timeframe: str, force: bool = False) -> dict:  # type:
                 try:
                     ema_ref = (pp_cfg.get("ema_ref_periods") or {}).get(timeframe) or _TF_EMA_REF.get(timeframe, 50)
                     candles = client.fetch_ohlcv(symbol, timeframe, limit=220)
-                    result = compute_vi_score(candles, enabled, ema_ref)
+                    result = compute_vi_score(candles, enabled, ema_ref, indicator_weights)
                     pair_scores[symbol] = result
                 except Exception as pair_exc:
                     logger.warning(
