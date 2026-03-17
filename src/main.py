@@ -79,7 +79,11 @@ app.include_router(volatility_router, prefix=API_PREFIX)
 
 @app.get("/api/health")
 def health() -> dict:
-    return {"status": "ok", "environment": settings.environment}
+    return {
+        "status": "ok",
+        "environment": settings.environment,
+        "version": settings.app_version,
+    }
 
 
 @app.get("/api/system/status")

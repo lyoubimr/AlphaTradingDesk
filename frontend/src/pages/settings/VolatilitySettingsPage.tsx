@@ -38,13 +38,13 @@ interface MarketVICfg {
 // 0=Mon … 6=Sun (Python weekday() convention)
 interface TFSchedule {
   enabled: boolean
-  hours_start: string       // "00:00" — start of execution window (UTC)
-  hours_end: string         // "23:59" — end of execution window (UTC)
-  days: number[]            // empty = all days
-  vi_min: number            // 0.0 — minimum VI score filter before compute
-  vi_max: number            // 1.0 — maximum VI score filter before compute
-  execution_hours: number[] // allowed UTC hours within range (empty = all)
-  regime_filter: string[]   // empty = all regimes allowed
+  days: number[]                     // empty = all days
+  vi_min: number                     // 0.0 — minimum VI score filter before compute
+  vi_max: number                     // 1.0 — maximum VI score filter before compute
+  execution_hours: number[]          // weekday UTC hours (empty = all)
+  weekend_execution_hours: number[]  // weekend UTC hours (empty = all)
+  execution_interval_minutes?: number // sub-hour: 15 (default) or 30 — 15m TF only
+  regime_filter: string[]            // empty = all regimes allowed
 }
 
 interface PerPairCfg {
@@ -87,13 +87,12 @@ const MVI_ANCHOR_PAIRS = ['BTCUSDT', 'ETHUSDT'] as const
 
 const D_TF_SCHEDULE: TFSchedule = {
   enabled: true,
-  hours_start: '00:00',
-  hours_end: '23:59',
   days: [],
   vi_min: 0.0,
   vi_max: 1.0,
-  execution_hours: [],  // empty = all hours within the range
-  regime_filter: [],    // empty = all regimes allowed
+  execution_hours: [],          // weekday hours (empty = all)
+  weekend_execution_hours: [],  // weekend hours (empty = all)
+  regime_filter: [],
 }
 
 const D_PP: PerPairCfg = {
@@ -162,41 +161,44 @@ const TFS: MVITFKey[] = ['15m', '1h', '4h', '1d']
 // SCHED_TFS = all TFs for the Schedules tab (includes 1w)
 const SCHED_TFS: TFKey[] = ['15m', '1h', '4h', '1d', '1w']
 
-// UTC ↔ local-time helpers (used in Schedules tab)
-const LOCAL_OFFSET_H = -new Date().getTimezoneOffset() / 60  // e.g. +1 for UTC+1
-const TZ_ABBR = new Intl.DateTimeFormat('default', { timeZoneName: 'short' })
-  .formatToParts(new Date()).find(p => p.type === 'timeZoneName')?.value ?? 'local'
+// UTC offset for local display of hours (e.g. +2 for UTC+2)
+const LOCAL_OFFSET_H = -new Date().getTimezoneOffset() / 60
 
-function utcTimeStrToLocal(utc: string): string {
-  const [h, m] = utc.split(':').map(Number)
-  const lh = (h + LOCAL_OFFSET_H + 24) % 24
-  return `${String(lh).padStart(2, '0')}:${String(m).padStart(2, '0')}`
-}
-function localTimeStrToUtc(local: string): string {
-  const [h, m] = local.split(':').map(Number)
-  const uh = (h - LOCAL_OFFSET_H + 24) % 24
-  return `${String(uh).padStart(2, '0')}:${String(m).padStart(2, '0')}`
-}
-
-// Standard execution-hour presets (UTC) — shown in local time, same for all TFs
-const EXEC_PRESETS: Array<{ label: string; hoursUtc: number[]; desc?: string }> = [
-  { label: 'Every 1h',  hoursUtc: [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23] },
-  { label: 'Every 4h',  hoursUtc: [0,4,8,12,16,20] },
-  { label: 'Every 8h',  hoursUtc: [0,8,16] },
-  { label: 'Every 12h', hoursUtc: [0,12] },
-  { label: 'Asia',      hoursUtc: [0,1,2,3,4,5,6,7,8],             desc: 'Asian session — UTC 00:00–09:00' },
-  { label: 'Europe',    hoursUtc: [7,8,9,10,11,12,13,14,15,16],    desc: 'European session — UTC 07:00–17:00' },
-  { label: 'US',        hoursUtc: [13,14,15,16,17,18,19,20,21,22], desc: 'US session — UTC 13:00–23:00' },
-]
-function presetTooltip(p: { hoursUtc: number[]; desc?: string }): string | undefined {
-  if (!p.desc) return undefined
-  const toLocal = (h: number) => {
-    const d = new Date()
-    d.setUTCHours(h, 0, 0, 0)
-    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-  }
-  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone
-  return `${p.desc}\nLocal (${tz}): ${toLocal(Math.min(...p.hoursUtc))} – ${toLocal(Math.max(...p.hoursUtc))}`
+// Per-TF presets: human-readable frequency labels + market sessions
+function getTFPresets(tf: TFKey): Array<{ label: string; hoursUtc: number[] }> {
+  const sessions = [
+    { label: 'Asia',   hoursUtc: [0,1,2,3,4,5,6,7,8] },
+    { label: 'Europe', hoursUtc: [7,8,9,10,11,12,13,14,15,16] },
+    { label: 'US',     hoursUtc: [13,14,15,16,17,18,19,20,21,22] },
+  ]
+  if (tf === '15m') return [
+    { label: 'Every 2h',  hoursUtc: [0,2,4,6,8,10,12,14,16,18,20,22] },
+    { label: 'Every 4h',  hoursUtc: [0,4,8,12,16,20] },
+    { label: 'Every 6h',  hoursUtc: [0,6,12,18] },
+    { label: 'Every 8h',  hoursUtc: [0,8,16] },
+    { label: 'Every 12h', hoursUtc: [0,12] },
+    ...sessions,
+  ]
+  if (tf === '1h') return [
+    { label: 'Every 2h',  hoursUtc: [0,2,4,6,8,10,12,14,16,18,20,22] },
+    { label: 'Every 4h',  hoursUtc: [0,4,8,12,16,20] },
+    { label: 'Every 6h',  hoursUtc: [0,6,12,18] },
+    { label: 'Every 8h',  hoursUtc: [0,8,16] },
+    { label: 'Every 12h', hoursUtc: [0,12] },
+    { label: 'Once/day',  hoursUtc: [0] },
+    ...sessions,
+  ]
+  if (tf === '4h') return [
+    { label: 'Every 8h',  hoursUtc: [0,8,16] },
+    { label: 'Every 12h', hoursUtc: [0,12] },
+    { label: 'Once/day',  hoursUtc: [0] },
+    ...sessions,
+  ]
+  if (tf === '1d') return [
+    { label: 'Every day', hoursUtc: [] },
+    ...sessions,
+  ]
+  return []
 }
 const pct = (v: number) => Math.round(v * 100)
 const tfSum = (w: TFWeights) => TFS.reduce((s, tf) => s + pct(w[tf] ?? 0), 0)
@@ -205,17 +207,17 @@ const REGIME_ROWS: { key: keyof RegimesCfg; label: string; cls: string }[] = [
   { key: 'dead_max',     label: 'DEAD max',     cls: 'text-slate-400' },
   { key: 'calm_max',     label: 'CALM max',     cls: 'text-blue-400' },
   { key: 'normal_max',   label: 'NORMAL max',   cls: 'text-emerald-400' },
-  { key: 'trending_max', label: 'TRENDING max', cls: 'text-amber-400' },
-  { key: 'active_max',   label: 'ACTIVE max',   cls: 'text-orange-400' },
+  { key: 'trending_max', label: 'TRENDING max', cls: 'text-indigo-400' },
+  { key: 'active_max',   label: 'ACTIVE max',   cls: 'text-amber-400' },
 ]
 
 const SCHED_REGIME_KEYS = ['DEAD', 'CALM', 'NORMAL', 'TRENDING', 'ACTIVE', 'EXTREME'] as const
 const SCHED_REGIME_COLOR: Record<string, string> = {
-  DEAD: '#a1a1aa', CALM: '#0ea5e9', NORMAL: '#10b981',
-  TRENDING: '#818cf8', ACTIVE: '#f59e0b', EXTREME: '#ef4444',
+  DEAD: '#a1a1aa', CALM: '#38bdf8', NORMAL: '#34d399',
+  TRENDING: '#eab308', ACTIVE: '#f97316', EXTREME: '#ef4444',
 }
 const SCHED_REGIME_EMOJI: Record<string, string> = {
-  DEAD: '⬜', CALM: '💧', NORMAL: '📊', TRENDING: '💎', ACTIVE: '⚠️', EXTREME: '🚫',
+  DEAD: '⬜', CALM: '💧', NORMAL: '✅', TRENDING: '📈', ACTIVE: '⚡', EXTREME: '�',
 }
 
 // ── Atoms ─────────────────────────────────────────────────────────────────────
@@ -426,11 +428,21 @@ export function VolatilitySettingsPage() {
     setSched(tf, { days: cur.includes(d) ? cur.filter(x => x !== d) : [...cur, d].sort() })
   }
 
-  // Toggle an execution hour (0–23) — empty = all hours
+  // Toggle a weekday execution hour (0–23) — empty = all hours
   const toggleExecHour = (tf: TFKey, h: number) => {
     const cur = getSched(tf).execution_hours
     setSched(tf, {
       execution_hours: cur.includes(h)
+        ? cur.filter(x => x !== h)
+        : [...cur, h].sort((a, b) => a - b),
+    })
+  }
+
+  // Toggle a weekend execution hour (0–23) — empty = all hours
+  const toggleExecHourWeekend = (tf: TFKey, h: number) => {
+    const cur = getSched(tf).weekend_execution_hours
+    setSched(tf, {
+      weekend_execution_hours: cur.includes(h)
         ? cur.filter(x => x !== h)
         : [...cur, h].sort((a, b) => a - b),
     })
@@ -445,6 +457,10 @@ export function VolatilitySettingsPage() {
   }
 
   const DAY_LABELS = ['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su']
+
+  // Weekday / Weekend tab state per TF — tracks which half of exec hours is visible
+  const [execTab, setExecTab] = useState<Partial<Record<TFKey, 'wd' | 'we'>>>({})
+  const getExecTab = (tf: TFKey) => execTab[tf] ?? 'wd'
 
   if (loading) {
     return (
@@ -874,10 +890,10 @@ export function VolatilitySettingsPage() {
         <div className="space-y-4 max-w-2xl">
           {/* Description */}
           <p className="text-xs text-slate-500">
-            Per timeframe: execution time range, active days, regime, and VI filter.
-            Leave <span className="font-mono text-slate-400">days</span> or{' '}
-            <span className="font-mono text-slate-400">exec hours</span> empty for no restriction.
-            Filters combining <em>days</em>, <em>exec hours</em>, <em>regime</em>, and <em>VI</em> are ANDed together.
+            Per timeframe: weekday and weekend execution hours, active days, regime, and VI filter.
+            Leave <span className="font-mono text-slate-400">exec hours</span> or{' '}
+            <span className="font-mono text-slate-400">days</span> empty for no restriction.
+            Weekday and weekend hours are independent. Hours shown in local time, stored as UTC.
             The VI and regime filters apply to the current score <em>before</em> launching the computation.
           </p>
 
@@ -931,6 +947,8 @@ export function VolatilitySettingsPage() {
           {/* ── Per-pair TF cards ───────────────────────────────────────── */}
           {SCHED_TFS.map(tf => {
             const s = getSched(tf)
+            const onWeTab  = getExecTab(tf) === 'we'
+            const curHours = onWeTab ? s.weekend_execution_hours : s.execution_hours
             return (
               <div key={tf} className="rounded-xl bg-surface-800 border border-surface-700 overflow-hidden">
                 {/* TF label + enable toggle */}
@@ -941,49 +959,92 @@ export function VolatilitySettingsPage() {
 
                 <div className={cn('px-5 py-4 space-y-4 transition-opacity', !s.enabled && 'opacity-40 pointer-events-none')}>
 
-                  {/* ── Execution window (shown in local time, stored as UTC) ── */}
-                  <div className="flex items-center gap-4">
-                    <span className="text-xs text-slate-400 w-28 shrink-0">Time range</span>
-                    <div className="flex items-center gap-2 flex-1">
-                      <input
-                        type="time"
-                        value={utcTimeStrToLocal(s.hours_start)}
-                        onChange={e => setSched(tf, { hours_start: localTimeStrToUtc(e.target.value) })}
-                        className="bg-surface-700 border border-surface-600 text-xs text-slate-300 rounded-lg px-2 py-1.5 focus:outline-none focus:border-brand-500/60"
-                      />
-                      <span className="text-xs text-slate-500">→</span>
-                      <input
-                        type="time"
-                        value={utcTimeStrToLocal(s.hours_end)}
-                        onChange={e => setSched(tf, { hours_end: localTimeStrToUtc(e.target.value) })}
-                        className="bg-surface-700 border border-surface-600 text-xs text-slate-300 rounded-lg px-2 py-1.5 focus:outline-none focus:border-brand-500/60"
-                      />
-                      <span className="text-[10px] text-slate-700">{TZ_ABBR}</span>
-                    </div>
-                  </div>
-
-                  {/* ── Allowed execution hours within the window ── */}
-                  {/* Empty = run at every natural TF cycle */}
+                  {/* ── Execution hours ─────────────────────────────────────────────────── */}
                   <div className="flex items-start gap-4">
-                    <span className="text-xs text-slate-400 w-28 shrink-0 pt-1">Exec hours</span>
+                    <span className="text-xs text-slate-400 w-28 shrink-0 pt-2">Exec hours</span>
                     <div className="flex-1 space-y-2">
-                      {/* 24-button grid — local hours (stored as UTC internally) */}
+
+                      {/* Sub-hour interval — 15m only */}
+                      {tf === '15m' && (
+                        <div className="flex items-center gap-2">
+                          <span className="text-[10px] text-slate-500 tracking-wide shrink-0">Sub-interval</span>
+                          <div className="flex gap-px bg-surface-700 p-0.5 rounded-lg">
+                            {([15, 30] as const).map(min => {
+                              const active = (s.execution_interval_minutes ?? 15) === min
+                              return (
+                                <button
+                                  key={min}
+                                  type="button"
+                                  onClick={() => setSched(tf, { execution_interval_minutes: min === 15 ? undefined : min })}
+                                  className={cn(
+                                    'px-2.5 py-1 rounded-md text-[11px] font-medium transition-all',
+                                    active
+                                      ? 'bg-brand-600/25 text-brand-300 shadow-sm'
+                                      : 'text-slate-600 hover:text-slate-400',
+                                  )}
+                                >
+                                  {min}min
+                                </button>
+                              )
+                            })}
+                          </div>
+                          <span className="text-[10px] text-slate-600">
+                            {!s.execution_interval_minutes || s.execution_interval_minutes === 15
+                              ? 'every candle'
+                              : `once every ${s.execution_interval_minutes}min`}
+                          </span>
+                        </div>
+                      )}
+
+                      {/* Tab pills: Weekday / Weekend */}
+                      <div className="flex gap-px bg-surface-700 p-0.5 rounded-lg w-fit">
+                        {(['wd', 'we'] as const).map(t => {
+                          const tabHours = t === 'wd' ? s.execution_hours : s.weekend_execution_hours
+                          const isActive = getExecTab(tf) === t
+                          return (
+                            <button
+                              key={t}
+                              type="button"
+                              onClick={() => setExecTab(p => ({ ...p, [tf]: t }))}
+                              className={cn(
+                                'flex items-center gap-1.5 px-3 py-1 rounded-md text-[11px] font-medium transition-all',
+                                isActive
+                                  ? t === 'wd'
+                                    ? 'bg-brand-600/25 text-brand-300 shadow-sm'
+                                    : 'bg-violet-600/25 text-violet-300 shadow-sm'
+                                  : 'text-slate-600 hover:text-slate-400',
+                              )}
+                            >
+                              {t === 'wd' ? 'Mo–Fr' : 'Sa–Su'}
+                              {tabHours.length > 0 && (
+                                <span className="text-[9px] opacity-60">{tabHours.length}h</span>
+                              )}
+                            </button>
+                          )
+                        })}
+                      </div>
+
+                      {/* 24-button hour grid — local time display, UTC stored */}
                       <div className="flex flex-wrap gap-1">
                         {Array.from({ length: 24 }, (_, localH) => {
                           const utcH = (localH - LOCAL_OFFSET_H + 24) % 24
-                          const sel = s.execution_hours.length === 0 || s.execution_hours.includes(utcH)
+                          const sel  = curHours.length === 0 || curHours.includes(utcH)
                           return (
                             <button
                               key={localH}
                               type="button"
-                              onClick={() => toggleExecHour(tf, utcH)}
-                              title={s.execution_hours.length === 0 ? 'All hours (click to restrict)' : `UTC ${utcH}:00`}
+                              onClick={() => onWeTab ? toggleExecHourWeekend(tf, utcH) : toggleExecHour(tf, utcH)}
+                              title={curHours.length === 0
+                                ? `${localH}:00 — all hours active`
+                                : `${localH}:00 local · UTC ${String(utcH).padStart(2, '0')}:00`}
                               className={cn(
                                 'w-7 h-6 rounded text-[10px] font-mono border transition-all',
                                 sel
-                                  ? 'bg-brand-600/20 border-brand-500/40 text-brand-300'
+                                  ? onWeTab
+                                    ? 'bg-violet-600/20 border-violet-500/40 text-violet-300'
+                                    : 'bg-brand-600/20 border-brand-500/40 text-brand-300'
                                   : 'bg-surface-700 border-surface-600 text-slate-600 hover:border-surface-500',
-                                s.execution_hours.length === 0 && 'opacity-40',
+                                curHours.length === 0 && 'opacity-30',
                               )}
                             >
                               {localH}
@@ -991,29 +1052,57 @@ export function VolatilitySettingsPage() {
                           )
                         })}
                       </div>
-                      {/* Standard presets — same for all TFs, shown in local time */}
-                      <div className="flex flex-wrap gap-1.5 pt-0.5">
-                        {EXEC_PRESETS.map(p => (
+
+                      {/* Presets + reset + copy */}
+                      <div className="flex flex-wrap gap-1">
+                        {getTFPresets(tf).map(p => (
                           <button
                             key={p.label}
                             type="button"
-                            onClick={() => setSched(tf, { execution_hours: p.hoursUtc })}
-                            title={presetTooltip(p)}
-                            className="text-[10px] text-slate-500 hover:text-brand-400 border border-surface-600 hover:border-brand-600/40 px-1.5 py-0.5 rounded transition-colors"
+                            onClick={() => onWeTab
+                              ? setSched(tf, { weekend_execution_hours: p.hoursUtc })
+                              : setSched(tf, { execution_hours: p.hoursUtc })
+                            }
+                            className={cn(
+                              'text-[10px] border px-2 py-0.5 rounded transition-colors',
+                              onWeTab
+                                ? 'text-slate-500 hover:text-violet-400 border-surface-600 hover:border-violet-600/40'
+                                : 'text-slate-500 hover:text-brand-400 border-surface-600 hover:border-brand-600/40',
+                            )}
                           >
                             {p.label}
                           </button>
                         ))}
-                        {s.execution_hours.length > 0 && (
+                        {curHours.length > 0 && (
                           <button
                             type="button"
-                            onClick={() => setSched(tf, { execution_hours: [] })}
-                            className="text-[10px] text-slate-600 hover:text-slate-400 border border-surface-700 px-1.5 py-0.5 rounded"
+                            onClick={() => onWeTab
+                              ? setSched(tf, { weekend_execution_hours: [] })
+                              : setSched(tf, { execution_hours: [] })
+                            }
+                            className="text-[10px] text-slate-600 hover:text-slate-400 border border-surface-700 px-2 py-0.5 rounded"
                           >
-                            reset (all)
+                            All hours
+                          </button>
+                        )}
+                        {onWeTab && (
+                          <button
+                            type="button"
+                            onClick={() => setSched(tf, { weekend_execution_hours: [...s.execution_hours] })}
+                            className="text-[10px] text-slate-500 hover:text-slate-300 border border-surface-600 hover:border-surface-500 px-2 py-0.5 rounded"
+                          >
+                            ← Same as Mo–Fr
                           </button>
                         )}
                       </div>
+
+                      {/* Status hint */}
+                      <p className="text-[10px] text-slate-700">
+                        {curHours.length === 0
+                          ? 'All hours — no restriction'
+                          : `${curHours.length} UTC hour${curHours.length > 1 ? 's' : ''} selected`}
+                      </p>
+
                     </div>
                   </div>
 
@@ -1152,8 +1241,8 @@ export function VolatilitySettingsPage() {
             <div className="bg-slate-600"   style={{ width: `${dead_max * 100}%` }} />
             <div className="bg-blue-600"    style={{ width: `${(calm_max - dead_max) * 100}%` }} />
             <div className="bg-emerald-600" style={{ width: `${(normal_max - calm_max) * 100}%` }} />
-            <div className="bg-amber-500"   style={{ width: `${(trending_max - normal_max) * 100}%` }} />
-            <div className="bg-orange-500"  style={{ width: `${(active_max - trending_max) * 100}%` }} />
+            <div className="bg-indigo-500"  style={{ width: `${(trending_max - normal_max) * 100}%` }} />
+            <div className="bg-amber-400"   style={{ width: `${(active_max - trending_max) * 100}%` }} />
             <div className="flex-1 bg-red-600" />
           </div>
 

@@ -55,8 +55,8 @@ const REGIME_COLOR_HEX: Record<string, string> = {
   DEAD:     '#a1a1aa',
   CALM:     '#0ea5e9',
   NORMAL:   '#10b981',
-  TRENDING: '#eab308',
-  ACTIVE:   '#f97316',
+  TRENDING: '#818cf8',  // indigo-400 — gem color
+  ACTIVE:   '#f59e0b',  // amber-400
   EXTREME:  '#ef4444',
 }
 

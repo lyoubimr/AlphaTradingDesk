@@ -122,6 +122,7 @@ const NAV_GROUPS: NavGroup[] = [
 interface SidebarProps {
   apiStatus: 'online' | 'offline' | 'connecting'
   environment?: string
+  version?: string
 }
 
 const statusMeta = {
@@ -130,7 +131,7 @@ const statusMeta = {
   connecting: { color: 'bg-amber-400',  label: 'Connecting…' },
 }
 
-export function Sidebar({ apiStatus, environment }: SidebarProps) {
+export function Sidebar({ apiStatus, environment, version }: SidebarProps) {
   const meta = statusMeta[apiStatus]
 
   return (
@@ -189,13 +190,20 @@ export function Sidebar({ apiStatus, environment }: SidebarProps) {
       </nav>
 
       {/* ── Status bar ────────────────────────────────────────────────────── */}
-      <div className="px-4 py-3 border-t border-surface-800 flex items-center gap-2">
-        <span className={cn('w-2 h-2 rounded-full shrink-0 animate-pulse', meta.color)} />
-        <span className="text-xs text-slate-600 flex-1 truncate">{meta.label}</span>
-        {environment && (
-          <span className="text-[9px] uppercase tracking-widest text-slate-700 bg-surface-800 px-1.5 py-0.5 rounded">
-            {environment}
-          </span>
+      <div className="px-4 py-3 border-t border-surface-800">
+        <div className="flex items-center gap-2">
+          <span className={cn('w-2 h-2 rounded-full shrink-0 animate-pulse', meta.color)} />
+          <span className="text-xs text-slate-600 flex-1 truncate">{meta.label}</span>
+          {environment && (
+            <span className="text-[9px] uppercase tracking-widest text-slate-700 bg-surface-800 px-1.5 py-0.5 rounded">
+              {environment}
+            </span>
+          )}
+        </div>
+        {version && (
+          <p className="mt-1 text-[9px] text-slate-700 tracking-wide">
+            v{version}
+          </p>
         )}
       </div>
     </aside>
