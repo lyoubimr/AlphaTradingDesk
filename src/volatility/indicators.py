@@ -143,7 +143,7 @@ def compute_bb_width(df: pd.DataFrame, period: int = 20, std_dev: float = 2.0) -
 
 def compute_ema_score(
     df: pd.DataFrame,
-    periods: tuple[int, int, int] = (20, 50, 200),
+    periods: tuple[int, int, int] = (21, 55, 200),
     ema_ref: int | None = None,
 ) -> dict:
     """EMA position score — directional signal for watchlist ranking.
@@ -153,11 +153,12 @@ def compute_ema_score(
         0.50 = neutral (price above some, below others)
         1.00 = price above all EMAs  (fully bullish)
 
-    Weights: EMA20=50%, EMA50=30%, EMA200=20%
+    Weights: EMA21=50%, EMA55=30%, EMA200=20%
+    Periods are Fibonacci-aligned: 21 · 55 · 200 (same standard set as ema_ref).
 
     ema_ref: TF-specific reference EMA for crossover/retest signal detection.
         Defaults to periods[0] when not supplied.
-        Recommended per TF: 15m→50, 1h→100, 4h→200, 1d→100, 1w→55.
+        Recommended per TF: 15m→55, 1h→99, 4h→200, 1d→99, 1w→55.
 
     Signal labels (ema_ref-based, used as the watchlist `ema_signal` column):
         above_all      — price > all 3 scoring EMAs  (state, no alert)
@@ -182,7 +183,7 @@ def compute_ema_score(
     score = round(sum(w * (1.0 if last > e else 0.0) for w, e in zip(ema_weights, emas)), 2)
 
     # Signal detection — ref EMA crossover + retest take priority over positional state.
-    # ema_ref: TF-specific reference EMA (15m→50, 1h→100, 4h/1d→200, 1w→50)
+    # ema_ref: TF-specific reference EMA (15m→55, 1h→99, 4h→200, 1d→99, 1w→55)
     # NOTE: checked BEFORE above_all / below_all so retest_up/down on EMA200 is not
     # swallowed by above_all when price is just above EMA200 (and also above EMA20/50).
     ref = ema_ref if ema_ref is not None else periods[0]

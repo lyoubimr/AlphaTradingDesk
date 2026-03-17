@@ -69,21 +69,22 @@ _TF_SUPERIOR: dict[str, str] = {
 _TF_AGG_ORDER = ["15m", "1h", "4h", "1d"]
 
 # Reference EMA per TF for crossover/retest signal detection (fallback defaults)
-# Spec: 15m→EMA50 / 1h→EMA100 / 4h→EMA200 / 1d→EMA100 / 1w→EMA55
+# Spec: 15m→EMA55 / 1h→EMA99 / 4h→EMA200 / 1d→EMA99 / 1w→EMA55
 #
+# Standard EMA set used throughout: 10 · 21 · 55 · 99 · 200
 # Why these choices (convergence with available candle limits):
 #   EMA200 on 4h  — requires limit=500 (500×4h = 83 days); Binance/Kraken have data ✓
-#   EMA100 on 1d  — converges with limit=220 (~1.2% residual, acceptable)
+#   EMA99  on 1d  — converges with limit=220 (~1.2% residual, acceptable)
 #   EMA55  on 1w  — Fibonacci EMA, ~13 months, classic weekly trend reference;
 #                   converges with 220 bars (residual <0.1%); EMA50w=1yr too slow
 #
-# Overridable per-profile via per_pair settings: {"ema_ref_periods": {"15m": 50, ...}}
+# Overridable per-profile via per_pair settings: {"ema_ref_periods": {"15m": 55, ...}}
 _TF_EMA_REF: dict[str, int] = {
-    "15m": 50,
-    "1h": 100,
+    "15m": 55,
+    "1h":  99,
     "4h": 200,
-    "1d": 100,
-    "1w": 55,
+    "1d":  99,
+    "1w":  55,
 }
 
 # Candle limit per TF — EMA200 on 4h requires 500 candles for <1% convergence bias.
@@ -94,6 +95,25 @@ _TF_CANDLE_LIMIT: dict[str, int] = {
     "4h":  500,   # EMA200: (1 - 2/201)^500 ≈ 0.7% residual vs 11% at 220
     "1d":  220,
     "1w":  220,
+}
+
+# Celery beat fires at :00/:15/:30/:45 — task may arrive up to 4min later.
+# 5min grace absorbs dispatch + execution delay without widening the window too much.
+_INTERVAL_GRACE_MIN = 5
+
+# EMA ranking boost — pairs with clear directional EMA signals rank slightly higher.
+# Affects ranking only; stored vi_score is unmodified.
+_EMA_RANK_BOOST_SIGNALS: frozenset[str] = frozenset({"breakout_up", "above_all"})
+_EMA_RANK_BOOST = 0.05
+
+# Actionable alert label derived from regime — stable mapping, not business config.
+_REGIME_ALERT: dict[str, str] = {
+    "EXTREME":  "warning_extreme",  # too hot — caution
+    "ACTIVE":   "opportunity",      # high momentum — actionable
+    "TRENDING": "setup_ready",      # sweet spot for trend-following
+    "NORMAL":   "neutral",          # baseline — nothing special
+    "CALM":     "low_activity",     # quiet market — low conviction
+    "DEAD":     "caution_dead",     # no liquidity — avoid
 }
 
 
@@ -154,8 +174,6 @@ def _build_watchlist_pairs(
         7 watchlist columns: pair, vi_score, regime, ema_signal, change_24h,
         tf_sup_regime, tf_sup_vi (EMA fields come after change_24h).
     """
-    _BOOST_SIGNALS = {"breakout_up", "above_all"}
-
     rows = []
     for symbol, res in pair_scores.items():
         vi = float(res["vi_score"])
@@ -164,8 +182,8 @@ def _build_watchlist_pairs(
         ema_signal: str = res.get("ema_signal", "mixed")
         ema_score: float = float(res.get("ema_score", 0.5))
 
-        # Rank score: vi_score + small EMA boost (≤ 0.05) for directional signals
-        rank_score = vi + (0.05 if ema_signal in _BOOST_SIGNALS else 0.0)
+        # Rank score: vi_score + small EMA boost for directional signals
+        rank_score = vi + (_EMA_RANK_BOOST if ema_signal in _EMA_RANK_BOOST_SIGNALS else 0.0)
 
         ticker = tickers.get(symbol, {})
         change_24h = ticker.get("change_pct_24h", None)
@@ -174,15 +192,6 @@ def _build_watchlist_pairs(
         tf_sup_regime = sup.get("regime")
         tf_sup_vi = sup.get("vi_score")
 
-        # Alert: actionable conclusion derived from regime
-        _REGIME_ALERT: dict[str, str] = {
-            "EXTREME":  "warning_extreme",  # too hot — caution
-            "ACTIVE":   "opportunity",      # high momentum — actionable
-            "TRENDING": "setup_ready",      # sweet spot for trend-following
-            "NORMAL":   "neutral",          # baseline — nothing special
-            "CALM":     "low_activity",     # quiet market — low conviction
-            "DEAD":     "caution_dead",     # no liquidity — avoid
-        }
         alert = _REGIME_ALERT.get(regime, "neutral")
 
         rows.append(
@@ -487,14 +496,14 @@ def compute_pair_vi(self, timeframe: str, force: bool = False) -> dict:  # type:
                     return {"status": "skipped", "reason": "outside_execution_hours", "timeframe": timeframe}
 
             # Sub-hour interval gate (15m TF only: 15min native, or every 30min)
-            # Use a window of interval//2 to tolerate Celery dispatch delay (3-8min):
-            #   beat fires at :00 → task executes at :03 → 3 % 30 = 3 < 15 → RUN ✓
-            #   beat fires at :15 → task executes at :18 → 18 % 30 = 18 >= 15 → SKIP ✓
-            #   beat fires at :30 → task executes at :33 → 3 % 30 = 3 < 15 → RUN ✓
-            #   beat fires at :45 → task executes at :48 → 18 % 30 = 18 >= 15 → SKIP ✓
+            # 5min grace window to absorb Celery dispatch + execution delay:
+            #   beat fires at :00 → task executes at :03 → 3 % 30 = 3 < 5 → RUN ✓
+            #   beat fires at :15 → task executes at :18 → 18 % 30 = 18 >= 5 → SKIP ✓
+            #   beat fires at :30 → task executes at :34 → 4 % 30 = 4 < 5 → RUN ✓
+            #   beat fires at :45 → task executes at :48 → 18 % 30 = 18 >= 5 → SKIP ✓
             interval_min: int | None = tf_sched.get("execution_interval_minutes")
             if interval_min and timeframe == "15m":
-                if now_utc_dt.minute % interval_min >= interval_min // 2:
+                if now_utc_dt.minute % interval_min >= _INTERVAL_GRACE_MIN:
                     logger.debug(
                         "compute_pair_vi(%s): skipped (minute :%02d not on %dmin interval)",
                         timeframe, now_utc_dt.minute, interval_min,

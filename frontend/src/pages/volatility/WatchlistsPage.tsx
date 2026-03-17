@@ -22,7 +22,7 @@ type TF = typeof TIMEFRAMES[number]
 const REGIMES = ['ALL', 'DEAD', 'CALM', 'NORMAL', 'TRENDING', 'ACTIVE', 'EXTREME'] as const
 
 // Reference EMA per TF used for signal detection (matches backend _TF_EMA_REF)
-const TF_EMA_REF: Record<string, number> = { '15m': 50, '1h': 100, '4h': 200, '1d': 200, '1w': 50 }
+const TF_EMA_REF: Record<string, number> = { '15m': 55, '1h': 99, '4h': 200, '1d': 99, '1w': 55 }
 // Superior TF mapping for TF+1 column header label
 const TF_NEXT: Record<string, string> = { '15m': '1h', '1h': '4h', '4h': '1d', '1d': '1w' }
 
@@ -68,7 +68,7 @@ const EMA_TOOLTIP: Record<string, string> = {
   mixed:          'Price position mixed relative to EMAs 20 / 50 / 200',
 }
 
-type SortKey = 'vi_score' | 'change_24h' | 'pair'
+type SortKey = 'vi_score' | 'change_24h' | 'pair' | 'ema_score'
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -826,9 +826,10 @@ export function WatchlistsPage() {
                       <th className="px-3 py-2.5 text-left text-zinc-500 font-mono">
                         <span className="flex items-center gap-1">
                           EMA{selectedData ? ` (${TF_EMA_REF[selectedData.timeframe] ?? ''})` : ''}
-                          <Tooltip text="Price vs EMA 20/50/200 (scoring). Breakout/retest uses ref EMA per TF: 50 on 15m · 100 on 1h · 200 on 4h/1d/1w. ▲ above all · ▼ below all · 🚀 breakout · 💥 breakdown · 🔄🔁 retest · ∿ mixed" maxWidth={300} />
+                          <Tooltip text="Signal vs the ref EMA per TF (configurable — e.g. EMA 200 on 4h). Breakout/retest = price crossing the ref EMA within 3 candles. ▲ above all · ▼ below all · 🚀 breakout · 💥 breakdown · 🔄🔁 retest · ∿ mixed" maxWidth={300} />
                         </span>
                       </th>
+                      <SortTh label="EMA%" col="ema_score" active={sortKey === 'ema_score'} desc={sortDesc} onClick={() => handleSort('ema_score')} tooltip={<Tooltip text="EMA Alignment Score (0–100). Price position vs the scoring EMAs (weighted average — e.g. above the longest ref EMA = smaller weight). 100 = above all · 0 = below all. Not included in VI — used for ranking only." maxWidth={260} />} />
                       <SortTh label="24H%" col="change_24h" active={sortKey === 'change_24h'} desc={sortDesc} onClick={() => handleSort('change_24h')} className="w-20" />
                       <th className="px-3 py-2.5 text-left text-zinc-500 font-mono">
                         <span className="flex items-center gap-1">
@@ -853,6 +854,8 @@ export function WatchlistsPage() {
                       const alert      = alertIcon(p)
                       const { base, quote } = formatPair(p.pair)
                       const chg = p.change_24h
+                      const emaPct     = p.ema_score != null ? Math.round(p.ema_score * 100) : null
+                      const emaScoreColor = emaPct != null ? (emaPct >= 67 ? '#10b981' : emaPct >= 34 ? '#f59e0b' : '#ef4444') : '#71717a'
                       return (
                         <tr key={p.pair} className="border-b border-zinc-900 hover:bg-zinc-900/50 transition-colors">
                           <td className="px-3 py-2 text-zinc-700 font-mono">{i + 1}</td>
@@ -874,6 +877,12 @@ export function WatchlistsPage() {
                           </td>
                           <td className="px-3 py-2 font-mono cursor-help" style={{ color: ema.color }} title={EMA_TOOLTIP[p.ema_signal] ?? p.ema_signal}>
                             <span className="mr-1">{ema.symbol}</span>{ema.label}
+                          </td>
+                          <td className="px-3 py-2 font-mono text-right tabular-nums">
+                            {emaPct != null
+                              ? <span className="text-xs font-bold" style={{ color: emaScoreColor }}>{emaPct}</span>
+                              : <span className="text-zinc-700">—</span>
+                            }
                           </td>
                           <td className="px-3 py-2 font-mono text-right tabular-nums">
                             {chg !== null
@@ -898,7 +907,7 @@ export function WatchlistsPage() {
                     })}
                     {filteredPairs.length === 0 && (
                       <tr>
-                        <td colSpan={8} className="px-4 py-10 text-center text-zinc-600">
+                        <td colSpan={9} className="px-4 py-10 text-center text-zinc-600">
                           No pairs match the filter.
                         </td>
                       </tr>
