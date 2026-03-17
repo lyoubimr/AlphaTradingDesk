@@ -196,9 +196,14 @@ adjusted_risk_pct     = 2.57%   ← dépasse le budget
 
 Condition de déclenchement :
 ```
-concurrent_risk_used ≥ max_concurrent_risk_pct
+alert_banner.enabled = true
+ET concurrent_risk_used ≥ max_concurrent_risk_pct × (alert_banner.trigger_threshold_pct / 100)
 ET count(trades WHERE status = 'pending') > 0
 ```
+
+> **Le seuil est configurable** — défaut `100%` (alerte à saturation complète).
+> Passer à `80%` → alerte dès que 4.8% sur 6% de budget concurrent utilisé.
+> `trigger_threshold_pct` est modifiable depuis Settings → Risk Management.
 
 Affichage : une bande d'alerte globale en haut du dashboard (et dans la sidebar) :
 > ⚠️ **Risque concurrent saturé** · X limite(s) en attente — pensez à fermer vos ordres LIMIT

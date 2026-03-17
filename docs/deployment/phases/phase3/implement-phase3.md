@@ -216,7 +216,9 @@ GET /api/risk/budget/{profile_id}
   "budget_remaining_amount": 220.0,
   "open_trades_count": 3,
   "pending_trades_count": 1,
-  "alert_risk_saturated": false    // true si used >= max AND pending > 0
+  "alert_risk_saturated": false,   // true si used >= trigger_threshold_pct ET pending > 0
+  "alert_threshold_pct": 80.0,     // lu depuis risk_settings.alert_banner.trigger_threshold_pct
+  "force_allowed": true            // lu depuis risk_settings.risk_guard.force_allowed
 }
 ```
 
@@ -228,6 +230,14 @@ JOIN profiles ON profiles.id = trades.profile_id
 WHERE trades.profile_id = :id
   AND trades.status IN ('open', 'partial', 'pending')
 ```
+
+`alert_risk_saturated` est calculé comme :
+```python
+alert_risk_saturated = (
+    risk_settings.alert_banner.enabled
+    and concurrent_risk_used_pct >= (max_concurrent_risk_pct * alert_threshold_pct / 100)
+    and pending_trades_count > 0
+)
 
 **Fichiers touchés :**
 ```
@@ -374,9 +384,14 @@ src/trades/router.py     ← (pas de changement si service gère)
 ## Step P3-8 — Dashboard Alert data
 
 **Quoi :**
-Le budget endpoint (`P3-5`) expose déjà `alert_risk_saturated`. Il suffit de :
+Le budget endpoint (`P3-5`) expose déjà `alert_risk_saturated` + `alert_threshold_pct`
+(calculé depuis `risk_settings.alert_banner` du profil). Il suffit de :
 - L'appeler depuis le frontend Dashboard au chargement
-- L'exposer dans le store React (context global)
+- Transmettre `force_allowed` au formulaire New Trade (désactiver le bouton Force si `false`)
+
+> ⚠️ Le seuil d'alerte N'EST PAS hardcodé — il vient de `risk_settings.alert_banner.trigger_threshold_pct`.
+> Si l'utilisateur le monte à 80% dans la page Risk Settings, l'alerte se déclenche
+> dès 80% du budget concurrent utilisé (anticipé avant saturation complète).
 
 Ce step est largement frontend — pas de nouveau endpoint backend.
 
@@ -432,7 +447,14 @@ frontend/src/components/sidebar/Sidebar.tsx        ← ajouter entrée Settings
 3. **Facteurs MA Direction** — 3 champs (aligned / neutral / opposed)
 4. **Bornes WR & Confidence** — min_factor / max_factor par critère
 5. **Plafond global** — `global_multiplier_max` slider (1.0 → 3.0)
-6. Preview live — simulateur : entrer des valeurs hypothétiques → voir le multiplier produit
+6. **Risk Guard** — 3 toggles configurables :
+   - `enabled` — activer/désactiver la garde budget entièrement
+   - `force_allowed` — autoriser le trader à forcer (mode discipline stricte si off)
+   - `hard_block_at_zero` — bloquer tout trade si budget restant = 0 (même base risk)
+7. **Alert Banner** — 2 contrôles :
+   - `enabled` toggle
+   - `trigger_threshold_pct` slider (50% → 100%) — ex : 80% = alerte avant saturation complète
+8. Preview live — simulateur : entrer des valeurs hypothétiques → voir le multiplier produit
 
 ---
 
