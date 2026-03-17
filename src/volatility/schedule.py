@@ -74,13 +74,9 @@ def is_within_schedule(db: Session, component: str, profile_id: int | None = Non
     if cfg.get("weekdays_only", False) and now_utc.weekday() >= 5:
         return False
 
-    start = _parse_time(cfg.get("active_hours_start", "00:00"))
-    end = _parse_time(cfg.get("active_hours_end", "23:59"))
-    current = now_utc.time().replace(second=0, microsecond=0)
-
-    # Handle overnight windows (e.g. 22:00 → 06:00) not needed in Phase 2
-    # — all windows are within the same day. Keep it simple.
-    return start <= current <= end
+    # Time range gate removed from UI — schedule is now controlled exclusively
+    # via per-TF execution_hours / weekend_execution_hours (step 2b in tasks.py).
+    return True
 
 
 def _load_settings(db: Session, component: str, profile_id: int | None) -> dict:

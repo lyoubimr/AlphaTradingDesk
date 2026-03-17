@@ -84,7 +84,15 @@ def compute_mfi(df: pd.DataFrame, period: int = 14) -> float:
     """Money Flow Index (14 periods), normalized for volatility.
 
     MFI extremes (< 20 or > 80) = strong buying or selling pressure → high vol.
-    Normalization: abs(mfi_raw - 50) / 50  →  0 at neutral, 1 at extreme.
+    Deviation series: abs(mfi_raw - 50) / 50  →  0 at neutral, 1 at extreme.
+    Percentile-ranked over the full window, consistent with RVOL / ATR / BB.
+
+    Why percentile-rank?
+      Without it, a crypto perp that *always* trades with MFI 70–80 would
+      produce a near-constant 0.4–0.6 component regardless of whether current
+      pressure is actually unusual. Percentile-ranking makes MFI self-adapting
+      to each pair's own historical pressure distribution, matching the
+      methodology of the other three indicators.
     """
     tp = (df["high"] + df["low"] + df["close"]) / 3.0
     rmf = tp * df["volume"]
@@ -95,8 +103,9 @@ def compute_mfi(df: pd.DataFrame, period: int = 14) -> float:
     mfr = pos_mf / neg_mf.replace(0.0, np.nan)
     mfi_raw = 100.0 - (100.0 / (1.0 + mfr))
     mfi_raw = mfi_raw.fillna(50.0)
-    last_mfi = float(mfi_raw.iloc[-1])
-    return round(abs(last_mfi - 50.0) / 50.0, 4)
+    # Deviation from neutral: 0 = no pressure, 1 = max one-sided pressure
+    mfi_dev = (mfi_raw - 50.0).abs() / 50.0
+    return round(_pct_rank(mfi_dev), 4)
 
 
 def compute_atr_norm(df: pd.DataFrame, period: int = 14) -> float:

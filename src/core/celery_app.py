@@ -59,7 +59,7 @@ celery_app.conf.update(
         "market-vi-1w": {
             "task": "src.volatility.tasks.compute_market_vi",
             "schedule": crontab(minute=0, hour=1, day_of_week="mon"),
-            "kwargs": {"timeframe": "1W"},
+            "kwargs": {"timeframe": "1w"},
         },
         # ── Per-Pair VI (Kraken Futures) ──────────────────────────────────
         "pair-vi-15m": {
@@ -85,7 +85,7 @@ celery_app.conf.update(
         "pair-vi-1w": {
             "task": "src.volatility.tasks.compute_pair_vi",
             "schedule": crontab(minute=0, hour=1, day_of_week="mon"),
-            "kwargs": {"timeframe": "1W"},
+            "kwargs": {"timeframe": "1w"},
         },
         # ── Instruments sync ─────────────────────────────────────────────
         # Kraken pairs upsert + Binance top-100 sync (P2-10)

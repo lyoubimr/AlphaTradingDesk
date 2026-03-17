@@ -66,10 +66,11 @@ read -r -d '' ATD_CRON_BLOCK <<'CRON_EOF' || true
 # Log rotation: truncate app log files larger than 100 MB (daily at 01:00)
 0 1 * * * find /srv/atd/logs/app -name "*.log" -size +100M -exec truncate -s 50M {} \; 2>/dev/null
 
-# OS update + reboot — 1st Sunday of the month at 04:00
-# (after the weekly backup at 03:00 — reboot is unconditional)
-# "day-of-month <= 7" + "day-of-week = 0" = 1st Sunday of the month
-0 4 1-7 * 0 /home/atd/apps/update-server.sh >> /srv/atd/logs/cron/update-server.log 2>&1
+# OS update + reboot — 3rd Sunday of the month at 03:00
+# The weekly backup also fires at 03:00 on Sundays — it completes in < 1 min;
+# apt-get itself takes several minutes, so reboot never races with the backup.
+# "day-of-month 15-21" + "day-of-week = 0" = 3rd Sunday of the month
+0 3 15-21 * 0 /home/atd/apps/update-server.sh >> /srv/atd/logs/cron/update-server.log 2>&1
 
 # ATD-END
 CRON_EOF

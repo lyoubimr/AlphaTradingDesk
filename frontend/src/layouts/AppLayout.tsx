@@ -11,11 +11,13 @@ type ApiStatus = 'online' | 'offline' | 'connecting'
 interface HealthData {
   status: string
   environment: string
+  version?: string
 }
 
-function useApiHealth(): { status: ApiStatus; environment?: string } {
+function useApiHealth(): { status: ApiStatus; environment?: string; version?: string } {
   const [status, setStatus] = useState<ApiStatus>('connecting')
   const [environment, setEnvironment] = useState<string | undefined>()
+  const [version, setVersion] = useState<string | undefined>()
 
   useEffect(() => {
     let cancelled = false
@@ -26,6 +28,7 @@ function useApiHealth(): { status: ApiStatus; environment?: string } {
           if (!cancelled) {
             setStatus('online')
             setEnvironment(data.environment)
+            setVersion(data.version)
           }
         })
         .catch(() => {
@@ -40,16 +43,16 @@ function useApiHealth(): { status: ApiStatus; environment?: string } {
     }
   }, [])
 
-  return { status, environment }
+  return { status, environment, version }
 }
 
 export function AppLayout() {
-  const { status: apiStatus, environment } = useApiHealth()
+  const { status: apiStatus, environment, version } = useApiHealth()
 
   return (
     <ProfileProvider>
       <div className="flex h-screen bg-surface-950 overflow-hidden">
-        <Sidebar apiStatus={apiStatus} environment={environment} />
+        <Sidebar apiStatus={apiStatus} environment={environment} version={version} />
 
         <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
           <Topbar />

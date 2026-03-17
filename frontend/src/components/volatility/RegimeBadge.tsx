@@ -30,17 +30,17 @@ const REGIME_MAP: Record<string, RegimeConfig> = {
     tooltip: 'Normal conditions — Standard strategy · Good liquidity',
   },
   TRENDING: {
-    label: 'TRENDING', emoji: '📈',
-    border: 'border border-yellow-500', bg: 'bg-yellow-950/80', text: 'text-yellow-300',
+    label: 'TRENDING', emoji: '�',
+    border: 'border border-indigo-500', bg: 'bg-indigo-950/80', text: 'text-indigo-300',
     tooltip: 'Trending market — Favor trend-following · High momentum',
   },
   ACTIVE: {
-    label: 'ACTIVE',   emoji: '⚡',
-    border: 'border border-orange-500', bg: 'bg-orange-950/80', text: 'text-orange-300',
+    label: 'ACTIVE',   emoji: '⚠️',
+    border: 'border border-amber-400', bg: 'bg-amber-950/80', text: 'text-amber-300',
     tooltip: 'Active market — Frequent breakouts · Tight risk management',
   },
   EXTREME: {
-    label: 'EXTREME',  emoji: '🔥',
+    label: 'EXTREME',  emoji: '�',
     border: 'border border-red-500',   bg: 'bg-red-950/80',   text: 'text-red-300',
     tooltip: 'Extreme volatility — Reduce positions · Gaps and false breakouts likely',
   },

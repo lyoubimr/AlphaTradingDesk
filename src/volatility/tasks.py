@@ -438,20 +438,46 @@ def compute_pair_vi(self, timeframe: str, force: bool = False) -> dict:  # type:
         )
         indicator_weights: dict = pp_cfg.get("indicator_weights", {})
 
-        # ── 2b. Gate by execution_hours for this TF (configured per TF in schedules) ──
-        # If the user has defined allowed execution hours for this TF, check that
-        # the current UTC hour is permitted before running the computation.
+        # ── 2b. Gate by execution_hours for this TF — weekday vs weekend split ──
+        # execution_hours         → allowed UTC hours on weekdays (Mon–Fri)
+        # weekend_execution_hours → allowed UTC hours on Sat–Sun
+        # Empty list = no restriction for that day type (run at every natural cycle).
         if not force:
             tf_sched: dict = (pp_cfg.get("schedules") or {}).get(timeframe, {})
-            exec_hours: list = tf_sched.get("execution_hours", [])
+            now_utc_dt = datetime.now(UTC)
+            is_weekend_day = now_utc_dt.weekday() >= 5
+            if is_weekend_day:
+                # Weekend: use weekend_execution_hours if key exists,
+                # otherwise fall back to execution_hours.
+                # None = key absent (never configured) → inherit weekday hours.
+                # []   = key present but empty → no restriction on weekends.
+                we_hours = tf_sched.get("weekend_execution_hours", None)
+                exec_hours: list = (
+                    we_hours if we_hours is not None
+                    else tf_sched.get("execution_hours", [])
+                )
+            else:
+                exec_hours = tf_sched.get("execution_hours", [])
             if exec_hours:
-                current_hour = datetime.now(UTC).hour
+                current_hour = now_utc_dt.hour
                 if current_hour not in exec_hours:
                     logger.debug(
-                        "compute_pair_vi(%s): skipped (hour %dh outside execution_hours %s)",
-                        timeframe, current_hour, exec_hours,
+                        "compute_pair_vi(%s): skipped (hour %dh outside %s execution_hours %s)",
+                        timeframe, current_hour,
+                        "weekend" if is_weekend_day else "weekday",
+                        exec_hours,
                     )
                     return {"status": "skipped", "reason": "outside_execution_hours", "timeframe": timeframe}
+
+            # Sub-hour interval gate (15m TF only: 15min native, or every 30min)
+            interval_min: int | None = tf_sched.get("execution_interval_minutes")
+            if interval_min and timeframe == "15m":
+                if now_utc_dt.minute % interval_min != 0:
+                    logger.debug(
+                        "compute_pair_vi(%s): skipped (minute :%02d not on %dmin interval)",
+                        timeframe, now_utc_dt.minute, interval_min,
+                    )
+                    return {"status": "skipped", "reason": "outside_interval", "timeframe": timeframe}
 
         # ── 3. Resolve active Kraken instruments ──────────────────────────
         kraken_broker = (
