@@ -22,7 +22,7 @@ type TF = typeof TIMEFRAMES[number]
 const REGIMES = ['ALL', 'DEAD', 'CALM', 'NORMAL', 'TRENDING', 'ACTIVE', 'EXTREME'] as const
 
 // Reference EMA per TF used for signal detection (matches backend _TF_EMA_REF)
-const TF_EMA_REF: Record<string, number> = { '15m': 50, '1h': 100, '4h': 200, '1d': 200, '1w': 50 }
+const TF_EMA_REF: Record<string, number> = { '15m': 55, '1h': 99, '4h': 200, '1d': 99, '1w': 55 }
 // Superior TF mapping for TF+1 column header label
 const TF_NEXT: Record<string, string> = { '15m': '1h', '1h': '4h', '4h': '1d', '1d': '1w' }
 
@@ -68,7 +68,7 @@ const EMA_TOOLTIP: Record<string, string> = {
   mixed:          'Price position mixed relative to EMAs 20 / 50 / 200',
 }
 
-type SortKey = 'vi_score' | 'change_24h' | 'pair'
+type SortKey = 'vi_score' | 'change_24h' | 'pair' | 'ema_score'
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -829,12 +829,7 @@ export function WatchlistsPage() {
                           <Tooltip text="Signal vs the ref EMA per TF (configurable — e.g. EMA 200 on 4h). Breakout/retest = price crossing the ref EMA within 3 candles. ▲ above all · ▼ below all · 🚀 breakout · 💥 breakdown · 🔄🔁 retest · ∿ mixed" maxWidth={300} />
                         </span>
                       </th>
-                      <th className="px-3 py-2.5 text-left text-zinc-500 font-mono">
-                        <span className="flex items-center gap-1">
-                          EMA%
-                          <Tooltip text="EMA Alignment Score (0–100). Price position vs the scoring EMAs (weighted average — e.g. above the longest ref EMA = smaller weight). 100 = above all · 0 = below all. Not included in VI — used for ranking only." maxWidth={260} />
-                        </span>
-                      </th>
+                      <SortTh label="EMA%" col="ema_score" active={sortKey === 'ema_score'} desc={sortDesc} onClick={() => handleSort('ema_score')} tooltip={<Tooltip text="EMA Alignment Score (0–100). Price position vs the scoring EMAs (weighted average — e.g. above the longest ref EMA = smaller weight). 100 = above all · 0 = below all. Not included in VI — used for ranking only." maxWidth={260} />} />
                       <SortTh label="24H%" col="change_24h" active={sortKey === 'change_24h'} desc={sortDesc} onClick={() => handleSort('change_24h')} className="w-20" />
                       <th className="px-3 py-2.5 text-left text-zinc-500 font-mono">
                         <span className="flex items-center gap-1">
