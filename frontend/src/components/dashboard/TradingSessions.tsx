@@ -1,14 +1,15 @@
-// Sessions indicator — compact inline pills for the Topbar.
+// Sessions indicator — compact dots for the Topbar.
 // Computed client-side from UTC time. Zero API calls. Updates every 30s.
+// Hover OR click on a dot to see session details.
 //
 // Sessions (UTC):
 //   Asia (Tokyo)        : 00:00 – 09:00
-//   London              : 08:00 – 17:00
+//   London / EUR        : 08:00 – 17:00
 //   London / NY Overlap : 13:00 – 17:00
 //   New York            : 13:00 – 22:00
 //   NYSE Open           : 14:30 – 21:00
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 interface Session {
   id: string
@@ -20,10 +21,10 @@ interface Session {
 }
 
 const SESSIONS: Session[] = [
-  { id: 'asia',   label: 'Asia',      emoji: '🌏', startH: 0,    endH: 9,  color: '#38bdf8' },
-  { id: 'london', label: 'London',    emoji: '🇬🇧', startH: 8,    endH: 17, color: '#a78bfa' },
-  { id: 'ny',     label: 'New York',  emoji: '🗽', startH: 13,   endH: 22, color: '#34d399' },
-  { id: 'nyse',   label: 'NYSE Open', emoji: '🔔', startH: 14.5, endH: 21, color: '#fbbf24' },
+  { id: 'asia',   label: 'Asia', emoji: '🌏', startH: 0,    endH: 9,  color: '#38bdf8' },
+  { id: 'london', label: 'EUR',  emoji: '🇬🇧', startH: 8,    endH: 17, color: '#a78bfa' },
+  { id: 'ny',     label: 'NY',   emoji: '🗽', startH: 13,   endH: 22, color: '#fb923c' },
+  { id: 'nyse',   label: 'NYSE', emoji: '🔔', startH: 14.5, endH: 21, color: '#f87171' },
 ]
 
 const isWeekend = (d: Date) => d.getUTCDay() === 0 || d.getUTCDay() === 6
@@ -61,6 +62,48 @@ function nextOpenLabel(now: Date): string {
   return `${next.emoji} ${next.label} in ${dh > 0 ? `${dh}h ` : ''}${dm}m`
 }
 
+// ── SessionDot: hover + click tooltip ────────────────────────────────────────
+function SessionDot({ color, label }: { color: string; label: string }) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLSpanElement>(null)
+
+  // Close on outside click
+  useEffect(() => {
+    if (!open) return
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [open])
+
+  return (
+    <span
+      ref={ref}
+      className="relative flex items-center justify-center"
+      onMouseEnter={() => setOpen(true)}
+      onMouseLeave={() => setOpen(false)}
+      onClick={() => setOpen(v => !v)}
+    >
+      <span
+        className="block w-2.5 h-2.5 rounded-full animate-pulse cursor-pointer"
+        style={{ backgroundColor: color }}
+      />
+      {open && (
+        <span className="
+          absolute top-full left-1/2 -translate-x-1/2 mt-2
+          whitespace-nowrap text-xs
+          bg-surface-800 border border-surface-700
+          text-slate-200 px-2.5 py-1 rounded-lg shadow-xl z-50
+          pointer-events-none
+        ">
+          {label}
+        </span>
+      )}
+    </span>
+  )
+}
+
 export function SessionsIndicator() {
   const [now, setNow] = useState(() => new Date())
 
@@ -75,40 +118,27 @@ export function SessionsIndicator() {
 
   if (weekend) {
     return (
-      <span className="hidden sm:inline text-xs text-amber-400 bg-amber-900/20 border border-amber-700/30 px-2.5 py-0.5 rounded-full">
-        🌙 Weekend — Crypto only
-      </span>
+      <SessionDot color="#f59e0b" label="🌙 Weekend — Crypto only" />
     )
   }
 
   if (active.length === 0) {
     return (
-      <span className="hidden lg:inline text-xs text-slate-600">
-        Market closed · next: {nextOpenLabel(now)}
-      </span>
+      <SessionDot color="#334155" label={`Market closed · next: ${nextOpenLabel(now)}`} />
     )
   }
 
   return (
-    <div className="hidden md:flex items-center gap-2">
+    <div className="hidden md:flex items-center gap-1.5">
       {active.map(s => (
-        <span
+        <SessionDot
           key={s.id}
-          className="flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full border"
-          style={{ borderColor: s.color + '55', backgroundColor: s.color + '18', color: s.color }}
-        >
-          <span
-            className="w-1.5 h-1.5 rounded-full shrink-0 animate-pulse"
-            style={{ backgroundColor: s.color }}
-          />
-          {s.emoji} {s.label}
-          <span className="opacity-60 font-normal">{closesIn(s, now)}</span>
-        </span>
+          color={s.color}
+          label={`${s.emoji} ${s.label} · ${closesIn(s, now)}`}
+        />
       ))}
       {overlap && (
-        <span className="text-[11px] text-purple-400 bg-purple-900/15 border border-purple-700/30 px-2 py-0.5 rounded-full">
-          ⚡ Overlap LDN·NYC
-        </span>
+        <SessionDot color="#c084fc" label="⚡ Overlap EUR·NY — peak liquidity" />
       )}
     </div>
   )

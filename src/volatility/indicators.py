@@ -157,7 +157,7 @@ def compute_ema_score(
 
     ema_ref: TF-specific reference EMA for crossover/retest signal detection.
         Defaults to periods[0] when not supplied.
-        Recommended per TF: 15m→50, 1h→100, 4h→200, 1d→200.
+        Recommended per TF: 15m→50, 1h→100, 4h→200, 1d→100, 1w→55.
 
     Signal labels (ema_ref-based, used as the watchlist `ema_signal` column):
         above_all      — price > all 3 scoring EMAs  (state, no alert)
