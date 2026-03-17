@@ -77,13 +77,19 @@ adjusted_risk_pct = base_risk_pct * multiplier
 {
   "DEAD":     0.30,
   "CALM":     0.60,
-  "NORMAL":   0.85,
-  "TRENDING": 1.30,
-  "ACTIVE":   1.00,
+  "NORMAL":   1.00,
+  "TRENDING": 1.50,
+  "ACTIVE":   1.20,
   "EXTREME":  0.50
 }
 ```
-> TRENDING = sweet spot → boost. EXTREME = danger → réduction. DEAD = marché mort → quasi-blocage.
+> `NORMAL = 1.0` est le **vrai neutre** — aucune pénalité, aucun boost.
+> `TRENDING = 1.5` est le sweet spot — boost significatif (sweet spot).
+> `ACTIVE = 1.2` = marché en mouvement — léger bonus.
+> `EXTREME = 0.5` = danger volatilité → forte réduction.
+> `DEAD = 0.3` = marché mort → quasi-blocage.
+>
+> ⚙️ **Tous ces facteurs sont configurables par profil** dans `risk_settings.config`.
 
 **MA Direction** — comparaison direction trade vs opinion analysée :
 ```
@@ -116,23 +122,36 @@ factor = confidence_min_factor + (score / 100) * (confidence_max_factor - confid
 Profile: risk_default = 2%, capital = 10 000€
 
 Critères activés (weights normalisés si nécessaire) :
-  Market VI   : TRENDING → 1.30  (weight 0.20)
-  Pair VI     : ACTIVE   → 1.00  (weight 0.25)
+  Market VI   : TRENDING → 1.50  (weight 0.20)
+  Pair VI     : ACTIVE   → 1.20  (weight 0.25)
   MA Direction: aligné   → 1.30  (weight 0.20)
   Strategy WR : 65%      → 1.15  (weight 0.20)
   Confidence  : 80/100   → 1.30  (weight 0.15)
 
-multiplier = 1.30×0.20 + 1.00×0.25 + 1.30×0.20 + 1.15×0.20 + 1.30×0.15
-           = 0.26 + 0.25 + 0.26 + 0.23 + 0.195
-           = 1.195
+multiplier = 1.50×0.20 + 1.20×0.25 + 1.30×0.20 + 1.15×0.20 + 1.30×0.15
+           = 0.300 + 0.300 + 0.260 + 0.230 + 0.195
+           = 1.285
 
-adjusted_risk_pct = 2% × 1.195 = 2.39%
-risk_amount       = 10 000 × 2.39% = 239€  (base : 200€)
+adjusted_risk_pct = 2% × 1.285 = 2.57%
+risk_amount       = 10 000 × 2.57% = 257€  (base : 200€ → +28.5%)
 
 Breakdown affiché :
   Base risk  : 200€ (2.00%)
-  Multiplier : ×1.20
-  Adjusted   : 239€ (2.39%)  ← trader peut accepter ou overrider
+  Multiplier : ×1.29
+  Adjusted   : 257€ (2.57%)  ← trader peut accepter ou overrider
+
+--- Cas maximal favorable (tous critères au max) ---
+  Market VI   : TRENDING → 1.50  (weight 0.20)
+  Pair VI     : TRENDING → 1.50  (weight 0.25)
+  MA Direction: aligné   → 1.30  (weight 0.20)
+  Strategy WR : 100%     → 1.50  (weight 0.20)
+  Confidence  : 100/100  → 1.50  (weight 0.15)
+
+multiplier = 1.50×0.20 + 1.50×0.25 + 1.30×0.20 + 1.50×0.20 + 1.50×0.15
+           = 0.300 + 0.375 + 0.260 + 0.300 + 0.225
+           = 1.46   (plafonné à min(1.46, global_multiplier_max=2.0))
+
+adjusted_risk_pct = 2% × 1.46 = 2.92%  → +46% sur le base risk
 ```
 
 ---
@@ -146,17 +165,26 @@ concurrent_risk_used = Σ(risk_amount des trades open + pending) / capital_curre
 budget_remaining     = max_concurrent_risk_pct - concurrent_risk_used
 ```
 
-**Règle :** si `adjusted_risk_amount > budget_remaining × capital_current`, le trade est **bloqué**.
+**Règle :** si `effective_risk_amount > budget_remaining × capital_current`, le trade est **bloqué**.
 
-L'utilisateur peut **forcer** l'ouverture avec un paramètre `force: bool` explicite (avec confirmation UI).
+> ⚠️ **La garde s'applique au risque EFFECTIF** — c'est-à-dire le montant de risque
+> réellement utilisé pour ce trade, quelle que soit sa source :
+> - risque ajusté dynamiquement (`adjusted_risk_pct` * capital)
+> - override manuel du trader (`risk_pct_override` * capital)
+> - risque de base brut (`risk_percentage_default` * capital) si aucun ajustement
+>
+> Le bypass de l'adviser ne permet pas de contourner le budget concurrent.
+
+L'utilisateur peut **forcer** l'ouverture avec un paramètre `force: bool` explicite
+(désactivable via `risk_guard.force_allowed = false` pour une discipline stricte).
 
 ### Prise en compte du budget restant
 
-Le moteur communique aussi le budget restant. Si `adjusted_risk_pct > budget_remaining`, le système propose **automatiquement** de ramener le risque au budget disponible :
+Le moteur communique aussi le budget restant. Si `effective_risk_pct > budget_remaining_pct`, le système propose **automatiquement** de ramener le risque au budget disponible :
 
 ```
-budget_remaining_pct = max_concurrent_risk_pct - concurrent_risk_used = 0.8%
-adjusted_risk_pct    = 2.39%   ← dépasse le budget
+budget_remaining_pct  = max_concurrent_risk_pct - concurrent_risk_used = 0.8%
+adjusted_risk_pct     = 2.57%   ← dépasse le budget
 
 → proposition : réduire à 0.8% (budget restant)
 → ou forcer avec confirmation (dépasse max_concurrent)
@@ -190,12 +218,12 @@ Structure JSONB `risk_settings.config` :
     "market_vi": {
       "enabled": true,
       "weight": 0.20,
-      "factors": {"DEAD": 0.30, "CALM": 0.60, "NORMAL": 0.85, "TRENDING": 1.30, "ACTIVE": 1.00, "EXTREME": 0.50}
+      "factors": {"DEAD": 0.30, "CALM": 0.60, "NORMAL": 1.00, "TRENDING": 1.50, "ACTIVE": 1.20, "EXTREME": 0.50}
     },
     "pair_vi": {
       "enabled": true,
       "weight": 0.25,
-      "factors": {"DEAD": 0.30, "CALM": 0.60, "NORMAL": 0.85, "TRENDING": 1.30, "ACTIVE": 1.00, "EXTREME": 0.50}
+      "factors": {"DEAD": 0.30, "CALM": 0.60, "NORMAL": 1.00, "TRENDING": 1.50, "ACTIVE": 1.20, "EXTREME": 0.50}
     },
     "ma_direction": {
       "enabled": true,
@@ -215,7 +243,16 @@ Structure JSONB `risk_settings.config` :
       "max_factor": 1.50
     }
   },
-  "global_multiplier_max": 2.0
+  "global_multiplier_max": 2.0,
+  "risk_guard": {
+    "enabled": true,
+    "force_allowed": true,
+    "hard_block_at_zero": false
+  },
+  "alert_banner": {
+    "enabled": true,
+    "trigger_threshold_pct": 100.0
+  }
 }
 ```
 
@@ -223,6 +260,8 @@ Structure JSONB `risk_settings.config` :
 - La somme des `weight` des critères activés doit être normalisée au runtime (pas validée strictement à la saisie — on normalise à la volée)
 - `global_multiplier_max` ∈ [1.0, 3.0]
 - Chaque `factor` ∈ [0.1, 3.0]
+- `alert_banner.trigger_threshold_pct` ∈ [50.0, 100.0] — permet une alerte anticipée (ex : 80% = alerte avant saturation complète)
+- `risk_guard.force_allowed = false` → blocage total, aucun override possible (mode discipline stricte)
 
 ---
 
@@ -234,14 +273,14 @@ Panneau inline dans le formulaire "New Trade" (après saisie du pair, TF, direct
 ┌─ Risk Advisor ────────────────────────────────────────────────────┐
 │  Base risk : 2.00% = 200€                                         │
 │                                                                    │
-│  ✅ Market VI       TRENDING    ×1.30  (weight 20%) → +0.26       │
-│  ✅ Pair VI         ACTIVE      ×1.00  (weight 25%) → +0.25       │
-│  ✅ MA Direction    Aligned ↑   ×1.30  (weight 20%) → +0.26       │
-│  ✅ Strategy WR     65%         ×1.15  (weight 20%) → +0.23       │
+│  ✅ Market VI       TRENDING    ×1.50  (weight 20%) → +0.300      │
+│  ✅ Pair VI         ACTIVE      ×1.20  (weight 25%) → +0.300      │
+│  ✅ MA Direction    Aligned ↑   ×1.30  (weight 20%) → +0.260      │
+│  ✅ Strategy WR     65%         ×1.15  (weight 20%) → +0.230      │
 │  ✅ Confidence      80/100      ×1.30  (weight 15%) → +0.195      │
 │  ─────────────────────────────────────────────────────────────    │
-│  Multiplier : ×1.195                                               │
-│  Adjusted risk : 2.39%  =  239€                                   │
+│  Multiplier : ×1.285                                              │
+│  Adjusted risk : 2.57%  =  257€                                   │
 │                                                                    │
 │  [✅ Accepter 239€]  [✏️ Override manuel]  [🔒 Forcer base 200€]  │
 └────────────────────────────────────────────────────────────────────┘

@@ -125,13 +125,13 @@ total_weight = sum(c["weight"] for c in enabled_criteria)
 ```
 
 **Test :** `pytest tests/risk_management/test_engine.py` — 8 cas couverts minimum :
-- All criteria enabled, all favorable → multiplier ≥ 1.2
-- All criteria enabled, all unfavorable → multiplier ≤ 0.7
+- All criteria enabled, all favorable → multiplier ≥ 1.40  (TRENDING+aligned+conf 100)
+- All criteria enabled, all unfavorable → multiplier ≤ 0.55
 - Strategy WR neutre (insufficient trades) → WR criterion = 1.0
 - Confidence None → confidence criterion = 1.0
 - MA direction aligned → factor 1.3
 - Disabled criterion not included in calculation
-- Budget blocking → `budget_blocking=True`, `suggested_risk_pct < adjusted_risk_pct`
+- Budget blocking → `budget_blocking=True`, `suggested_risk_pct < effective_risk_pct`
 - `global_multiplier_max` respected
 
 ---
@@ -275,17 +275,17 @@ Ce endpoint orchestre tout :
       "name": "market_vi",
       "enabled": true,
       "value_label": "TRENDING",
-      "factor": 1.30,
+      "factor": 1.50,
       "weight": 0.20,
-      "contribution": 0.26
+      "contribution": 0.300
     },
     {
       "name": "pair_vi",
       "enabled": true,
       "value_label": "ACTIVE",
-      "factor": 1.00,
+      "factor": 1.20,
       "weight": 0.25,
-      "contribution": 0.25
+      "contribution": 0.300
     },
     {
       "name": "ma_direction",
@@ -315,7 +315,7 @@ Ce endpoint orchestre tout :
   "budget_remaining_pct": 2.61,
   "budget_remaining_amount": 261.0,
   "budget_blocking": false,
-  "suggested_risk_pct": 2.39
+  "suggested_risk_pct": 2.57
 }
 ```
 
@@ -332,9 +332,12 @@ src/risk_management/service.py    ← orchestrate_risk_advisor()
 **Quoi :**
 Enrichir `trades/service.py::open_trade()` :
 1. Calculer `concurrent_risk_used` (trades open+partial+pending)
-2. Si `risk_amount > budget_remaining` ET `force != True` → `HTTP 422` avec message clair
-3. Si `force=True` → log warning + passer outre
-4. Persister `dynamic_risk_snapshot` dans `trade.dynamic_risk_snapshot` (JSONB)
+2. Résoudre le **risque effectif** = `risk_pct_override` si fourni, sinon `risk_percentage_default`
+   → la garde s'applique quel que soit le chemin (base brut, ajusté, ou override manuel)
+3. Si `effective_risk_amount > budget_remaining` ET `force != True` → `HTTP 422` avec message clair
+4. Si `force=True` ET `risk_guard.force_allowed=True` → log warning + passer outre
+   Si `risk_guard.force_allowed=False` → `HTTP 422` même avec `force=True` (mode strict)
+5. Persister `dynamic_risk_snapshot` dans `trade.dynamic_risk_snapshot` (JSONB)
 
 **Schema enrichi `TradeOpen` :**
 ```python
@@ -347,12 +350,15 @@ class TradeOpen(BaseModel):
 **Response d'erreur blocage :**
 ```json
 {
-  "detail": "Insufficient risk budget. Remaining: 0.8%, requested: 2.39%. Use force=true to override.",
+  "detail": "Insufficient risk budget. Remaining: 0.8%, requested: 2.57%. Use force=true to override.",
   "code": "RISK_BUDGET_EXCEEDED",
   "budget_remaining_pct": 0.8,
-  "requested_risk_pct": 2.39
+  "effective_risk_pct": 2.57,
+  "force_allowed": true
 }
 ```
+> `force_allowed: false` dans la réponse indique que même `force=True` sera rejeté
+> (profile a configuré `risk_guard.force_allowed = false` — mode discipline stricte).
 
 **Fichiers touchés :**
 ```
