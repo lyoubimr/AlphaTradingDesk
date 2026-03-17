@@ -9,6 +9,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import { Activity, Save, Loader2, RefreshCw, Check, AlertTriangle } from 'lucide-react'
 import { PageHeader } from '../../components/ui/PageHeader'
+import { Tooltip } from '../../components/ui/Tooltip'
 import { useProfile } from '../../context/ProfileContext'
 import { volatilityApi } from '../../lib/api'
 import { cn } from '../../lib/cn'
@@ -832,12 +833,15 @@ export function VolatilitySettingsPage() {
             <hr className="border-surface-700" />
 
             <div>
-              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">
+              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1 flex items-center gap-1">
                 EMA Reference per TF
+                <Tooltip
+                  text="Reference EMA used per timeframe to detect breakout and retest signals (price crosses above/below this EMA). Configure each TF independently. Does not affect the VI score computation."
+                  maxWidth={280}
+                />
               </p>
               <p className="text-xs text-slate-600 mt-0.5 mb-3">
-                EMA used for breakout / retest signal detection.<br />
-                Scoring EMAs (21 · 55 · 200) are fixed and unchanged by this setting.
+                Used for per-pair breakout / retest signal detection only — not for Market VI computation.
               </p>
               <div className="space-y-2">
                 {(['15m', '1h', '4h', '1d', '1w'] as TFKey[]).map(tf => (

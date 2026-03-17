@@ -105,7 +105,7 @@ export function VolatilityLegendPanel({
                 key: 'EMA Score',
                 full: 'EMA Alignment Score',
                 color: '#818cf8',
-                desc: 'Directional score (0–1) based on price position vs EMA 20 / 50 / 200 (weights: 50% / 30% / 20%). 1.0 = above all EMAs (full bull). 0.0 = below all. NOT included in VI — stored for context and watchlist ranking only.'
+                desc: 'Directional score (0–100) — price position relative to the scoring EMAs (weighted average, e.g. above the longest ref EMA = smallest weight). 100 = above all scoring EMAs (full bull). 0 = below all. NOT included in VI — used for watchlist ranking only.'
               },
             ] as const).map(({ key, full, color, desc }) => (
               <div key={key} className="flex gap-3">
@@ -187,6 +187,21 @@ export function VolatilityLegendPanel({
             })}
           </div>
         </div>
+
+        {/* EMA Score — watchlist variant (market variant shows this in Volatility Indicators) */}
+        {variant === 'watchlist' && (
+          <div>
+            <p className="text-[10px] font-semibold text-zinc-500 uppercase tracking-widest mb-1">EMA Score (EMA%)</p>
+            <p className="text-zinc-400 leading-relaxed">
+              Score from <strong className="text-zinc-300">0 to 100</strong> measuring how much of the price action is
+              above the scoring EMAs (weighted average — e.g. being above the longest ref EMA contributes
+              the smallest weight, while the shortest contributes the most).
+              {' '}<strong className="text-zinc-300">100</strong> = above all scoring EMAs ·{' '}
+              <strong className="text-zinc-300">0</strong> = below all.{' '}
+              <span className="text-zinc-600">Not included in VI — used for ranking only.</span>
+            </p>
+          </div>
+        )}
 
         {/* TF+1 */}
         <div>
