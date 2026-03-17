@@ -7,7 +7,7 @@ All endpoints added here incrementally as Phase 3 steps are implemented.
 P3-3   GET /risk/pair-vi                    — Live Pair VI (cache-first, Kraken fallback)
 P3-4   GET /risk/settings/{profile_id}      — Read risk settings (auto-init if absent)
        PUT /risk/settings/{profile_id}      — Update risk settings (deep-merge patch)
-P3-5   GET /risk/budget                     — Concurrent risk budget (added in P3-5)
+P3-5   GET /risk/budget/{profile_id}        — Concurrent risk budget
 P3-6   GET /risk/advisor                    — Full Risk Advisor calculation (added in P3-6)
 """
 
@@ -17,8 +17,8 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from src.core.deps import get_db
-from src.risk_management.schemas import PairVIOut, RiskSettingsOut, RiskSettingsUpdateIn
-from src.risk_management.service import get_live_pair_vi, get_risk_settings, update_risk_settings
+from src.risk_management.schemas import PairVIOut, RiskBudgetOut, RiskSettingsOut, RiskSettingsUpdateIn
+from src.risk_management.service import get_live_pair_vi, get_risk_budget, get_risk_settings, update_risk_settings
 
 router = APIRouter(prefix="/risk", tags=["risk"])
 
@@ -79,4 +79,24 @@ def write_risk_settings(
     """
     row = update_risk_settings(profile_id, body.config, db)
     return RiskSettingsOut(profile_id=row.profile_id, config=row.config)
+
+
+# ── P3-5: Risk Budget ─────────────────────────────────────────────────────────
+
+@router.get("/budget/{profile_id}", response_model=RiskBudgetOut)
+def read_risk_budget(
+    profile_id: int,
+    db: Session = Depends(get_db),
+) -> RiskBudgetOut:
+    """Return the concurrent risk budget for a profile.
+
+    Shows how much of the ``max_concurrent_risk_pct`` ceiling is already
+    consumed by open/partial/pending trades, and how much budget remains.
+
+    Also returns the ``alert_risk_saturated`` flag (true when the trader has
+    crossed the configurable alert threshold while a pending trade is waiting),
+    and ``force_allowed`` so the UI can decide whether to surface a hard block.
+    """
+    data = get_risk_budget(profile_id, db)
+    return RiskBudgetOut(**data)
 

@@ -16,6 +16,8 @@ import httpx
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
+from src.core.models.broker import Profile
+from src.core.models.trade import Trade
 from src.risk_management.defaults import DEFAULT_RISK_CONFIG
 from src.risk_management.engine import _deep_merge
 from src.risk_management.models import RiskSettings
@@ -139,3 +141,74 @@ def update_risk_settings(profile_id: int, config_patch: dict, db: Session) -> Ri
     db.commit()
     db.refresh(row)
     return row
+
+
+# ── P3-5: Risk Budget ─────────────────────────────────────────────────────────
+
+_ACTIVE_STATUSES = ("open", "partial", "pending")
+
+
+def get_risk_budget(profile_id: int, db: Session) -> dict:
+    """Compute the concurrent risk budget for a profile.
+
+    Returns a dict matching ``RiskBudgetOut``:
+    - Sums ``risk_amount`` of all open/partial/pending trades.
+    - Derives ``budget_remaining_pct`` and ``budget_remaining_amount``.
+    - Reads ``alert_threshold_pct`` + ``force_allowed`` from risk_settings.
+    - Evaluates ``alert_risk_saturated`` flag.
+
+    Raises HTTPException(404) if the profile does not exist.
+    """
+    profile = db.query(Profile).filter(Profile.id == profile_id).first()
+    if profile is None:
+        raise HTTPException(status_code=404, detail=f"Profile {profile_id} not found")
+
+    capital = float(profile.capital_current)
+    risk_pct_default = float(profile.risk_percentage_default)
+    max_concurrent = float(profile.max_concurrent_risk_pct)
+
+    # ── Active trades ─────────────────────────────────────────────────────────
+    active_trades = (
+        db.query(Trade)
+        .filter(Trade.profile_id == profile_id, Trade.status.in_(_ACTIVE_STATUSES))
+        .all()
+    )
+    open_count = sum(1 for t in active_trades if t.status in ("open", "partial"))
+    pending_count = sum(1 for t in active_trades if t.status == "pending")
+    risk_used_amount = sum(float(t.risk_amount) for t in active_trades)
+
+    concurrent_used_pct = (risk_used_amount / capital * 100) if capital > 0 else 0.0
+    budget_remaining_pct = max_concurrent - concurrent_used_pct
+    budget_remaining_amount = budget_remaining_pct / 100 * capital
+
+    # ── Risk settings ─────────────────────────────────────────────────────────
+    settings = get_risk_settings(profile_id, db)
+    config = _deep_merge(DEFAULT_RISK_CONFIG, settings.config)
+    alert_cfg = config.get("alert_banner", {})
+    alert_enabled: bool = bool(alert_cfg.get("enabled", True))
+    alert_threshold_pct: float = float(alert_cfg.get("trigger_threshold_pct", 100.0))
+    force_allowed: bool = bool(config.get("risk_guard", {}).get("force_allowed", True))
+
+    # ── Alert flag ────────────────────────────────────────────────────────────
+    # Triggered when the used budget crosses alert_threshold_pct % of the max
+    # ceiling AND there is at least one pending trade waiting to be opened.
+    alert_risk_saturated = (
+        alert_enabled
+        and concurrent_used_pct >= (max_concurrent * alert_threshold_pct / 100)
+        and pending_count > 0
+    )
+
+    return {
+        "profile_id": profile_id,
+        "capital_current": capital,
+        "risk_pct_default": risk_pct_default,
+        "max_concurrent_risk_pct": max_concurrent,
+        "concurrent_risk_used_pct": round(concurrent_used_pct, 4),
+        "budget_remaining_pct": round(budget_remaining_pct, 4),
+        "budget_remaining_amount": round(budget_remaining_amount, 4),
+        "open_trades_count": open_count,
+        "pending_trades_count": pending_count,
+        "alert_risk_saturated": alert_risk_saturated,
+        "alert_threshold_pct": alert_threshold_pct,
+        "force_allowed": force_allowed,
+    }
