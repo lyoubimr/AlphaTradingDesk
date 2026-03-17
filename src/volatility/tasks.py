@@ -69,14 +69,31 @@ _TF_SUPERIOR: dict[str, str] = {
 _TF_AGG_ORDER = ["15m", "1h", "4h", "1d"]
 
 # Reference EMA per TF for crossover/retest signal detection (fallback defaults)
-# Spec: 15m→EMA50 / 1h→EMA100 / 4h→EMA200 / 1d→EMA200 / 1w→EMA50
+# Spec: 15m→EMA50 / 1h→EMA100 / 4h→EMA200 / 1d→EMA100 / 1w→EMA55
+#
+# Why these choices (convergence with available candle limits):
+#   EMA200 on 4h  — requires limit=500 (500×4h = 83 days); Binance/Kraken have data ✓
+#   EMA100 on 1d  — converges with limit=220 (~1.2% residual, acceptable)
+#   EMA55  on 1w  — Fibonacci EMA, ~13 months, classic weekly trend reference;
+#                   converges with 220 bars (residual <0.1%); EMA50w=1yr too slow
+#
 # Overridable per-profile via per_pair settings: {"ema_ref_periods": {"15m": 50, ...}}
 _TF_EMA_REF: dict[str, int] = {
     "15m": 50,
     "1h": 100,
     "4h": 200,
-    "1d": 200,
-    "1w": 50,
+    "1d": 100,
+    "1w": 55,
+}
+
+# Candle limit per TF — EMA200 on 4h requires 500 candles for <1% convergence bias.
+# All other TFs converge within 220 candles for their respective ema_ref periods.
+_TF_CANDLE_LIMIT: dict[str, int] = {
+    "15m": 220,
+    "1h":  220,
+    "4h":  500,   # EMA200: (1 - 2/201)^500 ≈ 0.7% residual vs 11% at 220
+    "1d":  220,
+    "1w":  220,
 }
 
 
@@ -317,9 +334,9 @@ def compute_market_vi(self, timeframe: str) -> dict:  # type: ignore[override]
         with BinanceClient() as client:
             for symbol in symbols:
                 try:
-                    # 220 candles: covers EMA-200 convergence + 20-bar RVOL window
                     ema_ref = (mv_cfg.get("ema_ref_periods") or {}).get(timeframe) or _TF_EMA_REF.get(timeframe, 50)
-                    candles = client.fetch_ohlcv(symbol, timeframe, limit=220)
+                    limit = _TF_CANDLE_LIMIT.get(timeframe, 220)
+                    candles = client.fetch_ohlcv(symbol, timeframe, limit=limit)
                     result = compute_vi_score(candles, enabled, ema_ref, indicator_weights)
                     pair_scores[symbol] = result
                 except Exception as pair_exc:
@@ -470,9 +487,14 @@ def compute_pair_vi(self, timeframe: str, force: bool = False) -> dict:  # type:
                     return {"status": "skipped", "reason": "outside_execution_hours", "timeframe": timeframe}
 
             # Sub-hour interval gate (15m TF only: 15min native, or every 30min)
+            # Use a window of interval//2 to tolerate Celery dispatch delay (3-8min):
+            #   beat fires at :00 → task executes at :03 → 3 % 30 = 3 < 15 → RUN ✓
+            #   beat fires at :15 → task executes at :18 → 18 % 30 = 18 >= 15 → SKIP ✓
+            #   beat fires at :30 → task executes at :33 → 3 % 30 = 3 < 15 → RUN ✓
+            #   beat fires at :45 → task executes at :48 → 18 % 30 = 18 >= 15 → SKIP ✓
             interval_min: int | None = tf_sched.get("execution_interval_minutes")
             if interval_min and timeframe == "15m":
-                if now_utc_dt.minute % interval_min != 0:
+                if now_utc_dt.minute % interval_min >= interval_min // 2:
                     logger.debug(
                         "compute_pair_vi(%s): skipped (minute :%02d not on %dmin interval)",
                         timeframe, now_utc_dt.minute, interval_min,
@@ -556,7 +578,8 @@ def compute_pair_vi(self, timeframe: str, force: bool = False) -> dict:  # type:
             for symbol in symbols:
                 try:
                     ema_ref = (pp_cfg.get("ema_ref_periods") or {}).get(timeframe) or _TF_EMA_REF.get(timeframe, 50)
-                    candles = client.fetch_ohlcv(symbol, timeframe, limit=220)
+                    limit = _TF_CANDLE_LIMIT.get(timeframe, 220)
+                    candles = client.fetch_ohlcv(symbol, timeframe, limit=limit)
                     result = compute_vi_score(candles, enabled, ema_ref, indicator_weights)
                     pair_scores[symbol] = result
                 except Exception as pair_exc:

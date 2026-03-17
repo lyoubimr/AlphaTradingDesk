@@ -202,7 +202,7 @@ export function Sidebar({ apiStatus, environment, version }: SidebarProps) {
         </div>
         {version && (
           <p className="mt-1 text-[9px] text-slate-700 tracking-wide">
-            v{version}
+            {version.startsWith('v') ? version : `v${version}`}
           </p>
         )}
       </div>

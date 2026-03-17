@@ -103,14 +103,14 @@ export function Topbar() {
       sticky top-0 z-40
     ">
       {/* ── Left: profile picker + capital chip + sessions indicator ─── */}
-      <div className="flex items-center gap-3">
+      <div className="flex-1 flex items-center gap-3 min-w-0">
         <ProfilePicker />
         <CapitalChip />
         <SessionsIndicator />
       </div>
 
       {/* ── Right: WR pill + market pills + clock + theme picker + bell ── */}
-      <div className="flex items-center gap-4">
+      <div className="flex items-center gap-4 shrink-0 pl-4">
         {/* Global win-rate across all profiles */}
         <GlobalWRPill />
 
