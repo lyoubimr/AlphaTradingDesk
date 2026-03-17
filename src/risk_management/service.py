@@ -2,11 +2,13 @@
 Phase 3 — Risk Management service layer.
 
 P3-3: Live Pair VI — cache-first fetch from Kraken.
-Further functions (P3-4 Settings, P3-5 Budget, P3-6 Advisor) added in later steps.
+P3-4: Risk Settings CRUD — get (auto-upsert) + update (deep-merge patch).
+Further functions (P3-5 Budget, P3-6 Advisor) added in later steps.
 """
 
 from __future__ import annotations
 
+import copy
 import logging
 from datetime import UTC, datetime
 
@@ -14,6 +16,9 @@ import httpx
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
+from src.risk_management.defaults import DEFAULT_RISK_CONFIG
+from src.risk_management.engine import _deep_merge
+from src.risk_management.models import RiskSettings
 from src.volatility.cache import cache_pair_vi, get_cached_pair_vi
 from src.volatility.indicators import compute_vi_score
 from src.volatility.kraken_client import KrakenClient
@@ -94,3 +99,43 @@ def _format_pair_vi(symbol: str, timeframe: str, data: dict, source: str) -> dic
         "source": source,
         "computed_at": data.get("timestamp", ""),
     }
+
+
+# ── P3-4: Risk Settings CRUD ──────────────────────────────────────────────────
+
+def get_risk_settings(profile_id: int, db: Session) -> RiskSettings:
+    """Return the RiskSettings row for a profile.
+
+    If no row exists yet (first call for this profile), one is created with
+    DEFAULT_RISK_CONFIG so callers can always assume a row is present.
+    The returned object is already committed and refreshed.
+    """
+    row = db.query(RiskSettings).filter(RiskSettings.profile_id == profile_id).first()
+    if row is None:
+        row = RiskSettings(
+            profile_id=profile_id,
+            config=copy.deepcopy(DEFAULT_RISK_CONFIG),
+        )
+        db.add(row)
+        db.commit()
+        db.refresh(row)
+    return row
+
+
+def update_risk_settings(profile_id: int, config_patch: dict, db: Session) -> RiskSettings:
+    """Deep-merge *config_patch* into the current settings for a profile.
+
+    Only the keys present in *config_patch* overwrite existing values; all
+    other keys are kept.  Uses the same ``_deep_merge`` semantics as the risk
+    engine: the current DB config acts as the base and the patch as the
+    override layer.
+
+    Returns the updated, committed RiskSettings row.
+    """
+    row = get_risk_settings(profile_id, db)
+    merged = _deep_merge(row.config, config_patch)
+    row.config = merged  # triggers JSONB column change
+    row.updated_at = datetime.now(UTC).replace(tzinfo=None)
+    db.commit()
+    db.refresh(row)
+    return row

@@ -4,10 +4,11 @@ Phase 3 — Risk Management API router.
 Prefix: /api/risk
 All endpoints added here incrementally as Phase 3 steps are implemented.
 
-P3-3   GET /risk/pair-vi       — Live Pair VI (cache-first, Kraken fallback)
-P3-4   GET/PUT /risk/settings  — Risk Settings CRUD (added in P3-4)
-P3-5   GET /risk/budget        — Concurrent risk budget (added in P3-5)
-P3-6   GET /risk/advisor       — Full Risk Advisor calculation (added in P3-6)
+P3-3   GET /risk/pair-vi                    — Live Pair VI (cache-first, Kraken fallback)
+P3-4   GET /risk/settings/{profile_id}      — Read risk settings (auto-init if absent)
+       PUT /risk/settings/{profile_id}      — Update risk settings (deep-merge patch)
+P3-5   GET /risk/budget                     — Concurrent risk budget (added in P3-5)
+P3-6   GET /risk/advisor                    — Full Risk Advisor calculation (added in P3-6)
 """
 
 from __future__ import annotations
@@ -16,8 +17,8 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from src.core.deps import get_db
-from src.risk_management.schemas import PairVIOut
-from src.risk_management.service import get_live_pair_vi
+from src.risk_management.schemas import PairVIOut, RiskSettingsOut, RiskSettingsUpdateIn
+from src.risk_management.service import get_live_pair_vi, get_risk_settings, update_risk_settings
 
 router = APIRouter(prefix="/risk", tags=["risk"])
 
@@ -44,3 +45,38 @@ def live_pair_vi(
     """
     data = get_live_pair_vi(pair, timeframe, db)
     return PairVIOut(**data)
+
+
+# ── P3-4: Risk Settings CRUD ──────────────────────────────────────────────────
+
+@router.get("/settings/{profile_id}", response_model=RiskSettingsOut)
+def read_risk_settings(
+    profile_id: int,
+    db: Session = Depends(get_db),
+) -> RiskSettingsOut:
+    """Return the Dynamic Risk settings for a profile.
+
+    If no settings row exists yet (first ever call for this profile), one is
+    created automatically with sensible defaults (DEFAULT_RISK_CONFIG) so the
+    caller always receives a valid config without any prior setup step.
+    """
+    row = get_risk_settings(profile_id, db)
+    return RiskSettingsOut(profile_id=row.profile_id, config=row.config)
+
+
+@router.put("/settings/{profile_id}", response_model=RiskSettingsOut)
+def write_risk_settings(
+    profile_id: int,
+    body: RiskSettingsUpdateIn,
+    db: Session = Depends(get_db),
+) -> RiskSettingsOut:
+    """Deep-merge a partial or full config patch into the profile settings.
+
+    Only keys present in the request body overwrite existing values.  All
+    other keys keep their current DB values.  This allows the UI to send only
+    the changed section (e.g. just ``criteria.market_vi``) without resetting
+    unrelated settings.
+    """
+    row = update_risk_settings(profile_id, body.config, db)
+    return RiskSettingsOut(profile_id=row.profile_id, config=row.config)
+

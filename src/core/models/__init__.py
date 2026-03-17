@@ -19,5 +19,6 @@ from src.core.models import (  # noqa: F401
     trade,
 )
 from src.volatility import models as _volatility_models  # noqa: F401
+from src.risk_management import models as _risk_models  # noqa: F401
 
 __all__ = ["Base"]
