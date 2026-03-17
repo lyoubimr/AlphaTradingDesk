@@ -3,7 +3,8 @@ Phase 3 — Risk Management service layer.
 
 P3-3: Live Pair VI — cache-first fetch from Kraken.
 P3-4: Risk Settings CRUD — get (auto-upsert) + update (deep-merge patch).
-Further functions (P3-5 Budget, P3-6 Advisor) added in later steps.
+P3-5: Risk Budget — concurrent risk used vs ceiling.
+P3-6: Risk Advisor — full orchestration (VI + MA + strategy + engine).
 """
 
 from __future__ import annotations
@@ -17,11 +18,12 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from src.core.models.broker import Profile
-from src.core.models.trade import Trade
+from src.core.models.market_analysis import MarketAnalysisSession
+from src.core.models.trade import Strategy, Trade
 from src.risk_management.defaults import DEFAULT_RISK_CONFIG
-from src.risk_management.engine import _deep_merge
+from src.risk_management.engine import _deep_merge, compute_risk_multiplier
 from src.risk_management.models import RiskSettings
-from src.volatility.cache import cache_pair_vi, get_cached_pair_vi
+from src.volatility.cache import cache_pair_vi, get_cached_market_vi, get_cached_pair_vi
 from src.volatility.indicators import compute_vi_score
 from src.volatility.kraken_client import KrakenClient
 from src.volatility.schedule import get_regime_thresholds, score_to_regime
@@ -210,5 +212,161 @@ def get_risk_budget(profile_id: int, db: Session) -> dict:
         "pending_trades_count": pending_count,
         "alert_risk_saturated": alert_risk_saturated,
         "alert_threshold_pct": alert_threshold_pct,
+        "force_allowed": force_allowed,
+    }
+
+
+# ── P3-6: Risk Advisor orchestration ─────────────────────────────────────────
+
+def _resolve_ma_direction_match(
+    ma_session_id: int | None,
+    direction: str,
+    db: Session,
+) -> str | None:
+    """Return "aligned", "opposed", or None based on session bias vs direction.
+
+    Uses ``bias_composite_a`` (v2 sessions) with fallback to ``bias_htf_a``
+    (v1 sessions).  Returns None if no session or no bias stored.
+    """
+    if ma_session_id is None:
+        return None
+    session = (
+        db.query(MarketAnalysisSession)
+        .filter(MarketAnalysisSession.id == ma_session_id)
+        .first()
+    )
+    if session is None:
+        return None
+    bias = session.bias_composite_a or session.bias_htf_a
+    if bias is None:
+        return None
+    bias_lower = bias.lower()
+    if direction == "long":
+        return "aligned" if bias_lower == "bullish" else "opposed"
+    if direction == "short":
+        return "aligned" if bias_lower == "bearish" else "opposed"
+    return None
+
+
+def _resolve_strategy_stats(
+    strategy_id: int | None,
+    db: Session,
+) -> tuple[float | None, bool]:
+    """Return (win_rate, has_stats) for a strategy, or (None, False) if absent."""
+    if strategy_id is None:
+        return None, False
+    strategy = db.query(Strategy).filter(Strategy.id == strategy_id).first()
+    if strategy is None:
+        return None, False
+    has_stats = strategy.trades_count >= strategy.min_trades_for_stats
+    wr = (
+        strategy.win_count / strategy.trades_count
+        if strategy.trades_count > 0
+        else None
+    )
+    return wr, has_stats
+
+
+def orchestrate_risk_advisor(
+    profile_id: int,
+    pair: str,
+    timeframe: str,
+    direction: str,
+    strategy_id: int | None,
+    confidence: int | None,
+    ma_session_id: int | None,
+    db: Session,
+) -> dict:
+    """Full Risk Advisor orchestration — combines all P3-2 through P3-5 pieces.
+
+    1. Load profile + risk settings
+    2. Compute budget remaining (P3-5 logic)
+    3. Resolve market VI regime (Redis, graceful miss → None)
+    4. Resolve pair VI regime (cache → live Kraken, graceful miss → None)
+    5. Resolve MA direction match (optional, via MA session bias)
+    6. Resolve strategy win rate + has_stats (optional)
+    7. Call compute_risk_multiplier() (P3-2 engine)
+    8. Return dict matching RiskAdvisorOut
+
+    Never raises on VI / cache failures — missing inputs default to neutral.
+    Raises HTTPException(404) only if the profile is not found.
+    """
+    # ── 1. Profile ────────────────────────────────────────────────────────────
+    profile = db.query(Profile).filter(Profile.id == profile_id).first()
+    if profile is None:
+        raise HTTPException(status_code=404, detail=f"Profile {profile_id} not found")
+
+    capital = float(profile.capital_current)
+    base_risk_pct = float(profile.risk_percentage_default)
+
+    # ── 2. Settings (resolve effective config: DEFAULT + DB overlay) ──────────
+    settings = get_risk_settings(profile_id, db)
+    config = _deep_merge(DEFAULT_RISK_CONFIG, settings.config)
+    force_allowed: bool = bool(config.get("risk_guard", {}).get("force_allowed", True))
+
+    # ── 3. Budget remaining ───────────────────────────────────────────────────
+    budget = get_risk_budget(profile_id, db)
+    budget_remaining_pct: float = budget["budget_remaining_pct"]
+
+    # ── 4. Market VI regime (Redis, graceful degradation) ─────────────────────
+    market_vi_cached = get_cached_market_vi(timeframe)
+    market_vi_regime: str | None = (
+        market_vi_cached.get("regime") if market_vi_cached else None
+    )
+
+    # ── 5. Pair VI regime (cache → live, graceful degradation) ───────────────
+    pair_vi_regime: str | None = None
+    try:
+        pair_vi_data = get_live_pair_vi(pair, timeframe, db)
+        pair_vi_regime = pair_vi_data.get("regime")
+    except HTTPException:
+        logger.warning(
+            "orchestrate_risk_advisor: pair VI unavailable for %s/%s — neutral",
+            pair, timeframe,
+        )
+
+    # ── 6. MA direction match ─────────────────────────────────────────────────
+    ma_direction_match: str | None = _resolve_ma_direction_match(ma_session_id, direction, db)
+
+    # ── 7. Strategy stats ─────────────────────────────────────────────────────
+    strategy_wr, strategy_has_stats = _resolve_strategy_stats(strategy_id, db)
+
+    # ── 8. Confidence score (0-100 int, None if not provided) ─────────────────
+    confidence_score: int | None = confidence
+
+    # ── 9. Engine ─────────────────────────────────────────────────────────────
+    result = compute_risk_multiplier(
+        config,
+        market_vi_regime=market_vi_regime,
+        pair_vi_regime=pair_vi_regime,
+        ma_direction_match=ma_direction_match,
+        strategy_wr=strategy_wr,
+        strategy_has_stats=strategy_has_stats,
+        confidence_score=confidence_score,
+        base_risk_pct=base_risk_pct,
+        capital=capital,
+        budget_remaining_pct=budget_remaining_pct,
+    )
+
+    return {
+        "base_risk_pct": result.base_risk_pct,
+        "adjusted_risk_pct": result.adjusted_risk_pct,
+        "adjusted_risk_amount": result.adjusted_risk_amount,
+        "multiplier": result.multiplier,
+        "criteria": [
+            {
+                "name": c.name,
+                "enabled": c.enabled,
+                "value_label": c.value_label,
+                "factor": c.factor,
+                "weight": c.weight,
+                "contribution": c.contribution,
+            }
+            for c in result.criteria
+        ],
+        "budget_remaining_pct": result.budget_remaining_pct,
+        "budget_remaining_amount": result.budget_remaining_amount,
+        "budget_blocking": result.budget_blocking,
+        "suggested_risk_pct": result.suggested_risk_pct,
         "force_allowed": force_allowed,
     }

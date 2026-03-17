@@ -8,7 +8,7 @@ P3-3   GET /risk/pair-vi                    — Live Pair VI (cache-first, Krake
 P3-4   GET /risk/settings/{profile_id}      — Read risk settings (auto-init if absent)
        PUT /risk/settings/{profile_id}      — Update risk settings (deep-merge patch)
 P3-5   GET /risk/budget/{profile_id}        — Concurrent risk budget
-P3-6   GET /risk/advisor                    — Full Risk Advisor calculation (added in P3-6)
+P3-6   GET /risk/advisor                    — Full Risk Advisor calculation
 """
 
 from __future__ import annotations
@@ -17,8 +17,14 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from src.core.deps import get_db
-from src.risk_management.schemas import PairVIOut, RiskBudgetOut, RiskSettingsOut, RiskSettingsUpdateIn
-from src.risk_management.service import get_live_pair_vi, get_risk_budget, get_risk_settings, update_risk_settings
+from src.risk_management.schemas import PairVIOut, RiskAdvisorOut, RiskBudgetOut, RiskSettingsOut, RiskSettingsUpdateIn
+from src.risk_management.service import (
+    get_live_pair_vi,
+    get_risk_budget,
+    get_risk_settings,
+    orchestrate_risk_advisor,
+    update_risk_settings,
+)
 
 router = APIRouter(prefix="/risk", tags=["risk"])
 
@@ -99,4 +105,40 @@ def read_risk_budget(
     """
     data = get_risk_budget(profile_id, db)
     return RiskBudgetOut(**data)
+
+
+# ── P3-6: Risk Advisor ────────────────────────────────────────────────────────
+
+@router.get("/advisor", response_model=RiskAdvisorOut)
+def read_risk_advisor(
+    profile_id: int = Query(..., description="Profile ID"),
+    pair: str = Query(..., description="Kraken Futures symbol, e.g. PF_XBTUSD"),
+    timeframe: str = Query(..., description="ATD timeframe: 15m | 1h | 4h | 1d | 1w"),
+    direction: str = Query(..., description="Trade direction: long | short"),
+    strategy_id: int | None = Query(None, description="Strategy ID (optional)"),
+    confidence: int | None = Query(None, ge=0, le=100, description="Trader confidence 0–100 (optional)"),
+    ma_session_id: int | None = Query(None, description="Market Analysis session ID (optional)"),
+    db: Session = Depends(get_db),
+) -> RiskAdvisorOut:
+    """Full Risk Advisor — orchestrates all P3-2 to P3-5 inputs.
+
+    Resolves market VI regime (Redis), pair VI regime (cache → Kraken),
+    MA direction match (session bias vs trade direction), strategy win
+    rate, trader confidence, and the remaining risk budget — then runs
+    ``compute_risk_multiplier()`` to produce the full breakdown.
+
+    All optional inputs default to neutral (factor = 1.0) when absent.
+    Never fails on Redis/Kraken unavailability — degrades gracefully.
+    """
+    data = orchestrate_risk_advisor(
+        profile_id=profile_id,
+        pair=pair,
+        timeframe=timeframe,
+        direction=direction,
+        strategy_id=strategy_id,
+        confidence=confidence,
+        ma_session_id=ma_session_id,
+        db=db,
+    )
+    return RiskAdvisorOut(**data)
 
