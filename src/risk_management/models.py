@@ -29,7 +29,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import BigInteger, DateTime, ForeignKey, Index
+from sqlalchemy import BigInteger, DateTime, ForeignKey
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.sql import func
@@ -40,22 +40,17 @@ from src.core.database import Base
 class RiskSettings(Base):
     """Dynamic Risk Settings per profile.
 
-    One row per profile — created automatically on first GET (upsert in
-    service layer with DEFAULT_RISK_CONFIG).  The UNIQUE constraint on
-    profile_id prevents duplicate inserts.
+    One row per profile — profile_id IS the primary key (same pattern as
+    VolatilitySettings).  Created automatically on first GET (upsert in
+    service layer with DEFAULT_RISK_CONFIG).
     """
 
     __tablename__ = "risk_settings"
-    __table_args__ = (
-        Index("idx_risk_settings_profile", "profile_id"),
-    )
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     profile_id: Mapped[int] = mapped_column(
         BigInteger,
         ForeignKey("profiles.id", ondelete="CASCADE"),
-        nullable=False,
-        unique=True,
+        primary_key=True,
     )
     config: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
     updated_at: Mapped[datetime] = mapped_column(

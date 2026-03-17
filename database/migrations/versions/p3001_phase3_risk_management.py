@@ -55,17 +55,11 @@ def upgrade() -> None:
     # }
     op.execute("""
         CREATE TABLE IF NOT EXISTS risk_settings (
-            id          BIGSERIAL   PRIMARY KEY,
-            profile_id  BIGINT      NOT NULL UNIQUE
+            profile_id  BIGINT      PRIMARY KEY
                                     REFERENCES profiles(id) ON DELETE CASCADE,
             config      JSONB       NOT NULL DEFAULT '{}',
             updated_at  TIMESTAMP   NOT NULL DEFAULT NOW()
         )
-    """)
-
-    op.execute("""
-        CREATE INDEX IF NOT EXISTS idx_risk_settings_profile
-        ON risk_settings (profile_id)
     """)
 
     # ── 2. trades.dynamic_risk_snapshot — Risk Advisor snapshot at open ──────
