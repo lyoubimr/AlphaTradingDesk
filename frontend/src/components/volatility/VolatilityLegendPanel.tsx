@@ -152,23 +152,24 @@ export function VolatilityLegendPanel({
         <div>
           <p className="text-[10px] font-semibold text-zinc-500 uppercase tracking-widest mb-1">EMA Signals</p>
           <p className="text-zinc-600 mb-2">
-            Scoring EMAs: <span className="font-mono text-zinc-400">20 (50%) · 50 (30%) · 200 (20%)</span> — determine the directional score (0–1).<br />
+            Scoring EMAs: <span className="font-mono text-zinc-400">21 (50%) · 55 (30%) · 200 (20%)</span> — determine the directional score (0–1).<br />
             Signal detection uses the <strong className="text-zinc-300">reference EMA per TF</strong>:{' '}
-            <span className="font-mono text-zinc-400">EMA 50</span> on 15m ·{' '}
-            <span className="font-mono text-zinc-400">EMA 100</span> on 1h ·{' '}
-            <span className="font-mono text-zinc-400">EMA 200</span> on 4h / 1d ·{' '}
-            <span className="font-mono text-zinc-400">EMA 50</span> on 1w.{' '}
+            <span className="font-mono text-zinc-400">EMA 55</span> on 15m ·{' '}
+            <span className="font-mono text-zinc-400">EMA 99</span> on 1h ·{' '}
+            <span className="font-mono text-zinc-400">EMA 200</span> on 4h ·{' '}
+            <span className="font-mono text-zinc-400">EMA 99</span> on 1d ·{' '}
+            <span className="font-mono text-zinc-400">EMA 55</span> on 1w.{' '}
             Configurable in <em>Settings → Volatility</em>.
           </p>
           <div className="space-y-2">
             {([
-              { sig: 'above_all',      action: 'LONG BIAS',    detail: 'Price is above EMA 20, 50 AND 200 (all scoring EMAs). Full bullish alignment — all moving averages confirm uptrend. Strong long bias.' },
-              { sig: 'below_all',      action: 'SHORT BIAS',   detail: 'Price is below EMA 20, 50 AND 200 (all scoring EMAs). Full bearish alignment — all moving averages confirm downtrend. Strong short bias.' },
-              { sig: 'breakout_up',    action: 'MOMENTUM ↑',   detail: 'Price crossed ABOVE the reference EMA within the last 3 candles. Ref EMA: 50 (15m) · 100 (1h) · 200 (4h/1d) · 50 (1w). Fresh bullish momentum — look for volume confirmation.' },
-              { sig: 'breakdown_down', action: 'MOMENTUM ↓',   detail: 'Price crossed BELOW the reference EMA within the last 3 candles. Ref EMA: 50 (15m) · 100 (1h) · 200 (4h/1d) · 50 (1w). Fresh bearish momentum — look for volume confirmation.' },
-              { sig: 'retest_up',      action: 'SUPPORT TEST', detail: 'Price is ≤ 0.5% above the reference EMA — testing it as support from above. Ref per TF: 50 (15m) · 100 (1h) · 200 (4h/1d) · 50 (1w). Classic long entry zone if price bounces. Confluence with higher TF bias needed.' },
-              { sig: 'retest_down',    action: 'RESIST TEST',  detail: 'Price is ≤ 0.5% below the reference EMA — testing it as resistance from below. Ref per TF: 50 (15m) · 100 (1h) · 200 (4h/1d) · 50 (1w). Classic short entry zone if price rejects. Confluence with higher TF bias needed.' },
-              { sig: 'mixed',          action: 'NO SIGNAL',    detail: 'Price position is ambiguous relative to the 3 scoring EMAs (20 / 50 / 200) — some above, some below. No clear directional edge. Wait for cleaner alignment.' },
+              { sig: 'above_all',      action: 'LONG BIAS',    detail: 'Price is above EMA 21, 55 AND 200 (all scoring EMAs). Full bullish alignment — all moving averages confirm uptrend. Strong long bias.' },
+              { sig: 'below_all',      action: 'SHORT BIAS',   detail: 'Price is below EMA 21, 55 AND 200 (all scoring EMAs). Full bearish alignment — all moving averages confirm downtrend. Strong short bias.' },
+              { sig: 'breakout_up',    action: 'MOMENTUM ↑',   detail: 'Price crossed ABOVE the reference EMA within the last 3 candles. Ref EMA: 55 (15m) · 99 (1h) · 200 (4h) · 99 (1d) · 55 (1w). Fresh bullish momentum — look for volume confirmation.' },
+              { sig: 'breakdown_down', action: 'MOMENTUM ↓',   detail: 'Price crossed BELOW the reference EMA within the last 3 candles. Ref EMA: 55 (15m) · 99 (1h) · 200 (4h) · 99 (1d) · 55 (1w). Fresh bearish momentum — look for volume confirmation.' },
+              { sig: 'retest_up',      action: 'SUPPORT TEST', detail: 'Price is ≤ 0.5% above the reference EMA — testing it as support from above. Ref per TF: 55 (15m) · 99 (1h) · 200 (4h) · 99 (1d) · 55 (1w). Classic long entry zone if price bounces. Confluence with higher TF bias needed.' },
+              { sig: 'retest_down',    action: 'RESIST TEST',  detail: 'Price is ≤ 0.5% below the reference EMA — testing it as resistance from below. Ref per TF: 55 (15m) · 99 (1h) · 200 (4h) · 99 (1d) · 55 (1w). Classic short entry zone if price rejects. Confluence with higher TF bias needed.' },
+              { sig: 'mixed',          action: 'NO SIGNAL',    detail: 'Price position is ambiguous relative to the 3 scoring EMAs (21 / 55 / 200) — some above, some below. No clear directional edge. Wait for cleaner alignment.' },
             ] as const).map(({ sig, action, detail }) => {
               const ema = EMA_DISPLAY[sig]
               return (

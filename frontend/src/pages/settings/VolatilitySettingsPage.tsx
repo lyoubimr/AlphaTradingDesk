@@ -101,7 +101,7 @@ const D_PP: PerPairCfg = {
   retention_days: 30,
   enabled: true,
   schedules: {},
-  ema_ref_periods: { '15m': 50, '1h': 100, '4h': 200, '1d': 200, '1w': 50 },
+  ema_ref_periods: { '15m': 55, '1h': 99, '4h': 200, '1d': 99, '1w': 55 },
 }
 
 const D_REG: RegimesCfg = {
@@ -837,7 +837,7 @@ export function VolatilitySettingsPage() {
               </p>
               <p className="text-xs text-slate-600 mt-0.5 mb-3">
                 EMA used for breakout / retest signal detection.<br />
-                Scoring EMAs (20 · 50 · 200) are fixed and unchanged by this setting.
+                Scoring EMAs (21 · 55 · 200) are fixed and unchanged by this setting.
               </p>
               <div className="space-y-2">
                 {(['15m', '1h', '4h', '1d', '1w'] as TFKey[]).map(tf => (
@@ -848,7 +848,7 @@ export function VolatilitySettingsPage() {
                       onChange={e => setPP(p => ({ ...p, ema_ref_periods: { ...p.ema_ref_periods, [tf]: Number(e.target.value) } }))}
                       className="bg-surface-700 border border-surface-600 text-xs text-slate-300 rounded-lg px-3 py-1.5 focus:outline-none focus:border-brand-500/60"
                     >
-                      {[20, 50, 100, 200].map(v => (
+                      {[10, 21, 55, 99, 200].map(v => (
                         <option key={v} value={v}>EMA {v}</option>
                       ))}
                     </select>
