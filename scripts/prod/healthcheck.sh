@@ -8,11 +8,12 @@
 #
 # WHAT IT SHOWS
 #   1. Container status (running/stopped, health, image tag, uptime)
-#   2. API /health endpoint (HTTP 200 + JSON response)
+#   2. API /api/health endpoint (HTTP 200 + JSON response)
 #   3. Disk usage — /srv/atd/ (data + backups)
 #   4. Memory usage (Docker containers)
 #   5. Latest backup file (rolling)
 #   6. Alembic current revision
+#   7. Recent errors (backend) + Celery activity (worker + beat)
 #
 # USAGE
 #   ~/apps/healthcheck.sh
@@ -39,7 +40,7 @@ echo ""
 
 # ── 2. API healthcheck ────────────────────────────────────────────────────────
 echo "▶  API /health"
-HTTP_RESPONSE="$(curl -s -o /tmp/atd_health_body.txt -w "%{http_code}" http://localhost:8000/health 2>/dev/null || echo "000")"
+HTTP_RESPONSE="$(curl -s -o /tmp/atd_health_body.txt -w "%{http_code}" http://localhost:8000/api/health 2>/dev/null || echo "000")"
 if [ "${HTTP_RESPONSE}" = "200" ]; then
   echo "    ✅  HTTP ${HTTP_RESPONSE} — $(cat /tmp/atd_health_body.txt)"
 else
@@ -84,6 +85,27 @@ echo ""
 echo "▶  Alembic migration status"
 ALEMBIC_OUT="$(docker compose -f "${COMPOSE_FILE}" exec -T backend alembic current 2>&1 || echo "ERROR")"
 echo "    ${ALEMBIC_OUT}"
+echo ""
+
+# ── 7. Recent logs ───────────────────────────────────────────────────────────
+echo "▶  Recent errors — backend (last 5min)"
+docker compose -f "${COMPOSE_FILE}" logs --since 5m --no-log-prefix backend 2>/dev/null \
+  | grep -iE "error|exception|traceback|critical" | tail -10 | sed 's/^/    /' \
+  || true
+if ! docker compose -f "${COMPOSE_FILE}" logs --since 5m --no-log-prefix backend 2>/dev/null \
+    | grep -qiE "error|exception|traceback|critical"; then
+  echo "    ✅  No errors in last 5min"
+fi
+echo ""
+
+echo "▶  celery-worker — last 10 lines"
+docker compose -f "${COMPOSE_FILE}" logs --tail 10 --no-log-prefix celery-worker 2>/dev/null \
+  | sed 's/^/    /' || echo "    (container not running)"
+echo ""
+
+echo "▶  celery-beat — last 5 lines"
+docker compose -f "${COMPOSE_FILE}" logs --tail 5 --no-log-prefix celery-beat 2>/dev/null \
+  | sed 's/^/    /' || echo "    (container not running)"
 echo ""
 
 echo "══════════════════════════════════════════════════"

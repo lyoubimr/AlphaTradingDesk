@@ -11,7 +11,8 @@ Production server scripts — versioned in the repo, auto-synced to the Dell on 
 | `healthcheck.sh` | Ops sanity check — containers, DB, disk, logs | On demand: `~/apps/healthcheck.sh` |
 | `setup-cron.sh` | Install all ATD crontab entries (idempotent) | Once after first deploy, or when crons change |
 | `setup-ssl.sh` | Generate self-signed TLS cert for LAN HTTPS | Once: `~/apps/setup-ssl.sh` |
-| `update-server.sh` | `apt upgrade` + Docker prune + reboot | Cron (1st Sunday/month 04:00, managed by `setup-cron.sh`) |
+| `setup-sudoers.sh` | Install NOPASSWD sudo rules for `atd` (apt-get + reboot) | Once: `sudo bash ~/apps/setup-sudoers.sh` |
+| `update-server.sh` | `apt upgrade` + Docker prune + reboot | Cron (3rd Sunday/month 03:00, managed by `setup-cron.sh`) |
 
 ## How CI/CD syncs scripts
 

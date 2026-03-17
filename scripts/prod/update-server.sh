@@ -23,7 +23,7 @@
 #
 # USAGE
 #   Called automatically by cron (see setup-cron.sh):
-#     1st Sunday of each month at 04:00
+#     3rd Sunday of each month at 03:00
 #
 #   Manual run (as atd on Dell):
 #     ~/apps/update-server.sh
