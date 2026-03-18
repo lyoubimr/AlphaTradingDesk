@@ -331,7 +331,7 @@ def orchestrate_risk_advisor(
     # ── 7. Strategy stats ─────────────────────────────────────────────────────
     strategy_wr, strategy_has_stats = _resolve_strategy_stats(strategy_id, db)
 
-    # ── 8. Confidence score (0-100 int, None if not provided) ─────────────────
+    # ── 8. Confidence score (1-10 int, None if not provided) ──────────────────
     confidence_score: int | None = confidence
 
     # ── 9. Engine ─────────────────────────────────────────────────────────────

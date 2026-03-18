@@ -56,14 +56,14 @@ def _run(
 # ── Case 1: all favourable → multiplier ≥ 1.40 ───────────────────────────────
 
 def test_all_favourable_multiplier_significant():
-    """TRENDING + TRENDING + aligned + 100% WR + confidence 100 → big boost."""
+    """TRENDING + TRENDING + aligned + 100% WR + confidence 10 → big boost."""
     result = _run(
         market_vi_regime="TRENDING",
         pair_vi_regime="TRENDING",
         ma_direction_match="aligned",
         strategy_wr=1.0,
         strategy_has_stats=True,
-        confidence_score=100,
+        confidence_score=10,
         budget_remaining_pct=10.0,
     )
     assert result.multiplier >= 1.40, (
@@ -98,13 +98,13 @@ def test_strategy_wr_neutral_when_no_stats():
     result_no_stats = _run(
         strategy_wr=0.0,
         strategy_has_stats=False,
-        confidence_score=50,
+        confidence_score=5,
         ma_direction_match="neutral",
     )
     result_explicit_neutral = _run(
         strategy_wr=0.5,    # 50% WR → factor 1.0 on default min=0.5/max=1.5 scale
         strategy_has_stats=True,
-        confidence_score=50,
+        confidence_score=5,
         ma_direction_match="neutral",
     )
 
@@ -180,7 +180,7 @@ def test_budget_blocking_triggered():
         ma_direction_match="aligned",
         strategy_wr=1.0,
         strategy_has_stats=True,
-        confidence_score=100,
+        confidence_score=10,
         base_risk_pct=2.0,
         capital=10_000.0,
         budget_remaining_pct=0.5,  # only 0.5% = 50€ remaining
@@ -215,7 +215,7 @@ def test_global_multiplier_max_ceiling():
         ma_direction_match="aligned",
         strategy_wr=1.0,
         strategy_has_stats=True,
-        confidence_score=100,
+        confidence_score=10,
         budget_remaining_pct=10.0,
     )
     assert result.multiplier <= 1.10 + 1e-6, (

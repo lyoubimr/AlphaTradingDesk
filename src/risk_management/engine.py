@@ -64,7 +64,7 @@ def _resolve_config(raw_config: dict) -> dict:
 def _factor_vi(regime: str | None, factors: dict[str, float]) -> tuple[float, str]:
     """Return (factor, value_label) for a VI regime string."""
     if regime is None:
-        return _NEUTRAL_FACTOR, "N/A"
+        return _NEUTRAL_FACTOR, "No data"
     regime_upper = regime.upper()
     factor = factors.get(regime_upper, _NEUTRAL_FACTOR)
     return factor, regime_upper
@@ -117,16 +117,16 @@ def _factor_confidence(
     max_factor: float,
 ) -> tuple[float, str]:
     """
-    Linear interpolation of the confidence score (0–100) into a factor.
+    Linear interpolation of the confidence score (1–10) into a factor.
 
     Returns neutral (1.0) when confidence_score is None.
     """
     if confidence_score is None:
         return _NEUTRAL_FACTOR, "N/A"
-    score_clamped = _clamp(float(confidence_score), 0.0, 100.0)
-    factor = min_factor + (score_clamped / 100.0) * (max_factor - min_factor)
+    score_clamped = _clamp(float(confidence_score), 0.0, 10.0)
+    factor = min_factor + (score_clamped / 10.0) * (max_factor - min_factor)
     factor = _clamp(factor, min_factor, max_factor)
-    label = f"{int(score_clamped)}/100"
+    label = f"{int(score_clamped)}/10"
     return factor, label
 
 
@@ -157,7 +157,7 @@ def compute_risk_multiplier(
     ma_direction_match   : "aligned" | "neutral" | "opposed" | None
     strategy_wr          : win-rate 0.0–1.0; None if no strategy selected
     strategy_has_stats   : False when trades_count < min_trades_for_stats
-    confidence_score     : 0–100; None if not provided
+    confidence_score     : 1–10; None if not provided
     base_risk_pct        : profile.risk_percentage_default
     capital              : profile.capital_current
     budget_remaining_pct : max_concurrent_risk_pct - concurrent_risk_used_pct
