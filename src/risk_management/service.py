@@ -337,15 +337,16 @@ def orchestrate_risk_advisor(
     timeframe = timeframe.lower()  # normalise '1H' → '1h', '4H' → '4h', etc.
     pair   = pair.upper()          # normalise 'pf_xbtusd' → 'PF_XBTUSD'
 
-    # ── 4. Market VI regime (Redis → DB fallback, graceful degradation) ────────
-    market_vi_cached = get_cached_market_vi(timeframe)
+    # ── 4. Market VI regime — always aggregated (cross-TF macro view) ────────
+    # TF is irrelevant for market context; use the weighted cross-TF aggregate.
+    market_vi_cached = get_cached_market_vi("aggregated")
     if market_vi_cached:
         market_vi_regime: str | None = market_vi_cached.get("regime")
     else:
-        # Redis cold (dev / Celery not running) → fall back to latest DB snapshot
+        # Redis cold → fall back to latest aggregated DB snapshot
         row = (
             db.query(MarketVISnapshot)
-            .filter(MarketVISnapshot.timeframe == timeframe)
+            .filter(MarketVISnapshot.timeframe == "aggregated")
             .order_by(MarketVISnapshot.timestamp.desc())
             .first()
         )
