@@ -1,26 +1,22 @@
 // ── RiskSettingsPage ─────────────────────────────────────────────────────────
 // P3-10 — Settings > Risk: Dynamic Risk engine configuration
 //
-// Sections:
-//   1. Criteria active  — enable/disable + weight per criterion
-//   2. VI Factors       — regime → factor for market_vi and pair_vi
-//   3. MA Direction     — aligned / neutral / opposed factors
-//   4. WR & Confidence  — min_factor / max_factor
-//   5. Global Cap       — global_multiplier_max slider
-//   6. Risk Guard       — 3 toggles (enabled, force_allowed, hard_block_at_zero)
-//   7. Alert Banner     — enabled + trigger_threshold_pct
-//   8. Live Simulator   — hypothetical inputs → multiplier preview (uses current state)
+// Tabs:
+//   Criteria  — enable/disable + weight (%) per criterion
+//   Factors   — VI regime factors, MA direction factors, WR & confidence bounds
+//   Guard     — global multiplier cap + risk guard + alert banner
+//   Simulator — live multiplier preview
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { useEffect, useState, useCallback, useMemo } from 'react'
-import { Save, Loader2, RefreshCw, Check, AlertTriangle } from 'lucide-react'
+import { Loader2, RefreshCw, Save, Check, AlertTriangle } from 'lucide-react'
 import { PageHeader } from '../../components/ui/PageHeader'
 import { useProfile } from '../../context/ProfileContext'
 import { riskApi } from '../../lib/api'
 import { CriterionConfig } from '../../components/risk/CriterionConfig'
 import { cn } from '../../lib/cn'
 
-// ── Local types ───────────────────────────────────────────────────────────────
+// ── Types ─────────────────────────────────────────────────────────────────────
 
 const VI_REGIMES = ['DEAD', 'CALM', 'NORMAL', 'TRENDING', 'ACTIVE', 'EXTREME'] as const
 type VIRegimeKey = typeof VI_REGIMES[number]
@@ -79,6 +75,17 @@ function hydrate(raw: Record<string, unknown>): RiskConfig {
   }
 }
 
+// ── Tabs ──────────────────────────────────────────────────────────────────────
+
+type TabId = 'criteria' | 'factors' | 'guard' | 'simulator'
+
+const TABS: { id: TabId; label: string }[] = [
+  { id: 'criteria',  label: 'Criteria'  },
+  { id: 'factors',   label: 'Factors'   },
+  { id: 'guard',     label: 'Guard'     },
+  { id: 'simulator', label: 'Simulator' },
+]
+
 // ── Simulator ─────────────────────────────────────────────────────────────────
 
 interface SimInputs {
@@ -132,16 +139,26 @@ function computeSim(cfg: RiskConfig, inp: SimInputs): { multiplier: number; adju
   }
 }
 
-// ── Sub-components ────────────────────────────────────────────────────────────
+// ── Constants ─────────────────────────────────────────────────────────────────
 
-function SectionCard({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-5">
-      <h3 className="text-sm font-semibold text-zinc-300 mb-4">{title}</h3>
-      {children}
-    </div>
-  )
+const REGIME_COLORS: Record<VIRegimeKey, string> = {
+  DEAD:     'text-slate-400',
+  CALM:     'text-blue-400',
+  NORMAL:   'text-slate-300',
+  TRENDING: 'text-emerald-400',
+  ACTIVE:   'text-amber-400',
+  EXTREME:  'text-red-400',
 }
+
+const CRITERION_LABELS: Record<keyof RiskConfig['criteria'], string> = {
+  market_vi:    'Market VI — market-wide volatility regime',
+  pair_vi:      'Pair VI — per-pair volatility regime',
+  ma_direction: 'MA Direction — trend alignment',
+  strategy_wr:  'Strategy Win Rate — historical stats',
+  confidence:   'Confidence Score — 1 to 10',
+}
+
+// ── Shared atoms ──────────────────────────────────────────────────────────────
 
 function Toggle({
   checked,
@@ -159,82 +176,97 @@ function Toggle({
       onClick={() => onChange(!checked)}
       className={cn(
         'relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors',
-        checked ? 'bg-emerald-500' : 'bg-zinc-700',
+        checked ? 'bg-brand-500' : 'bg-surface-600',
         disabled && 'opacity-40 cursor-not-allowed',
       )}
     >
       <span
         className={cn(
-          'pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow transition duration-200',
-          checked ? 'translate-x-4' : 'translate-x-0',
+          'pointer-events-none inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
+          checked ? 'translate-x-4' : 'translate-x-1',
         )}
       />
     </button>
   )
 }
 
-function NumInput({
-  value,
-  onChange,
-  min,
-  max,
-  step,
-  disabled,
-  className,
+const factorInputCls = [
+  'px-2 py-1.5 rounded-lg text-center text-xs text-slate-300 tabular-nums',
+  'bg-surface-700 border border-surface-600',
+  'focus:outline-none focus:border-brand-500/60 focus:ring-1 focus:ring-brand-500/30 transition-colors',
+  'disabled:opacity-40',
+].join(' ')
+
+const selectCls = [
+  'w-full px-3 py-1.5 rounded-lg text-xs text-slate-300',
+  'bg-surface-700 border border-surface-600',
+  'focus:outline-none focus:border-brand-500/60 transition-colors',
+].join(' ')
+
+function SectionCard({
+  title,
+  description,
+  children,
 }: {
-  value: number
-  onChange: (v: number) => void
-  min?: number
-  max?: number
-  step?: number
-  disabled?: boolean
-  className?: string
+  title: string
+  description?: string
+  children: React.ReactNode
 }) {
   return (
-    <input
-      type="number"
-      value={value}
-      min={min}
-      max={max}
-      step={step ?? 0.05}
-      disabled={disabled}
-      onChange={e => onChange(parseFloat(e.target.value) || 0)}
-      className={cn(
-        'rounded bg-zinc-800 border border-zinc-700 px-2 py-1 text-sm text-zinc-200 text-right disabled:opacity-40',
-        className,
-      )}
-    />
+    <section className="rounded-xl bg-surface-800 border border-surface-700 overflow-hidden">
+      <div className="px-5 py-3.5 border-b border-surface-700">
+        <h2 className="text-sm font-semibold text-slate-300">{title}</h2>
+        {description && <p className="text-xs text-slate-600 mt-0.5">{description}</p>}
+      </div>
+      <div className="px-5 py-4">{children}</div>
+    </section>
   )
 }
 
-const REGIME_COLORS: Record<VIRegimeKey, string> = {
-  DEAD:     'text-slate-400',
-  CALM:     'text-blue-400',
-  NORMAL:   'text-zinc-300',
-  TRENDING: 'text-emerald-400',
-  ACTIVE:   'text-amber-400',
-  EXTREME:  'text-red-400',
+function SaveBar({
+  saving,
+  saveOk,
+  dirty,
+  onSave,
+}: {
+  saving: boolean
+  saveOk: boolean
+  dirty: boolean
+  onSave: () => void
+}) {
+  return (
+    <div className="flex items-center justify-end pt-5 mt-2 border-t border-surface-700">
+      <button
+        onClick={onSave}
+        disabled={!dirty || saving}
+        className={cn(
+          'flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-medium transition-colors disabled:opacity-40',
+          saveOk
+            ? 'bg-emerald-600 text-white'
+            : 'bg-brand-600 hover:bg-brand-500 text-white',
+        )}
+      >
+        {saving   ? <Loader2 size={12} className="animate-spin" />
+         : saveOk ? <Check   size={12} />
+         :          <Save    size={12} />}
+        {saving ? 'Saving…' : saveOk ? 'Saved!' : 'Save changes'}
+      </button>
+    </div>
+  )
 }
 
-const CRITERION_LABELS: Record<keyof RiskConfig['criteria'], string> = {
-  market_vi:    'Market VI — market-wide volatility regime',
-  pair_vi:      'Pair VI — per-pair volatility regime',
-  ma_direction: 'MA Direction — trend alignment',
-  strategy_wr:  'Strategy Win Rate — historical stats',
-  confidence:   'Confidence Score — 1 to 10',
-}
-
-// ── Page ─────────────────────────────────────────────────────────────────────
+// ── Page ──────────────────────────────────────────────────────────────────────
 
 export function RiskSettingsPage() {
   const { activeProfileId: profileId } = useProfile()
 
-  const [config, setConfig] = useState<RiskConfig>(DEFAULTS)
+  const [config,  setConfig]  = useState<RiskConfig>(DEFAULTS)
   const [loading, setLoading] = useState(true)
   const [saving,  setSaving]  = useState(false)
   const [dirty,   setDirty]   = useState(false)
   const [saveOk,  setSaveOk]  = useState(false)
   const [error,   setError]   = useState<string | null>(null)
+  const [tab,     setTab]     = useState<TabId>('criteria')
 
   const [sim, setSim] = useState<SimInputs>({
     market_vi: '', pair_vi: '', ma_dir: '', strategy_wr: null, confidence: null, base_risk: 1.0,
@@ -295,18 +327,21 @@ export function RiskSettingsPage() {
     }
   }
 
-  // ── Render ────────────────────────────────────────────────────────────────
+  // ── Loading ───────────────────────────────────────────────────────────────
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-48">
-        <Loader2 className="animate-spin text-zinc-500" size={28} />
+      <div className="flex items-center justify-center py-24 text-slate-500">
+        <Loader2 className="animate-spin mr-2" size={18} />
+        <span className="text-sm">Loading…</span>
       </div>
     )
   }
 
+  // ── Render ────────────────────────────────────────────────────────────────
+
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       <PageHeader
         icon="🛡"
         title="Risk Settings"
@@ -314,376 +349,403 @@ export function RiskSettingsPage() {
         badge="Phase 3"
         badgeVariant="phase"
         actions={
-          <div className="flex items-center gap-2">
-            <button
-              onClick={load}
-              disabled={saving}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded text-sm text-zinc-400 hover:text-zinc-200 border border-zinc-700 hover:border-zinc-500 disabled:opacity-40 transition-colors"
-            >
-              <RefreshCw size={13} />
-              Reset
-            </button>
-            <button
-              onClick={save}
-              disabled={!dirty || saving}
-              className={cn(
-                'flex items-center gap-1.5 px-4 py-1.5 rounded text-sm font-medium transition-colors disabled:opacity-40',
-                saveOk
-                  ? 'bg-emerald-600 text-white'
-                  : 'bg-blue-600 hover:bg-blue-500 text-white',
-              )}
-            >
-              {saving  ? <Loader2 size={13} className="animate-spin" />
-               : saveOk ? <Check size={13} />
-               :          <Save  size={13} />}
-              {saving ? 'Saving…' : saveOk ? 'Saved!' : 'Save'}
-            </button>
-          </div>
+          <button
+            onClick={load}
+            disabled={saving}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-surface-700 hover:bg-surface-600 text-xs text-slate-400 disabled:opacity-40 transition-colors"
+          >
+            <RefreshCw size={12} />
+            Reload
+          </button>
         }
       />
 
       {error && (
-        <div className="flex items-center gap-2 px-4 py-3 rounded-lg bg-red-900/30 border border-red-800 text-red-300 text-sm">
-          <AlertTriangle size={15} />
+        <div className="flex items-center gap-2 px-4 py-3 rounded-lg bg-red-900/20 border border-red-800/50 text-red-400 text-xs max-w-2xl">
+          <AlertTriangle size={13} />
           {error}
         </div>
       )}
 
-      {/* ─── 1. Criteria ──────────────────────────────────────────────────── */}
-      <SectionCard title="1 — Criteria">
-        <p className="text-xs text-zinc-500 mb-4">
-          Enable or disable each criterion. Weights are normalized automatically by the engine — only enabled criteria contribute.
-        </p>
-        {(Object.keys(config.criteria) as Array<keyof RiskConfig['criteria']>).map(key => (
-          <CriterionConfig
-            key={key}
-            label={CRITERION_LABELS[key]}
-            enabled={config.criteria[key].enabled}
-            weight={config.criteria[key].weight}
-            onToggle={enabled => updCrit(key, v => ({ ...v, enabled }))}
-            onWeightChange={weight => updCrit(key, v => ({ ...v, weight }))}
-          />
+      {/* ─── Tabs nav ──────────────────────────────────────────────────── */}
+      <div className="flex gap-1 bg-surface-800 border border-surface-700 p-1 rounded-lg w-fit">
+        {TABS.map(t => (
+          <button
+            key={t.id}
+            onClick={() => setTab(t.id)}
+            className={cn(
+              'px-4 py-1.5 rounded-md text-xs font-medium transition-colors',
+              tab === t.id
+                ? 'bg-surface-600 text-slate-200 shadow-sm'
+                : 'text-slate-500 hover:text-slate-400',
+            )}
+          >
+            {t.label}
+          </button>
         ))}
-      </SectionCard>
+      </div>
 
-      {/* ─── 2. VI Factors ────────────────────────────────────────────────── */}
-      <SectionCard title="2 — VI Factors">
-        <p className="text-xs text-zinc-500 mb-4">
-          Risk multiplier factor per VI regime, configurable separately for Market VI and Pair VI.
-        </p>
-        {(['market_vi', 'pair_vi'] as const).map(key => (
-          <div key={key} className="mb-5 last:mb-0">
-            <p className="text-xs font-medium text-zinc-400 mb-2">
-              {key === 'market_vi' ? 'Market VI' : 'Pair VI'}
-            </p>
-            <div className="grid grid-cols-3 gap-2 sm:grid-cols-6">
-              {VI_REGIMES.map(regime => (
-                <div key={regime} className="flex flex-col gap-1">
-                  <span className={cn('text-xs font-medium text-center', REGIME_COLORS[regime])}>
-                    {regime}
+      {/* ─── Tab: Criteria ─────────────────────────────────────────────── */}
+      {tab === 'criteria' && (
+        <div className="space-y-5 max-w-2xl">
+          <SectionCard
+            title="Criteria"
+            description="Enable or disable each criterion and set its relative weight. Weights are normalized — only enabled criteria count."
+          >
+            {(Object.keys(config.criteria) as Array<keyof RiskConfig['criteria']>).map(key => (
+              <CriterionConfig
+                key={key}
+                label={CRITERION_LABELS[key]}
+                enabled={config.criteria[key].enabled}
+                weight={config.criteria[key].weight}
+                onToggle={enabled => updCrit(key, v => ({ ...v, enabled }))}
+                onWeightChange={weight => updCrit(key, v => ({ ...v, weight }))}
+              />
+            ))}
+            <SaveBar saving={saving} saveOk={saveOk} dirty={dirty} onSave={save} />
+          </SectionCard>
+        </div>
+      )}
+
+      {/* ─── Tab: Factors ──────────────────────────────────────────────── */}
+      {tab === 'factors' && (
+        <div className="space-y-5 max-w-2xl">
+
+          {/* VI regime factors — market_vi & pair_vi */}
+          {(['market_vi', 'pair_vi'] as const).map(key => (
+            <SectionCard
+              key={key}
+              title={key === 'market_vi' ? 'Market VI — Regime Factors' : 'Pair VI — Regime Factors'}
+              description="Risk multiplier factor applied per VI regime."
+            >
+              <div className="grid grid-cols-3 gap-3 sm:grid-cols-6">
+                {VI_REGIMES.map(regime => (
+                  <div key={regime} className="flex flex-col gap-1.5">
+                    <span className={cn('text-xs font-medium text-center', REGIME_COLORS[regime])}>
+                      {regime}
+                    </span>
+                    <input
+                      type="number"
+                      min={0.1}
+                      max={3.0}
+                      step={0.05}
+                      value={config.criteria[key].factors[regime]}
+                      disabled={!config.criteria[key].enabled}
+                      onChange={e => updCrit(key, c => ({ ...c, factors: { ...c.factors, [regime]: parseFloat(e.target.value) || 0 } }))}
+                      className={cn(factorInputCls, 'w-full')}
+                    />
+                  </div>
+                ))}
+              </div>
+            </SectionCard>
+          ))}
+
+          {/* MA Direction factors */}
+          <SectionCard
+            title="MA Direction — Alignment Factors"
+            description="Factor applied based on whether the trade direction aligns with the MA analysis bias."
+          >
+            <div className="grid grid-cols-3 gap-3">
+              {(['aligned', 'neutral', 'opposed'] as const).map(dir => (
+                <div key={dir} className="flex flex-col gap-1.5">
+                  <span className={cn(
+                    'text-xs font-medium text-center',
+                    dir === 'aligned' ? 'text-emerald-400' : dir === 'opposed' ? 'text-red-400' : 'text-slate-400',
+                  )}>
+                    {dir.charAt(0).toUpperCase() + dir.slice(1)}
                   </span>
-                  <NumInput
-                    value={config.criteria[key].factors[regime]}
-                    onChange={v => updCrit(key, c => ({ ...c, factors: { ...c.factors, [regime]: v } }))}
-                    min={0.1} max={3.0} step={0.05}
-                    disabled={!config.criteria[key].enabled}
-                    className="w-full text-center"
+                  <input
+                    type="number"
+                    min={0.1}
+                    max={3.0}
+                    step={0.05}
+                    value={config.criteria.ma_direction.factors[dir]}
+                    disabled={!config.criteria.ma_direction.enabled}
+                    onChange={e => updCrit('ma_direction', c => ({ ...c, factors: { ...c.factors, [dir]: parseFloat(e.target.value) || 0 } }))}
+                    className={cn(factorInputCls, 'w-full')}
                   />
                 </div>
               ))}
             </div>
-          </div>
-        ))}
-      </SectionCard>
+          </SectionCard>
 
-      {/* ─── 3. MA Direction Factors ──────────────────────────────────────── */}
-      <SectionCard title="3 — MA Direction Factors">
-        <p className="text-xs text-zinc-500 mb-4">
-          Factor applied based on whether the trade direction aligns with the MA analysis bias.
-        </p>
-        <div className="grid grid-cols-3 gap-4">
-          {(['aligned', 'neutral', 'opposed'] as const).map(dir => (
-            <div key={dir} className="flex flex-col gap-1">
-              <span className={cn(
-                'text-xs font-medium',
-                dir === 'aligned' ? 'text-emerald-400' : dir === 'opposed' ? 'text-red-400' : 'text-zinc-400',
-              )}>
-                {dir.charAt(0).toUpperCase() + dir.slice(1)}
-              </span>
-              <NumInput
-                value={config.criteria.ma_direction.factors[dir]}
-                onChange={v => updCrit('ma_direction', c => ({ ...c, factors: { ...c.factors, [dir]: v } }))}
-                min={0.1} max={3.0} step={0.05}
-                disabled={!config.criteria.ma_direction.enabled}
-                className="w-full text-center"
-              />
-            </div>
-          ))}
-        </div>
-      </SectionCard>
-
-      {/* ─── 4. WR & Confidence Bounds ────────────────────────────────────── */}
-      <SectionCard title="4 — WR &amp; Confidence Bounds">
-        <p className="text-xs text-zinc-500 mb-4">
-          Linear interpolation: <span className="text-zinc-400">min_factor</span> at 0% WR / confidence 1,{' '}
-          <span className="text-zinc-400">max_factor</span> at 100% WR / confidence 10.
-        </p>
-        <div className="space-y-0">
-          {(['strategy_wr', 'confidence'] as const).map(key => (
-            <div key={key} className="flex items-center gap-4 py-3 border-b border-zinc-800 last:border-0">
-              <span className={cn('flex-1 text-sm', config.criteria[key].enabled ? 'text-zinc-200' : 'text-zinc-500')}>
-                {key === 'strategy_wr' ? 'Strategy Win Rate' : 'Confidence (1–10)'}
-              </span>
-              <div className="flex items-center gap-2">
-                <label className="text-xs text-zinc-500">min</label>
-                <NumInput
-                  value={config.criteria[key].min_factor}
-                  onChange={v => updCrit(key, c => ({ ...c, min_factor: v }))}
-                  min={0.1} max={2.0}
-                  disabled={!config.criteria[key].enabled}
-                  className="w-20"
-                />
-                <label className="text-xs text-zinc-500">max</label>
-                <NumInput
-                  value={config.criteria[key].max_factor}
-                  onChange={v => updCrit(key, c => ({ ...c, max_factor: v }))}
-                  min={0.1} max={3.0}
-                  disabled={!config.criteria[key].enabled}
-                  className="w-20"
-                />
-              </div>
-            </div>
-          ))}
-        </div>
-      </SectionCard>
-
-      {/* ─── 5. Global Cap ────────────────────────────────────────────────── */}
-      <SectionCard title="5 — Global Multiplier Cap">
-        <p className="text-xs text-zinc-500 mb-4">
-          Hard ceiling on the final multiplier regardless of individual criteria results.
-        </p>
-        <div className="flex items-center gap-4">
-          <input
-            type="range" min={1.0} max={3.0} step={0.1}
-            value={config.global_multiplier_max}
-            onChange={e => upd(c => ({ ...c, global_multiplier_max: parseFloat(e.target.value) }))}
-            className="flex-1 accent-blue-500"
-          />
-          <span className="w-14 text-center text-xl font-bold text-zinc-200 tabular-nums">
-            ×{config.global_multiplier_max.toFixed(1)}
-          </span>
-          <NumInput
-            value={config.global_multiplier_max}
-            onChange={v => upd(c => ({ ...c, global_multiplier_max: clamp(v, 1.0, 3.0) }))}
-            min={1.0} max={3.0} step={0.1}
-            className="w-20"
-          />
-        </div>
-      </SectionCard>
-
-      {/* ─── 6. Risk Guard ────────────────────────────────────────────────── */}
-      <SectionCard title="6 — Risk Guard">
-        <div className="space-y-4">
-          {(
-            [
-              {
-                key:   'enabled' as const,
-                label: 'Guard enabled',
-                desc:  'When OFF, budget checking is skipped entirely — all trades open freely.',
-              },
-              {
-                key:   'force_allowed' as const,
-                label: 'Force override allowed',
-                desc:  'Allow the trader to force-open trades that exceed the budget (shows a two-step confirmation). Disable for strict discipline mode.',
-              },
-              {
-                key:   'hard_block_at_zero' as const,
-                label: 'Hard block at zero budget',
-                desc:  'When ON, even the base risk % is blocked if the concurrent budget is fully exhausted.',
-              },
-            ] as const
-          ).map(({ key, label, desc }) => (
-            <div key={key} className="flex items-start gap-3">
-              <Toggle
-                checked={config.risk_guard[key]}
-                onChange={v => upd(c => ({ ...c, risk_guard: { ...c.risk_guard, [key]: v } }))}
-              />
-              <div>
-                <p className="text-sm text-zinc-200">{label}</p>
-                <p className="text-xs text-zinc-500 mt-0.5">{desc}</p>
-              </div>
-            </div>
-          ))}
-        </div>
-      </SectionCard>
-
-      {/* ─── 7. Alert Banner ──────────────────────────────────────────────── */}
-      <SectionCard title="7 — Dashboard Alert Banner">
-        <div className="space-y-4">
-          <div className="flex items-start gap-3">
-            <Toggle
-              checked={config.alert_banner.enabled}
-              onChange={v => upd(c => ({ ...c, alert_banner: { ...c.alert_banner, enabled: v } }))}
-            />
+          {/* WR & Confidence bounds */}
+          <SectionCard
+            title="WR & Confidence — Bounds"
+            description="Linear interpolation: min_factor at 0% WR / confidence 1 · max_factor at 100% WR / confidence 10."
+          >
             <div>
-              <p className="text-sm text-zinc-200">Banner enabled</p>
-              <p className="text-xs text-zinc-500 mt-0.5">
-                Show an amber warning on the dashboard when concurrent risk usage exceeds the threshold below.
+              {(['strategy_wr', 'confidence'] as const).map(key => (
+                <div key={key} className="flex items-center justify-between gap-3 py-2.5 border-b border-surface-700 last:border-none">
+                  <span className={cn('text-xs', config.criteria[key].enabled ? 'text-slate-300' : 'text-slate-600')}>
+                    {key === 'strategy_wr' ? 'Strategy Win Rate' : 'Confidence (1–10)'}
+                  </span>
+                  <div className={cn('flex items-center gap-2', !config.criteria[key].enabled && 'opacity-40')}>
+                    <span className="text-xs text-slate-500">min</span>
+                    <input
+                      type="number"
+                      min={0.1} max={2.0} step={0.05}
+                      value={config.criteria[key].min_factor}
+                      disabled={!config.criteria[key].enabled}
+                      onChange={e => updCrit(key, c => ({ ...c, min_factor: parseFloat(e.target.value) || 0 }))}
+                      className={cn(factorInputCls, 'w-20')}
+                    />
+                    <span className="text-xs text-slate-500">max</span>
+                    <input
+                      type="number"
+                      min={0.1} max={3.0} step={0.05}
+                      value={config.criteria[key].max_factor}
+                      disabled={!config.criteria[key].enabled}
+                      onChange={e => updCrit(key, c => ({ ...c, max_factor: parseFloat(e.target.value) || 0 }))}
+                      className={cn(factorInputCls, 'w-20')}
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+            <SaveBar saving={saving} saveOk={saveOk} dirty={dirty} onSave={save} />
+          </SectionCard>
+        </div>
+      )}
+
+      {/* ─── Tab: Guard ────────────────────────────────────────────────── */}
+      {tab === 'guard' && (
+        <div className="space-y-5 max-w-2xl">
+
+          {/* Global multiplier cap */}
+          <SectionCard
+            title="Global Multiplier Cap"
+            description="Hard ceiling on the final multiplier regardless of individual criteria results."
+          >
+            <div className="flex items-center gap-4">
+              <input
+                type="range"
+                min={1.0} max={3.0} step={0.1}
+                value={config.global_multiplier_max}
+                onChange={e => upd(c => ({ ...c, global_multiplier_max: parseFloat(e.target.value) }))}
+                className="flex-1 accent-brand-500"
+              />
+              <span className="w-14 text-center text-xl font-bold text-slate-200 tabular-nums">
+                ×{config.global_multiplier_max.toFixed(1)}
+              </span>
+            </div>
+          </SectionCard>
+
+          {/* Risk Guard */}
+          <SectionCard
+            title="Risk Guard"
+            description="Control budget enforcement behaviour and override rules."
+          >
+            {(
+              [
+                {
+                  key:   'enabled' as const,
+                  label: 'Guard enabled',
+                  desc:  'When OFF, budget checking is skipped entirely — all trades open freely.',
+                },
+                {
+                  key:   'force_allowed' as const,
+                  label: 'Force override allowed',
+                  desc:  'Allow force-opening trades that exceed the budget (two-step confirmation). Disable for strict discipline mode.',
+                },
+                {
+                  key:   'hard_block_at_zero' as const,
+                  label: 'Hard block at zero budget',
+                  desc:  'When ON, even the base risk % is blocked if the concurrent budget is fully exhausted.',
+                },
+              ] as const
+            ).map(({ key, label, desc }) => (
+              <div key={key} className="flex items-start justify-between gap-3 py-2.5 border-b border-surface-700 last:border-none">
+                <div>
+                  <p className="text-xs text-slate-300">{label}</p>
+                  <p className="text-xs text-slate-600 mt-0.5">{desc}</p>
+                </div>
+                <Toggle
+                  checked={config.risk_guard[key]}
+                  onChange={v => upd(c => ({ ...c, risk_guard: { ...c.risk_guard, [key]: v } }))}
+                />
+              </div>
+            ))}
+          </SectionCard>
+
+          {/* Alert Banner */}
+          <SectionCard
+            title="Dashboard Alert Banner"
+            description="Show an amber warning on the dashboard when concurrent risk usage exceeds the threshold."
+          >
+            <div className="flex items-start justify-between gap-3 py-2.5 border-b border-surface-700">
+              <div>
+                <p className="text-xs text-slate-300">Banner enabled</p>
+                <p className="text-xs text-slate-600 mt-0.5">
+                  Displays an alert on the dashboard when risk saturation hits the trigger.
+                </p>
+              </div>
+              <Toggle
+                checked={config.alert_banner.enabled}
+                onChange={v => upd(c => ({ ...c, alert_banner: { ...c.alert_banner, enabled: v } }))}
+              />
+            </div>
+            <div className={cn('flex items-center gap-4 py-2.5', !config.alert_banner.enabled && 'opacity-40')}>
+              <span className="text-xs text-slate-500 whitespace-nowrap">Trigger at</span>
+              <input
+                type="range"
+                min={50} max={100} step={5}
+                value={config.alert_banner.trigger_threshold_pct}
+                disabled={!config.alert_banner.enabled}
+                onChange={e => upd(c => ({ ...c, alert_banner: { ...c.alert_banner, trigger_threshold_pct: parseFloat(e.target.value) } }))}
+                className="flex-1 accent-amber-500"
+              />
+              <span className="w-12 text-right text-sm font-bold text-amber-400 tabular-nums">
+                {config.alert_banner.trigger_threshold_pct.toFixed(0)}%
+              </span>
+            </div>
+            <SaveBar saving={saving} saveOk={saveOk} dirty={dirty} onSave={save} />
+          </SectionCard>
+        </div>
+      )}
+
+      {/* ─── Tab: Simulator ────────────────────────────────────────────── */}
+      {tab === 'simulator' && (
+        <div className="space-y-5 max-w-2xl">
+          <SectionCard
+            title="Live Simulator"
+            description="Enter hypothetical inputs to preview the multiplier using current (unsaved) settings. Changes reflect instantly."
+          >
+            <div className="grid grid-cols-2 gap-x-6 gap-y-5 sm:grid-cols-3">
+
+              {/* Market VI */}
+              <div>
+                <label className="block text-xs text-slate-500 mb-1.5">Market VI Regime</label>
+                <select
+                  value={sim.market_vi}
+                  onChange={e => setSim(s => ({ ...s, market_vi: e.target.value as VIRegimeKey | '' }))}
+                  className={selectCls}
+                >
+                  <option value="">— No data (neutral)</option>
+                  {VI_REGIMES.map(r => <option key={r} value={r}>{r}</option>)}
+                </select>
+              </div>
+
+              {/* Pair VI */}
+              <div>
+                <label className="block text-xs text-slate-500 mb-1.5">Pair VI Regime</label>
+                <select
+                  value={sim.pair_vi}
+                  onChange={e => setSim(s => ({ ...s, pair_vi: e.target.value as VIRegimeKey | '' }))}
+                  className={selectCls}
+                >
+                  <option value="">— No data (neutral)</option>
+                  {VI_REGIMES.map(r => <option key={r} value={r}>{r}</option>)}
+                </select>
+              </div>
+
+              {/* MA Direction */}
+              <div>
+                <label className="block text-xs text-slate-500 mb-1.5">MA Direction</label>
+                <select
+                  value={sim.ma_dir}
+                  onChange={e => setSim(s => ({ ...s, ma_dir: e.target.value as SimInputs['ma_dir'] }))}
+                  className={selectCls}
+                >
+                  <option value="">— Not set (neutral)</option>
+                  <option value="aligned">Aligned ↑</option>
+                  <option value="neutral">Neutral</option>
+                  <option value="opposed">Opposed ↓</option>
+                </select>
+              </div>
+
+              {/* Strategy WR */}
+              <div>
+                <label className="block text-xs text-slate-500 mb-1">
+                  Strategy WR:{' '}
+                  <span className="text-slate-300 tabular-nums">
+                    {sim.strategy_wr === null ? '—' : `${sim.strategy_wr}%`}
+                  </span>
+                </label>
+                <input
+                  type="range" min={0} max={100} step={5}
+                  value={sim.strategy_wr ?? 50}
+                  onChange={e => setSim(s => ({ ...s, strategy_wr: parseInt(e.target.value) }))}
+                  className="w-full accent-brand-500"
+                />
+                <div className="flex justify-between text-xs text-slate-600 mt-0.5">
+                  <span>0%</span>
+                  <button
+                    className="text-slate-500 hover:text-slate-300 transition-colors"
+                    onClick={() => setSim(s => ({ ...s, strategy_wr: null }))}
+                  >
+                    clear
+                  </button>
+                  <span>100%</span>
+                </div>
+              </div>
+
+              {/* Confidence */}
+              <div>
+                <label className="block text-xs text-slate-500 mb-1">
+                  Confidence:{' '}
+                  <span className="text-slate-300 tabular-nums">
+                    {sim.confidence === null ? '—' : `${sim.confidence}/10`}
+                  </span>
+                </label>
+                <input
+                  type="range" min={1} max={10} step={1}
+                  value={sim.confidence ?? 5}
+                  onChange={e => setSim(s => ({ ...s, confidence: parseInt(e.target.value) }))}
+                  className="w-full accent-brand-500"
+                />
+                <div className="flex justify-between text-xs text-slate-600 mt-0.5">
+                  <span>1</span>
+                  <button
+                    className="text-slate-500 hover:text-slate-300 transition-colors"
+                    onClick={() => setSim(s => ({ ...s, confidence: null }))}
+                  >
+                    clear
+                  </button>
+                  <span>10</span>
+                </div>
+              </div>
+
+              {/* Base Risk */}
+              <div>
+                <label className="block text-xs text-slate-500 mb-1.5">Base Risk %</label>
+                <input
+                  type="number" min={0.01} max={10} step={0.1}
+                  value={sim.base_risk}
+                  onChange={e => setSim(s => ({ ...s, base_risk: parseFloat(e.target.value) || 0 }))}
+                  className={cn(factorInputCls, 'w-full')}
+                />
+              </div>
+            </div>
+
+            {/* Result */}
+            <div className="mt-6 flex flex-wrap items-center gap-6 px-5 py-4 rounded-xl bg-surface-700 border border-surface-600">
+              <div className="text-center min-w-[80px]">
+                <p className="text-xs text-slate-500 mb-1">Multiplier</p>
+                <p className={cn(
+                  'text-3xl font-bold tabular-nums',
+                  simResult.multiplier > 1.02 ? 'text-emerald-400' :
+                  simResult.multiplier < 0.98 ? 'text-red-400' : 'text-slate-300',
+                )}>
+                  ×{simResult.multiplier.toFixed(3)}
+                </p>
+              </div>
+              <div className="h-12 w-px bg-surface-600 hidden sm:block" />
+              <div className="text-center min-w-[100px]">
+                <p className="text-xs text-slate-500 mb-1">Adjusted Risk</p>
+                <p className="text-3xl font-bold tabular-nums text-slate-200">
+                  {simResult.adjusted.toFixed(2)}%
+                </p>
+              </div>
+              <div className="h-12 w-px bg-surface-600 hidden sm:block" />
+              <p className="flex-1 text-xs text-slate-600 min-w-[160px]">
+                Computed from current settings using the same engine as the backend.
+                Save first to persist the config.
               </p>
             </div>
-          </div>
-
-          <div className={cn('flex items-center gap-4 pl-12', !config.alert_banner.enabled && 'opacity-40')}>
-            <label className="text-xs text-zinc-400 whitespace-nowrap">Trigger at</label>
-            <input
-              type="range" min={50} max={100} step={5}
-              value={config.alert_banner.trigger_threshold_pct}
-              disabled={!config.alert_banner.enabled}
-              onChange={e => upd(c => ({ ...c, alert_banner: { ...c.alert_banner, trigger_threshold_pct: parseFloat(e.target.value) } }))}
-              className="flex-1 accent-amber-500"
-            />
-            <span className="w-14 text-center text-sm font-bold text-amber-400 tabular-nums">
-              {config.alert_banner.trigger_threshold_pct.toFixed(0)}%
-            </span>
-          </div>
+          </SectionCard>
         </div>
-      </SectionCard>
-
-      {/* ─── 8. Live Simulator ────────────────────────────────────────────── */}
-      <SectionCard title="8 — Live Simulator">
-        <p className="text-xs text-zinc-500 mb-5">
-          Enter hypothetical inputs and preview the multiplier using{' '}
-          <span className="text-zinc-400">current (unsaved) settings</span>. Changes reflect instantly.
-        </p>
-
-        <div className="grid grid-cols-2 gap-x-8 gap-y-5 sm:grid-cols-3">
-          {/* Market VI */}
-          <div>
-            <label className="block text-xs text-zinc-400 mb-1">Market VI Regime</label>
-            <select
-              value={sim.market_vi}
-              onChange={e => setSim(s => ({ ...s, market_vi: e.target.value as VIRegimeKey | '' }))}
-              className="w-full rounded bg-zinc-800 border border-zinc-700 px-2 py-1.5 text-sm text-zinc-200"
-            >
-              <option value="">— No data (neutral)</option>
-              {VI_REGIMES.map(r => <option key={r} value={r}>{r}</option>)}
-            </select>
-          </div>
-
-          {/* Pair VI */}
-          <div>
-            <label className="block text-xs text-zinc-400 mb-1">Pair VI Regime</label>
-            <select
-              value={sim.pair_vi}
-              onChange={e => setSim(s => ({ ...s, pair_vi: e.target.value as VIRegimeKey | '' }))}
-              className="w-full rounded bg-zinc-800 border border-zinc-700 px-2 py-1.5 text-sm text-zinc-200"
-            >
-              <option value="">— No data (neutral)</option>
-              {VI_REGIMES.map(r => <option key={r} value={r}>{r}</option>)}
-            </select>
-          </div>
-
-          {/* MA Direction */}
-          <div>
-            <label className="block text-xs text-zinc-400 mb-1">MA Direction</label>
-            <select
-              value={sim.ma_dir}
-              onChange={e => setSim(s => ({ ...s, ma_dir: e.target.value as SimInputs['ma_dir'] }))}
-              className="w-full rounded bg-zinc-800 border border-zinc-700 px-2 py-1.5 text-sm text-zinc-200"
-            >
-              <option value="">— Not set (neutral)</option>
-              <option value="aligned">Aligned ↑</option>
-              <option value="neutral">Neutral</option>
-              <option value="opposed">Opposed ↓</option>
-            </select>
-          </div>
-
-          {/* Strategy WR */}
-          <div>
-            <label className="block text-xs text-zinc-400 mb-1">
-              Strategy WR:{' '}
-              <span className="text-zinc-300">{sim.strategy_wr === null ? '—' : `${sim.strategy_wr}%`}</span>
-            </label>
-            <input
-              type="range" min={0} max={100} step={5}
-              value={sim.strategy_wr ?? 50}
-              onChange={e => setSim(s => ({ ...s, strategy_wr: parseInt(e.target.value) }))}
-              className="w-full accent-blue-500"
-            />
-            <div className="flex justify-between text-xs text-zinc-600 mt-0.5">
-              <span>0%</span>
-              <button
-                className="text-zinc-500 hover:text-zinc-300 transition-colors"
-                onClick={() => setSim(s => ({ ...s, strategy_wr: null }))}
-              >
-                clear
-              </button>
-              <span>100%</span>
-            </div>
-          </div>
-
-          {/* Confidence */}
-          <div>
-            <label className="block text-xs text-zinc-400 mb-1">
-              Confidence:{' '}
-              <span className="text-zinc-300">{sim.confidence === null ? '—' : `${sim.confidence}/10`}</span>
-            </label>
-            <input
-              type="range" min={1} max={10} step={1}
-              value={sim.confidence ?? 5}
-              onChange={e => setSim(s => ({ ...s, confidence: parseInt(e.target.value) }))}
-              className="w-full accent-blue-500"
-            />
-            <div className="flex justify-between text-xs text-zinc-600 mt-0.5">
-              <span>1</span>
-              <button
-                className="text-zinc-500 hover:text-zinc-300 transition-colors"
-                onClick={() => setSim(s => ({ ...s, confidence: null }))}
-              >
-                clear
-              </button>
-              <span>10</span>
-            </div>
-          </div>
-
-          {/* Base Risk */}
-          <div>
-            <label className="block text-xs text-zinc-400 mb-1">Base Risk %</label>
-            <NumInput
-              value={sim.base_risk}
-              onChange={v => setSim(s => ({ ...s, base_risk: v }))}
-              min={0.01} max={10} step={0.1}
-              className="w-full"
-            />
-          </div>
-        </div>
-
-        {/* Result */}
-        <div className="mt-6 flex flex-wrap items-center gap-6 px-5 py-4 rounded-lg bg-zinc-800/60 border border-zinc-700">
-          <div className="text-center min-w-[80px]">
-            <p className="text-xs text-zinc-500 mb-1">Multiplier</p>
-            <p className={cn(
-              'text-4xl font-bold tabular-nums',
-              simResult.multiplier > 1.02 ? 'text-emerald-400' :
-              simResult.multiplier < 0.98 ? 'text-red-400' : 'text-zinc-300',
-            )}>
-              ×{simResult.multiplier.toFixed(3)}
-            </p>
-          </div>
-          <div className="h-14 w-px bg-zinc-700 hidden sm:block" />
-          <div className="text-center min-w-[100px]">
-            <p className="text-xs text-zinc-500 mb-1">Adjusted Risk</p>
-            <p className="text-4xl font-bold tabular-nums text-zinc-200">
-              {simResult.adjusted.toFixed(2)}%
-            </p>
-          </div>
-          <div className="h-14 w-px bg-zinc-700 hidden sm:block" />
-          <p className="flex-1 text-xs text-zinc-500 min-w-[160px]">
-            Computed from current (unsaved) settings using the same engine as the backend.
-            Save first to persist the config, then it will be used for real advisor calls.
-          </p>
-        </div>
-      </SectionCard>
+      )}
     </div>
   )
 }
