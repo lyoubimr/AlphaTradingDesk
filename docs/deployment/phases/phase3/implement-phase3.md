@@ -1,8 +1,8 @@
 # 🛠️ Phase 3 — Implementation Plan
 
 **Date:** 17 mars 2026
-**Version:** 1.0
-**Status:** 📝 Draft — prêt pour démarrage
+**Version:** 1.1
+**Status:** ✅ Phase 3 COMPLETE — deploy prod Dell pending (PR develop → main)
 
 > Ce document décrit **quoi construire, dans quel ordre**.
 > Chaque step est un incrément testable — rien n'est laissé en suspend.
@@ -12,21 +12,21 @@
 
 ## 🗺️ Roadmap Phase 3
 
-| Step | Quoi | Statut |
-|------|------|--------|
-| **P3-1** | Alembic migration — `risk_settings` table + colonne `dynamic_risk_snapshot` sur `trades` | ⏳ |
-| **P3-2** | Dynamic Risk Engine — `compute_risk_multiplier()` service | ⏳ |
-| **P3-3** | Live Pair VI endpoint — fetch Kraken en temps réel | ⏳ |
-| **P3-4** | Risk Settings CRUD API — GET/PUT par profile | ⏳ |
-| **P3-5** | Risk Budget API — budget concurrent restant | ⏳ |
-| **P3-6** | Risk Advisor API — endpoint de calcul complet | ⏳ |
-| **P3-7** | Risk Guard — blocage dans `open_trade` + override `force` | ⏳ |
-| **P3-8** | Dashboard Alert — endpoint + données budget pour banner | ⏳ |
-| **P3-9** | Frontend — Risk Advisor panel dans le formulaire New Trade | ⏳ |
-| **P3-10** | Frontend — Risk Settings page (criteria + weights + factors) | ⏳ |
-| **P3-11** | Frontend — Dashboard alert banner (Risk Guard) | ⏳ |
-| **P3-12** | Tests unitaires + QA pass | ⏳ |
-| **P3-13** | Deploy prod Dell | ⏳ |
+| Step | Quoi | Statut | Commit |
+|------|------|--------|--------|
+| **P3-1** | Alembic migration — `risk_settings` table + colonne `dynamic_risk_snapshot` sur `trades` | ✅ | `51cd14f` |
+| **P3-2** | Dynamic Risk Engine — `compute_risk_multiplier()` service | ✅ | `de50c9e` |
+| **P3-3** | Live Pair VI endpoint — fetch Kraken en temps réel | ✅ | `11c9ecc` |
+| **P3-4** | Risk Settings CRUD API — GET/PUT par profile | ✅ | `f9954e1` |
+| **P3-5** | Risk Budget API — budget concurrent restant | ✅ | `934432e` |
+| **P3-6** | Risk Advisor API — endpoint de calcul complet | ✅ | `a08b0a4` |
+| **P3-7** | Risk Guard — blocage dans `open_trade` + override `force` | ✅ | `ef327fc` |
+| **P3-8** | Dashboard Alert — endpoint + données budget pour banner | ✅ | `c918a71` |
+| **P3-9** | Frontend — Risk Advisor panel dans le formulaire New Trade | ✅ | `3053c2c` |
+| **P3-10** | Frontend — Risk Settings page (criteria + weights + factors) | ✅ | `e8851e8` |
+| **P3-11** | Frontend — Dashboard alert banner (Risk Guard) | ✅ | `c918a71` |
+| **P3-12** | Tests unitaires + QA pass | ✅ | `08062cf` |
+| **P3-13** | Deploy prod Dell | ⏳ | — |
 
 ---
 
