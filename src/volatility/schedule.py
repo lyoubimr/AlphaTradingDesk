@@ -38,6 +38,10 @@ _DEFAULT_PER_PAIR: dict = {
     # EMA reference per TF (overridable in settings UI) — must match _TF_EMA_REF in tasks.py
     # Standard EMA set: 10 · 21 · 55 · 99 · 200
     "ema_ref_periods": {"15m": 55, "1h": 99, "4h": 200, "1d": 99, "1w": 55},
+    # Retest proximity tolerance per TF (fraction — e.g. 0.01 = 1%).
+    # A candle closing within this % of ema_ref is classified as retest_up/down.
+    # Higher TFs = larger candles = wider tolerance needed for visual accuracy.
+    "ema_retest_tolerance": {"15m": 0.005, "1h": 0.010, "4h": 0.015, "1d": 0.020, "1w": 0.030},
 }
 
 

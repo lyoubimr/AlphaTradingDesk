@@ -145,6 +145,7 @@ def compute_ema_score(
     df: pd.DataFrame,
     periods: tuple[int, int, int] = (21, 55, 200),
     ema_ref: int | None = None,
+    retest_tolerance: float | None = None,
 ) -> dict:
     """EMA position score — directional signal for watchlist ranking.
 
@@ -160,13 +161,17 @@ def compute_ema_score(
         Defaults to periods[0] when not supplied.
         Recommended per TF: 15m→55, 1h→99, 4h→200, 1d→99, 1w→55.
 
+    retest_tolerance: maximum % distance from ema_ref (as a fraction, e.g. 0.01 = 1%) to
+        classify the candle as a retest. Comes from per-pair DB config
+        (ema_retest_tolerance per TF). Falls back to 0.005 (0.5%) when absent.
+
     Signal labels (ema_ref-based, used as the watchlist `ema_signal` column):
         above_all      — price > all 3 scoring EMAs  (state, no alert)
         below_all      — price < all 3 scoring EMAs  (state, no alert)
         breakout_up    — price crossed ema_ref upward within last 3 bars
         breakdown_down — price crossed ema_ref downward within last 3 bars
-        retest_up      — price ≤ 0.5% above ema_ref (testing support)
-        retest_down    — price ≤ 0.5% below ema_ref (testing resistance)
+        retest_up      — price within retest_tolerance above ema_ref (testing support)
+        retest_down    — price within retest_tolerance below ema_ref (testing resistance)
         mixed          — everything else              (no alert)
 
     Returns:
@@ -197,8 +202,8 @@ def compute_ema_score(
             signal = "breakout_up"
         elif prev_close_3 > prev_ref_ema_3 and last < ref_ema_val:
             signal = "breakdown_down"
-        elif ref_ema_val > 0 and abs(last - ref_ema_val) / ref_ema_val < 0.005:
-            # ≤ 0.5% away from ref EMA — retest regardless of other EMAs
+        elif ref_ema_val > 0 and abs(last - ref_ema_val) / ref_ema_val < (retest_tolerance or 0.005):
+            # within retest_tolerance of ref EMA — retest regardless of other EMAs
             signal = "retest_up" if last >= ref_ema_val else "retest_down"
         elif all(above):
             signal = "above_all"
@@ -235,6 +240,7 @@ def compute_vi_score(
     enabled: dict | None = None,
     ema_ref: int | None = None,
     indicator_weights: dict | None = None,
+    retest_tolerance: float | None = None,
 ) -> dict:
     """Compute VI score for a single instrument from OHLCV candles.
 
@@ -245,6 +251,9 @@ def compute_vi_score(
         indicator_weights:  per-indicator weights from DB settings (per_pair.indicator_weights).
                             Falls back to _DEFAULT_INDICATOR_WEIGHTS when absent.
                             Disabled indicators are excluded and weights are renormalized.
+        retest_tolerance:   per-TF retest proximity threshold (fraction, e.g. 0.01 = 1%).
+                            Comes from per-pair DB config (ema_retest_tolerance).
+                            Falls back to 0.005 inside compute_ema_score when absent.
 
     Returns:
         {
@@ -291,7 +300,7 @@ def compute_vi_score(
     # EMA: computed and stored, but NOT included in VI average
     # (watchlist ranking boost — dotted arrow in architecture doc)
     if cfg.get("ema", True):
-        ema = compute_ema_score(df, ema_ref=ema_ref)
+        ema = compute_ema_score(df, ema_ref=ema_ref, retest_tolerance=retest_tolerance)
         components["ema_score"] = ema["score"]
         components["ema_signal"] = ema["signal"]
         components["ema_ref_period"] = ema["ema_ref_period"]
