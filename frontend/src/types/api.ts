@@ -126,6 +126,10 @@ export interface TradeOpen {
   session_tag?: string | null
   notes?: string | null
   confidence_score?: number | null
+  /** Risk Guard bypass — requires force_allowed=true in risk_settings */
+  force?: boolean
+  /** Snapshot of risk advisor output at time of trade open (persisted for audit) */
+  dynamic_risk_snapshot?: Record<string, unknown> | null
 }
 
 export interface TradeSizeResult {

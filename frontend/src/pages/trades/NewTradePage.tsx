@@ -35,6 +35,7 @@ import { useRiskCalc } from '../../hooks/useRiskCalc'
 import type { RiskCalcResult } from '../../hooks/useRiskCalc'
 import { cn } from '../../lib/cn'
 import type { Instrument, InstrumentCreate, Profile, Strategy, WinRateStats, GoalProgressItem } from '../../types/api'
+import { RiskAdvisorPanel } from '../../components/risk/RiskAdvisorPanel'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Shared styles
@@ -979,6 +980,27 @@ export function NewTradePage() {
   const [submitting, setSubmitting] = useState(false)
   const [error, setError]           = useState<string | null>(null)
 
+  // ── Risk Advisor state ────────────────────────────────────────────────────
+  const [advisorSnapshot, setAdvisorSnapshot] = useState<Record<string, unknown> | null>(null)
+  const [forceOpen, setForceOpen]             = useState(false)
+
+  const handleAdvisorAccept = useCallback((suggestedRiskPct: number, snapshot: Record<string, unknown>) => {
+    // Pre-fill the risk % field with the advisor's suggestion
+    const cap = activeProfile ? Number(activeProfile.capital_current) : null
+    setRiskSyncDir('pct')
+    setRiskPct(String(suggestedRiskPct))
+    if (cap) setRiskAmt(String(((cap * suggestedRiskPct) / 100).toFixed(2)))
+    setAdvisorSnapshot(snapshot)
+  }, [activeProfile])
+
+  const handleAdvisorReset = useCallback(() => {
+    setRiskPct('')
+    setRiskAmt('')
+    setRiskSyncDir('pct')
+    setAdvisorSnapshot(null)
+    setForceOpen(false)
+  }, [])
+
   // ── Profile type flags ────────────────────────────────────────────────────
   //   isCrypto = Crypto PROFILE → leverage slider visible, units displayed
   //   isCFD    = CFD PROFILE    → lots only, NO leverage slider ever
@@ -1038,6 +1060,8 @@ export function NewTradePage() {
     setNotes('')
     setMarginInput('')
     setLastEdit('margin')  // par défaut : marge proposée drive le levier
+    setAdvisorSnapshot(null)
+    setForceOpen(false)
   }, [activeProfile?.id])
 
   // ── Quand l'instrument change (Crypto) : reset vers marge proposée ───────
@@ -1346,12 +1370,14 @@ export function NewTradePage() {
           take_profit_price:  t.price,
           lot_percentage:     Number(t.pct),
         })),
-        risk_pct_override:  riskPct || null,
-        strategy_ids:       strategyIds.length > 0 ? strategyIds : undefined,
-        strategy_id:        strategyIds[0] ?? null,
-        session_tag:        sessionTag || null,
-        notes:              notes || null,
-        confidence_score:   confidence ? Number(confidence) : null,
+        risk_pct_override:    riskPct || null,
+        strategy_ids:         strategyIds.length > 0 ? strategyIds : undefined,
+        strategy_id:          strategyIds[0] ?? null,
+        session_tag:          sessionTag || null,
+        notes:                notes || null,
+        confidence_score:     confidence ? Number(confidence) : null,
+        force:                forceOpen || undefined,
+        dynamic_risk_snapshot: advisorSnapshot ?? undefined,
       })
       // Upload entry screenshots sequentially (fire-and-forget errors — non-blocking)
       for (const file of entryScreenshots) {
@@ -1363,7 +1389,13 @@ export function NewTradePage() {
       }
       navigate('/trades')
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unknown error')
+      const msg = err instanceof Error ? err.message : 'Unknown error'
+      // Surface budget block clearly so the user knows to use the advisor panel
+      if (msg.includes('RISK_BUDGET_EXCEEDED')) {
+        setError('Risk budget exceeded — not enough budget for this trade. Use the Risk Advisor panel above to force open (if allowed) or close existing positions first.')
+      } else {
+        setError(msg)
+      }
     } finally {
       setSubmitting(false)
     }
@@ -1573,6 +1605,19 @@ export function NewTradePage() {
             </Field>
           </div>
         </Section>
+
+        {/* ══════════════ 3b. RISK ADVISOR ═══════════════════════════════ */}
+        <RiskAdvisorPanel
+          profileId={activeProfile.id}
+          pair={instrument?.symbol ?? null}
+          timeframe={timeframe || null}
+          direction={direction}
+          strategyId={strategyIds[0] ?? null}
+          confidence={confidence ? Number(confidence) : null}
+          onAccept={handleAdvisorAccept}
+          onReset={handleAdvisorReset}
+          onForce={() => setForceOpen(true)}
+        />
 
         {/* ══════════════ 4. PRICES, RISK & POSITION SIZING ══════════════ */}
         <Section icon="💰" title="Prices, risk & position sizing">
