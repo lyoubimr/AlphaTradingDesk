@@ -16,7 +16,6 @@ from dataclasses import dataclass, field
 
 from pydantic import BaseModel, Field
 
-
 # ── Engine output ─────────────────────────────────────────────────────────────
 
 @dataclass

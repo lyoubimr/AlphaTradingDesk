@@ -17,7 +17,13 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from src.core.deps import get_db
-from src.risk_management.schemas import PairVIOut, RiskAdvisorOut, RiskBudgetOut, RiskSettingsOut, RiskSettingsUpdateIn
+from src.risk_management.schemas import (
+    PairVIOut,
+    RiskAdvisorOut,
+    RiskBudgetOut,
+    RiskSettingsOut,
+    RiskSettingsUpdateIn,
+)
 from src.risk_management.service import (
     get_live_pair_vi,
     get_risk_budget,

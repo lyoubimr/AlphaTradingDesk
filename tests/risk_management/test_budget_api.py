@@ -11,7 +11,6 @@ from sqlalchemy.orm import Session
 
 from src.core.models.broker import Broker, Profile
 
-
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 

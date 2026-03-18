@@ -21,10 +21,10 @@ from src.core.logging_config import setup_logging
 from src.goals.router import router as goals_router
 from src.market_analysis.router import ma_router, profiles_ma_router
 from src.profiles.router import router as profiles_router
+from src.risk_management.router import router as risk_router
 from src.stats.router import router as stats_router
 from src.strategies.router import router as strategies_router
 from src.trades.router import router as trades_router
-from src.risk_management.router import router as risk_router
 from src.volatility.router import router as volatility_router
 
 app = FastAPI(

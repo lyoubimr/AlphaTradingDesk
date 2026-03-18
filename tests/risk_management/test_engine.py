@@ -19,8 +19,6 @@ Covered cases (8 minimum per plan):
 
 from __future__ import annotations
 
-import pytest
-
 from src.risk_management.defaults import DEFAULT_RISK_CONFIG
 from src.risk_management.engine import compute_risk_multiplier
 
