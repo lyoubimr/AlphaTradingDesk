@@ -358,8 +358,6 @@ export function RiskSettingsPage() {
         icon="🛡"
         title="Risk Settings"
         subtitle="Configure the dynamic risk engine: criteria, factors and guard rules"
-        badge="Phase 3"
-        badgeVariant="phase"
         actions={
           <button
             onClick={load}
