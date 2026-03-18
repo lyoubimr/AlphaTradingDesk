@@ -902,6 +902,10 @@ export function VolatilitySettingsPage() {
             </div>
 
             <hr className="border-surface-700" />
+
+            <div className="flex items-center justify-between">
+              <div>
+                <span className="text-sm text-slate-300">Snapshot retention</span>
                 <p className="text-xs text-slate-600 mt-0.5">Days to keep per-pair &amp; watchlist snapshots in DB</p>
               </div>
               <select
