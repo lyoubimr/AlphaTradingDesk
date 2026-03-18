@@ -227,7 +227,7 @@ const CRITERION_LABELS: Record<keyof RiskConfig['criteria'], string> = {
 // ── Page ─────────────────────────────────────────────────────────────────────
 
 export function RiskSettingsPage() {
-  const { profileId } = useProfile()
+  const { activeProfileId: profileId } = useProfile()
 
   const [config, setConfig] = useState<RiskConfig>(DEFAULTS)
   const [loading, setLoading] = useState(true)
