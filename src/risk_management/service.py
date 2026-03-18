@@ -26,6 +26,7 @@ from src.risk_management.models import RiskSettings
 from src.volatility.cache import cache_pair_vi, get_cached_market_vi, get_cached_pair_vi
 from src.volatility.indicators import compute_vi_score
 from src.volatility.kraken_client import KrakenClient
+from src.volatility.models import MarketVISnapshot
 from src.volatility.schedule import get_regime_thresholds, score_to_regime
 
 logger = logging.getLogger(__name__)
@@ -308,11 +309,19 @@ def orchestrate_risk_advisor(
     budget = get_risk_budget(profile_id, db)
     budget_remaining_pct: float = budget["budget_remaining_pct"]
 
-    # ── 4. Market VI regime (Redis, graceful degradation) ─────────────────────
+    # ── 4. Market VI regime (Redis → DB fallback, graceful degradation) ────────
     market_vi_cached = get_cached_market_vi(timeframe)
-    market_vi_regime: str | None = (
-        market_vi_cached.get("regime") if market_vi_cached else None
-    )
+    if market_vi_cached:
+        market_vi_regime: str | None = market_vi_cached.get("regime")
+    else:
+        # Redis cold (dev / Celery not running) → fall back to latest DB snapshot
+        row = (
+            db.query(MarketVISnapshot)
+            .filter(MarketVISnapshot.timeframe == timeframe)
+            .order_by(MarketVISnapshot.timestamp.desc())
+            .first()
+        )
+        market_vi_regime = row.regime if row else None
 
     # ── 5. Pair VI regime (cache → live, graceful degradation) ───────────────
     pair_vi_regime: str | None = None
