@@ -1,7 +1,7 @@
 // ── MarketVIGauge ────────────────────────────────────────────────────────────
 // SVG arc gauge showing a VI score [0, 1].
 // Arc goes from -210° to +30° (240° sweep), bottom-left to bottom-right.
-// Color tracks the regime: zinc → sky → green → yellow → orange → red.
+// Color tracks the regime: zinc → sky → green → indigo → orange → red.
 
 interface Props {
   score: number   // [0, 1]
@@ -12,7 +12,7 @@ const REGIME_COLORS = [
   { max: 0.17, color: '#a1a1aa' },  // zinc-400   DEAD  (brighter for dark theme)
   { max: 0.33, color: '#38bdf8' },  // sky-400    CALM
   { max: 0.50, color: '#34d399' },  // emerald-400 NORMAL
-  { max: 0.67, color: '#fbbf24' },  // yellow-400  TRENDING
+  { max: 0.67, color: '#818cf8' },  // indigo-400  TRENDING
   { max: 0.83, color: '#fb923c' },  // orange-400  ACTIVE
   { max: 1.00, color: '#f87171' },  // red-400     EXTREME
 ]
