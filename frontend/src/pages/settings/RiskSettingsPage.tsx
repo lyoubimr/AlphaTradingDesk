@@ -136,27 +136,29 @@ function clamp(v: number, lo: number, hi: number): number {
   return Math.max(lo, Math.min(hi, v))
 }
 
+// The simulator always includes ALL criteria regardless of their enabled flag —
+// it's a "what if" tool; the real engine behaviour (enabled guard) is separate.
 function computeSim(cfg: RiskConfig, inp: SimInputs): { multiplier: number; adjusted: number } {
   const items: { factor: number; weight: number }[] = []
 
-  if (cfg.criteria.market_vi.enabled) {
+  {
     const f = inp.market_vi ? (cfg.criteria.market_vi.factors[inp.market_vi] ?? 1.0) : 1.0
     items.push({ factor: f, weight: cfg.criteria.market_vi.weight })
   }
-  if (cfg.criteria.pair_vi.enabled) {
+  {
     const f = inp.pair_vi ? (cfg.criteria.pair_vi.factors[inp.pair_vi] ?? 1.0) : 1.0
     items.push({ factor: f, weight: cfg.criteria.pair_vi.weight })
   }
-  if (cfg.criteria.ma_direction.enabled) {
+  {
     const f = inp.ma_dir ? (cfg.criteria.ma_direction.factors[inp.ma_dir] ?? 1.0) : 1.0
     items.push({ factor: f, weight: cfg.criteria.ma_direction.weight })
   }
-  if (cfg.criteria.strategy_wr.enabled && inp.strategy_wr !== null) {
+  if (inp.strategy_wr !== null) {
     const wr = clamp(inp.strategy_wr / 100, 0, 1)
     const { min_factor, max_factor } = cfg.criteria.strategy_wr
     items.push({ factor: clamp(min_factor + wr * (max_factor - min_factor), min_factor, max_factor), weight: cfg.criteria.strategy_wr.weight })
   }
-  if (cfg.criteria.confidence.enabled && inp.confidence !== null) {
+  if (inp.confidence !== null) {
     const score = clamp(inp.confidence, 0, 10)
     const { min_factor, max_factor } = cfg.criteria.confidence
     items.push({ factor: clamp(min_factor + (score / 10) * (max_factor - min_factor), min_factor, max_factor), weight: cfg.criteria.confidence.weight })
