@@ -26,7 +26,7 @@ from src.risk_management.models import RiskSettings
 from src.volatility.cache import cache_pair_vi, get_cached_market_vi, get_cached_pair_vi
 from src.volatility.indicators import compute_vi_score
 from src.volatility.kraken_client import KrakenClient
-from src.volatility.models import MarketVISnapshot
+from src.volatility.models import MarketVISnapshot, VolatilitySnapshot
 from src.volatility.schedule import get_regime_thresholds, score_to_regime
 
 logger = logging.getLogger(__name__)
@@ -43,16 +43,40 @@ def get_live_pair_vi(symbol: str, timeframe: str, db: Session) -> dict:
     Strategy:
     1. Check Redis cache (key: atd:pair_vi:{symbol}:{timeframe}).
        If present → return with source="cache".
-    2. Fetch live from Kraken Futures, compute VI, cache result, return source="live".
+    2. DB fallback — latest volatility_snapshots row for this pair/TF.
+       Used when cache is cold (dev / outside Celery schedule).
+    3. Fetch live from Kraken Futures, compute VI, cache result, return source="live".
 
-    Raises HTTPException(503) if Kraken is unreachable and the cache is cold.
+    Raises HTTPException(503) if Kraken is unreachable and both cache and DB are cold.
     """
     # ── 1. Cache hit ──────────────────────────────────────────────────────────
     cached = get_cached_pair_vi(symbol, timeframe)
     if cached is not None:
         return _format_pair_vi(symbol, timeframe, cached, source="cache")
 
-    # ── 2. Live fetch ─────────────────────────────────────────────────────────
+    # ── 2. DB fallback (cold cache — dev / outside Celery schedule) ───────────
+    snap = (
+        db.query(VolatilitySnapshot)
+        .filter(
+            VolatilitySnapshot.pair == symbol,
+            VolatilitySnapshot.timeframe == timeframe,
+        )
+        .order_by(VolatilitySnapshot.timestamp.desc())
+        .first()
+    )
+    if snap is not None:
+        thresholds_db = get_regime_thresholds(db, profile_id=None)
+        regime_db = score_to_regime(float(snap.vi_score), thresholds_db)
+        payload_db = {
+            "symbol": symbol,
+            "vi_score": float(snap.vi_score),
+            "regime": regime_db,
+            "components": snap.components or {},
+            "timestamp": snap.timestamp.isoformat(),
+        }
+        return _format_pair_vi(symbol, timeframe, payload_db, source="db")
+
+    # ── 3. Live fetch ─────────────────────────────────────────────────────────
     try:
         with KrakenClient() as client:
             candles = client.fetch_ohlcv(symbol, timeframe, limit=_OHLCV_LIMIT)
