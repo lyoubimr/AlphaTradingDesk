@@ -30,7 +30,7 @@ const REGIME_MAP: Record<string, RegimeConfig> = {
     tooltip: 'Normal conditions — Standard strategy · Good liquidity',
   },
   TRENDING: {
-    label: 'TRENDING', emoji: '�',
+    label: 'TRENDING', emoji: '💎',
     border: 'border border-indigo-500', bg: 'bg-indigo-950/80', text: 'text-indigo-300',
     tooltip: 'Trending market — Favor trend-following · High momentum',
   },
