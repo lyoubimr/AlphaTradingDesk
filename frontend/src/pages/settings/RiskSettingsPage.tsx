@@ -75,6 +75,41 @@ function hydrate(raw: Record<string, unknown>): RiskConfig {
   }
 }
 
+// ── Weight rebalancing ────────────────────────────────────────────────────────
+// When the user drags one criterion's weight, all OTHER enabled criteria are
+// proportionally scaled so the sum of enabled weights always equals 1.0 (100%).
+
+function rebalanceWeights(
+  criteria: RiskConfig['criteria'],
+  changedKey: keyof RiskConfig['criteria'],
+  newWeight: number,  // 0.0–1.0
+): RiskConfig['criteria'] {
+  const w = Math.max(0, Math.min(1, newWeight))
+  const allKeys = Object.keys(criteria) as Array<keyof RiskConfig['criteria']>
+  const otherEnabled = allKeys.filter(k => k !== changedKey && criteria[k].enabled)
+
+  if (otherEnabled.length === 0) {
+    return { ...criteria, [changedKey]: { ...criteria[changedKey], weight: w } }
+  }
+
+  const remaining = Math.max(0, 1.0 - w)
+  const otherSum = otherEnabled.reduce((s, k) => s + criteria[k].weight, 0)
+  let next: RiskConfig['criteria'] = { ...criteria }
+
+  if (otherSum > 0) {
+    const scale = remaining / otherSum
+    for (const k of otherEnabled) {
+      next = { ...next, [k]: { ...next[k], weight: Math.round(criteria[k].weight * scale * 1000) / 1000 } }
+    }
+  } else {
+    const each = remaining / otherEnabled.length
+    for (const k of otherEnabled) {
+      next = { ...next, [k]: { ...next[k], weight: Math.round(each * 1000) / 1000 } }
+    }
+  }
+  return { ...next, [changedKey]: { ...next[changedKey], weight: w } }
+}
+
 // ── Tabs ──────────────────────────────────────────────────────────────────────
 
 type TabId = 'criteria' | 'factors' | 'guard' | 'simulator'
@@ -274,6 +309,16 @@ export function RiskSettingsPage() {
 
   const simResult = useMemo(() => computeSim(config, sim), [config, sim])
 
+  const enabledWeightTotal = useMemo(
+    () =>
+      Math.round(
+        (Object.keys(config.criteria) as Array<keyof RiskConfig['criteria']>)
+          .filter(k => config.criteria[k].enabled)
+          .reduce((s, k) => s + config.criteria[k].weight, 0) * 100,
+      ),
+    [config.criteria],
+  )
+
   // ── Load ──────────────────────────────────────────────────────────────────
 
   const load = useCallback(async () => {
@@ -390,7 +435,7 @@ export function RiskSettingsPage() {
         <div className="space-y-5 max-w-2xl">
           <SectionCard
             title="Criteria"
-            description="Enable or disable each criterion and set its relative weight. Weights are normalized — only enabled criteria count."
+            description="Enable or disable each criterion and drag its weight. The other enabled criteria auto-adjust so the total always sums to 100%."
           >
             {(Object.keys(config.criteria) as Array<keyof RiskConfig['criteria']>).map(key => (
               <CriterionConfig
@@ -399,9 +444,17 @@ export function RiskSettingsPage() {
                 enabled={config.criteria[key].enabled}
                 weight={config.criteria[key].weight}
                 onToggle={enabled => updCrit(key, v => ({ ...v, enabled }))}
-                onWeightChange={weight => updCrit(key, v => ({ ...v, weight }))}
+                onWeightChange={weight =>
+                  upd(c => ({ ...c, criteria: rebalanceWeights(c.criteria, key, weight) }))
+                }
               />
             ))}
+            <div className={cn(
+              'flex items-center justify-end gap-1.5 pt-3 text-xs tabular-nums',
+              enabledWeightTotal === 100 ? 'text-emerald-500' : 'text-amber-400',
+            )}>
+              Total (enabled):<span className="font-semibold ml-1">{enabledWeightTotal}%</span>
+            </div>
             <SaveBar saving={saving} saveOk={saveOk} dirty={dirty} onSave={save} />
           </SectionCard>
         </div>
@@ -515,7 +568,7 @@ export function RiskSettingsPage() {
           {/* Global multiplier cap */}
           <SectionCard
             title="Global Multiplier Cap"
-            description="Hard ceiling on the final multiplier regardless of individual criteria results."
+            description="Hard ceiling on the combined multiplier. Ex: all criteria fire bullishly → engine computes ×2.4. Cap is ×2.0 → final is ×2.0. With base risk 1%, adjusted risk is always ≤ 2%, regardless of how favourable conditions look."
           >
             <div className="flex items-center gap-4">
               <input
@@ -571,13 +624,13 @@ export function RiskSettingsPage() {
           {/* Alert Banner */}
           <SectionCard
             title="Dashboard Alert Banner"
-            description="Show an amber warning on the dashboard when concurrent risk usage exceeds the threshold."
+            description="Amber warning shown on the dashboard when your concurrent risk usage hits the trigger threshold."
           >
             <div className="flex items-start justify-between gap-3 py-2.5 border-b border-surface-700">
               <div>
                 <p className="text-xs text-slate-300">Banner enabled</p>
                 <p className="text-xs text-slate-600 mt-0.5">
-                  Displays an alert on the dashboard when risk saturation hits the trigger.
+                  Ex: budget 4%, trigger 80% → banner appears once open trades consume ≥ 3.2% concurrently (e.g. 3 trades at 1% + 1 at 0.5%).
                 </p>
               </div>
               <Toggle
