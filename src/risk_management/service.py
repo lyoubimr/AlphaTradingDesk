@@ -49,6 +49,7 @@ def get_live_pair_vi(symbol: str, timeframe: str, db: Session) -> dict:
 
     Raises HTTPException(503) if Kraken is unreachable and both cache and DB are cold.
     """
+    timeframe = timeframe.lower()  # normalise '1H' → '1h', '4H' → '4h', etc.
     # ── 1. Cache hit ──────────────────────────────────────────────────────────
     cached = get_cached_pair_vi(symbol, timeframe)
     if cached is not None:
@@ -332,6 +333,9 @@ def orchestrate_risk_advisor(
     # ── 3. Budget remaining ───────────────────────────────────────────────────
     budget = get_risk_budget(profile_id, db)
     budget_remaining_pct: float = budget["budget_remaining_pct"]
+
+    timeframe = timeframe.lower()  # normalise '1H' → '1h', '4H' → '4h', etc.
+    pair   = pair.upper()          # normalise 'pf_xbtusd' → 'PF_XBTUSD'
 
     # ── 4. Market VI regime (Redis → DB fallback, graceful degradation) ────────
     market_vi_cached = get_cached_market_vi(timeframe)
