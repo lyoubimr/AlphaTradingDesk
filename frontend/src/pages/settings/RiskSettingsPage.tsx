@@ -75,41 +75,6 @@ function hydrate(raw: Record<string, unknown>): RiskConfig {
   }
 }
 
-// ── Weight rebalancing ────────────────────────────────────────────────────────
-// When the user drags one criterion's weight, all OTHER enabled criteria are
-// proportionally scaled so the sum of enabled weights always equals 1.0 (100%).
-
-function rebalanceWeights(
-  criteria: RiskConfig['criteria'],
-  changedKey: keyof RiskConfig['criteria'],
-  newWeight: number,  // 0.0–1.0
-): RiskConfig['criteria'] {
-  const w = Math.max(0, Math.min(1, newWeight))
-  const allKeys = Object.keys(criteria) as Array<keyof RiskConfig['criteria']>
-  const otherEnabled = allKeys.filter(k => k !== changedKey && criteria[k].enabled)
-
-  if (otherEnabled.length === 0) {
-    return { ...criteria, [changedKey]: { ...criteria[changedKey], weight: w } }
-  }
-
-  const remaining = Math.max(0, 1.0 - w)
-  const otherSum = otherEnabled.reduce((s, k) => s + criteria[k].weight, 0)
-  let next: RiskConfig['criteria'] = { ...criteria }
-
-  if (otherSum > 0) {
-    const scale = remaining / otherSum
-    for (const k of otherEnabled) {
-      next = { ...next, [k]: { ...next[k], weight: Math.round(criteria[k].weight * scale * 1000) / 1000 } }
-    }
-  } else {
-    const each = remaining / otherEnabled.length
-    for (const k of otherEnabled) {
-      next = { ...next, [k]: { ...next[k], weight: Math.round(each * 1000) / 1000 } }
-    }
-  }
-  return { ...next, [changedKey]: { ...next[changedKey], weight: w } }
-}
-
 // ── Tabs ──────────────────────────────────────────────────────────────────────
 
 type TabId = 'criteria' | 'factors' | 'guard' | 'simulator'
@@ -437,7 +402,7 @@ export function RiskSettingsPage() {
         <div className="space-y-5 max-w-2xl">
           <SectionCard
             title="Criteria"
-            description="Enable or disable each criterion and drag its weight. The other enabled criteria auto-adjust so the total always sums to 100%."
+            description="Enable or disable each criterion and set its relative weight. The engine normalises enabled weights at runtime — adjust freely."
           >
             {(Object.keys(config.criteria) as Array<keyof RiskConfig['criteria']>).map(key => (
               <CriterionConfig
@@ -446,16 +411,20 @@ export function RiskSettingsPage() {
                 enabled={config.criteria[key].enabled}
                 weight={config.criteria[key].weight}
                 onToggle={enabled => updCrit(key, v => ({ ...v, enabled }))}
-                onWeightChange={weight =>
-                  upd(c => ({ ...c, criteria: rebalanceWeights(c.criteria, key, weight) }))
-                }
+                onWeightChange={weight => updCrit(key, v => ({ ...v, weight }))}
               />
             ))}
             <div className={cn(
               'flex items-center justify-end gap-1.5 pt-3 text-xs tabular-nums',
-              enabledWeightTotal === 100 ? 'text-emerald-500' : 'text-amber-400',
+              enabledWeightTotal === 100
+                ? 'text-emerald-500'
+                : enabledWeightTotal > 100
+                  ? 'text-red-400'
+                  : 'text-amber-400',
             )}>
-              Total (enabled):<span className="font-semibold ml-1">{enabledWeightTotal}%</span>
+              {enabledWeightTotal > 100 && <span>Dépasse 100% — réduire un poids</span>}
+              {enabledWeightTotal < 100 && <span>{100 - enabledWeightTotal}% restant à distribuer</span>}
+              <span className="font-semibold">{enabledWeightTotal}% / 100%</span>
             </div>
             <SaveBar saving={saving} saveOk={saveOk} dirty={dirty} onSave={save} />
           </SectionCard>
