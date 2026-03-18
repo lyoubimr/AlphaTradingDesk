@@ -85,6 +85,12 @@ class TradeOpen(BaseModel):
     # Optional overrides — if None the profile default is used
     risk_pct_override: Decimal | None = Field(default=None, gt=0, le=10)
 
+    # Phase 3 — Dynamic Risk
+    # force=True: override budget block (only honoured if risk_guard.force_allowed=True)
+    force: bool = False
+    # Risk Advisor breakdown captured at the moment of trade open (optional)
+    dynamic_risk_snapshot: dict | None = None
+
     strategy_id: int | None = None
     # Multi-strategy: list of strategy IDs linked via trade_strategies table.
     # If strategy_ids is set and non-empty, strategy_id is auto-set to strategy_ids[0]

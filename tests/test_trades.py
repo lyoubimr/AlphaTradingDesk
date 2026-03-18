@@ -77,7 +77,7 @@ def _make_profile(
         capital_start=capital,
         capital_current=capital,
         risk_percentage_default=Decimal("2.0"),
-        max_concurrent_risk_pct=Decimal("2.0"),
+        max_concurrent_risk_pct=Decimal("10.0"),
         status="active",
     )
     db.add(p)

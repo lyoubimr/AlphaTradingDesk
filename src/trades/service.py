@@ -33,6 +33,7 @@ Capital is ALWAYS updated in the same DB transaction as trade close.
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 from decimal import Decimal
 
@@ -42,6 +43,9 @@ from sqlalchemy.orm import Session, joinedload
 
 from src.core.models.broker import Instrument, Profile
 from src.core.models.trade import Position, Strategy, Trade, TradeStrategy
+from src.risk_management.defaults import DEFAULT_RISK_CONFIG
+from src.risk_management.engine import _deep_merge
+from src.risk_management.service import get_risk_budget, get_risk_settings
 from src.trades.schemas import (
     PositionIn,
     TradeClose,
@@ -61,6 +65,8 @@ MARGIN_SAFETY_FACTOR = Decimal("2.5")
 DEFAULT_CFD_CONTRACT_SIZE = Decimal("100000")  # standard lot; overridden by instrument if set
 DEFAULT_CFD_MAX_LEVERAGE = 100  # conservative fallback
 DEFAULT_CRYPTO_MAX_LEVERAGE = 10  # conservative fallback
+
+logger = logging.getLogger(__name__)
 
 
 # -- Internal helpers ----------------------------------------------------------
@@ -434,6 +440,41 @@ def open_trade(db: Session, data: TradeOpen) -> TradeOut:
     risk_pct = data.risk_pct_override or profile.risk_percentage_default
     risk_amount = (profile.capital_current * risk_pct / 100).quantize(Decimal("0.01"))
 
+    # ── P3-7 Risk Guard ─────────────────────────────────────────────────────────
+    # Guard applies to the effective risk amount regardless of the path
+    # (base default, override, or Advisor-adjusted value).
+    # Only skipped for LIMIT/pending orders (budget not yet consumed).
+    if data.order_type != "LIMIT":
+        settings = get_risk_settings(data.profile_id, db)
+        guard_config = _deep_merge(DEFAULT_RISK_CONFIG, settings.config).get("risk_guard", {})
+        guard_enabled: bool = bool(guard_config.get("enabled", True))
+        if guard_enabled:
+            budget = get_risk_budget(data.profile_id, db)
+            effective_risk_pct = float(risk_pct)
+            if effective_risk_pct > budget["budget_remaining_pct"]:
+                force_allowed: bool = budget["force_allowed"]
+                if not data.force or not force_allowed:
+                    raise HTTPException(
+                        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                        detail={
+                            "detail": (
+                                f"Insufficient risk budget. "
+                                f"Remaining: {budget['budget_remaining_pct']:.2f}%, "
+                                f"requested: {effective_risk_pct:.2f}%. "
+                                f"Use force=true to override."
+                            ),
+                            "code": "RISK_BUDGET_EXCEEDED",
+                            "budget_remaining_pct": budget["budget_remaining_pct"],
+                            "effective_risk_pct": effective_risk_pct,
+                            "force_allowed": force_allowed,
+                        },
+                    )
+                logger.warning(
+                    "open_trade: Risk Guard bypassed via force=True "
+                    "(profile=%d, remaining=%.2f%%, requested=%.2f%%)",
+                    data.profile_id, budget["budget_remaining_pct"], effective_risk_pct,
+                )
+
     size_info = _compute_size_info(profile, instrument, data, risk_amount)
     potential_profit = _compute_potential_profit(data, size_info)
 
@@ -463,6 +504,7 @@ def open_trade(db: Session, data: TradeOpen) -> TradeOut:
         notes=data.notes,
         confidence_score=data.confidence_score,
         entry_screenshot_urls=data.entry_screenshot_urls,
+        dynamic_risk_snapshot=data.dynamic_risk_snapshot,
     )
     db.add(trade)
     db.flush()  # get trade.id before adding positions
