@@ -273,6 +273,7 @@ class TradeOut(BaseModel):
     session_tag: str | None
     notes: str | None
     confidence_score: int | None
+    dynamic_risk_snapshot: dict | None = None
     created_at: datetime
     updated_at: datetime
     closed_at: datetime | None

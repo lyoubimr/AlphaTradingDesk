@@ -750,3 +750,84 @@ class TestCFDMarginWarning:
         assert resp.status_code == 201
         # margin_warning is a bool — present either way
         assert "margin_warning" in resp.json()["size_info"]
+
+
+# ── Tests: P3-7 Risk Guard ────────────────────────────────────────────────────
+
+
+class TestRiskGuard:
+    """P3-7 — open_trade() Risk Guard: budget blocking and force override."""
+
+    def _make_profile_zero_budget(self, db: Session) -> tuple:
+        """Profile with max_concurrent_risk_pct = 0.1 and default risk 2% → always blocked."""
+        from decimal import Decimal
+        broker = _make_broker(db, name="GuardBroker")
+        inst = _make_instrument(db, broker, symbol="PF_XBTUSD")
+        profile = _make_profile(
+            db, broker,
+            name="GuardTrader",
+            capital=Decimal("10000"),
+        )
+        # Overwrite max_concurrent_risk_pct to near-zero so any trade is blocked
+        profile.max_concurrent_risk_pct = Decimal("0.1")
+        db.flush()
+        return profile, inst
+
+    def test_budget_block_returns_422_with_code(
+        self, client: TestClient, db_session: Session
+    ):
+        """Risk Guard: effective risk > budget → 422 RISK_BUDGET_EXCEEDED."""
+        profile, inst = self._make_profile_zero_budget(db_session)
+
+        payload = _open_payload(profile, inst, pair="BTC/USD")
+        payload["order_type"] = "MARKET"
+        resp = client.post("/api/trades", json=payload)
+
+        assert resp.status_code == 422
+        detail = resp.json()["detail"]
+        assert detail["code"] == "RISK_BUDGET_EXCEEDED"
+        assert "budget_remaining_pct" in detail
+        assert "effective_risk_pct" in detail
+        assert "force_allowed" in detail
+
+    def test_force_true_bypasses_budget_block(
+        self, client: TestClient, db_session: Session
+    ):
+        """Risk Guard: force=true → trade opens despite budget exceeded."""
+        profile, inst = self._make_profile_zero_budget(db_session)
+
+        payload = _open_payload(profile, inst, pair="BTC/USD")
+        payload["order_type"] = "MARKET"
+        payload["force"] = True
+        resp = client.post("/api/trades", json=payload)
+
+        assert resp.status_code == 201
+
+    def test_limit_orders_skip_guard(self, client: TestClient, db_session: Session):
+        """LIMIT orders do not consume budget → guard is skipped, trade opens freely."""
+        profile, inst = self._make_profile_zero_budget(db_session)
+
+        payload = _open_payload(profile, inst, pair="BTC/USD")
+        payload["order_type"] = "LIMIT"
+        resp = client.post("/api/trades", json=payload)
+
+        assert resp.status_code == 201
+
+    def test_dynamic_risk_snapshot_persisted(
+        self, client: TestClient, db_session: Session
+    ):
+        """dynamic_risk_snapshot sent in payload is stored on the trade."""
+        broker = _make_broker(db_session, name="SnapBroker")
+        inst = _make_instrument(db_session, broker)
+        profile = _make_profile(db_session, broker, name="SnapTrader")
+
+        snapshot = {"multiplier": 1.25, "criteria": ["market_vi"]}
+        payload = _open_payload(profile, inst)
+        payload["dynamic_risk_snapshot"] = snapshot
+        resp = client.post("/api/trades", json=payload)
+
+        assert resp.status_code == 201
+        trade_id = resp.json()["id"]
+
+        detail = client.get(f"/api/trades/{trade_id}").json()
+        assert detail["dynamic_risk_snapshot"] == snapshot
