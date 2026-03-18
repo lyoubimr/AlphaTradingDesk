@@ -15,6 +15,7 @@ import { GoalsSettingsPage } from './pages/settings/GoalsSettingsPage'
 import { StrategiesSettingsPage } from './pages/settings/StrategiesSettingsPage'
 import { VolatilitySettingsPage } from './pages/settings/VolatilitySettingsPage'
 import { NotificationsSettingsPage } from './pages/settings/NotificationsSettingsPage'
+import { RiskSettingsPage } from './pages/settings/RiskSettingsPage'
 import { MarketVIPage } from './pages/volatility/MarketVIPage'
 import { WatchlistsPage } from './pages/volatility/WatchlistsPage'
 
@@ -38,6 +39,7 @@ export default function App() {
         <Route path="/settings/strategies" element={<StrategiesSettingsPage />} />
         <Route path="/settings/volatility" element={<VolatilitySettingsPage />} />
         <Route path="/settings/notifications" element={<NotificationsSettingsPage />} />
+        <Route path="/settings/risk" element={<RiskSettingsPage />} />
         {/* Phase 2 — Volatility */}
         <Route path="/volatility" element={<Navigate to="/volatility/market" replace />} />
         <Route path="/volatility/market" element={<MarketVIPage />} />
