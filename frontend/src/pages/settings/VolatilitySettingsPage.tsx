@@ -55,6 +55,7 @@ interface PerPairCfg {
   enabled: boolean
   schedules: Partial<Record<TFKey, TFSchedule>>
   ema_ref_periods: Partial<Record<TFKey, number>>
+  ema_retest_tolerance: Partial<Record<TFKey, number>>
 }
 
 interface RegimesCfg {
@@ -103,6 +104,7 @@ const D_PP: PerPairCfg = {
   enabled: true,
   schedules: {},
   ema_ref_periods: { '15m': 55, '1h': 99, '4h': 200, '1d': 99, '1w': 55 },
+  ema_retest_tolerance: { '15m': 0.005, '1h': 0.010, '4h': 0.015, '1d': 0.020, '1w': 0.030 },
 }
 
 const D_REG: RegimesCfg = {
@@ -148,6 +150,7 @@ function hydratePerPair(raw: Record<string, unknown>): PerPairCfg {
     enabled: (raw.enabled as boolean | undefined) ?? D_PP.enabled,
     schedules,
     ema_ref_periods: { ...D_PP.ema_ref_periods, ...((raw.ema_ref_periods as Partial<Record<TFKey, number>> | undefined) ?? {}) },
+    ema_retest_tolerance: { ...D_PP.ema_retest_tolerance, ...((raw.ema_retest_tolerance as Partial<Record<TFKey, number>> | undefined) ?? {}) },
   }
 }
 
@@ -858,6 +861,43 @@ export function VolatilitySettingsPage() {
                     </select>
                   </div>
                 ))}
+              </div>
+            </div>
+
+            <hr className="border-surface-700" />
+
+            <div>
+              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1 flex items-center gap-1">
+                EMA Retest Tolerance per TF
+                <Tooltip
+                  text="Maximum % distance from the reference EMA to classify a candle close as a retest (retest_up / retest_down signal). Higher timeframes need wider tolerance — a 1W candle can close 3% from the EMA and still be a valid retest visually."
+                  maxWidth={300}
+                />
+              </p>
+              <p className="text-xs text-slate-600 mt-0.5 mb-3">
+                Increase for higher TFs to match what you see on the chart.
+              </p>
+              <div className="space-y-2">
+                {(['15m', '1h', '4h', '1d', '1w'] as TFKey[]).map(tf => {
+                  const frac = pp.ema_retest_tolerance[tf] ?? D_PP.ema_retest_tolerance[tf] ?? 0.005
+                  return (
+                    <div key={tf} className="flex items-center justify-between">
+                      <span className="text-sm text-slate-300 font-mono">{tf}</span>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="number"
+                          min={0.1}
+                          max={10}
+                          step={0.1}
+                          value={Math.round(frac * 1000) / 10}
+                          onChange={e => setPP(p => ({ ...p, ema_retest_tolerance: { ...p.ema_retest_tolerance, [tf]: Number(e.target.value) / 100 } }))}
+                          className="w-20 bg-surface-700 border border-surface-600 text-xs text-slate-300 rounded-lg px-3 py-1.5 text-right focus:outline-none focus:border-brand-500/60"
+                        />
+                        <span className="text-xs text-slate-500">%</span>
+                      </div>
+                    </div>
+                  )
+                })}
               </div>
             </div>
 

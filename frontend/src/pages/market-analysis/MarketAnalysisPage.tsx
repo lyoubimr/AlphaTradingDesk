@@ -242,15 +242,39 @@ function ModuleCard({
         <div className="space-y-2 flex-1">
           {mod.is_dual ? (
             <>
+              {/* ── Asset A ── */}
+              <p className="text-[9px] text-slate-500 uppercase tracking-wide font-medium">{mod.asset_a ?? 'A'}</p>
               <div className="flex items-center gap-2">
-                <span className="text-[9px] text-slate-600 w-14 shrink-0 uppercase tracking-wide">{mod.asset_a ?? 'A'} HTF</span>
+                <span className="text-[9px] text-slate-700 w-6 shrink-0">HTF</span>
                 <ScoreBar score={last.score_htf_a} bias={last.bias_htf_a as MABias | null} />
                 <BiasBadge bias={last.bias_htf_a as MABias | null} xs />
               </div>
               <div className="flex items-center gap-2">
-                <span className="text-[9px] text-slate-600 w-14 shrink-0 uppercase tracking-wide">{mod.asset_b ?? 'B'} HTF</span>
+                <span className="text-[9px] text-slate-700 w-6 shrink-0">MTF</span>
+                <ScoreBar score={last.score_mtf_a} bias={last.bias_mtf_a as MABias | null} />
+                <BiasBadge bias={last.bias_mtf_a as MABias | null} xs />
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-[9px] text-slate-700 w-6 shrink-0">LTF</span>
+                <ScoreBar score={last.score_ltf_a} bias={last.bias_ltf_a as MABias | null} />
+                <BiasBadge bias={last.bias_ltf_a as MABias | null} xs />
+              </div>
+              {/* ── Asset B ── */}
+              <p className="text-[9px] text-slate-500 uppercase tracking-wide font-medium mt-1">{mod.asset_b ?? 'B'}</p>
+              <div className="flex items-center gap-2">
+                <span className="text-[9px] text-slate-700 w-6 shrink-0">HTF</span>
                 <ScoreBar score={last.score_htf_b} bias={last.bias_htf_b as MABias | null} />
                 <BiasBadge bias={last.bias_htf_b as MABias | null} xs />
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-[9px] text-slate-700 w-6 shrink-0">MTF</span>
+                <ScoreBar score={last.score_mtf_b} bias={last.bias_mtf_b as MABias | null} />
+                <BiasBadge bias={last.bias_mtf_b as MABias | null} xs />
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-[9px] text-slate-700 w-6 shrink-0">LTF</span>
+                <ScoreBar score={last.score_ltf_b} bias={last.bias_ltf_b as MABias | null} />
+                <BiasBadge bias={last.bias_ltf_b as MABias | null} xs />
               </div>
             </>
           ) : (
@@ -264,6 +288,11 @@ function ModuleCard({
                 <span className="text-[9px] text-slate-600 w-8 shrink-0 uppercase tracking-wide">MTF</span>
                 <ScoreBar score={last.score_mtf_a} bias={last.bias_mtf_a as MABias | null} />
                 <BiasBadge bias={last.bias_mtf_a as MABias | null} xs />
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-[9px] text-slate-600 w-8 shrink-0 uppercase tracking-wide">LTF</span>
+                <ScoreBar score={last.score_ltf_a} bias={last.bias_ltf_a as MABias | null} />
+                <BiasBadge bias={last.bias_ltf_a as MABias | null} xs />
               </div>
             </>
           )}

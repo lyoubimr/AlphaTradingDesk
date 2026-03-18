@@ -344,9 +344,10 @@ def compute_market_vi(self, timeframe: str) -> dict:  # type: ignore[override]
             for symbol in symbols:
                 try:
                     ema_ref = (mv_cfg.get("ema_ref_periods") or {}).get(timeframe) or _TF_EMA_REF.get(timeframe, 50)
+                    retest_tol = (mv_cfg.get("ema_retest_tolerance") or {}).get(timeframe)
                     limit = _TF_CANDLE_LIMIT.get(timeframe, 220)
                     candles = client.fetch_ohlcv(symbol, timeframe, limit=limit)
-                    result = compute_vi_score(candles, enabled, ema_ref, indicator_weights)
+                    result = compute_vi_score(candles, enabled, ema_ref, indicator_weights, retest_tol)
                     pair_scores[symbol] = result
                 except Exception as pair_exc:
                     logger.warning(
@@ -587,9 +588,10 @@ def compute_pair_vi(self, timeframe: str, force: bool = False) -> dict:  # type:
             for symbol in symbols:
                 try:
                     ema_ref = (pp_cfg.get("ema_ref_periods") or {}).get(timeframe) or _TF_EMA_REF.get(timeframe, 50)
+                    retest_tol = (pp_cfg.get("ema_retest_tolerance") or {}).get(timeframe)
                     limit = _TF_CANDLE_LIMIT.get(timeframe, 220)
                     candles = client.fetch_ohlcv(symbol, timeframe, limit=limit)
-                    result = compute_vi_score(candles, enabled, ema_ref, indicator_weights)
+                    result = compute_vi_score(candles, enabled, ema_ref, indicator_weights, retest_tol)
                     pair_scores[symbol] = result
                 except Exception as pair_exc:
                     logger.warning(
