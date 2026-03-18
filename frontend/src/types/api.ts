@@ -674,3 +674,59 @@ export interface NotificationSettingsOut {
   watchlist_alerts: Record<string, unknown>
   updated_at: string
 }
+
+// ── Risk Management (Phase 3) ─────────────────────────────────────────────
+
+export interface RiskBudgetOut {
+  profile_id: number
+  capital_current: number
+  risk_pct_default: number
+  max_concurrent_risk_pct: number
+  concurrent_risk_used_pct: number
+  budget_remaining_pct: number
+  budget_remaining_amount: number
+  open_trades_count: number
+  pending_trades_count: number
+  alert_risk_saturated: boolean
+  alert_threshold_pct: number
+  force_allowed: boolean
+}
+
+export interface CriterionDetail {
+  name: string
+  enabled: boolean
+  value_label: string
+  factor: number
+  weight: number
+  contribution: number
+}
+
+export interface RiskAdvisorOut {
+  base_risk_pct: number
+  adjusted_risk_pct: number
+  adjusted_risk_amount: number
+  multiplier: number
+  criteria: CriterionDetail[]
+  budget_remaining_pct: number
+  budget_remaining_amount: number
+  budget_blocking: boolean
+  suggested_risk_pct: number
+  force_allowed: boolean
+}
+
+export interface RiskSettingsOut {
+  profile_id: number
+  config: Record<string, unknown>
+  updated_at: string
+}
+
+export interface PairVIOut {
+  pair: string
+  timeframe: string
+  vi_score: number
+  regime: VIRegime
+  ema_score: number | null
+  ema_signal: string | null
+  source: string
+  computed_at: string
+}

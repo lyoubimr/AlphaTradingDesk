@@ -21,10 +21,11 @@ import { StatCard }    from '../../components/ui/StatCard'
 import { useProfile }  from '../../context/ProfileContext'
 import { MarketVIWidget }  from '../../components/dashboard/MarketVIWidget'
 import {
-  goalsApi, tradesApi,
+  goalsApi, tradesApi, riskApi,
 } from '../../lib/api'
+import { RiskAlertBanner } from '../../components/risk/RiskAlertBanner'
 import type {
-  GoalProgressItem, TradeListItem,
+  GoalProgressItem, TradeListItem, RiskBudgetOut,
 } from '../../types/api'
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -717,6 +718,8 @@ export function DashboardPage() {
   const [tLoading,  setTLoading]  = useState(false)
   const [tError,    setTError]    = useState<string | null>(null)
 
+  const [budget,    setBudget]    = useState<RiskBudgetOut | null>(null)
+
   const loadTrades = useCallback(async () => {
     if (!activeProfile) return
     setTLoading(true); setTError(null)
@@ -725,9 +728,16 @@ export function DashboardPage() {
     finally { setTLoading(false) }
   }, [activeProfile])
 
-  useEffect(() => { void loadTrades() }, [loadTrades])
+  const loadBudget = useCallback(async () => {
+    if (!activeProfile) return
+    try { setBudget(await riskApi.getBudget(activeProfile.id)) }
+    catch { /* non-blocking — dashboard still works without budget */ }
+  }, [activeProfile])
 
-  // Compute risk for the banner
+  useEffect(() => { void loadTrades() }, [loadTrades])
+  useEffect(() => { void loadBudget() }, [loadBudget])
+
+  // Compute risk for the hard-limit banner (local, no API roundtrip needed)
   const openTrades    = trades.filter((t) => t.status === 'open' || t.status === 'partial')
   const capital       = activeProfile ? parseFloat(activeProfile.capital_current) : 0
   const maxRiskPct    = activeProfile ? parseFloat(activeProfile.max_concurrent_risk_pct) : 0
@@ -752,7 +762,10 @@ export function DashboardPage() {
 
       {activeProfile && (
         <>
-          {/* ── Risk exceeded banner ─────────────────────────────────────── */}
+          {/* ── Risk alert banner (amber — configurable threshold from budget API) ── */}
+          <RiskAlertBanner budget={budget} />
+
+          {/* ── Risk exceeded banner (red — hard limit exceeded, local computation) ── */}
           <RiskExceededBanner riskPct={currentRiskPct} maxRiskPct={maxRiskPct} />
 
           {/* ── KPI bar ─────────────────────────────────────────────────── */}

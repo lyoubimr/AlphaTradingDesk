@@ -15,6 +15,7 @@ import type {
   MASessionCreate, MASessionOut, MASessionListItem, MAStalenessItem, MATradeConclusion,
   MarketVIOut, AggregatedMarketVIOut, PairsVIOut, WatchlistOut, WatchlistMetaOut, LivePricesResponse,
   VolatilitySettingsOut, NotificationSettingsOut,
+  RiskBudgetOut, RiskAdvisorOut, RiskSettingsOut, PairVIOut,
 } from '../types/api'
 
 const BASE = '/api'
@@ -498,4 +499,44 @@ export const volatilityApi = {
   /** POST /api/volatility/notifications/{profileId}/test */
   testNotification: (profileId: number): Promise<{ status: string; message: string }> =>
     request(`/volatility/notifications/${profileId}/test`, { method: 'POST' }),
+}
+
+// ── Risk Management ───────────────────────────────────────────────────────
+
+export const riskApi = {
+  /** GET /api/risk/budget/{profileId} */
+  getBudget: (profileId: number): Promise<RiskBudgetOut> =>
+    request(`/risk/budget/${profileId}`),
+
+  /** GET /api/risk/advisor */
+  getAdvisor: (params: {
+    profile_id: number
+    pair: string
+    timeframe: string
+    direction: string
+    strategy_id?: number | null
+    confidence?: number | null
+    ma_session_id?: number | null
+  }): Promise<RiskAdvisorOut> => {
+    const q = new URLSearchParams({ profile_id: String(params.profile_id), pair: params.pair, timeframe: params.timeframe, direction: params.direction })
+    if (params.strategy_id != null)  q.set('strategy_id',  String(params.strategy_id))
+    if (params.confidence  != null)  q.set('confidence',   String(params.confidence))
+    if (params.ma_session_id != null) q.set('ma_session_id', String(params.ma_session_id))
+    return request(`/risk/advisor?${q.toString()}`)
+  },
+
+  /** GET /api/risk/settings/{profileId} */
+  getSettings: (profileId: number): Promise<RiskSettingsOut> =>
+    request(`/risk/settings/${profileId}`),
+
+  /** PUT /api/risk/settings/{profileId} */
+  updateSettings: (profileId: number, config: Record<string, unknown>): Promise<RiskSettingsOut> =>
+    request(`/risk/settings/${profileId}`, {
+      method: 'PUT',
+      body: JSON.stringify({ config }),
+    }),
+
+  /** GET /api/risk/pair-vi */
+  getPairVI: (pair: string, timeframe: string): Promise<PairVIOut> =>
+    request(`/risk/pair-vi?pair=${encodeURIComponent(pair)}&timeframe=${encodeURIComponent(timeframe)}`),
 }
