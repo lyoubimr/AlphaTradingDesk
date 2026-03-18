@@ -198,6 +198,11 @@ class Trade(Base):
     pair_vi_at_entry: Mapped[Decimal | None] = mapped_column(Numeric(5, 3))
     vi_adjusted_risk_amount: Mapped[Decimal | None] = mapped_column(Numeric(20, 2))
 
+    # Dynamic Risk Advisor snapshot (Phase 3+)
+    # Full breakdown from compute_risk_multiplier() at trade-open time.
+    # NULL for trades opened before Phase 3 or without the Advisor.
+    dynamic_risk_snapshot: Mapped[dict | None] = mapped_column(JSONB)
+
     # Auto-trading (Phase 4+)
     auto_generated: Mapped[bool] = mapped_column(Boolean, default=False)
     signal_score: Mapped[Decimal | None] = mapped_column(Numeric(5, 2))

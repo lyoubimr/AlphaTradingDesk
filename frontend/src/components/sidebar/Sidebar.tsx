@@ -13,6 +13,7 @@ import {
   SlidersHorizontal,
   Crosshair,
   Bell,
+  Shield,
 } from 'lucide-react'
 import { cn } from '../../lib/cn'
 import { Badge } from '../ui/Badge'
@@ -107,6 +108,11 @@ const NAV_GROUPS: NavGroup[] = [
         to: '/settings/notifications',
         label: 'Notifications',
         icon: <Bell size={16} />,
+      },
+      {
+        to: '/settings/risk',
+        label: 'Risk Settings',
+        icon: <Shield size={16} />,
       },
       {
         to: '/settings',

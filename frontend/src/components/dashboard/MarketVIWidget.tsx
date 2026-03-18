@@ -21,7 +21,7 @@ const scoreHex = (score: number): string => {
   if (score <= 15) return '#71717a'
   if (score <= 30) return '#38bdf8'
   if (score <= 50) return '#34d399'
-  if (score <= 65) return '#facc15'
+  if (score <= 65) return '#818cf8'  // indigo-400 — TRENDING
   if (score <= 80) return '#fb923c'
   return '#f87171'
 }
