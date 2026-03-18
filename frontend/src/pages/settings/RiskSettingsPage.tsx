@@ -422,8 +422,8 @@ export function RiskSettingsPage() {
                   ? 'text-red-400'
                   : 'text-amber-400',
             )}>
-              {enabledWeightTotal > 100 && <span>Dépasse 100% — réduire un poids</span>}
-              {enabledWeightTotal < 100 && <span>{100 - enabledWeightTotal}% restant à distribuer</span>}
+              {enabledWeightTotal > 100 && <span>Exceeds 100% — reduce a weight</span>}
+              {enabledWeightTotal < 100 && <span>{100 - enabledWeightTotal}% left to assign</span>}
               <span className="font-semibold">{enabledWeightTotal}% / 100%</span>
             </div>
             <SaveBar saving={saving} saveOk={saveOk} dirty={dirty} onSave={save} />
