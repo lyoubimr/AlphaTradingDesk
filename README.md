@@ -128,7 +128,7 @@ Production runs on a self-hosted Dell server — Docker Compose, images pulled f
 
 Quick summary:
 1. Provision the server → `scripts/prod/setup-server.sh` (in ops repo)
-2. Set GitHub Secrets: `DELL_HOST`, `DELL_USER`, `DELL_SSH_KEY`, `TAILSCALE_OAUTH_CLIENT_ID`, `TAILSCALE_OAUTH_SECRET`
+2. Set GitHub Secrets: `DELL_HOST`, `DELL_USER`, `DELL_SSH_KEY`, `TAILSCALE_AUTHKEY`
 3. Merge a `feat:` or `fix:` PR to `main` → CD builds images, deploys automatically
 
 ---
