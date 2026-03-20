@@ -4,17 +4,18 @@ Logging configuration — AlphaTradingDesk backend.
 Call setup_logging() once at application startup (src/main.py).
 
 Behaviour by environment:
-  dev  → stdout, colorized, DEBUG level by default
-  prod → stdout + rotating file (/srv/atd/logs/app/backend.log by default)
-         logrotate on the Dell handles the final rotation (external)
-         RotatingFileHandler is a safety net inside the process
+  dev  → stdout, colorized console (structlog ConsoleRenderer)
+  prod → stdout JSON (structlog JSONRenderer) — parsed by Promtail/Loki
+  test → stdout plain text (minimal noise in CI)
 
-Log format:
-  2026-03-09 14:32:01 | INFO     | src.goals.router       | POST /goals — goal 8 created
-  ^timestamp           ^level    ^logger name (module)     ^message
+JSON output fields (prod):
+  {"timestamp": "...", "level": "info", "logger": "src.goals.router",
+   "message": "POST /goals — goal 8 created", "request_id": "..."}
 
-LOG_LEVEL env var overrides the default (DEBUG in dev, INFO in prod).
-LOG_DIR   env var sets the log directory (prod only — ignored in dev).
+Promtail pipeline labels: level, logger — defined in config/promtail/promtail.yml
+
+LOG_LEVEL env var overrides the default (INFO).
+LOG_DIR   env var sets the log directory (prod only — ignored in dev/test).
 """
 
 from __future__ import annotations
@@ -24,6 +25,8 @@ import logging.handlers
 import os
 import sys
 
+import structlog
+
 
 def setup_logging(
     level: str = "INFO",
@@ -31,7 +34,7 @@ def setup_logging(
     environment: str = "dev",
 ) -> None:
     """
-    Configure the root logger and all relevant loggers.
+    Configure structlog + stdlib root logger.
 
     Args:
         level:       Log level string — DEBUG | INFO | WARNING | ERROR | CRITICAL
@@ -40,72 +43,91 @@ def setup_logging(
     """
     numeric_level = getattr(logging, level.upper(), logging.INFO)
 
-    # ── Formatters ────────────────────────────────────────────────────────────
-    # Prod / file: plain text, full timestamp
-    plain_fmt = logging.Formatter(
-        fmt="%(asctime)s | %(levelname)-8s | %(name)-40s | %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
+    # ── Shared pre-chain processors ────────────────────────────────────────────
+    # Applied to every log record before the final renderer
+    pre_chain: list = [
+        structlog.contextvars.merge_contextvars,
+        structlog.stdlib.add_log_level,
+        structlog.stdlib.add_logger_name,
+        structlog.stdlib.PositionalArgumentsFormatter(),
+        structlog.processors.StackInfoRenderer(),
+        structlog.processors.TimeStamper(fmt="iso", utc=True),
+    ]
+
+    # ── Final renderer — JSON in prod, console in dev ──────────────────────────
+    if environment == "dev":
+        renderer = structlog.dev.ConsoleRenderer()
+    else:
+        # Rename "event" → "message" so Promtail's pipeline finds the key
+        def _rename_event(logger: object, method: str, event_dict: dict) -> dict:  # noqa: ANN001
+            event_dict["message"] = event_dict.pop("event", "")
+            return event_dict
+
+        renderer = structlog.processors.JSONRenderer()  # type: ignore[assignment]
+        pre_chain = pre_chain + [_rename_event]
+
+    # ── Configure structlog ────────────────────────────────────────────────────
+    structlog.configure(
+        processors=pre_chain + [renderer],
+        wrapper_class=structlog.stdlib.BoundLogger,
+        context_class=dict,
+        logger_factory=structlog.stdlib.LoggerFactory(),
+        cache_logger_on_first_use=True,
     )
-    # Dev / stdout: shorter, easier to read in terminal
-    dev_fmt = logging.Formatter(
-        fmt="%(asctime)s | %(levelname)-8s | %(name)s — %(message)s",
-        datefmt="%H:%M:%S",
+
+    # ── Stdlib bridge — intercepts all logging.getLogger() calls ──────────────
+    formatter = structlog.stdlib.ProcessorFormatter(
+        foreign_pre_chain=pre_chain,
+        processors=[
+            structlog.stdlib.ProcessorFormatter.remove_processors_meta,
+            renderer,
+        ],
     )
 
     handlers: list[logging.Handler] = []
 
-    # ── stdout handler ────────────────────────────────────────────────────────
     stdout_handler = logging.StreamHandler(sys.stdout)
-    stdout_handler.setFormatter(dev_fmt if environment == "dev" else plain_fmt)
+    stdout_handler.setFormatter(formatter)
     stdout_handler.setLevel(numeric_level)
     handlers.append(stdout_handler)
 
-    # ── File handler (prod only) ──────────────────────────────────────────────
-    if log_dir and environment != "dev":
+    # ── File handler (prod only) ───────────────────────────────────────────────
+    if log_dir and environment == "prod":
         try:
             os.makedirs(log_dir, exist_ok=True)
+            log_file = os.path.join(log_dir, "backend.log")
+            file_handler = logging.handlers.RotatingFileHandler(
+                filename=log_file,
+                maxBytes=10 * 1024 * 1024,
+                backupCount=5,
+                encoding="utf-8",
+            )
+            file_handler.setFormatter(formatter)
+            file_handler.setLevel(numeric_level)
+            handlers.append(file_handler)
         except OSError:
-            # Log dir not accessible (CI, read-only fs) — fall back to stdout only
-            log_dir = None
-    if log_dir and environment != "dev":
-        log_file = os.path.join(log_dir, "backend.log")
-        # RotatingFileHandler: safety net inside the process
-        # 10 MB max per file, keep 5 backups → max 50 MB
-        # External logrotate on the Dell takes over for long-term archiving
-        file_handler = logging.handlers.RotatingFileHandler(
-            filename=log_file,
-            maxBytes=10 * 1024 * 1024,  # 10 MB
-            backupCount=5,
-            encoding="utf-8",
-        )
-        file_handler.setFormatter(plain_fmt)
-        file_handler.setLevel(numeric_level)
-        handlers.append(file_handler)
+            pass  # read-only fs (CI) — stdout only
 
-    # ── Root logger ───────────────────────────────────────────────────────────
+    # ── Root logger ────────────────────────────────────────────────────────────
     root = logging.getLogger()
-    root.setLevel(numeric_level)
-    # Remove any existing handlers (avoid duplicate logs on hot-reload)
     root.handlers.clear()
+    root.setLevel(numeric_level)
     for h in handlers:
         root.addHandler(h)
 
-    # ── Third-party noise reduction ───────────────────────────────────────────
-    # uvicorn already has its own access log — keep it but reduce sqlalchemy noise
+    # ── Third-party noise reduction ────────────────────────────────────────────
     logging.getLogger("uvicorn").setLevel(logging.INFO)
     logging.getLogger("uvicorn.access").setLevel(logging.INFO)
     logging.getLogger("uvicorn.error").setLevel(logging.INFO)
-    # SQLAlchemy engine logs every SQL statement at DEBUG — too noisy by default
-    # Set to WARNING unless LOG_LEVEL=DEBUG is explicitly requested
     if numeric_level > logging.DEBUG:
         logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
         logging.getLogger("sqlalchemy.pool").setLevel(logging.WARNING)
-    # Alembic migration logs → INFO always (useful to track migrations in prod)
     logging.getLogger("alembic").setLevel(logging.INFO)
 
     logging.getLogger(__name__).info(
-        "Logging configured — level=%s  env=%s  file=%s",
+        "Logging configured — level=%s env=%s renderer=%s",
         level.upper(),
         environment,
-        os.path.join(log_dir, "backend.log") if log_dir and environment != "dev" else "stdout only",
+        "json" if environment != "dev" else "console",
     )
+
