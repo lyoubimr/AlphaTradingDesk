@@ -3,6 +3,29 @@ __pycache__/
 *.py[codz]
 *$py.class
 
+# Sibling repos (cloned temporarily inside this workspace)
+AlphaTradingDesk-ops/
+AlphaTradingDesk-monitoring/
+
+# Scripts + docs moved to AlphaTradingDesk-ops (kept locally, not tracked here)
+docs/deployment/
+scripts/backup-db.sh
+scripts/deploy.sh
+scripts/refresh-dev-db.sh
+scripts/setup-server.sh
+scripts/sync-db-prod-to-dev.sh
+scripts/sync-remote-backups.sh
+scripts/check_migration.py
+scripts/db_recover.py
+scripts/debug_profiles.py
+scripts/fix_weekend_weights.py
+scripts/update_kraken_catalog.py
+scripts/update_vantage_catalog.py
+scripts/_fix_docs.py
+scripts/analyze_volatility.py
+scripts/test_alembic_env.py
+
+
 # C extensions
 *.so
 
