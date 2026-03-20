@@ -9,6 +9,7 @@ AlphaTradingDesk-monitoring/
 
 # Scripts + docs moved to AlphaTradingDesk-ops (kept locally, not tracked here)
 docs/deployment/
+docs/devops_doc/
 scripts/backup-db.sh
 scripts/deploy.sh
 scripts/refresh-dev-db.sh
