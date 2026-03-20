@@ -24,6 +24,7 @@ python-multipart = "^0.0.22"
 celery = {version = ">=5.4.0", extras = ["redis"]}
 redis = ">=5.0.0"
 pandas = ">=2.2.0"
+structlog = ">=24.0.0"
 # pandas-ta: deferred to P2-5 (latest release requires Python >=3.12)
 
 [tool.poetry.group.dev.dependencies]
