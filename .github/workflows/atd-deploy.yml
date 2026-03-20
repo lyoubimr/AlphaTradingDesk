@@ -2,22 +2,19 @@ name: ATD — Deploy
 
 # ── Trigger ──────────────────────────────────────────────────────────────────
 # Runs on every push to main.
-# The pipeline is split into 4 independent jobs:
+# The pipeline is split into 3 independent jobs:
 #
-#   version       — computes semver tag (always runs)
-#   sync-scripts  — copies prod scripts to Dell (always runs, no deploy needed)
-#   build         — builds + pushes Docker images (only if version bump)
-#   deploy        — SSH deploy on Dell (only if version bump)
+#   version  — computes semver tag (always runs)
+#   build    — builds + pushes Docker images (only if version bump)
+#   deploy   — SSH deploy on Dell (only if version bump)
 #
-# This means scripts/prod/*.sh are kept in sync on every merge to main,
-# even when the commit type (docs: / test: / ci:) triggers no release.
+# Scripts sync is handled by AlphaTradingDesk-ops repo (separate CI/CD).
 #
 # ── Bump rules (commit prefix → semver) ──────────────────────────────────────
 #   fix: / chore: / refactor:  → PATCH  v1.0.0 → v1.0.1
 #   feat:                      → MINOR  v1.0.1 → v1.1.0
 #   feat!: / BREAKING CHANGE   → MAJOR  v1.1.0 → v2.0.0
 #   docs: / test: / ci:        → no bump (no release, no deploy)
-#                                but sync-scripts still runs ← key point
 #
 # ── Re-run behaviour ─────────────────────────────────────────────────────────
 # If the `deploy` job fails (e.g. SSH timeout) you can re-run it alone.
@@ -107,56 +104,8 @@ jobs:
           echo "   Commit types that trigger a release: fix: chore: refactor: feat: feat!:"
 
   # ===========================================================================
-  # JOB 2 — sync-scripts
-  # Copies all prod scripts to ~/apps/ on the Dell on EVERY push to main.
-  # Runs unconditionally — no dependency on version bump.
-  # This ensures setup-ssl.sh, update-server.sh, setup-cron.sh etc. are
-  # always up to date on the Dell, even after a docs-only commit.
   # ===========================================================================
-  sync-scripts:
-    name: Sync prod scripts to Dell
-    runs-on: ubuntu-latest
-    # No `needs` — runs in parallel with version, immediately on push to main.
-
-    steps:
-      # ── 2a. Checkout (needed to read scripts/prod/) ───────────────────────
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      # ── 2b. Join Tailscale network ────────────────────────────────────────
-      - name: Connect Tailscale
-        uses: tailscale/github-action@v2
-        with:
-          authkey: ${{ secrets.TAILSCALE_AUTHKEY }}
-          version: "1.80.3"
-
-      # ── 2c. SCP scripts to Dell ───────────────────────────────────────────
-      # Syncs the entire scripts/prod/ directory.
-      # Any .sh added to scripts/prod/ is automatically included — no YAML change needed.
-      # setup-server.sh lives in scripts/ (not scripts/prod/) → never synced by CD.
-      - name: Copy scripts to Dell
-        uses: appleboy/scp-action@v0.1.7
-        with:
-          host: ${{ secrets.DELL_HOST }}
-          username: ${{ secrets.DELL_USER }}
-          key: ${{ secrets.DELL_SSH_KEY }}
-          source: "scripts/prod/"
-          target: "~/apps/"
-          strip_components: 2
-
-      # ── 2d. Make all scripts executable ──────────────────────────────────
-      - name: chmod +x scripts
-        uses: appleboy/ssh-action@v1
-        with:
-          host: ${{ secrets.DELL_HOST }}
-          username: ${{ secrets.DELL_USER }}
-          key: ${{ secrets.DELL_SSH_KEY }}
-          script: |
-            chmod +x ~/apps/*.sh
-            echo "✅ Scripts synced: $(ls ~/apps/*.sh | xargs -n1 basename | tr '\n' ' ')"
-
-  # ===========================================================================
-  # JOB 3 — build
+  # JOB 2 — build
   # Builds Docker images and pushes them to GHCR.
   # Creates the GitHub Release on first run (skipped on re-run: tag exists).
   # Depends on: version (needs release_tag)
@@ -217,14 +166,14 @@ jobs:
         continue-on-error: true   # Release already exists on re-run → non-fatal
 
   # ===========================================================================
-  # JOB 4 — deploy
+  # JOB 3 — deploy
   # SSHes into Dell to run deploy.sh.
-  # Depends on: build (images must be pushed first) + sync-scripts (scripts ready)
+  # Depends on: build (images must be pushed first)
   # Re-runnable independently: re-run only this job after an SSH timeout.
   # ===========================================================================
   deploy:
     name: Deploy to Dell
-    needs: [version, build, sync-scripts]
+    needs: [version, build]
     if: needs.version.outputs.release_tag != ''
     runs-on: ubuntu-latest
 
@@ -241,7 +190,7 @@ jobs:
           version: "1.80.3"
 
       # ── 4c. Login to GHCR + deploy ────────────────────────────────────────
-      # Scripts are already on the Dell (sync-scripts job ran first).
+      # Scripts are managed by AlphaTradingDesk-ops repo (separate CI/CD).
       # GHCR_OWNER is passed as env var so deploy.sh stays fully generic.
       - name: SSH deploy
         uses: appleboy/ssh-action@v1
