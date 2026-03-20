@@ -27,6 +27,7 @@
 | **P3-11** | Frontend — Dashboard alert banner (Risk Guard) | ✅ | `c918a71` |
 | **P3-12** | Tests unitaires + QA pass | ✅ | `08062cf` |
 | **P3-13** | Deploy prod Dell | ⏳ | — |
+| **P3.1** | External access via Tailscale — voir `phase3.1/implement-phase3.1.md` | ⏳ | — |
 
 ---
 
