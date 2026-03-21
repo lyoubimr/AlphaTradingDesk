@@ -14,6 +14,7 @@ import {
   Crosshair,
   Bell,
   Shield,
+  X,
 } from 'lucide-react'
 import { cn } from '../../lib/cn'
 import { Badge } from '../ui/Badge'
@@ -129,6 +130,8 @@ interface SidebarProps {
   apiStatus: 'online' | 'offline' | 'connecting'
   environment?: string
   version?: string
+  isOpen?: boolean
+  onClose?: () => void
 }
 
 const statusMeta = {
@@ -137,27 +140,43 @@ const statusMeta = {
   connecting: { color: 'bg-amber-400',  label: 'Connecting…' },
 }
 
-export function Sidebar({ apiStatus, environment, version }: SidebarProps) {
+export function Sidebar({ apiStatus, environment, version, isOpen = false, onClose }: SidebarProps) {
   const meta = statusMeta[apiStatus]
 
   return (
-    <aside className="
-      flex flex-col w-56 shrink-0
-      bg-surface-900 border-r border-surface-800
-      h-screen sticky top-0 overflow-y-auto
-    ">
+    <aside className={cn(
+      'flex flex-col w-56 shrink-0',
+      'bg-surface-900 border-r border-surface-800',
+      'h-screen overflow-y-auto',
+      // Mobile: fixed off-canvas drawer
+      'fixed inset-y-0 left-0 z-50 transition-transform duration-300 ease-in-out',
+      isOpen ? 'translate-x-0' : '-translate-x-full',
+      // Desktop: static, always visible, reset transforms
+      'lg:static lg:translate-x-0 lg:transition-none',
+    )}>
       {/* ── Logo ──────────────────────────────────────────────────────────── */}
       <div className="flex items-center gap-2.5 px-4 pt-5 pb-4 border-b border-surface-800">
         {/* Greek alpha + candlestick SVG mark */}
         <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-brand-600 shadow-lg shadow-brand-900/50 shrink-0">
           <TrendingUp size={15} className="text-white" strokeWidth={2.5} />
         </div>
-        <div>
+        <div className="flex-1">
           <div className="flex items-baseline gap-1">
             <span className="text-brand-400 font-bold text-sm tracking-tight">α</span>
             <span className="text-slate-100 font-semibold text-sm tracking-tight">TradingDesk</span>
           </div>
         </div>
+        {/* Close button — mobile only */}
+        {onClose && (
+          <button
+            type="button"
+            onClick={onClose}
+            className="lg:hidden ml-auto text-slate-500 hover:text-slate-200 transition-colors p-1 rounded"
+            aria-label="Close menu"
+          >
+            <X size={18} />
+          </button>
+        )}
       </div>
 
       {/* ── Nav groups ────────────────────────────────────────────────────── */}
@@ -174,6 +193,7 @@ export function Sidebar({ apiStatus, environment, version }: SidebarProps) {
                 <li key={item.to}>
                   <NavLink
                     to={item.to}
+                    onClick={onClose}
                     className={({ isActive }) => cn(
                       'flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-sm transition-colors',
                       'group relative',

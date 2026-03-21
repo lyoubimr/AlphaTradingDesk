@@ -1,6 +1,6 @@
 // ── Topbar component ───────────────────────────────────────────────────────
 import { useEffect, useRef, useState } from 'react'
-import { Bell, TrendingUp, Palette } from 'lucide-react'
+import { Bell, TrendingUp, Palette, Menu } from 'lucide-react'
 import { ProfilePicker } from './ProfilePicker'
 import { SessionsIndicator } from '../dashboard/TradingSessions'
 import { useProfile } from '../../context/ProfileContext'
@@ -94,16 +94,25 @@ function LocalClock() {
   )
 }
 
-export function Topbar() {
+export function Topbar({ onMenuOpen }: { onMenuOpen?: () => void }) {
   return (
     <header className="
       h-12 shrink-0
-      flex items-center justify-between px-5
+      flex items-center justify-between px-3 sm:px-5
       bg-surface-900 border-b border-surface-800
       sticky top-0 z-40
     ">
-      {/* ── Left: profile picker + capital chip + sessions indicator ─── */}
-      <div className="flex-1 flex items-center gap-3 min-w-0">
+      {/* ── Left: hamburger (mobile) + profile picker + capital chip + sessions ─── */}
+      <div className="flex-1 flex items-center gap-2 sm:gap-3 min-w-0">
+        {/* Hamburger — visible only on mobile */}
+        <button
+          type="button"
+          onClick={onMenuOpen}
+          className="lg:hidden shrink-0 text-slate-500 hover:text-slate-200 transition-colors p-1 rounded"
+          aria-label="Open menu"
+        >
+          <Menu size={18} />
+        </button>
         <ProfilePicker />
         <CapitalChip />
         <SessionsIndicator />
