@@ -243,16 +243,16 @@ export function VIHistoryChart({ timeframe, defaultColor = '#a1a1aa', compact = 
   // Smart level detection (memoised on data change)
   const proposedLevels = useMemo(() => detectKeyLevels(data), [data])
 
-  // Y-axis: orange ticks for proposed levels — always shown when levels exist (not gated on showSmart)
+  // Y-axis: orange ticks for proposed levels — only shown when showSmart is active
   const proposedLevelSet = useMemo(
-    () => new Set<number>(proposedLevels.map(p => p.level)),
-    [proposedLevels],
+    () => showSmart ? new Set<number>(proposedLevels.map(p => p.level)) : new Set<number>(),
+    [proposedLevels, showSmart],
   )
   const allYTicks = useMemo(() => {
-    if (proposedLevels.length === 0) return visibleTicks
+    if (!showSmart || proposedLevels.length === 0) return visibleTicks
     const combined = [...new Set([...visibleTicks, ...proposedLevels.map(p => p.level)])]
     return combined.sort((a, b) => a - b)
-  }, [visibleTicks, proposedLevels])
+  }, [visibleTicks, proposedLevels, showSmart])
 
   return (
     <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-4">
@@ -373,8 +373,8 @@ export function VIHistoryChart({ timeframe, defaultColor = '#a1a1aa', compact = 
                 />
               ))}
 
-              {/* Smart proposal level reference lines — always shown when levels detected */}
-              {proposedLevels.map(pl => (
+              {/* Smart proposal level reference lines — only shown when showSmart is active */}
+              {showSmart && proposedLevels.map(pl => (
                 <ReferenceLine
                   key={`smart-${pl.level}`}
                   y={pl.level}
