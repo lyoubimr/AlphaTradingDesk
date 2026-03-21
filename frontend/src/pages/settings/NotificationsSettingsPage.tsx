@@ -432,6 +432,7 @@ export function NotificationsSettingsPage() {
   }
 
   return (
+    <>
     <div>
       <PageHeader
         icon="🔔"
@@ -1127,5 +1128,6 @@ export function NotificationsSettingsPage() {
           </div>
         </div>
       )}
+    </>
   )
 }
