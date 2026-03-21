@@ -193,6 +193,7 @@ export function Sidebar({ apiStatus, environment, version, isOpen = false, onClo
                 <li key={item.to}>
                   <NavLink
                     to={item.to}
+                    onClick={onClose}
                     className={({ isActive }) => cn(
                       'flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-sm transition-colors',
                       'group relative',

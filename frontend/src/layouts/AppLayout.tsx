@@ -2,8 +2,8 @@
 // Root layout: sidebar (fixed left) + topbar + scrollable main content.
 // On mobile (< lg) the sidebar becomes an off-canvas drawer toggled by a
 // hamburger button in the topbar.
-import { useEffect, useState } from 'react'
-import { Outlet, useLocation } from 'react-router-dom'
+import { useState } from 'react'
+import { Outlet } from 'react-router-dom'
 import { Sidebar } from '../components/sidebar/Sidebar'
 import { Topbar } from '../components/topbar/Topbar'
 import { ProfileProvider } from '../context/ProfileContext'
@@ -51,12 +51,6 @@ function useApiHealth(): { status: ApiStatus; environment?: string; version?: st
 export function AppLayout() {
   const { status: apiStatus, environment, version } = useApiHealth()
   const [sidebarOpen, setSidebarOpen] = useState(false)
-  const location = useLocation()
-
-  // Close drawer on route change (mobile nav)
-  useEffect(() => {
-    setSidebarOpen(false)
-  }, [location.pathname])
 
   return (
     <ProfileProvider>
