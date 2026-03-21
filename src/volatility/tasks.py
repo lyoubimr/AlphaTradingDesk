@@ -421,6 +421,25 @@ def compute_market_vi(self, timeframe: str) -> dict:  # type: ignore[override]
                     except Exception:
                         prev_100 = None
                     send_vi_level_alerts(alert_cfg, market_vi * 100, timeframe, vi_levels, prev_100)
+
+                # ── 10c. Aggregated TF vi level alerts ────────────────────
+                agg_levels = [lv for lv in vi_levels if lv.get("timeframe") == "aggregated"]
+                if agg_levels:
+                    try:
+                        from src.volatility.cache import get_cached_market_vi, _get_redis
+                        agg_data = get_cached_market_vi("aggregated")
+                        if agg_data:
+                            agg_100 = float(agg_data["vi_score"]) * 100
+                            try:
+                                rr = _get_redis()
+                                prev_agg_raw = rr.get("atd:vi_prev_score:aggregated")
+                                prev_agg = float(prev_agg_raw) * 100 if prev_agg_raw else None
+                                rr.set("atd:vi_prev_score:aggregated", str(agg_data["vi_score"]))
+                            except Exception:
+                                prev_agg = None
+                            send_vi_level_alerts(alert_cfg, agg_100, "aggregated", agg_levels, prev_agg)
+                    except Exception:
+                        pass
         except Exception as tg_exc:
             logger.warning("compute_market_vi(%s): Telegram error — %s", timeframe, tg_exc)
         return {

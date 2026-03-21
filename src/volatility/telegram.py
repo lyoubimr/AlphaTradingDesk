@@ -102,11 +102,22 @@ def _set_cooldown(alert_type: str, timeframe: str, cooldown_min: int) -> None:
 
 # ── Message formatters ────────────────────────────────────────────────────────
 
+# Default message templates — can be overridden via MarketVIAlertsCfg.message_template
+# Variables: {timeframe} {score} {regime} {summary} {components}
+_DEFAULT_REGIME_TEMPLATE = (
+    "\U0001f514 ATD Market VI \u2014 {timeframe}\n\n"
+    "Score: {score}   Regime: {regime}\n"
+    "{summary}\n\n"
+    "Components: {components}"
+)
+
+
 def format_market_vi_message(
     vi_score: float,
     regime: str,
     timeframe: str,
     components: dict | None = None,
+    template: str | None = None,
 ) -> str:
     """Format a Market VI alert message.
 
@@ -117,21 +128,37 @@ def format_market_vi_message(
 
         Components: RVOL 0.82 | MFI 0.61 | ATR 0.74 | BB 0.67
     """
-    now = datetime.now(UTC).strftime("%d/%m %H:%M UTC")
-    lines = [
-        f"ATD Market VI — {timeframe.upper()} | {now}",
-        f"Score: {vi_score:.3f}   Regime: {_REGIME_LABEL.get(regime, regime)}",
-        _REGIME_SUMMARY.get(regime, ""),
-    ]
+    # Build component string
+    comp_parts: list[str] = []
     if components:
-        parts = []
         for key in ("rvol", "mfi", "atr", "bb_width"):
             if key in components:
                 label = key.upper().replace("_WIDTH", "")
-                parts.append(f"{label} {float(components[key]):.2f}")
-        if parts:
-            lines.append("")
-            lines.append("Components: " + " | ".join(parts))
+                comp_parts.append(f"{label} {float(components[key]):.2f}")
+    comp_str = " | ".join(comp_parts) if comp_parts else "\u2014"
+
+    if template:
+        try:
+            return template.format(
+                timeframe=timeframe.upper(),
+                score=f"{vi_score:.3f}",
+                regime=_REGIME_LABEL.get(regime, regime),
+                summary=_REGIME_SUMMARY.get(regime, ""),
+                components=comp_str,
+            )
+        except (KeyError, ValueError):
+            logger.warning("format_market_vi_message: invalid template, falling back to default")
+
+    # Default format
+    now = datetime.now(UTC).strftime("%d/%m %H:%M UTC")
+    lines = [
+        f"ATD Market VI \u2014 {timeframe.upper()} | {now}",
+        f"Score: {vi_score:.3f}   Regime: {_REGIME_LABEL.get(regime, regime)}",
+        _REGIME_SUMMARY.get(regime, ""),
+    ]
+    if comp_parts:
+        lines.append("")
+        lines.append("Components: " + comp_str)
     return "\n".join(lines)
 
 
@@ -224,7 +251,8 @@ def send_market_vi_alert(
         logger.debug("send_market_vi_alert: on cooldown (%d min) for %s", cooldown_min, timeframe)
         return
 
-    text = format_market_vi_message(vi_score, regime, timeframe, components)
+    template: str | None = notification_cfg.get("message_template") or None
+    text = format_market_vi_message(vi_score, regime, timeframe, components, template=template)
     _dispatch(notification_cfg, text)
     _set_cooldown("market_vi", timeframe, cooldown_min)
 
@@ -329,6 +357,11 @@ def send_vi_level_alerts(
         level_id = str(lv.get("id", lv.get("value", "custom")))
         label    = lv.get("label") or ""
 
+        # ── TF filter — skip if level targets a different timeframe ────────
+        lv_timeframe = lv.get("timeframe")
+        if lv_timeframe and lv_timeframe != timeframe:
+            continue
+
         # ── Cooldown check ────────────────────────────────────────────────
         ck = f"atd:alert_sent:vi_level:{timeframe}:{level_id}"
         try:
@@ -343,10 +376,12 @@ def send_vi_level_alerts(
 
         if ltype == "crossing":
             tval = float(lv.get("value", 0))
+            tol  = max(0.0, float(lv.get("tolerance", 0.5)))
             ldir = lv.get("direction", "both")
             if prev_score_100 is not None:
-                up   = prev_score_100 < tval <= curr
-                down = prev_score_100 > tval >= curr
+                # Trigger when VI enters the \u00b1tolerance zone around the threshold
+                up   = (prev_score_100 <= tval - tol) and (curr >= tval - tol)
+                down = (prev_score_100 >= tval + tol) and (curr <= tval + tol)
                 if ldir == "both":
                     triggered = up or down
                 elif ldir == "up":

@@ -7,9 +7,9 @@
 //   POST /api/volatility/notifications/{profile_id}/test → send test Telegram message
 // ───────────────────────────────────────────────────────────────────────────────
 
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useRef, useState, useCallback } from 'react'
 import {
-  Save, Loader2, RefreshCw, Check, AlertTriangle, Plus, Trash2, Send, Bell,
+  Save, Loader2, RefreshCw, Check, AlertTriangle, Plus, Trash2, Send, Bell, Pencil, X,
 } from 'lucide-react'
 import { PageHeader } from '../../components/ui/PageHeader'
 import { useProfile } from '../../context/ProfileContext'
@@ -30,10 +30,12 @@ interface VILevel {
   type: 'crossing' | 'range'
   value?: number          // 0–100, for type='crossing'
   direction?: 'both' | 'up' | 'down'
+  tolerance?: number      // ±zone around crossing value (default 0.5)
   min?: number            // 0–100, for type='range'
   max?: number            // 0–100, for type='range'
   enabled: boolean
   cooldown_min: number
+  timeframe?: string      // specific TF ('15m','1h','4h','1d','aggregated') or undefined = all TFs
 }
 
 interface MarketVIAlertsCfg {
@@ -42,6 +44,7 @@ interface MarketVIAlertsCfg {
   cooldown_min: number
   regimes: string[]
   vi_levels: VILevel[]
+  message_template?: string  // custom Telegram template with {variables}
 }
 
 interface TFAlertCfg {
@@ -63,7 +66,20 @@ const D_MVI_ALERTS: MarketVIAlertsCfg = {
   cooldown_min: 60,
   regimes: ['ACTIVE', 'EXTREME'],
   vi_levels: [],
+  message_template: undefined,
 }
+
+const DEFAULT_REGIME_TEMPLATE = `🔔 ATD Market VI — {timeframe}
+
+Score: {score}   Regime: {regime}
+{summary}
+
+Components: {components}`.trim()
+
+const DEFAULT_LEVEL_TEMPLATE = `🔔 VI Level Alert — {timeframe}
+
+{label} {direction}
+Value: {score}   Threshold: {threshold}`.trim()
 
 const D_TF_ALERT: TFAlertCfg = { enabled: false, cooldown_min: 30, vi_min: 0.5 }
 
@@ -82,11 +98,12 @@ type WLTf = typeof WL_TFS[number]
 
 function hydrateMVI(raw: Record<string, unknown>): MarketVIAlertsCfg {
   return {
-    enabled:      (raw.enabled as boolean | undefined) ?? D_MVI_ALERTS.enabled,
-    bot_name:     raw.bot_name as string | undefined,
-    cooldown_min: (raw.cooldown_min as number | undefined) ?? D_MVI_ALERTS.cooldown_min,
-    regimes:      (raw.regimes as string[] | undefined) ?? D_MVI_ALERTS.regimes,
-    vi_levels:    (raw.vi_levels as VILevel[] | undefined) ?? [],
+    enabled:          (raw.enabled as boolean | undefined) ?? D_MVI_ALERTS.enabled,
+    bot_name:         raw.bot_name as string | undefined,
+    cooldown_min:     (raw.cooldown_min as number | undefined) ?? D_MVI_ALERTS.cooldown_min,
+    regimes:          (raw.regimes as string[] | undefined) ?? D_MVI_ALERTS.regimes,
+    vi_levels:        (raw.vi_levels as VILevel[] | undefined) ?? [],
+    message_template: raw.message_template as string | undefined,
   }
 }
 
@@ -147,6 +164,10 @@ export function NotificationsSettingsPage() {
   const [saving,  setSaving]  = useState(false)
   const [saved,   setSaved]   = useState(false)
   const [saveErr, setSaveErr] = useState<string | null>(null)
+  const [dirty,   setDirty]   = useState(false)
+
+  // Prevents marking dirty during initial data load
+  const skipDirtyRef = useRef(true)
   const [testing, setTesting] = useState(false)
   const [testMsg, setTestMsg] = useState<{ ok: boolean; text: string } | null>(null)
 
@@ -168,19 +189,27 @@ export function NotificationsSettingsPage() {
   const [vlValue,    setVlValue]    = useState('')
   const [vlMin,      setVlMin]      = useState('')
   const [vlMax,      setVlMax]      = useState('')
-  const [vlDir,      setVlDir]      = useState<'both' | 'up' | 'down'>('both')
-  const [vlLabel,    setVlLabel]    = useState('')
-  const [vlCooldown, setVlCooldown] = useState('30')
+  const [vlDir,       setVlDir]       = useState<'both' | 'up' | 'down'>('both')
+  const [vlLabel,     setVlLabel]     = useState('')
+  const [vlCooldown,  setVlCooldown]  = useState('30')
+  const [vlTolerance, setVlTolerance] = useState('0.5')
+
+  // VI level inline-edit state
+  const [editingId, setEditingId] = useState<string | null>(null)
+  interface EditDraft { label?: string; direction?: 'both'|'up'|'down'; valueStr?: string; minStr?: string; maxStr?: string; cooldownStr?: string; toleranceStr?: string }
+  const [editDraft, setEditDraft] = useState<EditDraft>({})
 
   const load = useCallback(async () => {
     if (!profileId) return
     setLoading(true)
     setLoadErr(null)
+    skipDirtyRef.current = true
     try {
       const n = await volatilityApi.getNotificationSettings(profileId)
       setBots(n.bots ?? [])
       setMviA(hydrateMVI(n.market_vi_alerts as Record<string, unknown>))
       setWlA(hydrateWL(n.watchlist_alerts as Record<string, unknown>))
+      setDirty(false)
     } catch {
       setLoadErr('Failed to load notification settings')
     } finally {
@@ -189,6 +218,22 @@ export function NotificationsSettingsPage() {
   }, [profileId])
 
   useEffect(() => { void load() }, [load])
+
+  // After loading completes, allow dirty tracking (small delay ensures effects settle)
+  useEffect(() => {
+    if (!loading) {
+      const t = setTimeout(() => { skipDirtyRef.current = false }, 100)
+      return () => clearTimeout(t)
+    } else {
+      skipDirtyRef.current = true
+    }
+  }, [loading])
+
+  // Mark as dirty on any mviA/wlA change — except during load
+  useEffect(() => {
+    if (skipDirtyRef.current) return
+    setDirty(true)
+  }, [mviA, wlA])
 
   const save = async () => {
     if (!profileId) return
@@ -202,6 +247,7 @@ export function NotificationsSettingsPage() {
         watchlist_alerts: wlA,
       })
       setSaved(true)
+      setDirty(false)
       setTimeout(() => setSaved(false), 3000)
     } catch {
       setSaveErr('Save failed')
@@ -224,22 +270,42 @@ export function NotificationsSettingsPage() {
     }
   }
 
+  // Auto-save bots immediately to DB — no need to click "Save all" for bots
+  const saveBots = useCallback(async (botList: TelegramBot[]) => {
+    if (!profileId) return
+    try {
+      await volatilityApi.updateNotificationSettings(profileId, { bots: botList })
+    } catch { /* silent — bots are in local state */ }
+  }, [profileId])
+
+  // Auto-save VI levels immediately to DB — no need to click "Save all" for level add/remove/toggle
+  const saveMVI = useCallback(async (cfg: MarketVIAlertsCfg) => {
+    if (!profileId) return
+    try {
+      await volatilityApi.updateNotificationSettings(profileId, { market_vi_alerts: cfg })
+    } catch { /* silent — levels are in local state */ }
+  }, [profileId])
+
   const addBot = () => {
     if (!newToken.trim() || !newChat.trim()) return
-    setBots(prev => [
-      ...prev,
-      {
-        bot_name: newName.trim() || undefined,
-        bot_token: newToken.trim(),
-        chat_id: newChat.trim(),
-      },
-    ])
+    const bot: TelegramBot = {
+      bot_name: newName.trim() || undefined,
+      bot_token: newToken.trim(),
+      chat_id: newChat.trim(),
+    }
+    const updated = [...bots, bot]
+    setBots(updated)
+    void saveBots(updated)
     setNewName('')
     setNewToken('')
     setNewChat('')
   }
 
-  const removeBot = (idx: number) => setBots(prev => prev.filter((_, i) => i !== idx))
+  const removeBot = (idx: number) => {
+    const updated = bots.filter((_, i) => i !== idx)
+    setBots(updated)
+    void saveBots(updated)
+  }
 
   const testBot = async (b: TelegramBot, i: number) => {
     if (!profileId) return
@@ -263,23 +329,70 @@ export function NotificationsSettingsPage() {
       label:       vlLabel.trim() || undefined,
       type:        vlType,
       ...(vlType === 'crossing'
-        ? { value: Number(vlValue), direction: vlDir }
+        ? { value: Number(vlValue), direction: vlDir, tolerance: Number(vlTolerance) || 0.5 }
         : { min: Number(vlMin), max: Number(vlMax) }),
       enabled:     true,
       cooldown_min: Number(vlCooldown) || 30,
     }
-    setMviA(p => ({ ...p, vi_levels: [...p.vi_levels, newLevel] }))
-    setVlValue(''); setVlMin(''); setVlMax(''); setVlLabel(''); setVlCooldown('30')
+    const updated: MarketVIAlertsCfg = { ...mviA, vi_levels: [...mviA.vi_levels, newLevel] }
+    setMviA(updated)
+    void saveMVI(updated)
+    setVlValue(''); setVlMin(''); setVlMax(''); setVlLabel(''); setVlCooldown('30'); setVlTolerance('0.5')
   }
 
-  const removeVILevel = (id: string) =>
-    setMviA(p => ({ ...p, vi_levels: p.vi_levels.filter(l => l.id !== id) }))
+  const removeVILevel = (id: string) => {
+    const updated: MarketVIAlertsCfg = { ...mviA, vi_levels: mviA.vi_levels.filter(l => l.id !== id) }
+    setMviA(updated)
+    void saveMVI(updated)
+  }
 
-  const toggleVILevel = (id: string) =>
-    setMviA(p => ({
-      ...p,
-      vi_levels: p.vi_levels.map(l => l.id === id ? { ...l, enabled: !l.enabled } : l),
-    }))
+  const toggleVILevel = (id: string) => {
+    const updated: MarketVIAlertsCfg = {
+      ...mviA,
+      vi_levels: mviA.vi_levels.map(l => l.id === id ? { ...l, enabled: !l.enabled } : l),
+    }
+    setMviA(updated)
+    void saveMVI(updated)
+  }
+
+  const editVILevel = (id: string, patch: Partial<VILevel>) => {
+    const updated: MarketVIAlertsCfg = {
+      ...mviA,
+      vi_levels: mviA.vi_levels.map(l => l.id === id ? { ...l, ...patch } : l),
+    }
+    setMviA(updated)
+    void saveMVI(updated)
+  }
+
+  const startEdit = (lv: VILevel) => {
+    setEditingId(lv.id)
+    setEditDraft({
+      label:        lv.label ?? '',
+      direction:    lv.direction ?? 'both',
+      cooldownStr:  String(lv.cooldown_min),
+      valueStr:     lv.value     !== undefined ? String(lv.value)     : '',
+      minStr:       lv.min       !== undefined ? String(lv.min)       : '',
+      maxStr:       lv.max       !== undefined ? String(lv.max)       : '',
+      toleranceStr: lv.tolerance !== undefined ? String(lv.tolerance) : '0.5',
+    })
+  }
+
+  const commitEdit = (lv: VILevel) => {
+    const patch: Partial<VILevel> = {
+      label:        editDraft.label?.trim() || undefined,
+      cooldown_min: Number(editDraft.cooldownStr) || lv.cooldown_min,
+    }
+    if (lv.type === 'crossing') {
+      patch.value     = Number(editDraft.valueStr) || lv.value
+      patch.direction = editDraft.direction ?? lv.direction
+      patch.tolerance = Number(editDraft.toleranceStr) ?? lv.tolerance ?? 0.5
+    } else {
+      patch.min = Number(editDraft.minStr) || lv.min
+      patch.max = Number(editDraft.maxStr) || lv.max
+    }
+    editVILevel(lv.id, patch)
+    setEditingId(null)
+  }
 
   const toggleRegime = (r: string) =>
     setMviA(p => ({
@@ -533,27 +646,152 @@ export function NotificationsSettingsPage() {
               )}
               <div className="space-y-2 mb-3">
                 {mviA.vi_levels.map(lv => (
-                  <div key={lv.id} className="flex items-center justify-between gap-3 px-3 py-2 rounded-lg bg-surface-700/60 border border-surface-600">
-                    <div className="flex items-center gap-2 min-w-0 flex-1">
-                      <Toggle on={lv.enabled} onChange={() => toggleVILevel(lv.id)} label="toggle" />
-                      <div className="min-w-0">
-                        <p className="text-[11px] font-medium text-slate-300 truncate">
-                          {lv.label || (lv.type === 'crossing'
-                            ? `VI = ${lv.value} ${lv.direction === 'up' ? '↑' : lv.direction === 'down' ? '↓' : '↕'}`
-                            : `VI ∈ [${lv.min}, ${lv.max}]`)}
-                        </p>
-                        <p className="text-[10px] text-slate-600">
-                          {lv.type} · cooldown {lv.cooldown_min}min
-                        </p>
+                  <div key={lv.id} className="rounded-lg bg-surface-700/60 border border-surface-600 overflow-hidden">
+                    {/* Level row */}
+                    <div className="flex items-center justify-between gap-3 px-3 py-2">
+                      <div className="flex items-center gap-2 min-w-0 flex-1">
+                        <Toggle on={lv.enabled} onChange={() => toggleVILevel(lv.id)} label="toggle" />
+                        <div className="min-w-0">
+                          <p className="text-[11px] font-medium text-slate-300 truncate">
+                            {lv.label || (lv.type === 'crossing'
+                              ? `VI = ${lv.value} ${lv.direction === 'up' ? '↑' : lv.direction === 'down' ? '↓' : '↕'}`
+                              : `VI ∈ [${lv.min}, ${lv.max}]`)}
+                          </p>
+                          <p className="text-[10px] text-slate-600 flex items-center gap-1.5 flex-wrap">
+                            <span>{lv.type} · cooldown {lv.cooldown_min}min</span>
+                            {lv.type === 'crossing' && lv.tolerance !== undefined && (
+                              <span className="px-1 rounded bg-surface-700 border border-surface-600 font-mono text-sky-500/80">
+                                ±{lv.tolerance}
+                              </span>
+                            )}
+                            {lv.timeframe && (
+                              <span className="px-1 rounded bg-surface-700 border border-surface-600 font-mono text-amber-500/70">
+                                {lv.timeframe === 'aggregated' ? 'AGG' : lv.timeframe.toUpperCase()}
+                              </span>
+                            )}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => editingId === lv.id ? setEditingId(null) : startEdit(lv)}
+                          title="Edit alert"
+                          className={cn(
+                            'p-1 rounded transition-colors',
+                            editingId === lv.id
+                              ? 'text-brand-400 bg-brand-500/15'
+                              : 'text-slate-600 hover:text-brand-400',
+                          )}
+                        >
+                          <Pencil size={12} />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => removeVILevel(lv.id)}
+                          className="p-1 rounded text-slate-600 hover:text-red-400 transition-colors"
+                        >
+                          <Trash2 size={12} />
+                        </button>
                       </div>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => removeVILevel(lv.id)}
-                      className="text-slate-600 hover:text-red-400 transition-colors shrink-0"
-                    >
-                      <Trash2 size={13} />
-                    </button>
+
+                    {/* Inline edit form */}
+                    {editingId === lv.id && (
+                      <div className="px-3 pb-3 border-t border-surface-600 pt-3 space-y-2 bg-surface-800/60">
+                        <p className="text-[10px] font-semibold text-brand-400 uppercase tracking-wide">Edit alert</p>
+                        <input
+                          value={editDraft.label ?? ''}
+                          onChange={e => setEditDraft(d => ({ ...d, label: e.target.value }))}
+                          placeholder="Label (optional)"
+                          className={cn(inputCls)}
+                        />
+                        <div className="grid grid-cols-2 gap-2">
+                          {lv.type === 'crossing' ? (
+                            <>
+                              <div>
+                                <p className="text-[10px] text-slate-500 mb-1">VI value (0–100)</p>
+                                <input
+                                  type="number" min={0} max={100}
+                                  value={editDraft.valueStr ?? ''}
+                                  onChange={e => setEditDraft(d => ({ ...d, valueStr: e.target.value }))}
+                                  className={cn(inputCls)}
+                                />
+                              </div>
+                              <div>
+                                <p className="text-[10px] text-slate-500 mb-1">Direction</p>
+                                <select
+                                  value={editDraft.direction ?? 'both'}
+                                  onChange={e => setEditDraft(d => ({ ...d, direction: e.target.value as 'both'|'up'|'down' }))}
+                                  className="w-full px-2 py-2 rounded-lg bg-surface-700 border border-surface-600 text-xs text-slate-300 focus:outline-none focus:border-brand-500/60"
+                                >
+                                  <option value="both">↕ Both</option>
+                                  <option value="up">↑ Up only</option>
+                                  <option value="down">↓ Down only</option>
+                                </select>
+                              </div>
+                              <div>
+                                <p className="text-[10px] text-slate-500 mb-1">Tolerance (±)</p>
+                                <input
+                                  type="number" min={0} max={10} step={0.5}
+                                  value={editDraft.toleranceStr ?? '0.5'}
+                                  onChange={e => setEditDraft(d => ({ ...d, toleranceStr: e.target.value }))}
+                                  className={cn(inputCls)}
+                                />
+                              </div>
+                            </>
+                          ) : (
+                            <>
+                              <div>
+                                <p className="text-[10px] text-slate-500 mb-1">Min (≥)</p>
+                                <input
+                                  type="number" min={0} max={100}
+                                  value={editDraft.minStr ?? ''}
+                                  onChange={e => setEditDraft(d => ({ ...d, minStr: e.target.value }))}
+                                  className={cn(inputCls)}
+                                />
+                              </div>
+                              <div>
+                                <p className="text-[10px] text-slate-500 mb-1">Max (≤)</p>
+                                <input
+                                  type="number" min={0} max={100}
+                                  value={editDraft.maxStr ?? ''}
+                                  onChange={e => setEditDraft(d => ({ ...d, maxStr: e.target.value }))}
+                                  className={cn(inputCls)}
+                                />
+                              </div>
+                            </>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <div className="flex-1">
+                            <p className="text-[10px] text-slate-500 mb-1">Cooldown (min)</p>
+                            <input
+                              type="number" min={1} max={1440}
+                              value={editDraft.cooldownStr ?? ''}
+                              onChange={e => setEditDraft(d => ({ ...d, cooldownStr: e.target.value }))}
+                              className={cn(inputCls)}
+                            />
+                          </div>
+                          <div className="flex items-end gap-2 pb-0.5">
+                            <button
+                              type="button"
+                              onClick={() => commitEdit(lv)}
+                              className="flex items-center gap-1 px-3 py-2 rounded-lg bg-brand-600 hover:bg-brand-500 text-xs text-white font-medium transition-colors"
+                            >
+                              <Check size={12} /> Save
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setEditingId(null)}
+                              className="flex items-center gap-1 px-2.5 py-2 rounded-lg bg-surface-700 hover:bg-surface-600 text-xs text-slate-400 transition-colors"
+                            >
+                              <X size={12} />
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
@@ -579,7 +817,7 @@ export function NotificationsSettingsPage() {
                 </div>
 
                 {vlType === 'crossing' ? (
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                     <div>
                       <p className="text-[10px] text-slate-500 mb-1">VI value (0–100)</p>
                       <input
@@ -600,6 +838,15 @@ export function NotificationsSettingsPage() {
                         <option value="up">↑ Up only</option>
                         <option value="down">↓ Down only</option>
                       </select>
+                    </div>
+                    <div>
+                      <p className="text-[10px] text-slate-500 mb-1">Tolerance (±) <span className="text-zinc-700">e.g. 0.5 → triggers at value±0.5</span></p>
+                      <input
+                        type="number" min={0} max={10} step={0.5}
+                        value={vlTolerance} onChange={e => setVlTolerance(e.target.value)}
+                        placeholder="0.5"
+                        className={cn(inputCls)}
+                      />
                     </div>
                     <div>
                       <p className="text-[10px] text-slate-500 mb-1">Cooldown (min)</p>
@@ -656,8 +903,31 @@ export function NotificationsSettingsPage() {
                   <Plus size={13} /> Add level
                 </button>
               </div>
-            </div>
 
+              {/* ── Message Template ───────────────────────────────────── */}
+              <div className="border-t border-surface-700 pt-4 space-y-2">
+                <div className="flex items-center justify-between">
+                  <p className="text-xs font-semibold text-slate-400">Telegram message template</p>
+                  <button
+                    type="button"
+                    onClick={() => setMviA(p => ({ ...p, message_template: undefined }))}
+                    className="text-[10px] text-zinc-600 hover:text-zinc-400 transition-colors"
+                  >
+                    Reset to default
+                  </button>
+                </div>
+                <p className="text-[10px] text-zinc-600 leading-relaxed">
+                  Variables: <code className="text-zinc-400">{'{timeframe}'}</code> <code className="text-zinc-400">{'{score}'}</code> <code className="text-zinc-400">{'{regime}'}</code> <code className="text-zinc-400">{'{summary}'}</code> <code className="text-zinc-400">{'{threshold}'}</code> <code className="text-zinc-400">{'{direction}'}</code> <code className="text-zinc-400">{'{label}'}</code> <code className="text-zinc-400">{'{components}'}</code>
+                </p>
+                <textarea
+                  rows={5}
+                  value={mviA.message_template ?? DEFAULT_REGIME_TEMPLATE}
+                  onChange={e => setMviA(p => ({ ...p, message_template: e.target.value }))}
+                  spellCheck={false}
+                  className="w-full px-3 py-2 rounded-lg bg-surface-900 border border-surface-600 text-xs text-slate-300 font-mono placeholder-slate-600 focus:outline-none focus:border-brand-500/60 focus:ring-1 focus:ring-brand-500/30 resize-y transition-colors"
+                />
+              </div>
+            </div>
           </div>
         </section>
 
@@ -753,7 +1023,7 @@ export function NotificationsSettingsPage() {
         </section>
 
         {/* ── Global save bar ───────────────────────────────────────────────── */}
-        <div className="flex items-center justify-between pt-2">
+        <div className="flex items-center justify-between pt-5 border-t border-surface-700 mt-2">
           <div className="text-xs">
             {saveErr && (
               <span className="text-red-400 flex items-center gap-1.5">
@@ -769,11 +1039,11 @@ export function NotificationsSettingsPage() {
           <button
             type="button"
             onClick={() => void save()}
-            disabled={saving}
+            disabled={saving || !dirty}
             className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-brand-600 hover:bg-brand-500 disabled:opacity-40 text-xs font-medium text-white transition-colors"
           >
             {saving ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
-            Save all
+            Save
           </button>
         </div>
 

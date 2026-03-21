@@ -1,9 +1,9 @@
 // ── VIHistoryChart ────────────────────────────────────────────────────────
 // Recharts AreaChart for Market VI historical snapshots.
 // Fetches /volatility/market/{timeframe}/history with a `since` param derived
-// from the selected range (1h | 6h | 24h | 7d | 30d).
+// from the selected range (1h | 6h | 24h | 7d | 30d | 60d | 90d).
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useMemo } from 'react'
 import {
   ResponsiveContainer,
   AreaChart,
@@ -14,13 +14,13 @@ import {
   Tooltip,
   ReferenceLine,
 } from 'recharts'
-import { Loader2, AlertTriangle } from 'lucide-react'
+import { Loader2, AlertTriangle, Bell, Lightbulb } from 'lucide-react'
 import { volatilityApi } from '../../lib/api'
 import type { MarketVIOut } from '../../types/api'
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
-type Range = '1h' | '6h' | '24h' | '7d' | '30d'
+type Range = '1h' | '6h' | '24h' | '7d' | '30d' | '60d' | '90d'
 
 interface ChartPoint {
   ts: number
@@ -36,6 +36,8 @@ interface Props {
   defaultColor?: string
   /** compact mode: smaller chart height, used in grid layout */
   compact?: boolean
+  /** if provided, enables right-click alert creation + smart proposals */
+  onCreateAlert?: (level: number, timeframe: string) => void
 }
 
 // ── Constants ─────────────────────────────────────────────────────────────
@@ -46,6 +48,8 @@ const RANGE_MS: Record<Range, number> = {
   '24h': 24 * 60 * 60 * 1000,
   '7d':  7  * 24 * 60 * 60 * 1000,
   '30d': 30 * 24 * 60 * 60 * 1000,
+  '60d': 60 * 24 * 60 * 60 * 1000,
+  '90d': 90 * 24 * 60 * 60 * 1000,
 }
 
 // Regime thresholds on 0-100 scale
@@ -108,9 +112,76 @@ function CustomTooltip({ active, payload }: { active?: boolean; payload?: any[] 
   )
 }
 
+// ── Smart level detection ─────────────────────────────────────────────────
+
+interface ProposedLevel {
+  level: number
+  touches: number
+  direction: string
+}
+
+function detectKeyLevels(data: ChartPoint[]): ProposedLevel[] {
+  if (data.length < 15) return []
+  const scores = data.map(d => d.score)
+
+  // Separate local maxima (resistance) from local minima (support)
+  const maxima: number[] = []
+  const minima: number[] = []
+  for (let i = 3; i < scores.length - 3; i++) {
+    const v = scores[i]
+    const isMax = v >= scores[i-1] && v >= scores[i+1] && v >= scores[i-2] && v >= scores[i+2] && v >= scores[i-3] && v >= scores[i+3]
+    const isMin = v <= scores[i-1] && v <= scores[i+1] && v <= scores[i-2] && v <= scores[i+2] && v <= scores[i-3] && v <= scores[i+3]
+    if (isMax) maxima.push(v)
+    else if (isMin) minima.push(v)
+  }
+
+  function cluster(values: number[], direction: string) {
+    const clusters: { sum: number; count: number; direction: string }[] = []
+    for (const v of values) {
+      const avg = (c: { sum: number; count: number }) => c.sum / c.count
+      const existing = clusters.find(c => Math.abs(avg(c) - v) <= 2)
+      if (existing) {
+        existing.sum += v
+        existing.count++
+      } else {
+        clusters.push({ sum: v, count: 1, direction })
+      }
+    }
+    return clusters
+  }
+
+  return [
+    ...cluster(maxima, 'resistance'),
+    ...cluster(minima, 'support'),
+  ]
+    .filter(c => c.count >= 2)
+    .filter(c => !REGIME_THRESHOLDS.some(t => Math.abs(c.sum / c.count - t) <= 2.5))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 6)
+    .map(c => ({
+      level: Math.round(c.sum / c.count),
+      touches: c.count,
+      direction: c.direction,
+    }))
+}
+
+// ── Crosshair cursor ───────────────────────────────────────────────────────
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function CrosshairCursor({ points, width, height }: any) {
+  if (!points?.[0]) return null
+  const { x, y } = points[0] as { x: number; y: number }
+  return (
+    <g>
+      <line x1={x} y1={0} x2={x} y2={height} stroke="#52525b" strokeWidth={1} strokeDasharray="3 3" />
+      <line x1={0} y1={y} x2={width} y2={y} stroke="#52525b" strokeWidth={1} strokeDasharray="3 3" />
+    </g>
+  )
+}
+
 // ── Main component ─────────────────────────────────────────────────────────
 
-export function VIHistoryChart({ timeframe, defaultColor = '#a1a1aa', compact = false }: Props) {
+export function VIHistoryChart({ timeframe, defaultColor = '#a1a1aa', compact = false, onCreateAlert }: Props) {
   const [range, setRange] = useState<Range>('24h')
   const [data, setData] = useState<ChartPoint[]>([])
   const [loading, setLoading] = useState(true)
@@ -155,6 +226,34 @@ export function VIHistoryChart({ timeframe, defaultColor = '#a1a1aa', compact = 
   const chartHeight = compact ? 150 : 220
   const tfLabel = timeframe === 'aggregated' ? 'AGG' : timeframe.toUpperCase()
 
+  // ── Alert feature state ───────────────────────────────────────────────
+  const [showSmart, setShowSmart] = useState(false)
+  const [hoveredScore, setHoveredScore] = useState<number | null>(null)
+  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; level: number } | null>(null)
+
+  // Adaptive Y-axis: pad ±12% of range, clamped to [0, 100]
+  const scores = data.map(d => d.score)
+  const rawMin = scores.length ? Math.min(...scores) : 0
+  const rawMax = scores.length ? Math.max(...scores) : 100
+  const padding = Math.max(5, (rawMax - rawMin) * 0.12)
+  const domainMin = Math.max(0, Math.floor(rawMin - padding))
+  const domainMax = Math.min(100, Math.ceil(rawMax + padding))
+  const visibleTicks = [0, 17, 33, 50, 67, 83, 100].filter(t => t >= domainMin && t <= domainMax)
+
+  // Smart level detection (memoised on data change)
+  const proposedLevels = useMemo(() => detectKeyLevels(data), [data])
+
+  // Y-axis: orange ticks for proposed levels — always shown when levels exist (not gated on showSmart)
+  const proposedLevelSet = useMemo(
+    () => new Set<number>(proposedLevels.map(p => p.level)),
+    [proposedLevels],
+  )
+  const allYTicks = useMemo(() => {
+    if (proposedLevels.length === 0) return visibleTicks
+    const combined = [...new Set([...visibleTicks, ...proposedLevels.map(p => p.level)])]
+    return combined.sort((a, b) => a - b)
+  }, [visibleTicks, proposedLevels])
+
   return (
     <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-4">
       {/* Header */}
@@ -190,9 +289,9 @@ export function VIHistoryChart({ timeframe, defaultColor = '#a1a1aa', compact = 
             </button>
           )}
 
-          {/* Range selector */}}
+          {/* Range selector */}
         <div className="flex gap-0.5 bg-zinc-900 border border-zinc-800 rounded-md p-0.5">
-          {(['1h', '6h', '24h', '7d', '30d'] as Range[]).map((r) => (
+          {(['1h', '6h', '24h', '7d', '30d', '60d', '90d'] as Range[]).map((r) => (
             <button
               key={r}
               onClick={() => setRange(r)}
@@ -274,14 +373,14 @@ export function VIHistoryChart({ timeframe, defaultColor = '#a1a1aa', compact = 
                 />
               ))}
 
-              {/* Smart proposal level reference lines */}
+              {/* Smart proposal level reference lines — always shown when levels detected */}
               {proposedLevels.map(pl => (
                 <ReferenceLine
                   key={`smart-${pl.level}`}
                   y={pl.level}
                   stroke="#f59e0b"
                   strokeDasharray="2 4"
-                  strokeOpacity={0.5}
+                  strokeOpacity={0.4}
                 />
               ))}
 
@@ -299,11 +398,24 @@ export function VIHistoryChart({ timeframe, defaultColor = '#a1a1aa', compact = 
 
               <YAxis
                 domain={[domainMin, domainMax]}
-                ticks={compact ? [domainMin, Math.round((domainMin + domainMax) / 2), domainMax] : visibleTicks}
-                tick={{ fill: '#52525b', fontSize: 10, fontFamily: 'monospace' }}
+                ticks={compact ? [domainMin, Math.round((domainMin + domainMax) / 2), domainMax] : allYTicks}
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                tick={(props: any) => {
+                  const isProposed = proposedLevelSet.has(props.payload?.value)
+                  return (
+                    <text
+                      x={props.x} y={props.y}
+                      fill={isProposed ? '#f59e0b' : '#52525b'}
+                      textAnchor="end" dominantBaseline="middle"
+                      fontSize={10} fontFamily="monospace"
+                    >
+                      {props.payload?.value}
+                    </text>
+                  )
+                }}
                 axisLine={false}
                 tickLine={false}
-                width={compact ? 22 : 28}
+                width={compact ? 24 : 36}
               />
 
               <Tooltip
@@ -333,7 +445,7 @@ export function VIHistoryChart({ timeframe, defaultColor = '#a1a1aa', compact = 
               <p className="px-3 pt-1 pb-0.5 text-[10px] text-zinc-600 font-mono uppercase tracking-wider">Chart alert</p>
               <button
                 type="button"
-                onClick={() => { onCreateAlert?.(ctxMenu.level); setCtxMenu(null) }}
+                onClick={() => { onCreateAlert?.(ctxMenu.level, timeframe); setCtxMenu(null) }}
                 className="flex items-center gap-2 px-3 py-2 hover:bg-zinc-800 text-xs text-slate-300 w-full text-left transition-colors"
               >
                 <Bell size={12} className="text-amber-400 shrink-0" />
@@ -389,7 +501,7 @@ export function VIHistoryChart({ timeframe, defaultColor = '#a1a1aa', compact = 
               <button
                 key={pl.level}
                 type="button"
-                onClick={() => onCreateAlert?.(pl.level)}
+                onClick={() => onCreateAlert?.(pl.level, timeframe)}
                 className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg border border-amber-500/20 bg-amber-500/5 hover:bg-amber-500/10 transition-colors text-left"
               >
                 <div>

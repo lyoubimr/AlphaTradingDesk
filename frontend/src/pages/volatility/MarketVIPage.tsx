@@ -272,19 +272,22 @@ export function MarketVIPage() {
   const heroColor  = REGIME_COLOR_HEX[heroRegime] ?? '#a1a1aa'
 
   // Create alert from chart (right-click or smart suggestion)
-  const handleCreateAlert = useCallback(async (level: number) => {
+  const handleCreateAlert = useCallback(async (level: number, timeframe: string) => {
     if (!profileId) { navigate('/settings/notifications'); return }
     try {
       const current = await volatilityApi.getNotificationSettings(profileId)
       const existing: unknown[] = (current.market_vi_alerts as Record<string, unknown>)?.vi_levels as unknown[] ?? []
+      const tfLabel = timeframe === 'aggregated' ? 'AGG' : timeframe.toUpperCase()
       const newLevel = {
-        id:          Date.now().toString(),
-        label:       `Chart alert VI = ${level}`,
-        type:        'crossing',
-        value:       level,
-        direction:   'both',
-        enabled:     true,
+        id:           Date.now().toString(),
+        label:        `Chart alert VI = ${level} [${tfLabel}]`,
+        type:         'crossing',
+        value:        level,
+        direction:    'both',
+        tolerance:    0.5,
+        enabled:      true,
         cooldown_min: 30,
+        timeframe:    timeframe,
       }
       await volatilityApi.updateNotificationSettings(profileId, {
         market_vi_alerts: {
