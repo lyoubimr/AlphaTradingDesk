@@ -140,10 +140,10 @@ export function TradesPage() {
             >
               <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
             </button>
-            <button type="button" className="atd-btn-ghost" disabled>
+            <button type="button" className="atd-btn-ghost hidden sm:inline-flex" disabled>
               <Filter size={14} /> Filters
             </button>
-            <button type="button" className="atd-btn-ghost" disabled>
+            <button type="button" className="atd-btn-ghost hidden sm:inline-flex" disabled>
               <Download size={14} /> Export
             </button>
             <button
@@ -245,9 +245,100 @@ export function TradesPage() {
             </div>
           )}
 
-          {/* Actual table */}
+          {/* ── Mobile card list ───────────────────────────────────────── */}
           {!loading && trades.length > 0 && (
-            <div className="overflow-x-auto">
+            <div className="sm:hidden divide-y divide-surface-700/50">
+              {trades.map((t) => {
+                const pnlNum = t.realized_pnl
+                  ? parseFloat(t.realized_pnl)
+                  : t.booked_pnl
+                    ? parseFloat(t.booked_pnl)
+                    : null
+                const isBull = pnlNum !== null && pnlNum > 0
+                const isBear = pnlNum !== null && pnlNum < 0
+                return (
+                  <div
+                    key={t.id}
+                    onClick={() => navigate(`/trades/${t.id}`)}
+                    className={cn(
+                      'px-4 py-3 cursor-pointer transition-colors',
+                      t.status === 'cancelled' ? 'opacity-40' : 'hover:bg-surface-700/30',
+                    )}>
+                    {/* pair + direction + status */}
+                    <div className="flex items-center justify-between gap-2 mb-1.5">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className={cn(
+                          'text-xs font-bold shrink-0',
+                          t.direction === 'LONG' ? 'text-green-400' : 'text-red-400',
+                        )}>
+                          {t.direction}
+                        </span>
+                        <span className="text-sm font-semibold text-slate-200 truncate">
+                          {t.instrument_display_name ?? t.pair}
+                        </span>
+                      </div>
+                      <StatusBadge status={t.status} orderType={t.order_type} />
+                    </div>
+                    {/* date + entry + pnl */}
+                    <div className="flex items-center justify-between text-[11px] font-mono">
+                      <span className="text-slate-500">
+                        {(t.entry_date || t.created_at)
+                          ? new Date(t.entry_date ?? t.created_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' })
+                          : '—'}
+                        {' · '}
+                        <span className="text-slate-600">@ {parseFloat(t.entry_price).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 5 })}</span>
+                      </span>
+                      {pnlNum !== null ? (
+                        <span className={cn('font-semibold', isBull ? 'text-green-400' : isBear ? 'text-red-400' : 'text-slate-400')}>
+                          {isBull ? '+' : ''}{pnlNum.toFixed(2)}
+                        </span>
+                      ) : (t.status === 'open' || t.status === 'partial') ? (
+                        <span className="text-brand-500/60">Open</span>
+                      ) : null}
+                    </div>
+                    {/* strategy chips */}
+                    {t.strategy_ids && t.strategy_ids.length > 0 && (
+                      <div className="flex flex-wrap gap-1 mt-1.5">
+                        {t.strategy_ids.map((sid) => {
+                          const s = strategyMap.get(sid)
+                          return (
+                            <span key={sid} className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-brand-600/15 border border-brand-500/30 text-[10px] font-medium text-brand-300">
+                              {s?.emoji && <span>{s.emoji}</span>}
+                              {s?.name ?? `#${sid}`}
+                            </span>
+                          )
+                        })}
+                      </div>
+                    )}
+                    {/* pending actions */}
+                    {t.status === 'pending' && (
+                      <div className="flex gap-2 mt-2" onClick={(e) => e.stopPropagation()}>
+                        <button
+                          type="button"
+                          disabled={activating === t.id}
+                          onClick={() => handleActivate(t.id)}
+                          className="flex items-center gap-1 px-3 py-1.5 rounded text-[11px] font-medium text-green-400 bg-green-500/10 border border-green-500/30 disabled:opacity-40">
+                          {activating === t.id ? <Loader2 size={10} className="animate-spin" /> : <span>▶</span>}
+                          Activate
+                        </button>
+                        <button
+                          type="button"
+                          disabled={cancelling === t.id}
+                          onClick={() => handleCancel(t.id)}
+                          className="flex items-center gap-1 px-3 py-1.5 rounded text-[11px] font-medium text-slate-400 border border-surface-600 disabled:opacity-40">
+                          {cancelling === t.id ? <Loader2 size={10} className="animate-spin" /> : <X size={10} />}
+                          Cancel
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          )}
+          {/* ── Desktop table ───────────────────────────────────────────── */}
+          {!loading && trades.length > 0 && (
+            <div className="hidden sm:block overflow-x-auto">
               <table className="w-full text-xs">
                 <thead>
                   <tr className="border-b border-surface-700">

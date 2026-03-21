@@ -168,6 +168,29 @@ const SCHED_TFS: TFKey[] = ['15m', '1h', '4h', '1d', '1w']
 // UTC offset for local display of hours (e.g. +2 for UTC+2)
 const LOCAL_OFFSET_H = -new Date().getTimezoneOffset() / 60
 
+// Beat fire times in UTC per TF — mirrors celery_app.py beat_schedule.
+// Used to warn the user if their execution_hours filter would block the natural beat.
+const TF_BEAT_UTC: Partial<Record<TFKey, number[]>> = {
+  '4h': [0, 4, 8, 12, 16, 20],
+  '1d': [0],
+  '1w': [1], // Mon 01:00 UTC
+}
+
+// Returns a short human-readable "fires at …" label in local time for a given TF.
+function getBeatLocalLabel(tf: TFKey): string {
+  const toLocal = (h: number) => (h + LOCAL_OFFSET_H + 24) % 24
+  const fmtH    = (h: number) => String(toLocal(h)).padStart(2, '0')
+  if (tf === '15m') return 'every 15 min'
+  if (tf === '1h')  return 'every :00'
+  if (tf === '4h')  return '6×/day'
+  if (tf === '1d')  return `daily ${fmtH(0)}:00 local`
+  // 1w: Mon 01:00 UTC — may shift to adjacent day depending on timezone
+  const localHRaw = 1 + LOCAL_OFFSET_H
+  const dayShift  = localHRaw >= 24 ? 1 : localHRaw < 0 ? -1 : 0
+  const dayNames  = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+  return `${dayNames[((dayShift) % 7 + 7) % 7]} ${fmtH(1)}:00 local`
+}
+
 // Per-TF presets: human-readable frequency labels + market sessions
 function getTFPresets(tf: TFKey): Array<{ label: string; hoursUtc: number[] }> {
   const sessions = [
@@ -997,7 +1020,10 @@ export function VolatilitySettingsPage() {
               <div key={tf} className="rounded-xl bg-surface-800 border border-surface-700 overflow-hidden">
                 {/* TF label + enable toggle */}
                 <div className="px-5 py-3 border-b border-surface-700 flex items-center justify-between">
-                  <span className="text-sm font-mono font-bold text-slate-200 uppercase">{tf}</span>
+                  <div className="flex items-center gap-2.5">
+                    <span className="text-sm font-mono font-bold text-slate-200 uppercase">{tf}</span>
+                    <span className="text-[10px] text-slate-600 tracking-wide">{getBeatLocalLabel(tf)}</span>
+                  </div>
                   <Toggle on={s.enabled} onChange={v => setSched(tf, { enabled: v })} label={`Enable ${tf}`} />
                 </div>
 
@@ -1140,12 +1166,27 @@ export function VolatilitySettingsPage() {
                         )}
                       </div>
 
-                      {/* Status hint */}
-                      <p className="text-[10px] text-slate-700">
-                        {curHours.length === 0
-                          ? 'All hours — no restriction'
-                          : `${curHours.length} UTC hour${curHours.length > 1 ? 's' : ''} selected`}
-                      </p>
+                      {/* Status hint — shows beat label or blocked warning */}
+                      {(() => {
+                        const beatHours = TF_BEAT_UTC[tf]
+                        const beatBlocked = beatHours != null
+                          && curHours.length > 0
+                          && !beatHours.some(h => curHours.includes(h))
+                        if (beatBlocked) {
+                          return (
+                            <p className="text-[10px] text-amber-500/80 flex items-center gap-1">
+                              ⚠ Beat fires {getBeatLocalLabel(tf)} — not in your filter
+                            </p>
+                          )
+                        }
+                        return (
+                          <p className="text-[10px] text-slate-700">
+                            {curHours.length === 0
+                              ? `All hours · fires ${getBeatLocalLabel(tf)}`
+                              : `${curHours.length} UTC hour${curHours.length > 1 ? 's' : ''} selected`}
+                          </p>
+                        )
+                      })()}
 
                     </div>
                   </div>
