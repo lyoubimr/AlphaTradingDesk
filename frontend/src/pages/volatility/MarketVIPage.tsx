@@ -269,19 +269,19 @@ export function MarketVIPage() {
   const heroColor = REGIME_COLOR_HEX[heroRegime] ?? '#a1a1aa'
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-4">
       {/* ── Topbar ── */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
         <PageHeader
           icon="📊"
           title="Market VI"
           subtitle="Kraken Futures — crypto volatility index"
         />
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <div className="flex gap-1 bg-zinc-900 border border-zinc-800 rounded-lg p-1">
             <button
               onClick={() => { setActiveTF(null); setSparkPoints([]) }}
-              className={`px-3 py-1 text-xs font-mono rounded-md transition-colors ${
+              className={`px-2.5 py-1 text-xs font-mono rounded-md transition-colors ${
                 activeTF === null ? 'bg-zinc-700 text-zinc-100' : 'text-zinc-400 hover:text-zinc-200'
               }`}
             >ALL</button>
@@ -289,7 +289,7 @@ export function MarketVIPage() {
               <button
                 key={t}
                 onClick={() => { setActiveTF(t); setSparkPoints([]) }}
-                className={`px-3 py-1 text-xs font-mono rounded-md transition-colors ${
+                className={`px-2.5 py-1 text-xs font-mono rounded-md transition-colors ${
                   t === activeTF ? 'bg-zinc-700 text-zinc-100' : 'text-zinc-400 hover:text-zinc-200'
                 }`}
               >{t}</button>
@@ -463,7 +463,7 @@ export function MarketVIPage() {
                       </span>
                     )}
                   </div>
-                  <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                  <div className="grid grid-cols-2 gap-3">
                     {aggregated.tf_components.map((c) => (
                       <TFMiniCard
                         key={c.tf}

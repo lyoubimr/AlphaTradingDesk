@@ -173,6 +173,8 @@ export function WatchlistsPage() {
   const [runStatus, setRunStatus]         = useState<string | null>(null)
   const [generateTF, setGenerateTF]       = useState<TF>('1h')
   const [expandedDates, setExpandedDates] = useState<Set<string>>(new Set())
+  // Mobile: 'tree' = show snapshot list, 'detail' = show pair table
+  const [mobileView, setMobileView]       = useState<'tree' | 'detail'>('tree')
   const [expandedTFs, setExpandedTFs]     = useState<Set<string>>(new Set())
   const [regimeFilters, setRegimeFilters] = useState<Set<string>>(new Set(['ALL']))
   const [emaFilters, setEmaFilters]       = useState<Set<string>>(new Set(['ALL']))
@@ -200,6 +202,7 @@ export function WatchlistsPage() {
       setRegimeSameAsTFSup(false)
     }
     setLoadingDetail(true)
+    setMobileView('detail')  // auto-switch to detail panel on mobile after selecting
     try {
       const data = await volatilityApi.getWatchlistById(id)
       setSelectedData(data)
@@ -373,7 +376,7 @@ export function WatchlistsPage() {
   // ── Render ────────────────────────────────────────────────────────────────
 
   return (
-    <div className="flex flex-col gap-4" style={{ height: 'calc(100vh - 80px)' }}>
+    <div className="flex flex-col gap-4" style={{ height: 'calc(100dvh - 80px)', minHeight: '400px' }}>
 
       {/* ── Topbar ── */}
       <div className="flex items-center justify-between shrink-0">
@@ -588,10 +591,32 @@ export function WatchlistsPage() {
           </div>
         </div>
       )}
+      {/* ── Mobile tab bar ── */}
+      <div className="flex lg:hidden shrink-0 rounded-lg overflow-hidden border border-zinc-800 bg-zinc-900">
+        <button
+          onClick={() => setMobileView('tree')}
+          className={`flex-1 py-2 text-xs font-mono transition-colors ${
+            mobileView === 'tree' ? 'bg-zinc-700 text-zinc-100' : 'text-zinc-500 hover:text-zinc-300'
+          }`}
+        >
+          📅 Snapshots
+        </button>
+        <button
+          onClick={() => setMobileView('detail')}
+          className={`flex-1 py-2 text-xs font-mono transition-colors ${
+            mobileView === 'detail' ? 'bg-zinc-700 text-zinc-100' : 'text-zinc-500 hover:text-zinc-300'
+          }`}
+        >
+          📊 Pairs {selectedData ? `(${filteredPairs.length})` : ''}
+        </button>
+      </div>
+
       <div className="flex gap-4 flex-1 min-h-0">
 
         {/* ── LEFT: snapshot tree ── */}
-        <div className="w-64 shrink-0 rounded-xl border border-zinc-800 bg-zinc-950 flex flex-col overflow-hidden">
+        <div className={`${
+          mobileView === 'tree' ? 'flex' : 'hidden'
+        } lg:flex w-full lg:w-64 shrink-0 rounded-xl border border-zinc-800 bg-zinc-950 flex-col overflow-hidden`}>
           <div className="px-3 py-2 border-b border-zinc-800 text-xs text-zinc-500 font-mono uppercase tracking-wider shrink-0">
             Snapshots · last 30 days
           </div>
@@ -683,7 +708,9 @@ export function WatchlistsPage() {
         </div>
 
         {/* ── RIGHT: detail panel ── */}
-        <div className="flex-1 min-w-0 rounded-xl border border-zinc-800 bg-zinc-950 flex flex-col overflow-hidden">
+        <div className={`${
+          mobileView === 'detail' ? 'flex' : 'hidden'
+        } lg:flex flex-1 min-w-0 rounded-xl border border-zinc-800 bg-zinc-950 flex-col overflow-hidden`}>
           {selectedId === null ? (
             <div className="flex flex-col items-center justify-center h-full text-zinc-600 gap-2">
               <span className="text-4xl">👈</span>
