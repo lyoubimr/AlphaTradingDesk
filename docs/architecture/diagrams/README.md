@@ -1,6 +1,6 @@
 # 📐 Architecture Diagrams — AlphaTradingDesk
 
-**Version:** 1.2 — Phase 1 + Phase 2 + Phase 4B
+**Version:** 1.3 — Phase 1 + Phase 2 + Phase 4B + Infra générale
 **Date:** 21 mars 2026
 
 All diagrams use [Mermaid](https://mermaid.js.org/) flowchart syntax and are renderable in VS Code (with the Mermaid Preview extension), GitHub, and any Mermaid-compatible viewer.
@@ -11,6 +11,7 @@ All diagrams use [Mermaid](https://mermaid.js.org/) flowchart syntax and are ren
 
 | # | File | Phase | What it shows |
 |---|------|-------|---------------|
+| 00 | [`00-infra-architecture.md`](./00-infra-architecture.md) | All | **Vue infra complète** : réseau LAN/Tailscale/mDNS · tous les services Docker · Celery Beat tasks · crons OS · CI/CD 3 repos · pipeline logs · stockage |
 | 01 | [`01-system-architecture.md`](./01-system-architecture.md) | P1 | Docker services layout · Dev vs Prod vs Future environments · LAN domain resolution |
 | 02 | [`02-feature-data-flow.md`](./02-feature-data-flow.md) | P1 | Feature flow : Market Analysis → Trade Form → Trade Lifecycle → Goals/Risk |
 | 03 | [`03-database-schema.md`](./03-database-schema.md) | P1 | Tables Phase 1 et relations FK |
