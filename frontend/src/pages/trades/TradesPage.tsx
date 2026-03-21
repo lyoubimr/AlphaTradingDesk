@@ -7,6 +7,7 @@ import { Badge } from '../../components/ui/Badge'
 import { StatCard } from '../../components/ui/StatCard'
 import { useProfile } from '../../context/ProfileContext'
 import { tradesApi, strategiesApi } from '../../lib/api'
+import { cn } from '../../lib/cn'
 import type { TradeListItem, Strategy } from '../../types/api'
 
 // ── Status badge ──────────────────────────────────────────────────────────
