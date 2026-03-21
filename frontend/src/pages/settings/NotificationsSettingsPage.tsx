@@ -9,7 +9,7 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react'
 import {
-  Save, Loader2, RefreshCw, Check, AlertTriangle, Plus, Trash2, Send, Bell, Pencil, X,
+  Save, Loader2, RefreshCw, Check, AlertTriangle, Plus, Trash2, Send, Bell, Pencil, X, FileText,
 } from 'lucide-react'
 import { PageHeader } from '../../components/ui/PageHeader'
 import { useProfile } from '../../context/ProfileContext'
@@ -198,6 +198,20 @@ export function NotificationsSettingsPage() {
   const [editingId, setEditingId] = useState<string | null>(null)
   interface EditDraft { label?: string; direction?: 'both'|'up'|'down'; valueStr?: string; minStr?: string; maxStr?: string; cooldownStr?: string; toleranceStr?: string }
   const [editDraft, setEditDraft] = useState<EditDraft>({})
+
+  // Template modal state
+  const [showTemplateModal, setShowTemplateModal] = useState(false)
+  const [templateDraft, setTemplateDraft] = useState<string>(DEFAULT_REGIME_TEMPLATE)
+
+  function openTemplateModal() {
+    setTemplateDraft(mviA.message_template ?? DEFAULT_REGIME_TEMPLATE)
+    setShowTemplateModal(true)
+  }
+  function confirmTemplate() {
+    const val = templateDraft.trim()
+    setMviA(p => ({ ...p, message_template: val === DEFAULT_REGIME_TEMPLATE.trim() ? undefined : val }))
+    setShowTemplateModal(false)
+  }
 
   const load = useCallback(async () => {
     if (!profileId) return
@@ -904,28 +918,22 @@ export function NotificationsSettingsPage() {
                 </button>
               </div>
 
-              {/* ── Message Template ───────────────────────────────────── */}
-              <div className="border-t border-surface-700 pt-4 space-y-2">
-                <div className="flex items-center justify-between">
-                  <p className="text-xs font-semibold text-slate-400">Telegram message template</p>
-                  <button
-                    type="button"
-                    onClick={() => setMviA(p => ({ ...p, message_template: undefined }))}
-                    className="text-[10px] text-zinc-600 hover:text-zinc-400 transition-colors"
-                  >
-                    Reset to default
-                  </button>
+              {/* ── Message Template button ──────────────────────────────── */}
+              <div className="border-t border-surface-700 pt-3 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <FileText size={12} className="text-slate-500" />
+                  <span className="text-xs text-slate-500">Message template</span>
+                  {mviA.message_template && (
+                    <span className="w-1.5 h-1.5 rounded-full bg-brand-400" title="Custom template active" />
+                  )}
                 </div>
-                <p className="text-[10px] text-zinc-600 leading-relaxed">
-                  Variables: <code className="text-zinc-400">{'{timeframe}'}</code> <code className="text-zinc-400">{'{score}'}</code> <code className="text-zinc-400">{'{regime}'}</code> <code className="text-zinc-400">{'{summary}'}</code> <code className="text-zinc-400">{'{threshold}'}</code> <code className="text-zinc-400">{'{direction}'}</code> <code className="text-zinc-400">{'{label}'}</code> <code className="text-zinc-400">{'{components}'}</code>
-                </p>
-                <textarea
-                  rows={5}
-                  value={mviA.message_template ?? DEFAULT_REGIME_TEMPLATE}
-                  onChange={e => setMviA(p => ({ ...p, message_template: e.target.value }))}
-                  spellCheck={false}
-                  className="w-full px-3 py-2 rounded-lg bg-surface-900 border border-surface-600 text-xs text-slate-300 font-mono placeholder-slate-600 focus:outline-none focus:border-brand-500/60 focus:ring-1 focus:ring-brand-500/30 resize-y transition-colors"
-                />
+                <button
+                  type="button"
+                  onClick={openTemplateModal}
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-surface-700 hover:bg-surface-600 border border-surface-600 text-[11px] text-slate-400 hover:text-slate-200 transition-colors"
+                >
+                  <Pencil size={11} /> Customise
+                </button>
               </div>
             </div>
           </div>
@@ -1049,5 +1057,75 @@ export function NotificationsSettingsPage() {
 
       </div>
     </div>
+
+      {/* ── Template modal ────────────────────────────────────────────────── */}
+      {showTemplateModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
+          onClick={e => { if (e.target === e.currentTarget) setShowTemplateModal(false) }}
+        >
+          <div className="w-full max-w-lg rounded-2xl bg-surface-800 border border-surface-600 shadow-2xl overflow-hidden">
+            {/* Modal header */}
+            <div className="flex items-center justify-between px-5 py-3.5 border-b border-surface-700">
+              <div className="flex items-center gap-2">
+                <FileText size={14} className="text-brand-400" />
+                <span className="text-sm font-semibold text-slate-200">Telegram message template</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowTemplateModal(false)}
+                className="p-1 rounded text-slate-600 hover:text-slate-300 transition-colors"
+              >
+                <X size={15} />
+              </button>
+            </div>
+
+            {/* Modal body */}
+            <div className="px-5 py-4 space-y-3">
+              <p className="text-[11px] text-zinc-500 leading-relaxed">
+                Available variables:{' '}
+                {['{timeframe}','{score}','{regime}','{summary}','{threshold}','{direction}','{label}','{components}'].map(v => (
+                  <code key={v} className="mx-0.5 px-1 rounded bg-surface-700 text-zinc-300 font-mono">{v}</code>
+                ))}
+              </p>
+              <textarea
+                rows={8}
+                autoFocus
+                value={templateDraft}
+                onChange={e => setTemplateDraft(e.target.value)}
+                spellCheck={false}
+                className="w-full px-3 py-2.5 rounded-lg bg-surface-900 border border-surface-600 text-xs text-slate-300 font-mono focus:outline-none focus:border-brand-500/60 focus:ring-1 focus:ring-brand-500/30 resize-y transition-colors"
+              />
+            </div>
+
+            {/* Modal footer */}
+            <div className="flex items-center justify-between px-5 py-3 border-t border-surface-700 bg-surface-900/40">
+              <button
+                type="button"
+                onClick={() => setTemplateDraft(DEFAULT_REGIME_TEMPLATE)}
+                className="text-[11px] text-zinc-600 hover:text-zinc-400 transition-colors"
+              >
+                Reset to default
+              </button>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowTemplateModal(false)}
+                  className="px-3 py-1.5 rounded-lg bg-surface-700 hover:bg-surface-600 text-xs text-slate-400 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={confirmTemplate}
+                  className="px-4 py-1.5 rounded-lg bg-brand-600 hover:bg-brand-500 text-xs text-white font-medium transition-colors"
+                >
+                  Apply
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
   )
 }
