@@ -1039,9 +1039,9 @@ export function NotificationsSettingsPage() {
                 <AlertTriangle size={12} /> {saveErr}
               </span>
             )}
-            {saved && !saveErr && (
-              <span className="text-emerald-400 flex items-center gap-1.5">
-                <Check size={12} /> Saved
+            {!saveErr && dirty && !saving && !saved && (
+              <span className="text-amber-400/70 flex items-center gap-1.5">
+                · Unsaved changes
               </span>
             )}
           </div>
@@ -1049,10 +1049,15 @@ export function NotificationsSettingsPage() {
             type="button"
             onClick={() => void save()}
             disabled={saving || !dirty}
-            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-brand-600 hover:bg-brand-500 disabled:opacity-40 text-xs font-medium text-white transition-colors"
+            className={cn(
+              'inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-medium transition-colors disabled:opacity-40',
+              saved && !saveErr ? 'bg-emerald-600 text-white' : 'bg-brand-600 hover:bg-brand-500 text-white',
+            )}
           >
-            {saving ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
-            Save
+            {saving   ? <Loader2 size={13} className="animate-spin" />
+             : saved  ? <Check   size={13} />
+             :          <Save    size={13} />}
+            {saving ? 'Saving…' : saved ? 'Saved!' : 'Save changes'}
           </button>
         </div>
 
