@@ -1,7 +1,7 @@
 # 📐 Architecture Diagrams — AlphaTradingDesk
 
-**Version:** 1.1 — Phase 1 + Phase 2
-**Date:** 14 mars 2026
+**Version:** 1.2 — Phase 1 + Phase 2 + Phase 4B
+**Date:** 21 mars 2026
 
 All diagrams use [Mermaid](https://mermaid.js.org/) flowchart syntax and are renderable in VS Code (with the Mermaid Preview extension), GitHub, and any Mermaid-compatible viewer.
 
@@ -17,6 +17,7 @@ All diagrams use [Mermaid](https://mermaid.js.org/) flowchart syntax and are ren
 | 04 | [`04-phase2-system-architecture.md`](./04-phase2-system-architecture.md) | P2 | Stack Phase 2 : TimescaleDB + Redis + Celery Worker + Beat · Flux Beat→Worker→DB |
 | 05 | [`05-phase2-volatility-dataflow.md`](./05-phase2-volatility-dataflow.md) | P2 | Data flow Volatility Engine : sources → calcul indicateurs → DB → API → UI · Agregation Market VI · Watchlist 7 cols |
 | 06 | [`06-phase2-database-schema.md`](./06-phase2-database-schema.md) | P2 | 5 nouvelles tables Phase 2 (hypertables TimescaleDB · volatility_settings · notification_settings) + relations avec Phase 1 |
+| 07 | [`07-phase4b-logging-architecture.md`](./07-phase4b-logging-architecture.md) | P4B | Stack observabilité : structlog → Docker logs → Promtail → Loki → Grafana · Pipeline de logs · Labels · CI/CD deploy flow |
 
 ---
 
