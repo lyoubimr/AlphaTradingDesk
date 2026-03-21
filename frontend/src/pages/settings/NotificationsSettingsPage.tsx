@@ -36,6 +36,7 @@ interface VILevel {
   enabled: boolean
   cooldown_min: number
   timeframe?: string      // specific TF ('15m','1h','4h','1d','aggregated') or undefined = all TFs
+  day_type?: 'any' | 'workday' | 'weekend'  // filter by market day type
 }
 
 interface MarketVIAlertsCfg {
@@ -194,10 +195,11 @@ export function NotificationsSettingsPage() {
   const [vlCooldown,  setVlCooldown]  = useState('30')
   const [vlTolerance, setVlTolerance] = useState('0.5')
   const [vlTf,        setVlTf]        = useState('aggregated')
+  const [vlDayType,   setVlDayType]   = useState<'any' | 'workday' | 'weekend'>('any')
 
   // VI level inline-edit state
   const [editingId, setEditingId] = useState<string | null>(null)
-  interface EditDraft { label?: string; direction?: 'both'|'up'|'down'; valueStr?: string; minStr?: string; maxStr?: string; cooldownStr?: string; toleranceStr?: string; tfStr?: string }
+  interface EditDraft { label?: string; direction?: 'both'|'up'|'down'; valueStr?: string; minStr?: string; maxStr?: string; cooldownStr?: string; toleranceStr?: string; tfStr?: string; dayTypeStr?: 'any'|'workday'|'weekend' }
   const [editDraft, setEditDraft] = useState<EditDraft>({})
 
   // Template modal state
@@ -349,11 +351,12 @@ export function NotificationsSettingsPage() {
       enabled:     true,
       cooldown_min: Number(vlCooldown) || 30,
       timeframe:   vlTf || undefined,
+      day_type:    vlDayType === 'any' ? undefined : vlDayType,
     }
     const updated: MarketVIAlertsCfg = { ...mviA, vi_levels: [...mviA.vi_levels, newLevel] }
     setMviA(updated)
     void saveMVI(updated)
-    setVlValue(''); setVlMin(''); setVlMax(''); setVlLabel(''); setVlCooldown('30'); setVlTolerance('0.5'); setVlTf('aggregated')
+    setVlValue(''); setVlMin(''); setVlMax(''); setVlLabel(''); setVlCooldown('30'); setVlTolerance('0.5'); setVlTf('aggregated'); setVlDayType('any')
   }
 
   const removeVILevel = (id: string) => {
@@ -391,6 +394,7 @@ export function NotificationsSettingsPage() {
       maxStr:       lv.max       !== undefined ? String(lv.max)       : '',
       toleranceStr: lv.tolerance !== undefined ? String(lv.tolerance) : '0.5',
       tfStr:        lv.timeframe ?? 'aggregated',
+      dayTypeStr:   lv.day_type ?? 'any',
     })
   }
 
@@ -408,6 +412,7 @@ export function NotificationsSettingsPage() {
       patch.max = Number(editDraft.maxStr) || lv.max
     }
     patch.timeframe = editDraft.tfStr || undefined
+    patch.day_type  = (editDraft.dayTypeStr && editDraft.dayTypeStr !== 'any') ? editDraft.dayTypeStr : undefined
     editVILevel(lv.id, patch)
     setEditingId(null)
   }
@@ -688,6 +693,11 @@ export function NotificationsSettingsPage() {
                                 {lv.timeframe === 'aggregated' ? 'AGG' : lv.timeframe.toUpperCase()}
                               </span>
                             )}
+                            {lv.day_type && lv.day_type !== 'any' && (
+                              <span className="px-1 rounded bg-surface-700 border border-surface-600 font-mono text-violet-400/70">
+                                {lv.day_type === 'workday' ? 'WD' : 'WKD'}
+                              </span>
+                            )}
                           </p>
                         </div>
                       </div>
@@ -807,6 +817,18 @@ export function NotificationsSettingsPage() {
                             </select>
                           </div>
                         </div>
+                        <div>
+                          <p className="text-[10px] text-slate-500 mb-1">Day type</p>
+                          <select
+                            value={editDraft.dayTypeStr ?? 'any'}
+                            onChange={e => setEditDraft(d => ({ ...d, dayTypeStr: e.target.value as 'any'|'workday'|'weekend' }))}
+                            className="w-full px-2 py-2 rounded-lg bg-surface-700 border border-surface-600 text-xs text-slate-300 focus:outline-none focus:border-brand-500/60"
+                          >
+                            <option value="any">Any day</option>
+                            <option value="workday">Workday only</option>
+                            <option value="weekend">Weekend only</option>
+                          </select>
+                        </div>
                         <div className="flex items-center gap-2">
                           <div className="flex items-end gap-2 pb-0.5">
                             <button
@@ -923,7 +945,7 @@ export function NotificationsSettingsPage() {
                   </div>
                 )}
 
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-3 gap-2">
                   <div>
                     <p className="text-[10px] text-slate-500 mb-1">Label <span className="text-zinc-600">(optional)</span></p>
                     <input
@@ -945,6 +967,18 @@ export function NotificationsSettingsPage() {
                         <option key={tf} value={tf}>{tf.toUpperCase()}</option>
                       ))}
                       <option value="aggregated">AGG — General</option>
+                    </select>
+                  </div>
+                  <div>
+                    <p className="text-[10px] text-slate-500 mb-1">Day type</p>
+                    <select
+                      value={vlDayType}
+                      onChange={e => setVlDayType(e.target.value as typeof vlDayType)}
+                      className="w-full px-2 py-2 rounded-lg bg-surface-700 border border-surface-600 text-xs text-slate-300 focus:outline-none focus:border-brand-500/60"
+                    >
+                      <option value="any">Any day</option>
+                      <option value="workday">Workday only</option>
+                      <option value="weekend">Weekend only</option>
                     </select>
                   </div>
                 </div>

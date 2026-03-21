@@ -362,6 +362,16 @@ def send_vi_level_alerts(
         if lv_timeframe and lv_timeframe != timeframe:
             continue
 
+        # ── Day type filter — workday vs weekend ──────────────────────────
+        lv_day_type = lv.get("day_type")
+        if lv_day_type and lv_day_type != "any":
+            from datetime import datetime, timezone  # noqa: PLC0415
+            is_weekend = datetime.now(timezone.utc).weekday() >= 5
+            if lv_day_type == "workday" and is_weekend:
+                continue
+            if lv_day_type == "weekend" and not is_weekend:
+                continue
+
         # ── Cooldown check ────────────────────────────────────────────────
         ck = f"atd:alert_sent:vi_level:{timeframe}:{level_id}"
         try:
