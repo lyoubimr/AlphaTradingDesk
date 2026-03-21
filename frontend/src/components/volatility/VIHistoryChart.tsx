@@ -155,7 +155,6 @@ function detectKeyLevels(data: ChartPoint[]): ProposedLevel[] {
     ...cluster(minima, 'support'),
   ]
     .filter(c => c.count >= 2)
-    .filter(c => !REGIME_THRESHOLDS.some(t => Math.abs(c.sum / c.count - t) <= 2.5))
     .sort((a, b) => b.count - a.count)
     .slice(0, 6)
     .map(c => ({
@@ -399,6 +398,7 @@ export function VIHistoryChart({ timeframe, defaultColor = '#a1a1aa', compact = 
               <YAxis
                 domain={[domainMin, domainMax]}
                 ticks={compact ? [domainMin, Math.round((domainMin + domainMax) / 2), domainMax] : allYTicks}
+                minTickGap={0}
                 // eslint-disable-next-line @typescript-eslint/no-explicit-any
                 tick={(props: any) => {
                   const isProposed = proposedLevelSet.has(props.payload?.value)

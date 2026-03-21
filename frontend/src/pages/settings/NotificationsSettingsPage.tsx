@@ -64,7 +64,7 @@ interface WatchlistAlertsCfg {
 const D_MVI_ALERTS: MarketVIAlertsCfg = {
   enabled: false,
   cooldown_min: 60,
-  regimes: ['ACTIVE', 'EXTREME'],
+  regimes: [],
   vi_levels: [],
   message_template: undefined,
 }
@@ -193,10 +193,11 @@ export function NotificationsSettingsPage() {
   const [vlLabel,     setVlLabel]     = useState('')
   const [vlCooldown,  setVlCooldown]  = useState('30')
   const [vlTolerance, setVlTolerance] = useState('0.5')
+  const [vlTf,        setVlTf]        = useState('aggregated')
 
   // VI level inline-edit state
   const [editingId, setEditingId] = useState<string | null>(null)
-  interface EditDraft { label?: string; direction?: 'both'|'up'|'down'; valueStr?: string; minStr?: string; maxStr?: string; cooldownStr?: string; toleranceStr?: string }
+  interface EditDraft { label?: string; direction?: 'both'|'up'|'down'; valueStr?: string; minStr?: string; maxStr?: string; cooldownStr?: string; toleranceStr?: string; tfStr?: string }
   const [editDraft, setEditDraft] = useState<EditDraft>({})
 
   // Template modal state
@@ -347,11 +348,12 @@ export function NotificationsSettingsPage() {
         : { min: Number(vlMin), max: Number(vlMax) }),
       enabled:     true,
       cooldown_min: Number(vlCooldown) || 30,
+      timeframe:   vlTf || undefined,
     }
     const updated: MarketVIAlertsCfg = { ...mviA, vi_levels: [...mviA.vi_levels, newLevel] }
     setMviA(updated)
     void saveMVI(updated)
-    setVlValue(''); setVlMin(''); setVlMax(''); setVlLabel(''); setVlCooldown('30'); setVlTolerance('0.5')
+    setVlValue(''); setVlMin(''); setVlMax(''); setVlLabel(''); setVlCooldown('30'); setVlTolerance('0.5'); setVlTf('aggregated')
   }
 
   const removeVILevel = (id: string) => {
@@ -388,6 +390,7 @@ export function NotificationsSettingsPage() {
       minStr:       lv.min       !== undefined ? String(lv.min)       : '',
       maxStr:       lv.max       !== undefined ? String(lv.max)       : '',
       toleranceStr: lv.tolerance !== undefined ? String(lv.tolerance) : '0.5',
+      tfStr:        lv.timeframe ?? 'aggregated',
     })
   }
 
@@ -404,6 +407,7 @@ export function NotificationsSettingsPage() {
       patch.min = Number(editDraft.minStr) || lv.min
       patch.max = Number(editDraft.maxStr) || lv.max
     }
+    patch.timeframe = editDraft.tfStr || undefined
     editVILevel(lv.id, patch)
     setEditingId(null)
   }
@@ -778,8 +782,8 @@ export function NotificationsSettingsPage() {
                             </>
                           )}
                         </div>
-                        <div className="flex items-center gap-2">
-                          <div className="flex-1">
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
                             <p className="text-[10px] text-slate-500 mb-1">Cooldown (min)</p>
                             <input
                               type="number" min={1} max={1440}
@@ -788,6 +792,22 @@ export function NotificationsSettingsPage() {
                               className={cn(inputCls)}
                             />
                           </div>
+                          <div>
+                            <p className="text-[10px] text-slate-500 mb-1">Timeframe</p>
+                            <select
+                              value={editDraft.tfStr ?? 'aggregated'}
+                              onChange={e => setEditDraft(d => ({ ...d, tfStr: e.target.value }))}
+                              className="w-full px-2 py-2 rounded-lg bg-surface-700 border border-surface-600 text-xs text-slate-300 focus:outline-none focus:border-brand-500/60"
+                            >
+                              <option value="">All TFs</option>
+                              {['15m', '1h', '4h', '1d'].map(tf => (
+                                <option key={tf} value={tf}>{tf.toUpperCase()}</option>
+                              ))}
+                              <option value="aggregated">AGG — General</option>
+                            </select>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2">
                           <div className="flex items-end gap-2 pb-0.5">
                             <button
                               type="button"
@@ -903,12 +923,31 @@ export function NotificationsSettingsPage() {
                   </div>
                 )}
 
-                <input
-                  value={vlLabel}
-                  onChange={e => setVlLabel(e.target.value)}
-                  placeholder="Label (optional)"
-                  className={cn(inputCls)}
-                />
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <p className="text-[10px] text-slate-500 mb-1">Label <span className="text-zinc-600">(optional)</span></p>
+                    <input
+                      value={vlLabel}
+                      onChange={e => setVlLabel(e.target.value)}
+                      placeholder="e.g. Active zone"
+                      className={cn(inputCls)}
+                    />
+                  </div>
+                  <div>
+                    <p className="text-[10px] text-slate-500 mb-1">Timeframe</p>
+                    <select
+                      value={vlTf}
+                      onChange={e => setVlTf(e.target.value)}
+                      className="w-full px-2 py-2 rounded-lg bg-surface-700 border border-surface-600 text-xs text-slate-300 focus:outline-none focus:border-brand-500/60"
+                    >
+                      <option value="">All TFs</option>
+                      {['15m', '1h', '4h', '1d'].map(tf => (
+                        <option key={tf} value={tf}>{tf.toUpperCase()}</option>
+                      ))}
+                      <option value="aggregated">AGG — General</option>
+                    </select>
+                  </div>
+                </div>
                 <button
                   type="button"
                   onClick={addVILevel}
