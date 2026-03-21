@@ -1514,7 +1514,7 @@ export function NewTradePage() {
         {/* before touching numbers. Strategy + confidence will gate risk max      */}
         {/* in future phases (market analysis will also feed into this).           */}
         <Section icon="🧠" title="Strategy & setup intent">
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <Field label={<>Strategy <Tip text="Your trading methods for this trade — select one or more. Win rate stats accumulate per strategy after 5+ trades. Different from setup tags." /></>}>
               <MultiStrategySelect
                 strategies={strategies} loading={stratLoading}
@@ -1569,7 +1569,7 @@ export function NewTradePage() {
 
         {/* ════════════════ 3. DIRECTION & ORDER TYPE ════════════════════ */}
         <Section icon="🧭" title="Direction & order type">
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <Field label="Direction *">
               <div className="grid grid-cols-2 gap-2">
                 {(['LONG', 'SHORT'] as const).map((d) => (
@@ -1623,7 +1623,7 @@ export function NewTradePage() {
         <Section icon="💰" title="Prices, risk & position sizing">
 
           {/* Entry / SL */}
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <Field label="Entry price *">
               <PriceInput required value={entry} onChange={setEntry} ccy={ccy} />
             </Field>
@@ -1640,7 +1640,7 @@ export function NewTradePage() {
           </div>
 
           {/* Risk % ↔ Max loss (bidirectional) */}
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <Field
               label={<>Risk % <Tip text="% of capital you accept to lose. Changes this recalculates max loss." /></>}
               hint={`Profile default: ${profileRisk ?? '—'}%`}>
@@ -1672,7 +1672,7 @@ export function NewTradePage() {
 
           {/* ── Leverage + Margin — CRYPTO profiles ─────────────────────────── */}
           {isCrypto && (
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <Field
                 label={<>Leverage <Tip text={`Max: ×${maxLeverage}. ×1 = spot (no leverage). Changing leverage auto-recalculates margin. Changing margin auto-derives leverage.`} /></>}
                 hint={`Instrument max: ×${maxLeverage}`}>
@@ -1855,7 +1855,7 @@ export function NewTradePage() {
 
           {/* Live calc pills */}
           {calc.valid && (
-            <div className={cn('grid gap-2', isCrypto ? 'grid-cols-3' : 'grid-cols-2')}>
+            <div className={cn('grid gap-2', isCrypto ? 'grid-cols-2 sm:grid-cols-3' : 'grid-cols-2')}>
               <CalcPill label="Max loss" value={`-${fmt(calc.risk_amount)} ${ccy}`} sub={`${fmt(effectiveRisk, 2)}% of capital`} color="red" />
               {/* CFD: lot size is the actionable value → blue. Crypto: position size is informational → default. */}
               <CalcPill
