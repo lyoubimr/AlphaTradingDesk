@@ -402,11 +402,25 @@ def compute_market_vi(self, timeframe: str) -> dict:  # type: ignore[override]
         # ── 10. Telegram alert (fail-silent) ──────────────────────────────
         try:
             from src.volatility.models import NotificationSettings
-            from src.volatility.telegram import send_market_vi_alert
+            from src.volatility.telegram import send_market_vi_alert, send_vi_level_alerts
             notif = db.query(NotificationSettings).first()
             if notif:
                 alert_cfg = {**notif.market_vi_alerts, "bot_token": _first_bot_token(notif.bots), "chat_id": _first_chat_id(notif.bots)}
                 send_market_vi_alert(alert_cfg, market_vi, regime, timeframe, components)
+
+                # ── 10b. VI level / range alerts ──────────────────────────
+                vi_levels: list = notif.market_vi_alerts.get("vi_levels", [])
+                if vi_levels:
+                    try:
+                        from src.volatility.cache import _get_redis
+                        r = _get_redis()
+                        prev_key = f"atd:vi_prev_score:{timeframe}"
+                        prev_raw = r.get(prev_key)
+                        prev_100 = float(prev_raw) * 100 if prev_raw else None
+                        r.set(prev_key, str(market_vi))
+                    except Exception:
+                        prev_100 = None
+                    send_vi_level_alerts(alert_cfg, market_vi * 100, timeframe, vi_levels, prev_100)
         except Exception as tg_exc:
             logger.warning("compute_market_vi(%s): Telegram error — %s", timeframe, tg_exc)
         return {

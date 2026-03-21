@@ -8,8 +8,8 @@
 //       → Gauge + session sparkline + components breakdown + pair context
 
 import { useEffect, useRef, useState, useCallback } from 'react'
-import { Link } from 'react-router-dom'
-import { RefreshCw, Loader2, AlertTriangle, Play, BookOpen } from 'lucide-react'
+import { Link, useNavigate } from 'react-router-dom'
+import { RefreshCw, Loader2, AlertTriangle, Play, BookOpen, Bell } from 'lucide-react'
 import { PageHeader } from '../../components/ui/PageHeader'
 import { Tooltip } from '../../components/ui/Tooltip'
 import { MarketVIGauge } from '../../components/volatility/MarketVIGauge'
@@ -17,6 +17,7 @@ import { VISparkline } from '../../components/volatility/VISparkline'
 import { VIHistoryChart } from '../../components/volatility/VIHistoryChart'
 import { VolatilityLegendPanel } from '../../components/volatility/VolatilityLegendPanel'
 import { volatilityApi } from '../../lib/api'
+import { useProfile } from '../../context/ProfileContext'
 import type { AggregatedMarketVIOut, MarketVIOut, PairVIOut, TFComponentOut } from '../../types/api'
 
 const TIMEFRAMES = ['15m', '1h', '4h', '1d'] as const
@@ -130,15 +131,17 @@ function TFMiniCard({ component, onClick, active }: {
 // ── Main page component ───────────────────────────────────────────────────
 
 export function MarketVIPage() {
+  const { activeProfileId: profileId } = useProfile()
+  const navigate = useNavigate()
   // null = aggregated view, otherwise a TF drill-down
   const [activeTF, setActiveTF] = useState<TF | null>(null)
   const [showLegend, setShowLegend] = useState(false)
   const [showAllPairs, setShowAllPairs] = useState(false)
+  const [alertToast, setAlertToast] = useState<string | null>(null)
 
   const [aggregated, setAggregated] = useState<AggregatedMarketVIOut | null>(null)
   const [tfData, setTfData] = useState<MarketVIOut | null>(null)
   const [pairsData, setPairsData] = useState<PairVIOut[]>([])
-
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [sparkPoints, setSparkPoints] = useState<SparkPoint[]>([])
@@ -263,10 +266,38 @@ export function MarketVIPage() {
   }, [activeTF])
 
   // Display score + regime for the hero gauge
-  const heroScore = activeTF === null ? (aggregated?.vi_score ?? null) : (tfData?.vi_score ?? null)
+  const heroScore  = activeTF === null ? (aggregated?.vi_score ?? null) : (tfData?.vi_score ?? null)
   const heroRegime = activeTF === null ? (aggregated?.regime ?? '') : (tfData?.regime ?? '')
-  const heroTs = activeTF === null ? (aggregated?.timestamp ?? '') : (tfData?.timestamp ?? '')
-  const heroColor = REGIME_COLOR_HEX[heroRegime] ?? '#a1a1aa'
+  const heroTs     = activeTF === null ? (aggregated?.timestamp ?? '') : (tfData?.timestamp ?? '')
+  const heroColor  = REGIME_COLOR_HEX[heroRegime] ?? '#a1a1aa'
+
+  // Create alert from chart (right-click or smart suggestion)
+  const handleCreateAlert = useCallback(async (level: number) => {
+    if (!profileId) { navigate('/settings/notifications'); return }
+    try {
+      const current = await volatilityApi.getNotificationSettings(profileId)
+      const existing: unknown[] = (current.market_vi_alerts as Record<string, unknown>)?.vi_levels as unknown[] ?? []
+      const newLevel = {
+        id:          Date.now().toString(),
+        label:       `Chart alert VI = ${level}`,
+        type:        'crossing',
+        value:       level,
+        direction:   'both',
+        enabled:     true,
+        cooldown_min: 30,
+      }
+      await volatilityApi.updateNotificationSettings(profileId, {
+        market_vi_alerts: {
+          ...(current.market_vi_alerts as Record<string, unknown>),
+          vi_levels: [...existing, newLevel],
+        },
+      })
+      setAlertToast(`✅ Alert set at VI = ${level}`)
+    } catch {
+      setAlertToast(`⚠️ Could not save alert — configure in Settings`)
+    }
+    setTimeout(() => setAlertToast(null), 4000)
+  }, [profileId, navigate])
 
   return (
     <div className="space-y-4">
@@ -330,6 +361,15 @@ export function MarketVIPage() {
           </div>
         </div>
       </div>
+
+      {/* ── Alert toast ── */}
+      {alertToast && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 px-4 py-2.5 rounded-xl bg-zinc-900 border border-zinc-700 shadow-2xl text-sm text-slate-200">
+          <Bell size={14} className="text-amber-400 shrink-0" />
+          {alertToast}
+          <button onClick={() => navigate('/settings/notifications')} className="ml-2 text-xs text-brand-400 hover:underline">Configure</button>
+        </div>
+      )}
 
       {/* ── Status banner ── */}
       {runStatus && (
@@ -485,7 +525,7 @@ export function MarketVIPage() {
             <p className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-3">History</p>
             {activeTF === null ? (
               <div className="space-y-4">
-                <VIHistoryChart timeframe="aggregated" defaultColor={heroColor} />
+                <VIHistoryChart timeframe="aggregated" defaultColor={heroColor} onCreateAlert={handleCreateAlert} />
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   {TIMEFRAMES.map((tf) => (
                     <VIHistoryChart key={tf} timeframe={tf} compact />
@@ -493,7 +533,7 @@ export function MarketVIPage() {
                 </div>
               </div>
             ) : (
-              <VIHistoryChart timeframe={activeTF} defaultColor={heroColor} />
+              <VIHistoryChart timeframe={activeTF} defaultColor={heroColor} onCreateAlert={handleCreateAlert} />
             )}
           </div>
 

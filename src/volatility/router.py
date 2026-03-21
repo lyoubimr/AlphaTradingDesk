@@ -19,7 +19,8 @@ Valid timeframes: 15m | 1h | 4h | 1d | 1w
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Body, Depends, HTTPException, status
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from src.core.deps import get_db
@@ -518,6 +519,17 @@ def update_volatility_settings(
 
 # ── Notification Settings ─────────────────────────────────────────────────────
 
+class TestNotificationRequest(BaseModel):
+    """Optional body for POST /notifications/{profile_id}/test.
+
+    - Pass bot_token + chat_id to test inline (before saving).
+    - Omit both (or omit the body entirely) to test bot at bot_index from saved bots.
+    """
+    bot_index: int = 0
+    bot_token: str | None = None
+    chat_id: str | None = None
+
+
 def _get_or_create_notif_settings(db: Session, profile_id: int) -> NotificationSettings:
     """Return existing NotificationSettings row, or insert defaults and return it."""
     row = db.query(NotificationSettings).filter(
@@ -593,9 +605,14 @@ def update_notification_settings(
 @router.post("/notifications/{profile_id}/test", status_code=200)
 def test_notification(
     profile_id: int,
+    body: "TestNotificationRequest | None" = Body(default=None),
     db: Session = Depends(get_db),
 ) -> dict:
-    """Send a test Telegram message to verify bot configuration."""
+    """Send a test Telegram message to verify bot configuration.
+
+    Pass bot_token + chat_id in body to test inline (without saving to DB first).
+    Omit them to test the saved bot at bot_index (default: 0).
+    """
     from src.core.models.broker import Profile
     from src.volatility.telegram import _dispatch
 
@@ -603,23 +620,32 @@ def test_notification(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Profile not found")
 
     row = _get_or_create_notif_settings(db, profile_id)
-    bots: list = row.bots or []
-    if not bots:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="No bots configured. Add at least one bot in notification settings.",
-        )
+    req = body or TestNotificationRequest()
 
-    first_bot = bots[0]
-    bot_token = first_bot.get("bot_token")
-    chat_id = first_bot.get("chat_id")
-    if not bot_token or not chat_id:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="First bot is missing bot_token or chat_id.",
-        )
+    # Inline test: credentials provided directly in request body
+    if req.bot_token and req.chat_id:
+        bot_token = req.bot_token
+        chat_id = req.chat_id
+    else:
+        # Test from saved bots list
+        bots: list = row.bots or []
+        if not bots:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="No bots configured. Add at least one bot in notification settings.",
+            )
+        idx = min(req.bot_index, len(bots) - 1)
+        first_bot = bots[idx]
+        bot_token = first_bot.get("bot_token")
+        chat_id = first_bot.get("chat_id")
+        if not bot_token or not chat_id:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Bot at index {idx} is missing bot_token or chat_id.",
+            )
 
-    success = _dispatch({"bot_token": bot_token, "chat_id": chat_id}, "🔔 AlphaTradingDesk — test message OK")
+    bot_label = req.bot_token[:8] + "…" if req.bot_token else f"bot[{req.bot_index}]"
+    success = _dispatch({"bot_token": bot_token, "chat_id": chat_id}, f"🔔 AlphaTradingDesk — test OK ({bot_label})")
     if not success:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,

@@ -287,3 +287,107 @@ def _dispatch(notification_cfg: dict, text: str) -> bool:
         return False
 
     return _send(bot_token, chat_id, text)
+
+
+# ── VI Level / Range alerts ───────────────────────────────────────────────────
+
+def send_vi_level_alerts(
+    cfg: dict,
+    market_vi_100: float,
+    timeframe: str,
+    vi_levels: list,
+    prev_score_100: float | None,
+) -> None:
+    """Check each configured VI level/range alert and send if triggered.
+
+    vi_levels item schema:
+      type: 'crossing' | 'range'
+      -- crossing: value (0-100), direction: 'up'|'down'|'both'
+      -- range:    min (0-100), max (0-100)
+      id, label?, enabled, cooldown_min
+    """
+    bot_token = cfg.get("bot_token")
+    chat_id   = cfg.get("chat_id")
+    if not bot_token or not chat_id:
+        return
+
+    tf_label = timeframe.upper()
+    curr = market_vi_100
+
+    try:
+        from src.volatility.cache import _get_redis
+        r = _get_redis()
+    except Exception:
+        r = None  # fail-open: alerts sent without cooldown if Redis is down
+
+    for lv in vi_levels:
+        if not lv.get("enabled", False):
+            continue
+
+        ltype    = lv.get("type", "crossing")
+        cooldown = max(1, int(lv.get("cooldown_min", 30)))
+        level_id = str(lv.get("id", lv.get("value", "custom")))
+        label    = lv.get("label") or ""
+
+        # ── Cooldown check ────────────────────────────────────────────────
+        ck = f"atd:alert_sent:vi_level:{timeframe}:{level_id}"
+        try:
+            if r and r.exists(ck):
+                continue
+        except Exception:
+            pass
+
+        # ── Trigger check ─────────────────────────────────────────────────
+        triggered = False
+        direction_arrow = "→"
+
+        if ltype == "crossing":
+            tval = float(lv.get("value", 0))
+            ldir = lv.get("direction", "both")
+            if prev_score_100 is not None:
+                up   = prev_score_100 < tval <= curr
+                down = prev_score_100 > tval >= curr
+                if ldir == "both":
+                    triggered = up or down
+                elif ldir == "up":
+                    triggered = up
+                else:
+                    triggered = down
+                direction_arrow = "↑" if up else "↓"
+        elif ltype == "range":
+            rmin = float(lv.get("min", 0))
+            rmax = float(lv.get("max", 100))
+            triggered = rmin <= curr <= rmax
+
+        if not triggered:
+            continue
+
+        # ── Set cooldown ──────────────────────────────────────────────────
+        try:
+            if r:
+                r.setex(ck, cooldown * 60, "1")
+        except Exception:
+            pass
+
+        # ── Build & send message ──────────────────────────────────────────
+        score_str = f"{curr:.1f}"
+        if ltype == "crossing":
+            tval   = float(lv.get("value", 0))
+            header = label or f"Level {tval:.0f} crossed"
+            msg = (
+                f"🔔 VI Level Alert — {tf_label}\n\n"
+                f"{header} {direction_arrow}\n"
+                f"Current VI: {score_str}\n"
+                f"Threshold: {tval:.0f}"
+            )
+        else:
+            rmin = float(lv.get("min", 0))
+            rmax = float(lv.get("max", 100))
+            header = label or f"Range {rmin:.0f}–{rmax:.0f}"
+            msg = (
+                f"🔔 VI Range Alert — {tf_label}\n\n"
+                f"{header}\n"
+                f"Current VI: {score_str} — in range [{rmin:.0f}, {rmax:.0f}]"
+            )
+
+        _send(bot_token, chat_id, msg)

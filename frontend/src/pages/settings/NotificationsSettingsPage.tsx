@@ -9,7 +9,7 @@
 
 import { useEffect, useState, useCallback } from 'react'
 import {
-  Save, Loader2, RefreshCw, Check, AlertTriangle, Plus, Trash2, Send,
+  Save, Loader2, RefreshCw, Check, AlertTriangle, Plus, Trash2, Send, Bell,
 } from 'lucide-react'
 import { PageHeader } from '../../components/ui/PageHeader'
 import { useProfile } from '../../context/ProfileContext'
@@ -24,11 +24,24 @@ interface TelegramBot {
   chat_id: string
 }
 
+interface VILevel {
+  id: string
+  label?: string
+  type: 'crossing' | 'range'
+  value?: number          // 0–100, for type='crossing'
+  direction?: 'both' | 'up' | 'down'
+  min?: number            // 0–100, for type='range'
+  max?: number            // 0–100, for type='range'
+  enabled: boolean
+  cooldown_min: number
+}
+
 interface MarketVIAlertsCfg {
   enabled: boolean
   bot_name?: string
   cooldown_min: number
   regimes: string[]
+  vi_levels: VILevel[]
 }
 
 interface TFAlertCfg {
@@ -49,6 +62,7 @@ const D_MVI_ALERTS: MarketVIAlertsCfg = {
   enabled: false,
   cooldown_min: 60,
   regimes: ['ACTIVE', 'EXTREME'],
+  vi_levels: [],
 }
 
 const D_TF_ALERT: TFAlertCfg = { enabled: false, cooldown_min: 30, vi_min: 0.5 }
@@ -68,10 +82,11 @@ type WLTf = typeof WL_TFS[number]
 
 function hydrateMVI(raw: Record<string, unknown>): MarketVIAlertsCfg {
   return {
-    enabled: (raw.enabled as boolean | undefined) ?? D_MVI_ALERTS.enabled,
-    bot_name: raw.bot_name as string | undefined,
+    enabled:      (raw.enabled as boolean | undefined) ?? D_MVI_ALERTS.enabled,
+    bot_name:     raw.bot_name as string | undefined,
     cooldown_min: (raw.cooldown_min as number | undefined) ?? D_MVI_ALERTS.cooldown_min,
-    regimes: (raw.regimes as string[] | undefined) ?? D_MVI_ALERTS.regimes,
+    regimes:      (raw.regimes as string[] | undefined) ?? D_MVI_ALERTS.regimes,
+    vi_levels:    (raw.vi_levels as VILevel[] | undefined) ?? [],
   }
 }
 
@@ -144,6 +159,19 @@ export function NotificationsSettingsPage() {
   const [newToken, setNewToken] = useState('')
   const [newChat,  setNewChat]  = useState('')
 
+  // Per-bot test state
+  const [testingBot, setTestingBot] = useState<number | null>(null)
+  const [botTestResults, setBotTestResults] = useState<Record<number, { ok: boolean; text: string }>>({})
+
+  // VI level add-form state
+  const [vlType,     setVlType]     = useState<'crossing' | 'range'>('crossing')
+  const [vlValue,    setVlValue]    = useState('')
+  const [vlMin,      setVlMin]      = useState('')
+  const [vlMax,      setVlMax]      = useState('')
+  const [vlDir,      setVlDir]      = useState<'both' | 'up' | 'down'>('both')
+  const [vlLabel,    setVlLabel]    = useState('')
+  const [vlCooldown, setVlCooldown] = useState('30')
+
   const load = useCallback(async () => {
     if (!profileId) return
     setLoading(true)
@@ -213,6 +241,46 @@ export function NotificationsSettingsPage() {
 
   const removeBot = (idx: number) => setBots(prev => prev.filter((_, i) => i !== idx))
 
+  const testBot = async (b: TelegramBot, i: number) => {
+    if (!profileId) return
+    setTestingBot(i)
+    setBotTestResults(p => { const n = { ...p }; delete n[i]; return n })
+    try {
+      await volatilityApi.testNotification(profileId, { botToken: b.bot_token, chatId: b.chat_id })
+      setBotTestResults(p => ({ ...p, [i]: { ok: true, text: 'Message sent ✓' } }))
+    } catch {
+      setBotTestResults(p => ({ ...p, [i]: { ok: false, text: 'Failed — check token & chat ID' } }))
+    } finally {
+      setTestingBot(null)
+    }
+  }
+
+  const addVILevel = () => {
+    if (vlType === 'crossing' && !vlValue.trim()) return
+    if (vlType === 'range' && (!vlMin.trim() || !vlMax.trim())) return
+    const newLevel: VILevel = {
+      id: Date.now().toString(),
+      label:       vlLabel.trim() || undefined,
+      type:        vlType,
+      ...(vlType === 'crossing'
+        ? { value: Number(vlValue), direction: vlDir }
+        : { min: Number(vlMin), max: Number(vlMax) }),
+      enabled:     true,
+      cooldown_min: Number(vlCooldown) || 30,
+    }
+    setMviA(p => ({ ...p, vi_levels: [...p.vi_levels, newLevel] }))
+    setVlValue(''); setVlMin(''); setVlMax(''); setVlLabel(''); setVlCooldown('30')
+  }
+
+  const removeVILevel = (id: string) =>
+    setMviA(p => ({ ...p, vi_levels: p.vi_levels.filter(l => l.id !== id) }))
+
+  const toggleVILevel = (id: string) =>
+    setMviA(p => ({
+      ...p,
+      vi_levels: p.vi_levels.map(l => l.id === id ? { ...l, enabled: !l.enabled } : l),
+    }))
+
   const toggleRegime = (r: string) =>
     setMviA(p => ({
       ...p,
@@ -268,26 +336,46 @@ export function NotificationsSettingsPage() {
               <p className="text-xs text-slate-600 italic">No bots configured yet</p>
             )}
             {bots.map((b, i) => (
-              <div
-                key={i}
-                className="flex items-center justify-between gap-3 py-2.5 border-b border-surface-700 last:border-none"
-              >
-                <div className="min-w-0">
-                  <p className="text-xs font-medium text-slate-300 truncate">
-                    {b.bot_name ?? <span className="text-slate-500 italic">unnamed</span>}
-                  </p>
-                  <p className="text-[10px] font-mono text-slate-600">
-                    …{b.bot_token.slice(-8)} · chat {b.chat_id}
-                  </p>
+              <div key={i} className="py-2.5 border-b border-surface-700 last:border-none">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0 flex-1">
+                    <p className="text-xs font-medium text-slate-300 truncate">
+                      {b.bot_name ?? <span className="text-slate-500 italic">unnamed</span>}
+                    </p>
+                    <p className="text-[10px] font-mono text-slate-600">
+                      …{b.bot_token.slice(-8)} · chat {b.chat_id}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => void testBot(b, i)}
+                      disabled={testingBot === i}
+                      title="Test this bot (inline — works before saving)"
+                      className="inline-flex items-center gap-1 px-2 py-1 rounded text-[10px] text-indigo-400 bg-indigo-600/10 border border-indigo-600/30 hover:bg-indigo-600/20 disabled:opacity-40 transition-colors"
+                    >
+                      {testingBot === i ? <Loader2 size={10} className="animate-spin" /> : <Send size={10} />}
+                      Test
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => removeBot(i)}
+                      className="text-slate-600 hover:text-red-400 transition-colors"
+                      aria-label="Remove bot"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => removeBot(i)}
-                  className="text-slate-600 hover:text-red-400 transition-colors shrink-0"
-                  aria-label="Remove bot"
-                >
-                  <Trash2 size={14} />
-                </button>
+                {botTestResults[i] && (
+                  <p className={cn(
+                    'text-[10px] mt-1.5 flex items-center gap-1',
+                    botTestResults[i].ok ? 'text-emerald-400' : 'text-red-400',
+                  )}>
+                    {botTestResults[i].ok ? <Check size={10} /> : <AlertTriangle size={10} />}
+                    {botTestResults[i].text}
+                  </p>
+                )}
               </div>
             ))}
 
@@ -408,7 +496,7 @@ export function NotificationsSettingsPage() {
 
             {/* Trigger regimes */}
             <div>
-              <p className="text-xs text-slate-400 mb-2">Trigger regimes</p>
+              <p className="text-xs text-slate-400 mb-2">Trigger on regime change</p>
               <div className="flex flex-wrap gap-2">
                 {REGIMES.map(r => {
                   const active = mviA.regimes.includes(r)
@@ -430,6 +518,146 @@ export function NotificationsSettingsPage() {
                 })}
               </div>
             </div>
+
+            {/* ── VI Level / Range Alerts ──────────────────────────────────── */}
+            <div className="border-t border-surface-700 pt-4">
+              <div className="flex items-center gap-2 mb-3">
+                <Bell size={13} className="text-brand-400" />
+                <p className="text-xs font-semibold text-slate-300">Custom VI Level Alerts</p>
+                <span className="text-[10px] text-slate-600">trigger on exact value or range (0–100 scale)</span>
+              </div>
+
+              {/* Existing levels */}
+              {mviA.vi_levels.length === 0 && (
+                <p className="text-xs text-slate-600 italic mb-3">No custom levels yet</p>
+              )}
+              <div className="space-y-2 mb-3">
+                {mviA.vi_levels.map(lv => (
+                  <div key={lv.id} className="flex items-center justify-between gap-3 px-3 py-2 rounded-lg bg-surface-700/60 border border-surface-600">
+                    <div className="flex items-center gap-2 min-w-0 flex-1">
+                      <Toggle on={lv.enabled} onChange={() => toggleVILevel(lv.id)} label="toggle" />
+                      <div className="min-w-0">
+                        <p className="text-[11px] font-medium text-slate-300 truncate">
+                          {lv.label || (lv.type === 'crossing'
+                            ? `VI = ${lv.value} ${lv.direction === 'up' ? '↑' : lv.direction === 'down' ? '↓' : '↕'}`
+                            : `VI ∈ [${lv.min}, ${lv.max}]`)}
+                        </p>
+                        <p className="text-[10px] text-slate-600">
+                          {lv.type} · cooldown {lv.cooldown_min}min
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => removeVILevel(lv.id)}
+                      className="text-slate-600 hover:text-red-400 transition-colors shrink-0"
+                    >
+                      <Trash2 size={13} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+
+              {/* Add level form */}
+              <div className="rounded-lg border border-surface-600 bg-surface-700/30 p-3 space-y-2">
+                <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide">Add alert</p>
+                {/* Type selector */}
+                <div className="flex gap-1">
+                  {(['crossing', 'range'] as const).map(t => (
+                    <button
+                      key={t}
+                      type="button"
+                      onClick={() => setVlType(t)}
+                      className={cn(
+                        'px-3 py-1 rounded text-[11px] font-medium transition-colors',
+                        vlType === t
+                          ? 'bg-brand-600/25 border border-brand-500/50 text-brand-300'
+                          : 'bg-surface-700 border border-surface-600 text-slate-500 hover:text-slate-300',
+                      )}
+                    >{t}</button>
+                  ))}
+                </div>
+
+                {vlType === 'crossing' ? (
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                    <div>
+                      <p className="text-[10px] text-slate-500 mb-1">VI value (0–100)</p>
+                      <input
+                        type="number" min={0} max={100} step={1}
+                        value={vlValue} onChange={e => setVlValue(e.target.value)}
+                        placeholder="e.g. 22"
+                        className={cn(inputCls)}
+                      />
+                    </div>
+                    <div>
+                      <p className="text-[10px] text-slate-500 mb-1">Direction</p>
+                      <select
+                        value={vlDir}
+                        onChange={e => setVlDir(e.target.value as typeof vlDir)}
+                        className="w-full px-2 py-2 rounded-lg bg-surface-700 border border-surface-600 text-xs text-slate-300 focus:outline-none focus:border-brand-500/60"
+                      >
+                        <option value="both">↕ Both</option>
+                        <option value="up">↑ Up only</option>
+                        <option value="down">↓ Down only</option>
+                      </select>
+                    </div>
+                    <div>
+                      <p className="text-[10px] text-slate-500 mb-1">Cooldown (min)</p>
+                      <input
+                        type="number" min={1} max={1440}
+                        value={vlCooldown} onChange={e => setVlCooldown(e.target.value)}
+                        className={cn(inputCls)}
+                      />
+                    </div>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                    <div>
+                      <p className="text-[10px] text-slate-500 mb-1">Min (≥)</p>
+                      <input
+                        type="number" min={0} max={100}
+                        value={vlMin} onChange={e => setVlMin(e.target.value)}
+                        placeholder="e.g. 12"
+                        className={cn(inputCls)}
+                      />
+                    </div>
+                    <div>
+                      <p className="text-[10px] text-slate-500 mb-1">Max (≤)</p>
+                      <input
+                        type="number" min={0} max={100}
+                        value={vlMax} onChange={e => setVlMax(e.target.value)}
+                        placeholder="e.g. 20"
+                        className={cn(inputCls)}
+                      />
+                    </div>
+                    <div>
+                      <p className="text-[10px] text-slate-500 mb-1">Cooldown (min)</p>
+                      <input
+                        type="number" min={1} max={1440}
+                        value={vlCooldown} onChange={e => setVlCooldown(e.target.value)}
+                        className={cn(inputCls)}
+                      />
+                    </div>
+                  </div>
+                )}
+
+                <input
+                  value={vlLabel}
+                  onChange={e => setVlLabel(e.target.value)}
+                  placeholder="Label (optional)"
+                  className={cn(inputCls)}
+                />
+                <button
+                  type="button"
+                  onClick={addVILevel}
+                  disabled={vlType === 'crossing' ? !vlValue : !vlMin || !vlMax}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-surface-700 hover:bg-surface-600 disabled:opacity-40 text-xs text-slate-300 transition-colors"
+                >
+                  <Plus size={13} /> Add level
+                </button>
+              </div>
+            </div>
+
           </div>
         </section>
 

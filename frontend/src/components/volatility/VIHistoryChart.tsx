@@ -176,7 +176,21 @@ export function VIHistoryChart({ timeframe, defaultColor = '#a1a1aa', compact = 
           )}
         </div>
 
-        {/* Range selector */}
+        <div className="flex items-center gap-2">
+          {/* Smart proposals toggle (non-compact only) */}
+          {!compact && onCreateAlert && (
+            <button
+              onClick={() => setShowSmart(v => !v)}
+              title={showSmart ? 'Hide smart suggestions' : 'Show smart alert suggestions'}
+              className={`p-1.5 rounded transition-colors ${
+                showSmart ? 'text-amber-400 bg-amber-500/10 border border-amber-500/20' : 'text-zinc-600 hover:text-zinc-300'
+              }`}
+            >
+              <Lightbulb size={13} />
+            </button>
+          )}
+
+          {/* Range selector */}}
         <div className="flex gap-0.5 bg-zinc-900 border border-zinc-800 rounded-md p-0.5">
           {(['1h', '6h', '24h', '7d', '30d'] as Range[]).map((r) => (
             <button
@@ -191,6 +205,7 @@ export function VIHistoryChart({ timeframe, defaultColor = '#a1a1aa', compact = 
               {r}
             </button>
           ))}
+        </div>
         </div>
       </div>
 
@@ -208,76 +223,132 @@ export function VIHistoryChart({ timeframe, defaultColor = '#a1a1aa', compact = 
           {error ?? 'No data in this time range.'}
         </div>
       ) : (
-        <ResponsiveContainer width="100%" height={chartHeight}>
-          <AreaChart data={data} margin={{ top: 6, right: 4, bottom: 0, left: -14 }}>
-            <defs>
-              <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
-                <stop offset="5%"  stopColor={activeColor} stopOpacity={0.35} />
-                <stop offset="95%" stopColor={activeColor} stopOpacity={0.03} />
-              </linearGradient>
-            </defs>
+        <div
+          className="relative"
+          onContextMenu={onCreateAlert ? (e) => {
+            e.preventDefault()
+            if (hoveredScore !== null) {
+              setCtxMenu({ x: e.clientX, y: e.clientY, level: Math.round(hoveredScore) })
+            }
+          } : undefined}
+        >
+          <ResponsiveContainer width="100%" height={chartHeight}>
+            <AreaChart
+              data={data}
+              margin={{ top: 6, right: 4, bottom: 0, left: -14 }}
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              onMouseMove={(e: any) => {
+                if (e?.activePayload?.[0]?.value != null) {
+                  setHoveredScore(e.activePayload[0].value as number)
+                }
+              }}
+              onMouseLeave={() => setHoveredScore(null)}
+            >
+              <defs>
+                <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%"  stopColor={activeColor} stopOpacity={0.35} />
+                  <stop offset="95%" stopColor={activeColor} stopOpacity={0.03} />
+                </linearGradient>
+              </defs>
 
-            <CartesianGrid
-              strokeDasharray="3 3"
-              stroke="#27272a"
-              vertical={false}
-            />
-
-            {/* Regime boundary reference lines */}
-            {REGIME_THRESHOLDS.map((t) => (
-              <ReferenceLine
-                key={t}
-                y={t}
-                stroke="#3f3f46"
-                strokeDasharray="4 3"
-                label={compact ? undefined : {
-                  value: THRESHOLD_LABELS[t],
-                  position: 'insideTopRight',
-                  fill: '#52525b',
-                  fontSize: 9,
-                  fontFamily: 'monospace',
-                }}
+              <CartesianGrid
+                strokeDasharray="3 3"
+                stroke="#27272a"
+                vertical={false}
               />
-            ))}
 
-            <XAxis
-              dataKey="ts"
-              type="number"
-              domain={['dataMin', 'dataMax']}
-              scale="time"
-              tickFormatter={(v) => formatXTick(v as number, range)}
-              tick={{ fill: '#52525b', fontSize: 10, fontFamily: 'monospace' }}
-              axisLine={false}
-              tickLine={false}
-              minTickGap={compact ? 50 : 40}
-            />
+              {/* Regime boundary reference lines */}
+              {REGIME_THRESHOLDS.filter(t => t > domainMin && t < domainMax).map((t) => (
+                <ReferenceLine
+                  key={t}
+                  y={t}
+                  stroke="#3f3f46"
+                  strokeDasharray="4 3"
+                  label={compact ? undefined : {
+                    value: THRESHOLD_LABELS[t],
+                    position: 'insideTopRight',
+                    fill: '#52525b',
+                    fontSize: 9,
+                    fontFamily: 'monospace',
+                  }}
+                />
+              ))}
 
-            <YAxis
-              domain={[0, 100]}
-              ticks={compact ? [0, 50, 100] : [0, 17, 33, 50, 67, 83, 100]}
-              tick={{ fill: '#52525b', fontSize: 10, fontFamily: 'monospace' }}
-              axisLine={false}
-              tickLine={false}
-              width={compact ? 22 : 28}
-            />
+              {/* Smart proposal level reference lines */}
+              {proposedLevels.map(pl => (
+                <ReferenceLine
+                  key={`smart-${pl.level}`}
+                  y={pl.level}
+                  stroke="#f59e0b"
+                  strokeDasharray="2 4"
+                  strokeOpacity={0.5}
+                />
+              ))}
 
-            <Tooltip
-              content={<CustomTooltip />}
-              cursor={{ stroke: '#52525b', strokeWidth: 1 }}
-            />
+              <XAxis
+                dataKey="ts"
+                type="number"
+                domain={['dataMin', 'dataMax']}
+                scale="time"
+                tickFormatter={(v) => formatXTick(v as number, range)}
+                tick={{ fill: '#52525b', fontSize: 10, fontFamily: 'monospace' }}
+                axisLine={false}
+                tickLine={false}
+                minTickGap={compact ? 50 : 40}
+              />
 
-            <Area
-              type="monotone"
-              dataKey="score"
-              stroke={activeColor}
-              strokeWidth={compact ? 1.5 : 2}
-              fill={`url(#${gradientId})`}
-              dot={false}
-              activeDot={{ r: 4, fill: activeColor, strokeWidth: 0 }}
-              isAnimationActive={false}
-            />
-          </AreaChart>
-        </ResponsiveContainer>
+              <YAxis
+                domain={[domainMin, domainMax]}
+                ticks={compact ? [domainMin, Math.round((domainMin + domainMax) / 2), domainMax] : visibleTicks}
+                tick={{ fill: '#52525b', fontSize: 10, fontFamily: 'monospace' }}
+                axisLine={false}
+                tickLine={false}
+                width={compact ? 22 : 28}
+              />
+
+              <Tooltip
+                content={<CustomTooltip />}
+                cursor={<CrosshairCursor />}
+              />
+
+              <Area
+                type="monotone"
+                dataKey="score"
+                stroke={activeColor}
+                strokeWidth={compact ? 1.5 : 2}
+                fill={`url(#${gradientId})`}
+                dot={false}
+                activeDot={{ r: 4, fill: activeColor, strokeWidth: 0 }}
+                isAnimationActive={false}
+              />
+            </AreaChart>
+          </ResponsiveContainer>
+
+          {/* Right-click context menu */}
+          {ctxMenu && (
+            <div
+              style={{ position: 'fixed', top: ctxMenu.y, left: ctxMenu.x, zIndex: 9999 }}
+              className="rounded-lg shadow-2xl bg-zinc-900 border border-zinc-700 py-1 min-w-[180px]"
+            >
+              <p className="px-3 pt-1 pb-0.5 text-[10px] text-zinc-600 font-mono uppercase tracking-wider">Chart alert</p>
+              <button
+                type="button"
+                onClick={() => { onCreateAlert?.(ctxMenu.level); setCtxMenu(null) }}
+                className="flex items-center gap-2 px-3 py-2 hover:bg-zinc-800 text-xs text-slate-300 w-full text-left transition-colors"
+              >
+                <Bell size={12} className="text-amber-400 shrink-0" />
+                Set alert at VI = {ctxMenu.level}
+              </button>
+              <button
+                type="button"
+                onClick={() => setCtxMenu(null)}
+                className="flex items-center gap-2 px-3 py-1.5 hover:bg-zinc-800 text-xs text-zinc-500 w-full text-left transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          )}
+        </div>
       )}
 
       {/* Stats bar */}
@@ -296,7 +367,45 @@ export function VIHistoryChart({ timeframe, defaultColor = '#a1a1aa', compact = 
               {data[data.length - 1].score.toFixed(1)}
             </span>
           </span>
+          {onCreateAlert && hoveredScore !== null && (
+            <span className="ml-auto text-zinc-500">
+              VI <span className="text-zinc-300">{hoveredScore.toFixed(1)}</span>
+              <span className="text-zinc-700"> · right-click to set alert</span>
+            </span>
+          )}
         </div>
+      )}
+
+      {/* Smart proposals panel */}
+      {showSmart && !compact && proposedLevels.length > 0 && (
+        <div className="mt-3 pt-3 border-t border-zinc-800">
+          <div className="flex items-center gap-2 mb-2">
+            <Lightbulb size={12} className="text-amber-400" />
+            <p className="text-xs font-semibold text-amber-400">Smart suggestions</p>
+            <span className="text-[10px] text-zinc-600">levels with repeated VI bounces in this range</span>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+            {proposedLevels.map(pl => (
+              <button
+                key={pl.level}
+                type="button"
+                onClick={() => onCreateAlert?.(pl.level)}
+                className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg border border-amber-500/20 bg-amber-500/5 hover:bg-amber-500/10 transition-colors text-left"
+              >
+                <div>
+                  <p className="text-xs font-mono font-bold text-amber-300">VI {pl.level}</p>
+                  <p className="text-[10px] text-zinc-600">{pl.touches}× touched · {pl.direction}</p>
+                </div>
+                <Bell size={12} className="text-amber-500/60 shrink-0" />
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+      {showSmart && !compact && proposedLevels.length === 0 && data.length >= 15 && (
+        <p className="mt-3 text-[11px] text-zinc-600 italic">
+          No significant level detected in this range — try a wider range (7d, 30d).
+        </p>
       )}
     </div>
   )
