@@ -2,7 +2,7 @@
 // Root layout: sidebar (fixed left) + topbar + scrollable main content.
 // On mobile (< lg) the sidebar becomes an off-canvas drawer toggled by a
 // hamburger button in the topbar.
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Outlet } from 'react-router-dom'
 import { Sidebar } from '../components/sidebar/Sidebar'
 import { Topbar } from '../components/topbar/Topbar'
