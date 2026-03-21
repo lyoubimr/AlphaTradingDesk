@@ -1,7 +1,9 @@
 // ── AppLayout ──────────────────────────────────────────────────────────────
 // Root layout: sidebar (fixed left) + topbar + scrollable main content.
+// On mobile (< lg) the sidebar becomes an off-canvas drawer toggled by a
+// hamburger button in the topbar.
 import { useEffect, useState } from 'react'
-import { Outlet } from 'react-router-dom'
+import { Outlet, useLocation } from 'react-router-dom'
 import { Sidebar } from '../components/sidebar/Sidebar'
 import { Topbar } from '../components/topbar/Topbar'
 import { ProfileProvider } from '../context/ProfileContext'
@@ -48,17 +50,40 @@ function useApiHealth(): { status: ApiStatus; environment?: string; version?: st
 
 export function AppLayout() {
   const { status: apiStatus, environment, version } = useApiHealth()
+  const [sidebarOpen, setSidebarOpen] = useState(false)
+  const location = useLocation()
+
+  // Close drawer on route change (mobile nav)
+  useEffect(() => {
+    setSidebarOpen(false)
+  }, [location.pathname])
 
   return (
     <ProfileProvider>
       <div className="flex h-screen bg-surface-950 overflow-hidden">
-        <Sidebar apiStatus={apiStatus} environment={environment} version={version} />
+
+        {/* ── Mobile backdrop ─────────────────────────────────────────── */}
+        {sidebarOpen && (
+          <div
+            className="fixed inset-0 z-40 bg-black/60 lg:hidden"
+            onClick={() => setSidebarOpen(false)}
+            aria-hidden="true"
+          />
+        )}
+
+        <Sidebar
+          apiStatus={apiStatus}
+          environment={environment}
+          version={version}
+          isOpen={sidebarOpen}
+          onClose={() => setSidebarOpen(false)}
+        />
 
         <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
-          <Topbar />
+          <Topbar onMenuOpen={() => setSidebarOpen(true)} />
 
           <main className="flex-1 overflow-y-auto">
-            <div className="max-w-7xl mx-auto px-6 py-6">
+            <div className="max-w-7xl mx-auto px-3 sm:px-6 py-4 sm:py-6">
               <Outlet />
             </div>
           </main>
