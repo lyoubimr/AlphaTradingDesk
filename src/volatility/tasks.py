@@ -55,6 +55,18 @@ def _first_chat_id(bots: list) -> str | None:
     return bots[0].get("chat_id") if bots else None
 
 
+def _resolve_bot(bots: list, bot_name: str | None) -> tuple[str | None, str | None]:
+    """Return (bot_token, chat_id) for the named bot, or the first bot as fallback."""
+    if bot_name:
+        for b in bots:
+            if b.get("bot_name") == bot_name:
+                return b.get("bot_token"), b.get("chat_id")
+    # fallback: first bot in list
+    if bots:
+        return bots[0].get("bot_token"), bots[0].get("chat_id")
+    return None, None
+
+
 # Timeframe hierarchy for TF+1 column in watchlist
 # Key = current TF, Value = next higher TF to look up in DB
 _TF_SUPERIOR: dict[str, str] = {
@@ -405,12 +417,13 @@ def compute_market_vi(self, timeframe: str) -> dict:  # type: ignore[override]
             from src.volatility.telegram import send_market_vi_alert, send_vi_level_alerts
             notif = db.query(NotificationSettings).first()
             if notif:
-                alert_cfg = {**notif.market_vi_alerts, "bot_token": _first_bot_token(notif.bots), "chat_id": _first_chat_id(notif.bots)}
+                bot_token, chat_id = _resolve_bot(notif.bots, notif.market_vi_alerts.get("bot_name"))
+                alert_cfg = {**notif.market_vi_alerts, "bot_token": bot_token, "chat_id": chat_id}
                 send_market_vi_alert(alert_cfg, market_vi, regime, timeframe, components)
 
-                # ── 10b. VI level / range alerts ──────────────────────────
+                # ── 10b. VI level / range alerts ────────────────────────
                 vi_levels: list = notif.market_vi_alerts.get("vi_levels", [])
-                if vi_levels:
+                if vi_levels and notif.market_vi_alerts.get("enabled", False):
                     try:
                         from src.volatility.cache import _get_redis
                         r = _get_redis()
@@ -750,7 +763,8 @@ def compute_pair_vi(self, timeframe: str, force: bool = False) -> dict:  # type:
             from src.volatility.telegram import send_watchlist_alert
             notif = db.query(NotificationSettings).first()
             if notif:
-                alert_cfg = {**notif.watchlist_alerts, "bot_token": _first_bot_token(notif.bots), "chat_id": _first_chat_id(notif.bots)}
+                bot_token, chat_id = _resolve_bot(notif.bots, notif.watchlist_alerts.get("bot_name"))
+                alert_cfg = {**notif.watchlist_alerts, "bot_token": bot_token, "chat_id": chat_id}
                 send_watchlist_alert(alert_cfg, watchlist_pairs, timeframe, dominant_regime, 0.0)
         except Exception as tg_exc:
             logger.warning("compute_pair_vi(%s): Telegram error — %s", timeframe, tg_exc)
