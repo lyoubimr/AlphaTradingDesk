@@ -443,8 +443,10 @@ def send_vi_level_alerts(
                 triggered = in_zone
             else:
                 # Transition-based: fire when VI enters the ±tolerance zone
-                up   = (prev_score_100 <= tval - tol) and (curr >= tval - tol)
-                down = (prev_score_100 >= tval + tol) and (curr <= tval + tol)
+                # Both conditions require curr to be inside the zone — prevents firing
+                # when VI overshoots (e.g. target=36±1, curr=28 crossing below 37)
+                up   = (prev_score_100 <= tval - tol) and in_zone
+                down = (prev_score_100 >= tval + tol) and in_zone
                 if ldir == "both":
                     triggered = up or down
                 elif ldir == "up":
