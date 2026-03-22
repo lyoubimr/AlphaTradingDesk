@@ -435,7 +435,7 @@ def compute_market_vi(self, timeframe: str) -> dict:  # type: ignore[override]
                         r = _get_redis()
                         prev_key = f"atd:vi_prev_score:{pid}:{timeframe}"
                         prev_raw = r.get(prev_key)
-                        prev_100 = float(prev_raw) * 100 if prev_raw else None
+                        prev_100 = float(str(prev_raw)) * 100 if prev_raw else None
                         r.set(prev_key, str(market_vi))
                     except Exception:
                         prev_100 = None
@@ -452,7 +452,7 @@ def compute_market_vi(self, timeframe: str) -> dict:  # type: ignore[override]
                             try:
                                 rr = _get_redis()
                                 prev_agg_raw = rr.get(f"atd:vi_prev_score:{pid}:aggregated")
-                                prev_agg = float(prev_agg_raw) * 100 if prev_agg_raw else None
+                                prev_agg = float(str(prev_agg_raw)) * 100 if prev_agg_raw else None
                                 rr.set(f"atd:vi_prev_score:{pid}:aggregated", str(agg_data["vi_score"]))
                             except Exception:
                                 prev_agg = None

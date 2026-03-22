@@ -444,8 +444,8 @@ def send_vi_level_alerts(
         # ── Day type filter — workday vs weekend ──────────────────────────
         lv_day_type = lv.get("day_type")
         if lv_day_type and lv_day_type != "any":
-            from datetime import datetime  # noqa: PLC0415
-            is_weekend = datetime.now(datetime.UTC).weekday() >= 5
+            from datetime import UTC, datetime  # noqa: PLC0415
+            is_weekend = datetime.now(UTC).weekday() >= 5
             if lv_day_type == "workday" and is_weekend:
                 continue
             if lv_day_type == "weekend" and not is_weekend:
