@@ -272,7 +272,7 @@ export function MarketVIPage() {
   const heroColor  = REGIME_COLOR_HEX[heroRegime] ?? '#a1a1aa'
 
   // Create alert from chart (right-click or smart suggestion)
-  const handleCreateAlert = useCallback(async (level: number, timeframe: string) => {
+  const handleCreateAlert = useCallback(async (level: number, timeframe: string, tolerance?: number) => {
     if (!profileId) { navigate('/settings/notifications'); return }
     try {
       const current = await volatilityApi.getNotificationSettings(profileId)
@@ -284,7 +284,7 @@ export function MarketVIPage() {
         type:         'crossing',
         value:        level,
         direction:    'both',
-        tolerance:    0.5,
+        tolerance:    tolerance !== undefined ? Math.round(tolerance) : 1,
         enabled:      true,
         cooldown_min: 30,
         timeframe:    timeframe,
@@ -506,7 +506,7 @@ export function MarketVIPage() {
                       </span>
                     )}
                   </div>
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     {aggregated.tf_components.map((c) => (
                       <TFMiniCard
                         key={c.tf}

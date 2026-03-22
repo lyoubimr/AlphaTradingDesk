@@ -379,13 +379,13 @@ export function WatchlistsPage() {
     <div className="flex flex-col gap-4" style={{ height: 'calc(100dvh - 80px)', minHeight: '400px' }}>
 
       {/* ── Topbar ── */}
-      <div className="flex items-center justify-between shrink-0">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 shrink-0">
         <PageHeader
           icon="👁"
           title="Pair Watchlists"
           subtitle="Snapshot history — select a snapshot to inspect pairs"
         />
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <Link
             to="/volatility/market"
             className="text-xs text-zinc-500 hover:text-zinc-300 transition-colors"
@@ -835,7 +835,7 @@ export function WatchlistsPage() {
               </div>
 
               {/* ── Pair table ── */}
-              <div className="overflow-y-auto flex-1">
+              <div className="overflow-x-auto overflow-y-auto flex-1">
                 <table className="w-full text-xs min-w-[680px]">
                   <thead className="bg-zinc-900/60 sticky top-0 z-10">
                     <tr className="border-b border-zinc-800">

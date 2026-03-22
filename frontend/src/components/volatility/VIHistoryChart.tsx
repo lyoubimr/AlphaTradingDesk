@@ -37,7 +37,7 @@ interface Props {
   /** compact mode: smaller chart height, used in grid layout */
   compact?: boolean
   /** if provided, enables right-click alert creation + smart proposals */
-  onCreateAlert?: (level: number, timeframe: string) => void
+  onCreateAlert?: (level: number, timeframe: string, tolerance?: number) => void
 }
 
 // ── Constants ─────────────────────────────────────────────────────────────
@@ -118,6 +118,7 @@ interface ProposedLevel {
   level: number
   touches: number
   direction: string
+  tolerance: number  // ±zone radius used for visit counting
 }
 
 function detectKeyLevels(data: ChartPoint[]): ProposedLevel[] {
@@ -173,9 +174,10 @@ function detectKeyLevels(data: ChartPoint[]): ProposedLevel[] {
     ...cluster(minima, 'support'),
   ]
     .map(c => ({
-      level:   Math.round(c.sum / c.count),
-      touches: countVisits(Math.round(c.sum / c.count)),
+      level:     Math.round(c.sum / c.count),
+      touches:   countVisits(Math.round(c.sum / c.count)),
       direction: c.direction,
+      tolerance: clusterTol,
     }))
     .filter(r => r.touches >= 2)
     .sort((a, b) => b.touches - a.touches)
@@ -195,10 +197,10 @@ function detectKeyLevels(data: ChartPoint[]): ProposedLevel[] {
   const minRounded = Math.round(rawMin)
   const maxRounded = Math.round(rawMax)
   if (!results.some(r => Math.abs(r.level - minRounded) <= clusterTol)) {
-    results.push({ level: minRounded, touches: countVisits(minRounded), direction: 'support' })
+    results.push({ level: minRounded, touches: countVisits(minRounded), direction: 'support',    tolerance: clusterTol })
   }
   if (!results.some(r => Math.abs(r.level - maxRounded) <= clusterTol)) {
-    results.push({ level: maxRounded, touches: countVisits(maxRounded), direction: 'resistance' })
+    results.push({ level: maxRounded, touches: countVisits(maxRounded), direction: 'resistance', tolerance: clusterTol })
   }
 
   return results
@@ -329,21 +331,21 @@ export function VIHistoryChart({ timeframe, defaultColor = '#a1a1aa', compact = 
           )}
 
           {/* Range selector */}
-        <div className="flex gap-0.5 bg-zinc-900 border border-zinc-800 rounded-md p-0.5">
-          {(['1h', '6h', '24h', '7d', '30d', '60d', '90d'] as Range[]).map((r) => (
-            <button
-              key={r}
-              onClick={() => setRange(r)}
-              className={`px-2 py-0.5 text-xs font-mono rounded transition-colors ${
-                r === range
-                  ? 'bg-zinc-700 text-zinc-100'
-                  : 'text-zinc-500 hover:text-zinc-300'
-              }`}
-            >
-              {r}
-            </button>
-          ))}
-        </div>
+          <div className="flex gap-0.5 bg-zinc-900 border border-zinc-800 rounded-md p-0.5 overflow-x-auto max-w-[180px] sm:max-w-none scrollbar-none">
+            {(['1h', '6h', '24h', '7d', '30d', '60d', '90d'] as Range[]).map((r) => (
+              <button
+                key={r}
+                onClick={() => setRange(r)}
+                className={`px-2 py-0.5 text-xs font-mono rounded transition-colors shrink-0 ${
+                  r === range
+                    ? 'bg-zinc-700 text-zinc-100'
+                    : 'text-zinc-500 hover:text-zinc-300'
+                }`}
+              >
+                {r}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
@@ -447,7 +449,7 @@ export function VIHistoryChart({ timeframe, defaultColor = '#a1a1aa', compact = 
                       x={props.x} y={props.y}
                       fill={isProposed ? '#f59e0b' : '#52525b'}
                       textAnchor="end" dominantBaseline="middle"
-                      fontSize={10} fontFamily="monospace"
+                      fontSize={isProposed ? 8 : 10} fontFamily="monospace"
                     >
                       {props.payload?.value}
                     </text>
@@ -455,7 +457,7 @@ export function VIHistoryChart({ timeframe, defaultColor = '#a1a1aa', compact = 
                 }}
                 axisLine={false}
                 tickLine={false}
-                width={compact ? 24 : 36}
+                width={compact ? 24 : 40}
               />
 
               <Tooltip
@@ -505,7 +507,7 @@ export function VIHistoryChart({ timeframe, defaultColor = '#a1a1aa', compact = 
 
       {/* Stats bar */}
       {data.length > 0 && !loading && (
-        <div className="mt-2 pt-2 border-t border-zinc-800 flex gap-4 text-xs font-mono text-zinc-600">
+        <div className="mt-2 pt-2 border-t border-zinc-800 flex flex-wrap gap-x-4 gap-y-1 text-xs font-mono text-zinc-600">
           <span>{data.length} pts</span>
           <span>
             min <span className="text-zinc-400">{Math.min(...data.map((d) => d.score)).toFixed(0)}</span>
@@ -541,11 +543,14 @@ export function VIHistoryChart({ timeframe, defaultColor = '#a1a1aa', compact = 
               <button
                 key={pl.level}
                 type="button"
-                onClick={() => onCreateAlert?.(pl.level, timeframe)}
+                onClick={() => onCreateAlert?.(pl.level, timeframe, pl.tolerance)}
                 className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg border border-amber-500/20 bg-amber-500/5 hover:bg-amber-500/10 transition-colors text-left"
               >
                 <div>
-                  <p className="text-xs font-mono font-bold text-amber-300">VI {pl.level}</p>
+                  <p className="text-xs font-mono font-bold text-amber-300">
+                    VI {pl.level}
+                    <span className="text-amber-500/60 font-normal"> ±{pl.tolerance.toFixed(0)}</span>
+                  </p>
                   <p className="text-[10px] text-zinc-600">{pl.touches}× touched · {pl.direction}</p>
                 </div>
                 <Bell size={12} className="text-amber-500/60 shrink-0" />
