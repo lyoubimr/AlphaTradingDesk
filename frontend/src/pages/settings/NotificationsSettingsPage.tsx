@@ -103,11 +103,6 @@ const DEFAULT_REGIME_TEMPLATE = `📡 <b>ATD Market VI</b> · {timeframe}
 
 <code>Components: {components}</code>`.trim()
 
-const _DEFAULT_LEVEL_TEMPLATE = `🔔 VI Level Alert — {timeframe}
-
-{label} {direction}
-Value: {score}   Threshold: {threshold}`.trim()
-
 const D_TF_ALERT: TFAlertCfg = { enabled: false, cooldown_min: 30, vi_min: 0.5 }
 
 const D_WL_ALERTS: WatchlistAlertsCfg = {
