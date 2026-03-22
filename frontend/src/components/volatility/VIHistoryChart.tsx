@@ -526,7 +526,7 @@ export function VIHistoryChart({ timeframe, defaultColor = '#a1a1aa', compact = 
               />
 
               <Tooltip
-                content={<CustomTooltip />}
+                content={(props) => hoveredScore !== null ? <CustomTooltip {...props} /> : null}
                 cursor={false}
               />
 
