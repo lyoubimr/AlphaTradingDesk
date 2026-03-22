@@ -16,6 +16,7 @@ import {
   Customized,
   usePlotArea,
   useActiveTooltipCoordinate,
+  useIsTooltipActive,
 } from 'recharts'
 import { Loader2, AlertTriangle, Bell, Lightbulb } from 'lucide-react'
 import { volatilityApi } from '../../lib/api'
@@ -89,8 +90,8 @@ function formatXTick(ts: number, range: Range): string {
 // ── Custom tooltip ─────────────────────────────────────────────────────────
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function CustomTooltip({ active, payload, isHovering }: { active?: boolean; payload?: any[]; isHovering?: boolean }) {
-  if (!isHovering || !active || !payload?.length) return null
+function CustomTooltip({ active, payload }: { active?: boolean; payload?: any[] }) {
+  if (!active || !payload?.length) return null
   const d = payload[0].payload as ChartPoint
   const color = REGIME_COLOR_HEX[d.regime] ?? '#a1a1aa'
   return (
@@ -216,22 +217,24 @@ function detectKeyLevels(data: ChartPoint[]): ProposedLevel[] {
   return results
 }
 
-// ── Crosshair — Recharts v3 hooks: usePlotArea + useActiveTooltipCoordinate ───────
-// • coord.y  = active tooltip y (mouse position inside plot area)
-// • plotArea = {x, y, width, height} of the SVG plot area
-// These hooks resolve the v2 cursor issue where points[0].y was always 0
+// ── ChartInteractions — crosshair + active dot via Recharts v3 hooks ───────────
+// useIsTooltipActive() is the ONLY reliable source of truth:
+// it is true ONLY when Recharts has an active data point under the cursor.
+// This avoids any chicken-egg issues and DOM-level false positives.
 
-function ChartCrosshair() {
+function ChartInteractions({ color }: { color: string }) {
+  const isActive = useIsTooltipActive()
   const plotArea = usePlotArea()
   const coord = useActiveTooltipCoordinate()
-  if (!coord || !plotArea) return null
+  if (!isActive || !coord || !plotArea) return null
   const { x: px, y: py, width: pw, height: ph } = plotArea
   return (
     <g pointerEvents="none">
-      <line x1={coord.x} y1={py} x2={coord.x} y2={py + ph}
-        stroke="#52525b" strokeWidth={1} strokeDasharray="3 3" />
-      <line x1={px} y1={coord.y} x2={px + pw} y2={coord.y}
-        stroke="#52525b" strokeWidth={1} strokeDasharray="3 3" />
+      {/* Crosshair */}
+      <line x1={coord.x} y1={py}      x2={coord.x} y2={py + ph} stroke="#52525b" strokeWidth={1} strokeDasharray="3 3" />
+      <line x1={px}      y1={coord.y} x2={px + pw} y2={coord.y} stroke="#52525b" strokeWidth={1} strokeDasharray="3 3" />
+      {/* Active dot */}
+      <circle cx={coord.x} cy={coord.y} r={4} fill={color} />
     </g>
   )
 }
@@ -318,7 +321,6 @@ export function VIHistoryChart({ timeframe, defaultColor = '#a1a1aa', compact = 
 
   // ── Alert feature state ───────────────────────────────────────────────
   const [showSmart, setShowSmart] = useState(false)
-  const [isHovering, setIsHovering] = useState(false)
   const [hoveredScore, setHoveredScore] = useState<number | null>(null)
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; level: number } | null>(null)
 
@@ -424,8 +426,6 @@ export function VIHistoryChart({ timeframe, defaultColor = '#a1a1aa', compact = 
       ) : (
         <div
           className="relative"
-          onMouseEnter={() => setIsHovering(true)}
-          onMouseLeave={() => { setIsHovering(false); setHoveredScore(null) }}
           onContextMenu={onCreateAlert ? (e) => {
             e.preventDefault()
             if (hoveredScore !== null) {
@@ -443,6 +443,7 @@ export function VIHistoryChart({ timeframe, defaultColor = '#a1a1aa', compact = 
                   setHoveredScore(e.activePayload[0].value as number)
                 }
               }}
+              onMouseLeave={() => setHoveredScore(null)}
             >
               <defs>
                 <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
@@ -528,12 +529,12 @@ export function VIHistoryChart({ timeframe, defaultColor = '#a1a1aa', compact = 
               />
 
               <Tooltip
-                content={(props) => <CustomTooltip {...props} isHovering={isHovering} />}
+                content={<CustomTooltip />}
                 cursor={false}
               />
 
-              {/* Crosshair via Recharts v3 hooks — rendered inside chart SVG */}
-              <Customized component={ChartCrosshair} />
+              {/* Crosshair + active dot — only when Recharts has a real active datapoint */}
+              <Customized component={() => <ChartInteractions color={activeColor} />} />
 
               <Area
                 type="monotone"
@@ -542,7 +543,7 @@ export function VIHistoryChart({ timeframe, defaultColor = '#a1a1aa', compact = 
                 strokeWidth={compact ? 1.5 : 2}
                 fill={`url(#${gradientId})`}
                 dot={false}
-                activeDot={isHovering ? { r: 4, fill: activeColor, strokeWidth: 0 } : false}
+                activeDot={false}
                 isAnimationActive={false}
               />
             </AreaChart>
