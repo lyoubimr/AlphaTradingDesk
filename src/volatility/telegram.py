@@ -46,10 +46,41 @@ _REGIME_SUMMARY: dict[str, str] = {
     "DEAD":     "No liquidity — avoid new entries",
 }
 
+# Regime → emoji
+_REGIME_EMOJI: dict[str, str] = {
+    "EXTREME":  "🔥",
+    "ACTIVE":   "⚡",
+    "TRENDING": "📈",
+    "NORMAL":   "⚖️",
+    "CALM":     "😴",
+    "DEAD":     "💀",
+}
+
+
+def _he(s: str) -> str:
+    """Minimal HTML escape for Telegram HTML parse mode."""
+    return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def _score_100_to_regime(score_100: float) -> str:
+    """Map VI score (0–100) to regime using default thresholds."""
+    s = score_100 / 100.0
+    if s <= 0.17:
+        return "DEAD"
+    if s <= 0.33:
+        return "CALM"
+    if s <= 0.50:
+        return "NORMAL"
+    if s <= 0.67:
+        return "TRENDING"
+    if s <= 0.83:
+        return "ACTIVE"
+    return "EXTREME"
+
 
 # ── Internal HTTP helper ──────────────────────────────────────────────────────
 
-def _send(bot_token: str, chat_id: str, text: str) -> bool:
+def _send(bot_token: str, chat_id: str, text: str, parse_mode: str = "HTML") -> bool:
     """POST a message to Telegram Bot API.
 
     Returns True on success, False on any error (fail-silent).
@@ -58,7 +89,7 @@ def _send(bot_token: str, chat_id: str, text: str) -> bool:
     try:
         resp = httpx.post(
             url,
-            json={"chat_id": chat_id, "text": text},
+            json={"chat_id": chat_id, "text": text, "parse_mode": parse_mode},
             timeout=_TIMEOUT,
         )
         if not resp.is_success:
@@ -149,16 +180,18 @@ def format_market_vi_message(
         except (KeyError, ValueError):
             logger.warning("format_market_vi_message: invalid template, falling back to default")
 
-    # Default format
+    # Default format (HTML)
     now = datetime.now(UTC).strftime("%d/%m %H:%M UTC")
+    r_emoji = _REGIME_EMOJI.get(regime, "📊")
+    r_summary = _REGIME_SUMMARY.get(regime, "")
     lines = [
-        f"ATD Market VI \u2014 {timeframe.upper()} | {now}",
-        f"Score: {vi_score:.3f}   Regime: {_REGIME_LABEL.get(regime, regime)}",
-        _REGIME_SUMMARY.get(regime, ""),
+        f"📡 <b>ATD Market VI</b> · {timeframe.upper()} — {now}",
+        f"📊 Score: <b>{vi_score:.3f}</b>",
+        f"{r_emoji} Regime: <b>{regime}</b> — {r_summary}",
     ]
     if comp_parts:
         lines.append("")
-        lines.append("Components: " + comp_str)
+        lines.append(f"<code>Components: {comp_str}</code>")
     return "\n".join(lines)
 
 
@@ -184,9 +217,10 @@ def format_watchlist_message(
         -> 3 pairs | setup_ready + opportunity
     """
     now = datetime.now(UTC).strftime("%d/%m %H:%M UTC")
+    mr_emoji = _REGIME_EMOJI.get(market_regime, "📊")
     lines = [
-        f"ATD Watchlist — {timeframe.upper()} | {now}",
-        f"Market: {market_regime} ({market_vi:.3f})",
+        f"📋 <b>ATD Watchlist</b> · {timeframe.upper()} — {now}",
+        f"Market: {mr_emoji} <b>{market_regime}</b> ({market_vi:.3f})",
         "",
     ]
 
@@ -200,20 +234,23 @@ def format_watchlist_message(
     for regime in regime_order:
         if regime not in grouped:
             continue
-        lines.append(regime)
+        r_emoji = _REGIME_EMOJI.get(regime, "")
+        lines.append(f"{r_emoji} <b>{regime}</b>")
+        pair_lines: list[str] = []
         for p in grouped[regime]:
-            pair = p.get("pair", "?")
+            pair = _he(p.get("pair", "?"))
             vi = float(p.get("vi_score", 0))
-            signal = p.get("ema_signal", "")
+            signal = _he(p.get("ema_signal", ""))
             chg = p.get("change_24h")
             chg_str = f"{chg:+.1f}%" if chg is not None else ""
-            lines.append(f"  {pair:<14} {vi:.2f}  {signal:<16} {chg_str}")
+            pair_lines.append(f"{pair:<14} {vi:.2f}  {signal:<16} {chg_str}")
+        lines.append("<code>" + "\n".join(pair_lines) + "</code>")
         lines.append("")
 
     # Summary line
     alerts = [p.get("alert") for p in pairs if p.get("alert")]
     unique_alerts = list(dict.fromkeys(a for a in alerts if a))  # stable dedup
-    lines.append(f"-> {len(pairs)} pairs" + (f" | {', '.join(unique_alerts)}" if unique_alerts else ""))
+    lines.append(f"→ {len(pairs)} pairs" + (f" | {', '.join(unique_alerts)}" if unique_alerts else ""))
     return "\n".join(lines)
 
 
@@ -422,23 +459,33 @@ def send_vi_level_alerts(
 
         # ── Build & send message ──────────────────────────────────────────
         score_str = f"{curr:.1f}"
+        now_str = datetime.now(UTC).strftime("%d/%m %H:%M UTC")
+        regime = _score_100_to_regime(curr)
+        r_emoji = _REGIME_EMOJI.get(regime, "📊")
+        r_summary = _REGIME_SUMMARY.get(regime, "")
         if ltype == "crossing":
-            tval   = float(lv.get("value", 0))
-            header = label or f"Level {tval:.0f} crossed"
+            tval = float(lv.get("value", 0))
+            tol  = max(0.0, float(lv.get("tolerance", 0.5)))
             msg = (
-                f"🔔 VI Level Alert — {tf_label}\n\n"
-                f"{header} {direction_arrow}\n"
-                f"Current VI: {score_str}\n"
-                f"Threshold: {tval:.0f}"
+                f"🔔 <b>VI Level Alert</b> · {tf_label}\n\n"
+                f"📊 Score: <b>{score_str}</b> {direction_arrow}\n"
+                f"{r_emoji} Regime: <b>{regime}</b> — {r_summary}\n\n"
+                f"🎯 Target: <b>{tval:.0f}</b> (±{tol:.1f})"
             )
+            if label:
+                msg += f"\n🏷 {_he(label)}"
+            msg += f"\n\n<i>{now_str}</i>"
         else:
             rmin = float(lv.get("min", 0))
             rmax = float(lv.get("max", 100))
-            header = label or f"Range {rmin:.0f}–{rmax:.0f}"
             msg = (
-                f"🔔 VI Range Alert — {tf_label}\n\n"
-                f"{header}\n"
-                f"Current VI: {score_str} — in range [{rmin:.0f}, {rmax:.0f}]"
+                f"🔔 <b>VI Range Alert</b> · {tf_label}\n\n"
+                f"📊 Score: <b>{score_str}</b>\n"
+                f"{r_emoji} Regime: <b>{regime}</b> — {r_summary}\n\n"
+                f"📏 Range: [<b>{rmin:.0f} – {rmax:.0f}</b>]"
             )
+            if label:
+                msg += f"\n🏷 {_he(label)}"
+            msg += f"\n\n<i>{now_str}</i>"
 
         _send(bot_token, chat_id, msg)
