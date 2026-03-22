@@ -1244,12 +1244,6 @@ export function NotificationsSettingsPage() {
                 >
                   Cancel
                 </button>
-                  type="button"
-                  onClick={() => setTemplateModalTf(null)}
-                  className="px-3 py-1.5 rounded-lg bg-surface-700 hover:bg-surface-600 text-xs text-slate-400 transition-colors"
-                >
-                  Cancel
-                </button>
                 <button
                   type="button"
                   onClick={confirmTemplate}
