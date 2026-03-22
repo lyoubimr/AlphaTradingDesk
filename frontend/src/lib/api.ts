@@ -496,9 +496,23 @@ export const volatilityApi = {
       body: JSON.stringify(patch),
     }),
 
-  /** POST /api/volatility/notifications/{profileId}/test */
-  testNotification: (profileId: number): Promise<{ status: string; message: string }> =>
-    request(`/volatility/notifications/${profileId}/test`, { method: 'POST' }),
+  /** POST /api/volatility/notifications/{profileId}/test
+   *  - Omit opts to test saved bots[0] from DB
+   *  - Pass botToken + chatId for inline test (before saving)
+   *  - Pass botIndex to test a specific saved bot by index
+   */
+  testNotification: (
+    profileId: number,
+    opts?: { botIndex?: number; botToken?: string; chatId?: string },
+  ): Promise<{ status: string; message: string }> =>
+    request(`/volatility/notifications/${profileId}/test`, {
+      method: 'POST',
+      body: JSON.stringify({
+        bot_index: opts?.botIndex ?? 0,
+        bot_token: opts?.botToken ?? null,
+        chat_id:   opts?.chatId  ?? null,
+      }),
+    }),
 }
 
 // ── Risk Management ───────────────────────────────────────────────────────
