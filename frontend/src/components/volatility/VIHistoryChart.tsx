@@ -169,16 +169,23 @@ function detectKeyLevels(data: ChartPoint[]): ProposedLevel[] {
     return visits
   }
 
+  // Per-level tolerance: proportional to the level value, capped at clusterTol
+  // VI=8→±1, VI=24→±2, VI=42→±3, VI=62–88→±4 (with clusterTol=4)
+  const levelTol = (level: number) => Math.max(1, Math.min(clusterTol, Math.round(level * 0.07)))
+
   const raw: ProposedLevel[] = [
     ...cluster(maxima, 'resistance'),
     ...cluster(minima, 'support'),
   ]
-    .map(c => ({
-      level:     Math.round(c.sum / c.count),
-      touches:   countVisits(Math.round(c.sum / c.count)),
-      direction: c.direction,
-      tolerance: clusterTol,
-    }))
+    .map(c => {
+      const level = Math.round(c.sum / c.count)
+      return {
+        level,
+        touches:   countVisits(level),
+        direction: c.direction,
+        tolerance: levelTol(level),
+      }
+    })
     .filter(r => r.touches >= 2)
     .sort((a, b) => b.touches - a.touches)
 
@@ -197,10 +204,10 @@ function detectKeyLevels(data: ChartPoint[]): ProposedLevel[] {
   const minRounded = Math.round(rawMin)
   const maxRounded = Math.round(rawMax)
   if (!results.some(r => Math.abs(r.level - minRounded) <= clusterTol)) {
-    results.push({ level: minRounded, touches: countVisits(minRounded), direction: 'support',    tolerance: clusterTol })
+    results.push({ level: minRounded, touches: countVisits(minRounded), direction: 'support',    tolerance: levelTol(minRounded) })
   }
   if (!results.some(r => Math.abs(r.level - maxRounded) <= clusterTol)) {
-    results.push({ level: maxRounded, touches: countVisits(maxRounded), direction: 'resistance', tolerance: clusterTol })
+    results.push({ level: maxRounded, touches: countVisits(maxRounded), direction: 'resistance', tolerance: levelTol(maxRounded) })
   }
 
   return results
@@ -284,16 +291,9 @@ export function VIHistoryChart({ timeframe, defaultColor = '#a1a1aa', compact = 
   // Smart level detection (memoised on data change)
   const proposedLevels = useMemo(() => detectKeyLevels(data), [data])
 
-  // Y-axis: orange ticks for proposed levels — only shown when showSmart is active
-  const proposedLevelSet = useMemo(
-    () => showSmart ? new Set<number>(proposedLevels.map(p => p.level)) : new Set<number>(),
-    [proposedLevels, showSmart],
-  )
-  const allYTicks = useMemo(() => {
-    if (!showSmart || proposedLevels.length === 0) return visibleTicks
-    const combined = [...new Set([...visibleTicks, ...proposedLevels.map(p => p.level)])]
-    return combined.sort((a, b) => a - b)
-  }, [visibleTicks, proposedLevels, showSmart])
+  // Y-axis: only regime thresholds — proposed levels shown via label on ReferenceLine
+  // Merging them into allYTicks caused overflow / hidden labels with 14+ ticks
+  const allYTicks = visibleTicks
 
   return (
     <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-4">
@@ -421,7 +421,16 @@ export function VIHistoryChart({ timeframe, defaultColor = '#a1a1aa', compact = 
                   y={pl.level}
                   stroke="#f59e0b"
                   strokeDasharray="2 4"
-                  strokeOpacity={0.4}
+                  strokeOpacity={0.5}
+                  label={{
+                    value: String(pl.level),
+                    position: 'insideTopLeft',
+                    fill: '#f59e0b99',
+                    fontSize: 9,
+                    fontFamily: 'monospace',
+                    dx: 4,
+                    dy: -3,
+                  }}
                 />
               ))}
 
@@ -440,24 +449,12 @@ export function VIHistoryChart({ timeframe, defaultColor = '#a1a1aa', compact = 
               <YAxis
                 domain={[domainMin, domainMax]}
                 ticks={compact ? [domainMin, Math.round((domainMin + domainMax) / 2), domainMax] : allYTicks}
-                minTickGap={0}
+                minTickGap={12}
                 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                tick={(props: any) => {
-                  const isProposed = proposedLevelSet.has(props.payload?.value)
-                  return (
-                    <text
-                      x={props.x} y={props.y}
-                      fill={isProposed ? '#f59e0b' : '#52525b'}
-                      textAnchor="end" dominantBaseline="middle"
-                      fontSize={isProposed ? 8 : 10} fontFamily="monospace"
-                    >
-                      {props.payload?.value}
-                    </text>
-                  )
-                }}
+                tick={{ fill: '#52525b', fontSize: 10, fontFamily: 'monospace' }}
                 axisLine={false}
                 tickLine={false}
-                width={compact ? 24 : 40}
+                width={compact ? 24 : 32}
               />
 
               <Tooltip
