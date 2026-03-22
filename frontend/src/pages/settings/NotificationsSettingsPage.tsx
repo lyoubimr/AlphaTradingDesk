@@ -72,12 +72,12 @@ const D_MVI_ALERTS: MarketVIAlertsCfg = {
   message_template: undefined,
 }
 
-const DEFAULT_REGIME_TEMPLATE = `🔔 ATD Market VI — {timeframe}
+const DEFAULT_REGIME_TEMPLATE = `� <b>ATD Market VI</b> · {timeframe}
 
-Score: {score}   Regime: {regime}
-{summary}
+📊 Score: <b>{score}</b>
+📈 Regime: <b>{regime}</b> — {summary}
 
-Components: {components}`.trim()
+<code>Components: {components}</code>`.trim()
 
 const DEFAULT_LEVEL_TEMPLATE = `🔔 VI Level Alert — {timeframe}
 

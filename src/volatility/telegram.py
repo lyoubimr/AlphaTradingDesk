@@ -11,13 +11,13 @@ Two alert types:
 Cooldown is enforced via Redis (key: atd:alert_sent:{type}:{timeframe}).
 If Redis is down, alerts are sent without cooldown (fail-open — better than silent).
 
-Message format: plain text, no HTML/Markdown (parse_mode omitted — most compatible).
+Message format: Telegram HTML (parse_mode=HTML). Use <b>, <i>, <code> tags in custom templates.
 """
 
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime
+from datetime import datetime
 
 import httpx
 
@@ -133,9 +133,8 @@ def _set_cooldown(alert_type: str, timeframe: str, cooldown_min: int) -> None:
 
 # ── Message formatters ────────────────────────────────────────────────────────
 
-# Default message templates — can be overridden via MarketVIAlertsCfg.message_template
-# Variables: {timeframe} {score} {regime} {summary} {components}
-_DEFAULT_REGIME_TEMPLATE = (
+# Legacy plain-text template saved before HTML format was introduced — treated as «no template»
+_LEGACY_REGIME_TEMPLATE = (
     "\U0001f514 ATD Market VI \u2014 {timeframe}\n\n"
     "Score: {score}   Regime: {regime}\n"
     "{summary}\n\n"
@@ -168,6 +167,10 @@ def format_market_vi_message(
                 comp_parts.append(f"{label} {float(components[key]):.2f}")
     comp_str = " | ".join(comp_parts) if comp_parts else "\u2014"
 
+    # Skip template if it matches the legacy plain-text default (saved before HTML format)
+    if template and template.strip() == _LEGACY_REGIME_TEMPLATE:
+        template = None
+
     if template:
         try:
             return template.format(
@@ -181,7 +184,7 @@ def format_market_vi_message(
             logger.warning("format_market_vi_message: invalid template, falling back to default")
 
     # Default format (HTML)
-    now = datetime.now(UTC).strftime("%d/%m %H:%M UTC")
+    now = datetime.now().strftime("%d/%m %H:%M")
     r_emoji = _REGIME_EMOJI.get(regime, "📊")
     r_summary = _REGIME_SUMMARY.get(regime, "")
     lines = [
@@ -216,7 +219,7 @@ def format_watchlist_message(
 
         -> 3 pairs | setup_ready + opportunity
     """
-    now = datetime.now(UTC).strftime("%d/%m %H:%M UTC")
+    now = datetime.now().strftime("%d/%m %H:%M")
     mr_emoji = _REGIME_EMOJI.get(market_regime, "📊")
     lines = [
         f"📋 <b>ATD Watchlist</b> · {timeframe.upper()} — {now}",
@@ -459,7 +462,7 @@ def send_vi_level_alerts(
 
         # ── Build & send message ──────────────────────────────────────────
         score_str = f"{curr:.1f}"
-        now_str = datetime.now(UTC).strftime("%d/%m %H:%M UTC")
+        now_str = datetime.now().strftime("%d/%m %H:%M")
         regime = _score_100_to_regime(curr)
         r_emoji = _REGIME_EMOJI.get(regime, "📊")
         r_summary = _REGIME_SUMMARY.get(regime, "")
