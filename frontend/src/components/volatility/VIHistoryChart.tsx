@@ -330,7 +330,6 @@ export function VIHistoryChart({ timeframe, defaultColor = '#a1a1aa', compact = 
   const padding = Math.max(5, (rawMax - rawMin) * 0.12)
   const domainMin = Math.max(0, Math.floor(rawMin - padding))
   const domainMax = Math.min(100, Math.ceil(rawMax + padding))
-  const visibleTicks = [0, 17, 33, 50, 67, 83, 100].filter(t => t >= domainMin && t <= domainMax)
 
   // Smart level detection (memoised on data change)
   const proposedLevels = useMemo(() => detectKeyLevels(data), [data])
@@ -471,7 +470,7 @@ export function VIHistoryChart({ timeframe, defaultColor = '#a1a1aa', compact = 
                   strokeDasharray="3 3"
                   strokeOpacity={0.7}
                   label={{
-                    content: (props: any) => (
+                    content: (props: React.SVGProps<SVGElement>) => (
                       <LastScoreLabel {...props} value={Math.round(lastScore)} color={activeColor} />
                     ),
                   }}
@@ -567,7 +566,7 @@ export function VIHistoryChart({ timeframe, defaultColor = '#a1a1aa', compact = 
                 className="flex items-center gap-2 px-3 py-2 hover:bg-zinc-800 text-xs text-slate-300 w-full text-left transition-colors"
               >
                 <Bell size={12} className="text-amber-400 shrink-0" />
-                Set alert at VI = {ctxMenu.level}
+                Set alert at VI = {ctxMenu.level}
               </button>
               <button
                 type="button"
@@ -599,7 +598,7 @@ export function VIHistoryChart({ timeframe, defaultColor = '#a1a1aa', compact = 
           </span>
           {onCreateAlert && hoveredScore !== null && (
             <span className="ml-auto text-zinc-500">
-              VI <span className="text-zinc-300">{hoveredScore.toFixed(1)}</span>
+              VI <span className="text-zinc-300">{hoveredScore.toFixed(1)}</span>
               <span className="text-zinc-700"> · right-click to set alert</span>
             </span>
           )}

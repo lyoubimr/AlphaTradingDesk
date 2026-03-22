@@ -295,7 +295,7 @@ export function MarketVIPage() {
           vi_levels: [...existing, newLevel],
         },
       })
-      setAlertToast(`✅ Alert set at VI = ${level}`)
+      setAlertToast(`✅ Alert set at VI = ${level}`)
     } catch {
       setAlertToast(`⚠️ Could not save alert — configure in Settings`)
     }

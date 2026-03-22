@@ -269,7 +269,7 @@ export function RiskSettingsPage() {
     } finally {
       setLoading(false)
     }
-  }, [profileId])
+  }, [profileId, setDirty])
 
   useEffect(() => { load() }, [load])
 

@@ -103,7 +103,7 @@ const DEFAULT_REGIME_TEMPLATE = `📡 <b>ATD Market VI</b> · {timeframe}
 
 <code>Components: {components}</code>`.trim()
 
-const DEFAULT_LEVEL_TEMPLATE = `🔔 VI Level Alert — {timeframe}
+const _DEFAULT_LEVEL_TEMPLATE = `🔔 VI Level Alert — {timeframe}
 
 {label} {direction}
 Value: {score}   Threshold: {threshold}`.trim()
@@ -280,7 +280,7 @@ export function NotificationsSettingsPage() {
     } finally {
       setLoading(false)
     }
-  }, [profileId])
+  }, [profileId, setDirty])
 
   useEffect(() => { void load() }, [load])
 
@@ -298,7 +298,7 @@ export function NotificationsSettingsPage() {
   useEffect(() => {
     if (skipDirtyRef.current) return
     setDirty(true)
-  }, [mviA, wlA])
+  }, [mviA, wlA, setDirty])
 
   const save = async () => {
     if (!profileId) return
@@ -444,7 +444,7 @@ export function NotificationsSettingsPage() {
     if (lv.type === 'crossing') {
       patch.value     = Number(editDraft.valueStr) || lv.value
       patch.direction = editDraft.direction ?? lv.direction
-      patch.tolerance = Number(editDraft.toleranceStr) ?? lv.tolerance ?? 0.5
+      patch.tolerance = Number(editDraft.toleranceStr) || lv.tolerance || 0.5
     } else {
       patch.min = Number(editDraft.minStr) || lv.min
       patch.max = Number(editDraft.maxStr) || lv.max
