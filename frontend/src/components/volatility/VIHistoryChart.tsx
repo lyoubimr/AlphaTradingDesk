@@ -92,14 +92,22 @@ function CustomTooltip({ active, payload }: { active?: boolean; payload?: any[] 
   if (!active || !payload?.length) return null
   const d = payload[0].payload as ChartPoint
   const color = REGIME_COLOR_HEX[d.regime] ?? '#a1a1aa'
+  const dt = new Date(d.ts)
+  const dateStr = dt.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+  const timeStr = dt.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
   return (
     <div
       className="rounded px-2 py-1 pointer-events-none"
       style={{ background: '#181818cc', border: '1px solid #3f3f46', fontSize: 10 }}
     >
-      <span className="font-mono font-bold" style={{ color }}>{d.score.toFixed(1)}</span>
-      <span className="text-zinc-600 mx-1">·</span>
-      <span style={{ color }}>{d.regime}</span>
+      <div>
+        <span className="font-mono font-bold" style={{ color }}>{d.score.toFixed(1)}</span>
+        <span className="text-zinc-600 mx-1">·</span>
+        <span style={{ color }}>{d.regime}</span>
+      </div>
+      <div className="text-zinc-500 font-mono" style={{ fontSize: 9, marginTop: 2 }}>
+        {dateStr} {timeStr}
+      </div>
     </div>
   )
 }
@@ -527,7 +535,7 @@ export function VIHistoryChart({ timeframe, defaultColor = '#a1a1aa', compact = 
                 content={(props: any) => hoverCoord ? <CustomTooltip {...props} /> : null}
                 // Position tooltip above the hovered dot — clamped so it never goes off-chart top
                 position={hoverCoord
-                  ? { x: hoverCoord.x - 45, y: Math.max(0, hoverCoord.y - 34) }
+                  ? { x: hoverCoord.x - 45, y: Math.max(0, hoverCoord.y - 50) }
                   : undefined}
                 cursor={false}
               />
