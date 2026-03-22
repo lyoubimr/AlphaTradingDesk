@@ -123,45 +123,85 @@ interface ProposedLevel {
 function detectKeyLevels(data: ChartPoint[]): ProposedLevel[] {
   if (data.length < 15) return []
   const scores = data.map(d => d.score)
+  const rawMin = Math.min(...scores)
+  const rawMax = Math.max(...scores)
+  const range  = rawMax - rawMin
 
-  // Separate local maxima (resistance) from local minima (support)
+  // Adaptive tolerance: 5% of visible range, clamped [2, 5]
+  const clusterTol = Math.max(2, Math.min(5, range * 0.05))
+  // visitTol = same as clusterTol — avoids zones overlapping & dual direction hits
+  const visitTol = clusterTol
+
+  // Step 1: local extrema (window ±2)
   const maxima: number[] = []
   const minima: number[] = []
-  for (let i = 3; i < scores.length - 3; i++) {
+  for (let i = 2; i < scores.length - 2; i++) {
     const v = scores[i]
-    const isMax = v >= scores[i-1] && v >= scores[i+1] && v >= scores[i-2] && v >= scores[i+2] && v >= scores[i-3] && v >= scores[i+3]
-    const isMin = v <= scores[i-1] && v <= scores[i+1] && v <= scores[i-2] && v <= scores[i+2] && v <= scores[i-3] && v <= scores[i+3]
+    const isMax = v >= scores[i-1] && v >= scores[i+1] && v >= scores[i-2] && v >= scores[i+2]
+    const isMin = v <= scores[i-1] && v <= scores[i+1] && v <= scores[i-2] && v <= scores[i+2]
     if (isMax) maxima.push(v)
     else if (isMin) minima.push(v)
   }
 
+  // Step 2: cluster sorted values so nearby peaks (32.4, 32.5, 33.1) merge
   function cluster(values: number[], direction: string) {
+    const sorted = [...values].sort((a, b) => a - b)
     const clusters: { sum: number; count: number; direction: string }[] = []
-    for (const v of values) {
+    for (const v of sorted) {
       const avg = (c: { sum: number; count: number }) => c.sum / c.count
-      const existing = clusters.find(c => Math.abs(avg(c) - v) <= 2)
-      if (existing) {
-        existing.sum += v
-        existing.count++
-      } else {
-        clusters.push({ sum: v, count: 1, direction })
-      }
+      const existing = clusters.find(c => Math.abs(avg(c) - v) <= clusterTol)
+      if (existing) { existing.sum += v; existing.count++ }
+      else clusters.push({ sum: v, count: 1, direction })
     }
     return clusters
   }
 
-  return [
+  // Step 3: count how many times VI enters the zone (entry from outside = 1 visit)
+  function countVisits(level: number): number {
+    let visits = 0
+    let inside = false
+    for (const s of scores) {
+      const inZone = Math.abs(s - level) <= visitTol
+      if (inZone && !inside) { visits++; inside = true }
+      else if (!inZone) inside = false
+    }
+    return visits
+  }
+
+  const raw: ProposedLevel[] = [
     ...cluster(maxima, 'resistance'),
     ...cluster(minima, 'support'),
   ]
-    .filter(c => c.count >= 2)
-    .sort((a, b) => b.count - a.count)
-    .slice(0, 6)
     .map(c => ({
-      level: Math.round(c.sum / c.count),
-      touches: c.count,
+      level:   Math.round(c.sum / c.count),
+      touches: countVisits(Math.round(c.sum / c.count)),
       direction: c.direction,
     }))
+    .filter(r => r.touches >= 2)
+    .sort((a, b) => b.touches - a.touches)
+
+  // Step 4: dedup — walk sorted-by-touches list, skip any level within clusterTol
+  // of an already-kept level. This removes: duplicate directions on same level,
+  // and neighbouring levels too close to be meaningfully distinct.
+  const results: ProposedLevel[] = []
+  for (const r of raw) {
+    if (!results.some(kept => Math.abs(kept.level - r.level) <= clusterTol)) {
+      results.push(r)
+    }
+    if (results.length >= 7) break
+  }
+
+  // Always include the absolute min/max if not already covered
+  const minRounded = Math.round(rawMin)
+  const maxRounded = Math.round(rawMax)
+  if (!results.some(r => Math.abs(r.level - minRounded) <= clusterTol)) {
+    results.push({ level: minRounded, touches: countVisits(minRounded), direction: 'support' })
+  }
+  if (!results.some(r => Math.abs(r.level - maxRounded) <= clusterTol)) {
+    results.push({ level: maxRounded, touches: countVisits(maxRounded), direction: 'resistance' })
+  }
+
+  return results
 }
 
 // ── Crosshair cursor ───────────────────────────────────────────────────────

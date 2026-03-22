@@ -325,6 +325,7 @@ def send_vi_level_alerts(
     timeframe: str,
     vi_levels: list,
     prev_score_100: float | None,
+    profile_id: int | None = None,
 ) -> None:
     """Check each configured VI level/range alert and send if triggered.
 
@@ -373,7 +374,8 @@ def send_vi_level_alerts(
                 continue
 
         # ── Cooldown check ────────────────────────────────────────────────
-        ck = f"atd:alert_sent:vi_level:{timeframe}:{level_id}"
+        pid_part = f":{profile_id}" if profile_id is not None else ""
+        ck = f"atd:alert_sent:vi_level{pid_part}:{timeframe}:{level_id}"
         try:
             if r and r.exists(ck):
                 continue
@@ -388,8 +390,12 @@ def send_vi_level_alerts(
             tval = float(lv.get("value", 0))
             tol  = max(0.0, float(lv.get("tolerance", 0.5)))
             ldir = lv.get("direction", "both")
-            if prev_score_100 is not None:
-                # Trigger when VI enters the \u00b1tolerance zone around the threshold
+            in_zone = abs(curr - tval) <= tol
+            if prev_score_100 is None:
+                # First cycle — fire immediately if VI is already inside the zone
+                triggered = in_zone
+            else:
+                # Transition-based: fire when VI enters the ±tolerance zone
                 up   = (prev_score_100 <= tval - tol) and (curr >= tval - tol)
                 down = (prev_score_100 >= tval + tol) and (curr <= tval + tol)
                 if ldir == "both":
@@ -398,7 +404,7 @@ def send_vi_level_alerts(
                     triggered = up
                 else:
                     triggered = down
-                direction_arrow = "↑" if up else "↓"
+                direction_arrow = "↑" if (prev_score_100 is not None and curr > prev_score_100) else "↓"
         elif ltype == "range":
             rmin = float(lv.get("min", 0))
             rmax = float(lv.get("max", 100))

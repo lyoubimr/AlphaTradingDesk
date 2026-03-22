@@ -194,7 +194,7 @@ export function NotificationsSettingsPage() {
   const [vlLabel,     setVlLabel]     = useState('')
   const [vlCooldown,  setVlCooldown]  = useState('30')
   const [vlTolerance, setVlTolerance] = useState('0.5')
-  const [vlTf,        setVlTf]        = useState('aggregated')
+  const [vlTf,        setVlTf]        = useState('')
   const [vlDayType,   setVlDayType]   = useState<'any' | 'workday' | 'weekend'>('any')
 
   // VI level inline-edit state
@@ -356,7 +356,7 @@ export function NotificationsSettingsPage() {
     const updated: MarketVIAlertsCfg = { ...mviA, vi_levels: [...mviA.vi_levels, newLevel] }
     setMviA(updated)
     void saveMVI(updated)
-    setVlValue(''); setVlMin(''); setVlMax(''); setVlLabel(''); setVlCooldown('30'); setVlTolerance('0.5'); setVlTf('aggregated'); setVlDayType('any')
+    setVlValue(''); setVlMin(''); setVlMax(''); setVlLabel(''); setVlCooldown('30'); setVlTolerance('0.5'); setVlTf(''); setVlDayType('any')
   }
 
   const removeVILevel = (id: string) => {
@@ -393,7 +393,7 @@ export function NotificationsSettingsPage() {
       minStr:       lv.min       !== undefined ? String(lv.min)       : '',
       maxStr:       lv.max       !== undefined ? String(lv.max)       : '',
       toleranceStr: lv.tolerance !== undefined ? String(lv.tolerance) : '0.5',
-      tfStr:        lv.timeframe ?? 'aggregated',
+      tfStr:        lv.timeframe ?? '',
       dayTypeStr:   lv.day_type ?? 'any',
     })
   }

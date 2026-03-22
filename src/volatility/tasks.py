@@ -411,29 +411,35 @@ def compute_market_vi(self, timeframe: str) -> dict:  # type: ignore[override]
             _update_aggregated_score(db, mv_cfg)
         except Exception as agg_exc:
             logger.warning("compute_market_vi(%s): aggregated score error — %s", timeframe, agg_exc)
-        # ── 10. Telegram alert (fail-silent) ──────────────────────────────
+        # ── 10. Telegram alerts — iterate ALL profiles with enabled alerts ──
         try:
             from src.volatility.models import NotificationSettings
             from src.volatility.telegram import send_market_vi_alert, send_vi_level_alerts
-            notif = db.query(NotificationSettings).first()
-            if notif:
+            all_notifs = db.query(NotificationSettings).all()
+            for notif in all_notifs:
+                if not notif.market_vi_alerts.get("enabled", False):
+                    continue
                 bot_token, chat_id = _resolve_bot(notif.bots, notif.market_vi_alerts.get("bot_name"))
+                if not bot_token or not chat_id:
+                    continue
                 alert_cfg = {**notif.market_vi_alerts, "bot_token": bot_token, "chat_id": chat_id}
+                pid = notif.profile_id
+
                 send_market_vi_alert(alert_cfg, market_vi, regime, timeframe, components)
 
                 # ── 10b. VI level / range alerts ────────────────────────
                 vi_levels: list = notif.market_vi_alerts.get("vi_levels", [])
-                if vi_levels and notif.market_vi_alerts.get("enabled", False):
+                if vi_levels:
                     try:
                         from src.volatility.cache import _get_redis
                         r = _get_redis()
-                        prev_key = f"atd:vi_prev_score:{timeframe}"
+                        prev_key = f"atd:vi_prev_score:{pid}:{timeframe}"
                         prev_raw = r.get(prev_key)
                         prev_100 = float(prev_raw) * 100 if prev_raw else None
                         r.set(prev_key, str(market_vi))
                     except Exception:
                         prev_100 = None
-                    send_vi_level_alerts(alert_cfg, market_vi * 100, timeframe, vi_levels, prev_100)
+                    send_vi_level_alerts(alert_cfg, market_vi * 100, timeframe, vi_levels, prev_100, pid)
 
                 # ── 10c. Aggregated TF vi level alerts ────────────────────
                 agg_levels = [lv for lv in vi_levels if lv.get("timeframe") == "aggregated"]
@@ -445,12 +451,12 @@ def compute_market_vi(self, timeframe: str) -> dict:  # type: ignore[override]
                             agg_100 = float(agg_data["vi_score"]) * 100
                             try:
                                 rr = _get_redis()
-                                prev_agg_raw = rr.get("atd:vi_prev_score:aggregated")
+                                prev_agg_raw = rr.get(f"atd:vi_prev_score:{pid}:aggregated")
                                 prev_agg = float(prev_agg_raw) * 100 if prev_agg_raw else None
-                                rr.set("atd:vi_prev_score:aggregated", str(agg_data["vi_score"]))
+                                rr.set(f"atd:vi_prev_score:{pid}:aggregated", str(agg_data["vi_score"]))
                             except Exception:
                                 prev_agg = None
-                            send_vi_level_alerts(alert_cfg, agg_100, "aggregated", agg_levels, prev_agg)
+                            send_vi_level_alerts(alert_cfg, agg_100, "aggregated", agg_levels, prev_agg, pid)
                     except Exception:
                         pass
         except Exception as tg_exc:
