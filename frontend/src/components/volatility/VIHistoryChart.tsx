@@ -237,27 +237,6 @@ function ChartOverlay({ hoverCoord, color }: { hoverCoord: { x: number; y: numbe
   )
 }
 
-// ── Last-score badge label — TradingView-style on right edge ──────────────────
-// Rendered as the `label` of the last-score ReferenceLine.
-// viewBox.y = SVG y of the reference line; viewBox.x + viewBox.width = right edge.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function LastScoreLabel({ viewBox, value, color }: any) {
-  if (!viewBox || value == null) return null
-  const { x, y, width } = viewBox as { x: number; y: number; width: number }
-  const bx = x + width + 3   // 3px gap right of plot
-  const bw = 22, bh = 11
-  return (
-    <g pointerEvents="none">
-      <rect x={bx} y={y - bh - 3} width={bw} height={bh} rx={2}
-        fill={color} fillOpacity={0.85} />
-      <text x={bx + bw / 2} y={y - bh / 2 - 3} textAnchor="middle" dominantBaseline="middle"
-        fill="#09090b" fontSize={7} fontFamily="monospace" fontWeight="bold">
-        {value}
-      </text>
-    </g>
-  )
-}
-
 // ── Y-axis tick — regime ticks in grey, S/R levels in amber ───────────────
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function CustomYAxisTick({ x, y, payload, showSmart, labelledLevels }: any) {
@@ -435,7 +414,7 @@ export function VIHistoryChart({ timeframe, defaultColor = '#a1a1aa', compact = 
           <ResponsiveContainer width="100%" height={chartHeight}>
             <AreaChart
               data={data}
-              margin={{ top: 6, right: compact ? 4 : 40, bottom: 0, left: -14 }}
+              margin={{ top: 6, right: compact ? 4 : 8, bottom: 0, left: -14 }}
               // In Recharts v3, onMouseMove receives (nextState, reactEvent) where
               // nextState = { activeCoordinate, activeIndex, isTooltipActive, ... }
               // activePayload no longer exists; use activeIndex to look up value.
@@ -463,19 +442,13 @@ export function VIHistoryChart({ timeframe, defaultColor = '#a1a1aa', compact = 
                 vertical={false}
               />
 
-              {/* Last-score line — persistent, stays visible even during hover */}
+              {/* Last-score line — subtle dashed line at current score level */}
               {!compact && lastScore !== null && (
                 <ReferenceLine
                   y={lastScore}
                   stroke={activeColor}
                   strokeDasharray="3 3"
-                  strokeOpacity={0.7}
-                  label={{
-                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                    content: (props: any) => (
-                      <LastScoreLabel {...props} value={Math.round(lastScore)} color={activeColor} />
-                    ),
-                  }}
+                  strokeOpacity={0.5}
                 />
               )}
 
