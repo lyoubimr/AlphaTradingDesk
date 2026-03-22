@@ -41,13 +41,23 @@ interface VILevel {
   day_type?: 'any' | 'workday' | 'weekend'  // filter by market day type
 }
 
-interface MarketVIAlertsCfg {
+interface MarketStatusTFCfg {
   enabled: boolean
+  interval_min: number
+  template?: string
+}
+
+interface MarketVIAlertsCfg {
+  enabled: boolean            // master switch
+  status_enabled: boolean     // regime-change (market status) notifications sub-toggle
+  levels_enabled: boolean     // custom VI level alerts sub-toggle
   bot_name?: string
-  cooldown_min: number
   regimes: string[]
+  per_tf_status: Record<string, MarketStatusTFCfg>
   vi_levels: VILevel[]
-  message_template?: string  // custom Telegram template with {variables}
+  // legacy fallbacks (kept for backward compat)
+  cooldown_min: number
+  message_template?: string
 }
 
 interface TFAlertCfg {
@@ -64,15 +74,29 @@ interface WatchlistAlertsCfg {
 
 // ── Defaults ─────────────────────────────────────────────────────────────────
 
+const STATUS_TFS = ['aggregated', '15m', '1h', '4h', '1d'] as const
+type StatusTF = typeof STATUS_TFS[number]
+
+const D_STATUS_TF_CFG: Record<StatusTF, MarketStatusTFCfg> = {
+  aggregated: { enabled: true,  interval_min: 120 },
+  '15m':      { enabled: true,  interval_min: 240 },
+  '1h':       { enabled: true,  interval_min: 480 },
+  '4h':       { enabled: false, interval_min: 960 },
+  '1d':       { enabled: false, interval_min: 1440 },
+}
+
 const D_MVI_ALERTS: MarketVIAlertsCfg = {
-  enabled: false,
-  cooldown_min: 60,
-  regimes: [],
-  vi_levels: [],
+  enabled:        false,
+  status_enabled: true,
+  levels_enabled: true,
+  regimes:        [],
+  per_tf_status:  { ...D_STATUS_TF_CFG },
+  vi_levels:      [],
+  cooldown_min:   60,
   message_template: undefined,
 }
 
-const DEFAULT_REGIME_TEMPLATE = `� <b>ATD Market VI</b> · {timeframe}
+const DEFAULT_REGIME_TEMPLATE = `📡 <b>ATD Market VI</b> · {timeframe}
 
 📊 Score: <b>{score}</b>
 📈 Regime: <b>{regime}</b> — {summary}
@@ -99,14 +123,30 @@ type WLTf = typeof WL_TFS[number]
 
 // ── Hydration ─────────────────────────────────────────────────────────────────
 
+function hydrateStatusTF(raw: Record<string, unknown> | undefined): Record<string, MarketStatusTFCfg> {
+  const result: Record<string, MarketStatusTFCfg> = {}
+  for (const tf of STATUS_TFS) {
+    const src = raw?.[tf] as Record<string, unknown> | undefined
+    result[tf] = {
+      enabled:      (src?.enabled      as boolean | undefined) ?? D_STATUS_TF_CFG[tf].enabled,
+      interval_min: (src?.interval_min as number  | undefined) ?? D_STATUS_TF_CFG[tf].interval_min,
+      template:      src?.template     as string  | undefined,
+    }
+  }
+  return result
+}
+
 function hydrateMVI(raw: Record<string, unknown>): MarketVIAlertsCfg {
   return {
-    enabled:          (raw.enabled as boolean | undefined) ?? D_MVI_ALERTS.enabled,
-    bot_name:         raw.bot_name as string | undefined,
-    cooldown_min:     (raw.cooldown_min as number | undefined) ?? D_MVI_ALERTS.cooldown_min,
-    regimes:          (raw.regimes as string[] | undefined) ?? D_MVI_ALERTS.regimes,
-    vi_levels:        (raw.vi_levels as VILevel[] | undefined) ?? [],
-    message_template: raw.message_template as string | undefined,
+    enabled:          (raw.enabled         as boolean   | undefined) ?? D_MVI_ALERTS.enabled,
+    status_enabled:   (raw.status_enabled  as boolean   | undefined) ?? true,
+    levels_enabled:   (raw.levels_enabled  as boolean   | undefined) ?? true,
+    bot_name:          raw.bot_name        as string    | undefined,
+    regimes:          (raw.regimes         as string[]  | undefined) ?? [],
+    per_tf_status:    hydrateStatusTF(raw.per_tf_status as Record<string, unknown> | undefined),
+    vi_levels:        (raw.vi_levels       as VILevel[] | undefined) ?? [],
+    cooldown_min:     (raw.cooldown_min    as number    | undefined) ?? 60,
+    message_template:  raw.message_template as string  | undefined,
   }
 }
 
@@ -201,18 +241,27 @@ export function NotificationsSettingsPage() {
   interface EditDraft { label?: string; direction?: 'both'|'up'|'down'; valueStr?: string; minStr?: string; maxStr?: string; cooldownStr?: string; toleranceStr?: string; tfStr?: string; dayTypeStr?: 'any'|'workday'|'weekend' }
   const [editDraft, setEditDraft] = useState<EditDraft>({})
 
-  // Template modal state
-  const [showTemplateModal, setShowTemplateModal] = useState(false)
+  // Template modal — per-TF (null = closed, string = which TF)
+  const [templateModalTf, setTemplateModalTf] = useState<string | null>(null)
   const [templateDraft, setTemplateDraft] = useState<string>(DEFAULT_REGIME_TEMPLATE)
 
-  function openTemplateModal() {
-    setTemplateDraft(mviA.message_template ?? DEFAULT_REGIME_TEMPLATE)
-    setShowTemplateModal(true)
+  function openTemplateForTF(tf: string) {
+    const tfCfg = mviA.per_tf_status[tf]
+    setTemplateDraft(tfCfg?.template ?? DEFAULT_REGIME_TEMPLATE)
+    setTemplateModalTf(tf)
   }
   function confirmTemplate() {
+    if (!templateModalTf) return
     const val = templateDraft.trim()
-    setMviA(p => ({ ...p, message_template: val === DEFAULT_REGIME_TEMPLATE.trim() ? undefined : val }))
-    setShowTemplateModal(false)
+    const isDefault = val === DEFAULT_REGIME_TEMPLATE.trim()
+    setMviA(p => ({
+      ...p,
+      per_tf_status: {
+        ...p.per_tf_status,
+        [templateModalTf]: { ...p.per_tf_status[templateModalTf], template: isDefault ? undefined : val },
+      },
+    }))
+    setTemplateModalTf(null)
   }
 
   const load = useCallback(async () => {
@@ -417,6 +466,12 @@ export function NotificationsSettingsPage() {
   const setTFAlert = (tf: WLTf, patch: Partial<TFAlertCfg>) =>
     setWlA(p => ({ ...p, per_tf: { ...p.per_tf, [tf]: { ...getTFAlert(tf), ...patch } } }))
 
+  const getStatusTF = (tf: string): MarketStatusTFCfg =>
+    mviA.per_tf_status[tf] ?? D_STATUS_TF_CFG[tf as StatusTF] ?? { enabled: false, interval_min: 120 }
+
+  const setStatusTF = (tf: string, patch: Partial<MarketStatusTFCfg>) =>
+    setMviA(p => ({ ...p, per_tf_status: { ...p.per_tf_status, [tf]: { ...getStatusTF(tf), ...patch } } }))
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-24 text-slate-500">
@@ -603,55 +658,104 @@ export function NotificationsSettingsPage() {
               </select>
             </div>
 
-            {/* Cooldown */}
-            <div className="flex items-center justify-between gap-4">
-              <span className="text-xs text-slate-400">Cooldown</span>
-              <div className="flex items-center gap-2">
-                <input
-                  type="number"
-                  min={5}
-                  max={1440}
-                  step={5}
-                  value={mviA.cooldown_min}
-                  onChange={e => setMviA(p => ({ ...p, cooldown_min: Number(e.target.value) }))}
-                  className={cn(numCls, 'w-20')}
+            {/* ── 📡 Market Status ─────────────────────────────────────── */}
+            <div className="rounded-lg border border-surface-700 overflow-hidden">
+              <div className="flex items-center justify-between px-3 py-2.5 bg-surface-700/40">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm">📡</span>
+                  <p className="text-xs font-semibold text-slate-300">Market Status</p>
+                  <span className="text-[10px] text-slate-600">regime change notifications</span>
+                </div>
+                <Toggle
+                  on={mviA.status_enabled}
+                  onChange={v => setMviA(p => ({ ...p, status_enabled: v }))}
+                  label="Enable market status notifications"
                 />
-                <span className="text-xs text-slate-500">min</span>
+              </div>
+              <div className={cn('px-3 py-3 space-y-3 transition-opacity', !mviA.status_enabled && 'opacity-40 pointer-events-none')}>
+                {/* Trigger regimes */}
+                <div>
+                  <p className="text-[10px] text-slate-500 mb-1.5">Trigger on regime</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {REGIMES.map(r => {
+                      const active = mviA.regimes.includes(r)
+                      return (
+                        <button
+                          key={r}
+                          type="button"
+                          onClick={() => toggleRegime(r)}
+                          className={cn(
+                            'px-2.5 py-1 rounded-full text-[11px] font-medium border transition-all',
+                            active
+                              ? 'bg-brand-600/20 border-brand-600/40 text-brand-400'
+                              : 'bg-surface-700 border-surface-600 text-slate-500 hover:border-surface-500',
+                          )}
+                        >
+                          {r}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+                {/* Per-TF intervals */}
+                <div>
+                  <p className="text-[10px] text-slate-500 mb-1.5">Send interval per timeframe</p>
+                  <div className="space-y-1">
+                    {STATUS_TFS.map(tf => {
+                      const tfCfg = getStatusTF(tf)
+                      return (
+                        <div key={tf} className="flex items-center gap-2 py-1.5 px-2 rounded bg-surface-700/50">
+                          <Toggle
+                            on={tfCfg.enabled}
+                            onChange={v => setStatusTF(tf, { enabled: v })}
+                            label={`${tf} enabled`}
+                          />
+                          <span className="text-[11px] font-mono text-slate-400 w-12 shrink-0">
+                            {tf === 'aggregated' ? 'AGG' : tf.toUpperCase()}
+                          </span>
+                          <div className={cn('flex items-center gap-1.5 flex-1', !tfCfg.enabled && 'opacity-40')}>
+                            <input
+                              type="number"
+                              min={5}
+                              max={2880}
+                              step={30}
+                              value={tfCfg.interval_min}
+                              onChange={e => setStatusTF(tf, { interval_min: Number(e.target.value) })}
+                              className={cn(numCls, 'w-16')}
+                            />
+                            <span className="text-[10px] text-slate-600">min</span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => openTemplateForTF(tf)}
+                            title={tfCfg.template ? 'Custom template active — click to edit' : 'Customize template for this TF'}
+                            className={cn('p-1 rounded transition-colors', tfCfg.template ? 'text-brand-400' : 'text-slate-600 hover:text-slate-400')}
+                          >
+                            <FileText size={11} />
+                          </button>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
               </div>
             </div>
 
-            {/* Trigger regimes */}
-            <div>
-              <p className="text-xs text-slate-400 mb-2">Trigger on regime change</p>
-              <div className="flex flex-wrap gap-2">
-                {REGIMES.map(r => {
-                  const active = mviA.regimes.includes(r)
-                  return (
-                    <button
-                      key={r}
-                      type="button"
-                      onClick={() => toggleRegime(r)}
-                      className={cn(
-                        'px-2.5 py-1 rounded-full text-[11px] font-medium border transition-all',
-                        active
-                          ? 'bg-brand-600/20 border-brand-600/40 text-brand-400'
-                          : 'bg-surface-700 border-surface-600 text-slate-500 hover:border-surface-500',
-                      )}
-                    >
-                      {r}
-                    </button>
-                  )
-                })}
+            {/* ── 🔔 Custom VI Level Alerts ─────────────────────────────── */}
+            <div className="rounded-lg border border-surface-700 overflow-hidden">
+              <div className="flex items-center justify-between px-3 py-2.5 bg-surface-700/40">
+                <div className="flex items-center gap-2">
+                  <Bell size={13} className="text-brand-400" />
+                  <p className="text-xs font-semibold text-slate-300">Custom VI Level Alerts</p>
+                  <span className="text-[10px] text-slate-600">trigger on exact value or range (0–100 scale)</span>
+                </div>
+                <Toggle
+                  on={mviA.levels_enabled}
+                  onChange={v => setMviA(p => ({ ...p, levels_enabled: v }))}
+                  label="Enable level alerts"
+                />
               </div>
-            </div>
-
-            {/* ── VI Level / Range Alerts ──────────────────────────────────── */}
-            <div className="border-t border-surface-700 pt-4">
-              <div className="flex items-center gap-2 mb-3">
-                <Bell size={13} className="text-brand-400" />
-                <p className="text-xs font-semibold text-slate-300">Custom VI Level Alerts</p>
-                <span className="text-[10px] text-slate-600">trigger on exact value or range (0–100 scale)</span>
-              </div>
+              <div className={cn('px-3 py-3 transition-opacity', !mviA.levels_enabled && 'opacity-40 pointer-events-none')}>
 
               {/* Existing levels */}
               {mviA.vi_levels.length === 0 && (
@@ -981,22 +1085,6 @@ export function NotificationsSettingsPage() {
                 </button>
               </div>
 
-              {/* ── Message Template button ──────────────────────────────── */}
-              <div className="border-t border-surface-700 pt-3 flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <FileText size={12} className="text-slate-500" />
-                  <span className="text-xs text-slate-500">Message template</span>
-                  {mviA.message_template && (
-                    <span className="w-1.5 h-1.5 rounded-full bg-brand-400" title="Custom template active" />
-                  )}
-                </div>
-                <button
-                  type="button"
-                  onClick={openTemplateModal}
-                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-surface-700 hover:bg-surface-600 border border-surface-600 text-[11px] text-slate-400 hover:text-slate-200 transition-colors"
-                >
-                  <Pencil size={11} /> Customise
-                </button>
               </div>
             </div>
           </div>
@@ -1100,21 +1188,21 @@ export function NotificationsSettingsPage() {
     </div>
 
       {/* ── Template modal ────────────────────────────────────────────────── */}
-      {showTemplateModal && (
+      {templateModalTf !== null && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
-          onClick={e => { if (e.target === e.currentTarget) setShowTemplateModal(false) }}
+          onClick={e => { if (e.target === e.currentTarget) setTemplateModalTf(null) }}
         >
           <div className="w-full max-w-lg rounded-2xl bg-surface-800 border border-surface-600 shadow-2xl overflow-hidden">
             {/* Modal header */}
             <div className="flex items-center justify-between px-5 py-3.5 border-b border-surface-700">
               <div className="flex items-center gap-2">
                 <FileText size={14} className="text-brand-400" />
-                <span className="text-sm font-semibold text-slate-200">Telegram message template</span>
+                <span className="text-sm font-semibold text-slate-200">Template · {templateModalTf === 'aggregated' ? 'AGG' : templateModalTf.toUpperCase()}</span>
               </div>
               <button
                 type="button"
-                onClick={() => setShowTemplateModal(false)}
+                onClick={() => setTemplateModalTf(null)}
                 className="p-1 rounded text-slate-600 hover:text-slate-300 transition-colors"
               >
                 <X size={15} />
@@ -1125,7 +1213,7 @@ export function NotificationsSettingsPage() {
             <div className="px-5 py-4 space-y-3">
               <p className="text-[11px] text-zinc-500 leading-relaxed">
                 Available variables:{' '}
-                {['{timeframe}','{score}','{regime}','{summary}','{threshold}','{direction}','{label}','{components}'].map(v => (
+                {['{timeframe}','{score}','{regime}','{summary}','{components}'].map(v => (
                   <code key={v} className="mx-0.5 px-1 rounded bg-surface-700 text-zinc-300 font-mono">{v}</code>
                 ))}
               </p>
@@ -1151,7 +1239,13 @@ export function NotificationsSettingsPage() {
               <div className="flex gap-2">
                 <button
                   type="button"
-                  onClick={() => setShowTemplateModal(false)}
+                  onClick={() => setTemplateModalTf(null)}
+                  className="px-3 py-1.5 rounded-lg bg-surface-700 hover:bg-surface-600 text-xs text-slate-400 transition-colors"
+                >
+                  Cancel
+                </button>
+                  type="button"
+                  onClick={() => setTemplateModalTf(null)}
                   className="px-3 py-1.5 rounded-lg bg-surface-700 hover:bg-surface-600 text-xs text-slate-400 transition-colors"
                 >
                   Cancel

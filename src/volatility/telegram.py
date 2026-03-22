@@ -286,17 +286,29 @@ def send_market_vi_alert(
     if not notification_cfg.get("enabled", False):
         return
 
+    # Status sub-toggle (default True for backward compat with old configs)
+    if not notification_cfg.get("status_enabled", True):
+        return
+
     # Filter by configured regimes (empty list = all regimes)
     allowed_regimes: list[str] = notification_cfg.get("regimes", [])
     if allowed_regimes and regime not in allowed_regimes:
         return
 
-    cooldown_min: int = int(notification_cfg.get("cooldown_min", 30))
+    # Per-TF config: interval + template
+    per_tf: dict = notification_cfg.get("per_tf_status", {})
+    tf_cfg: dict = per_tf.get(timeframe, {})
+    # If per_tf_status is configured and this TF is explicitly disabled, skip
+    if per_tf and not tf_cfg.get("enabled", True):
+        logger.debug("send_market_vi_alert: TF %s disabled in per_tf_status", timeframe)
+        return
+
+    cooldown_min: int = int(tf_cfg.get("interval_min", notification_cfg.get("cooldown_min", 60)))
     if _is_on_cooldown("market_vi", timeframe, cooldown_min):
         logger.debug("send_market_vi_alert: on cooldown (%d min) for %s", cooldown_min, timeframe)
         return
 
-    template: str | None = notification_cfg.get("message_template") or None
+    template: str | None = tf_cfg.get("template") or notification_cfg.get("message_template") or None
     # is_trigger = user configured specific regimes to watch (not "all regimes")
     is_trigger = bool(allowed_regimes)
     text = format_market_vi_message(vi_score, regime, timeframe, components, template=template, is_trigger=is_trigger)
@@ -385,6 +397,10 @@ def send_vi_level_alerts(
     bot_token = cfg.get("bot_token")
     chat_id   = cfg.get("chat_id")
     if not bot_token or not chat_id:
+        return
+
+    # Levels sub-toggle (default True for backward compat)
+    if not cfg.get("levels_enabled", True):
         return
 
     tf_label = timeframe.upper()
