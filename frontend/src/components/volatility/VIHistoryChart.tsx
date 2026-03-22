@@ -214,16 +214,35 @@ function detectKeyLevels(data: ChartPoint[]): ProposedLevel[] {
 }
 
 // ── Crosshair cursor ───────────────────────────────────────────────────────
+// Recharts passes viewBox={x,y,width,height} (plot area) to cursor components;
+// width/height as direct props are unreliable — use viewBox as primary source.
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function CrosshairCursor({ points, width, height }: any) {
+function CrosshairCursor({ points, width, height, viewBox }: any) {
   if (!points?.[0]) return null
   const { x, y } = points[0] as { x: number; y: number }
+  const vb = viewBox as { x: number; y: number; width: number; height: number } | undefined
+  const left   = vb?.x ?? 0
+  const top    = vb?.y ?? 0
+  const right  = vb ? vb.x + vb.width  : (width  ?? 0)
+  const bottom = vb ? vb.y + vb.height : (height ?? 0)
   return (
     <g>
-      <line x1={x} y1={0} x2={x} y2={height} stroke="#52525b" strokeWidth={1} strokeDasharray="3 3" />
-      <line x1={0} y1={y} x2={width} y2={y} stroke="#52525b" strokeWidth={1} strokeDasharray="3 3" />
+      <line x1={x}    y1={top} x2={x}     y2={bottom} stroke="#52525b" strokeWidth={1} strokeDasharray="3 3" />
+      <line x1={left} y1={y}   x2={right} y2={y}      stroke="#52525b" strokeWidth={1} strokeDasharray="3 3" />
     </g>
+  )
+}
+
+// ── Y-axis tick — regime ticks in grey, S/R levels in amber ───────────────
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function CustomYAxisTick({ x, y, payload, showSmart, labelledLevels }: any) {
+  if (payload == null || x == null || y == null) return null
+  const isSR = showSmart && (labelledLevels as Set<number>)?.has(payload.value as number)
+  return (
+    <text x={x} y={y} dy={3} textAnchor="end" fill={isSR ? '#f59e0b' : '#52525b'} fontSize={10} fontFamily="monospace">
+      {payload.value}
+    </text>
   )
 }
 
@@ -303,6 +322,13 @@ export function VIHistoryChart({ timeframe, defaultColor = '#a1a1aa', compact = 
     }
     return new Set(kept)
   }, [proposedLevels, showSmart, domainMin, domainMax])
+
+  // Combined Y-axis ticks: regime thresholds (grey) + labelled S/R levels (amber)
+  const allYTicks = useMemo(() => {
+    const regimeTicks = [0, 17, 33, 50, 67, 83, 100].filter(t => t >= domainMin && t <= domainMax)
+    const srTicks = showSmart ? Array.from(labelledLevels) : []
+    return Array.from(new Set([...regimeTicks, ...srTicks])).sort((a, b) => a - b)
+  }, [showSmart, labelledLevels, domainMin, domainMax])
 
   return (
     <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-4">
@@ -423,7 +449,7 @@ export function VIHistoryChart({ timeframe, defaultColor = '#a1a1aa', compact = 
                 />
               ))}
 
-              {/* Smart proposal level reference lines — only shown when showSmart is active */}
+              {/* Smart proposal level reference lines — values shown on Y-axis, no floating labels */}
               {showSmart && proposedLevels.map(pl => (
                 <ReferenceLine
                   key={`smart-${pl.level}`}
@@ -431,15 +457,6 @@ export function VIHistoryChart({ timeframe, defaultColor = '#a1a1aa', compact = 
                   stroke="#f59e0b"
                   strokeDasharray="2 4"
                   strokeOpacity={0.5}
-                  label={labelledLevels.has(pl.level) ? {
-                    value: String(pl.level),
-                    position: 'insideTopLeft',
-                    fill: '#f59e0b99',
-                    fontSize: 9,
-                    fontFamily: 'monospace',
-                    dx: 4,
-                    dy: -3,
-                  } : undefined}
                 />
               ))}
 
@@ -458,12 +475,15 @@ export function VIHistoryChart({ timeframe, defaultColor = '#a1a1aa', compact = 
               <YAxis
                 domain={[domainMin, domainMax]}
                 ticks={compact ? [domainMin, Math.round((domainMin + domainMax) / 2), domainMax] : allYTicks}
-                minTickGap={12}
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                tick={{ fill: '#52525b', fontSize: 10, fontFamily: 'monospace' }}
+                minTickGap={compact ? 12 : 4}
+                tick={compact
+                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                  ? ({ fill: '#52525b', fontSize: 10, fontFamily: 'monospace' } as any)
+                  : <CustomYAxisTick showSmart={showSmart} labelledLevels={labelledLevels} />
+                }
                 axisLine={false}
                 tickLine={false}
-                width={compact ? 24 : 32}
+                width={compact ? 24 : 36}
               />
 
               <Tooltip
