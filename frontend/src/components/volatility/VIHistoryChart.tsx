@@ -436,16 +436,19 @@ export function VIHistoryChart({ timeframe, defaultColor = '#a1a1aa', compact = 
             <AreaChart
               data={data}
               margin={{ top: 6, right: compact ? 4 : 40, bottom: 0, left: -14 }}
+              // In Recharts v3, onMouseMove receives (nextState, reactEvent) where
+              // nextState = { activeCoordinate, activeIndex, isTooltipActive, ... }
+              // activePayload no longer exists; use activeIndex to look up value.
               // eslint-disable-next-line @typescript-eslint/no-explicit-any
               onMouseMove={(e: any) => {
-                const val = e?.activePayload?.[0]?.value
-                const coord = e?.activeCoordinate
-                if (val != null && coord?.x != null && coord?.y != null) {
-                  setHoveredScore(val as number)
-                  setHoverCoord({ x: coord.x as number, y: coord.y as number })
+                if (e?.isTooltipActive && e.activeCoordinate?.x != null) {
+                  const idx: number = e.activeIndex ?? e.activeTooltipIndex
+                  const score = idx != null && idx >= 0 ? (data[idx]?.score ?? null) : null
+                  setHoverCoord({ x: e.activeCoordinate.x as number, y: e.activeCoordinate.y as number })
+                  setHoveredScore(score)
                 }
               }}
-              onMouseLeave={() => { setHoveredScore(null); setHoverCoord(null) }}
+              onMouseLeave={() => { setHoverCoord(null); setHoveredScore(null) }}
             >
               <defs>
                 <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
