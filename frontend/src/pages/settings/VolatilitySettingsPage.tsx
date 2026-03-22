@@ -7,8 +7,10 @@
 // ───────────────────────────────────────────────────────────────────────────────
 
 import { useEffect, useState, useCallback } from 'react'
-import { Activity, Save, Loader2, RefreshCw, Check, AlertTriangle } from 'lucide-react'
+import { Activity, Loader2, RefreshCw, AlertTriangle } from 'lucide-react'
 import { PageHeader } from '../../components/ui/PageHeader'
+import { SaveBar } from '../../components/ui/SaveBar'
+import { useSaveState } from '../../hooks/useSaveState'
 import { Tooltip } from '../../components/ui/Tooltip'
 import { useProfile } from '../../context/ProfileContext'
 import { volatilityApi } from '../../lib/api'
@@ -324,46 +326,6 @@ function TFBlock({
   )
 }
 
-function SaveBar({
-  saving,
-  saved,
-  error,
-  disabled,
-  onSave,
-}: {
-  saving: boolean
-  saved: boolean
-  error: string | null
-  disabled?: boolean
-  onSave: () => void
-}) {
-  return (
-    <div className="flex items-center justify-between pt-5 border-t border-surface-700 mt-6">
-      <div className="text-xs">
-        {error && (
-          <span className="text-red-400 flex items-center gap-1.5">
-            <AlertTriangle size={12} /> {error}
-          </span>
-        )}
-        {saved && !error && (
-          <span className="text-emerald-400 flex items-center gap-1.5">
-            <Check size={12} /> Saved
-          </span>
-        )}
-      </div>
-      <button
-        type="button"
-        onClick={onSave}
-        disabled={saving || disabled}
-        className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-brand-600 hover:bg-brand-500 disabled:opacity-40 text-xs font-medium text-white transition-colors"
-      >
-        {saving ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
-        Save
-      </button>
-    </div>
-  )
-}
-
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 type Tab = 'market-vi' | 'per-pair' | 'schedules' | 'regimes'
@@ -373,9 +335,7 @@ export function VolatilitySettingsPage() {
   const [loading, setLoading] = useState(true)
   const [loadErr, setLoadErr] = useState<string | null>(null)
   const [tab,     setTab]     = useState<Tab>('market-vi')
-  const [saving,  setSaving]  = useState(false)
-  const [saved,   setSaved]   = useState(false)
-  const [saveErr, setSaveErr] = useState<string | null>(null)
+  const { saving, saved, saveErr, wrapSave, reset: resetSave } = useSaveState()
 
   const [mvi, setMVI] = useState<MarketVICfg>(D_MVI)
   const [pp,  setPP]  = useState<PerPairCfg>(D_PP)
@@ -401,25 +361,14 @@ export function VolatilitySettingsPage() {
 
   const save = async () => {
     if (!profileId) return
-    setSaving(true)
-    setSaveErr(null)
-    setSaved(false)
-    try {
-      // Each tab saves only its own section (merge-patch)
-      // per-pair and schedules both patch per_pair (schedules embedded in it)
+    await wrapSave(async () => {
       const patch =
         tab === 'market-vi'  ? { market_vi: mvi }
         : tab === 'regimes'  ? { regimes: reg }
-        : tab === 'schedules' ? { per_pair: pp, market_vi: mvi }  // schedules includes Market VI gate
+        : tab === 'schedules' ? { per_pair: pp, market_vi: mvi }
         : { per_pair: pp }
       await volatilityApi.updateSettings(profileId, patch)
-      setSaved(true)
-      setTimeout(() => setSaved(false), 3000)
-    } catch {
-      setSaveErr('Save failed')
-    } finally {
-      setSaving(false)
-    }
+    })
   }
 
   const setTFW = (mode: 'weekday' | 'weekend', tf: TFKey, v: number) =>
@@ -532,7 +481,7 @@ export function VolatilitySettingsPage() {
           <button
             key={id}
             type="button"
-            onClick={() => { setTab(id); setSaved(false); setSaveErr(null) }}
+            onClick={() => { setTab(id); resetSave() }}
             className={cn(
               'px-4 py-1.5 rounded-md text-xs font-medium transition-all',
               tab === id
@@ -773,7 +722,7 @@ export function VolatilitySettingsPage() {
           <SaveBar
             saving={saving}
             saved={saved}
-            error={saveErr}
+            saveErr={saveErr}
             disabled={!canSave}
             onSave={() => void save()}
           />
@@ -946,7 +895,7 @@ export function VolatilitySettingsPage() {
           <SaveBar
             saving={saving}
             saved={saved}
-            error={saveErr}
+            saveErr={saveErr}
             onSave={() => void save()}
           />
         </div>
@@ -1306,7 +1255,7 @@ export function VolatilitySettingsPage() {
             )
           })}
 
-          <SaveBar saving={saving} saved={saved} error={saveErr} onSave={() => void save()} />
+          <SaveBar saving={saving} saved={saved} saveErr={saveErr} onSave={() => void save()} />
         </div>
       )}
 
@@ -1362,7 +1311,7 @@ export function VolatilitySettingsPage() {
           <SaveBar
             saving={saving}
             saved={saved}
-            error={saveErr}
+            saveErr={saveErr}
             disabled={!regOk}
             onSave={() => void save()}
           />

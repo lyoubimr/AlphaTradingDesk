@@ -9,9 +9,11 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react'
 import {
-  Save, Loader2, RefreshCw, Check, AlertTriangle, Plus, Trash2, Send, Bell, Pencil, X, FileText,
+  Loader2, RefreshCw, Check, AlertTriangle, Plus, Trash2, Send, Bell, Pencil, X, FileText,
 } from 'lucide-react'
 import { PageHeader } from '../../components/ui/PageHeader'
+import { SaveBar } from '../../components/ui/SaveBar'
+import { useSaveState } from '../../hooks/useSaveState'
 import { useProfile } from '../../context/ProfileContext'
 import { volatilityApi } from '../../lib/api'
 import { cn } from '../../lib/cn'
@@ -162,10 +164,7 @@ export function NotificationsSettingsPage() {
   const { activeProfileId: profileId } = useProfile()
   const [loading, setLoading] = useState(true)
   const [loadErr, setLoadErr] = useState<string | null>(null)
-  const [saving,  setSaving]  = useState(false)
-  const [saved,   setSaved]   = useState(false)
-  const [saveErr, setSaveErr] = useState<string | null>(null)
-  const [dirty,   setDirty]   = useState(false)
+  const { saving, saved, saveErr, dirty, setDirty, wrapSave } = useSaveState()
 
   // Prevents marking dirty during initial data load
   const skipDirtyRef = useRef(true)
@@ -254,23 +253,13 @@ export function NotificationsSettingsPage() {
 
   const save = async () => {
     if (!profileId) return
-    setSaving(true)
-    setSaveErr(null)
-    setSaved(false)
-    try {
+    await wrapSave(async () => {
       await volatilityApi.updateNotificationSettings(profileId, {
         bots,
         market_vi_alerts: mviA,
         watchlist_alerts: wlA,
       })
-      setSaved(true)
-      setDirty(false)
-      setTimeout(() => setSaved(false), 3000)
-    } catch {
-      setSaveErr('Save failed')
-    } finally {
-      setSaving(false)
-    }
+    })
   }
 
   const test = async () => {
@@ -1105,34 +1094,7 @@ export function NotificationsSettingsPage() {
         </section>
 
         {/* ── Global save bar ───────────────────────────────────────────────── */}
-        <div className="flex items-center justify-between pt-5 border-t border-surface-700 mt-2">
-          <div className="text-xs">
-            {saveErr && (
-              <span className="text-red-400 flex items-center gap-1.5">
-                <AlertTriangle size={12} /> {saveErr}
-              </span>
-            )}
-            {!saveErr && dirty && !saving && !saved && (
-              <span className="text-amber-400/70 flex items-center gap-1.5">
-                · Unsaved changes
-              </span>
-            )}
-          </div>
-          <button
-            type="button"
-            onClick={() => void save()}
-            disabled={saving || !dirty}
-            className={cn(
-              'inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-medium transition-colors disabled:opacity-40',
-              saved && !saveErr ? 'bg-emerald-600 text-white' : 'bg-brand-600 hover:bg-brand-500 text-white',
-            )}
-          >
-            {saving   ? <Loader2 size={13} className="animate-spin" />
-             : saved  ? <Check   size={13} />
-             :          <Save    size={13} />}
-            {saving ? 'Saving…' : saved ? 'Saved!' : 'Save changes'}
-          </button>
-        </div>
+        <SaveBar saving={saving} saved={saved} saveErr={saveErr} dirty={dirty} onSave={() => void save()} />
 
       </div>
     </div>

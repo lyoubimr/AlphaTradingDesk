@@ -9,8 +9,10 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { useEffect, useState, useCallback, useMemo } from 'react'
-import { Loader2, RefreshCw, Save, Check, AlertTriangle } from 'lucide-react'
+import { Loader2, RefreshCw, AlertTriangle } from 'lucide-react'
 import { PageHeader } from '../../components/ui/PageHeader'
+import { SaveBar } from '../../components/ui/SaveBar'
+import { useSaveState } from '../../hooks/useSaveState'
 import { useProfile } from '../../context/ProfileContext'
 import { riskApi } from '../../lib/api'
 import { CriterionConfig } from '../../components/risk/CriterionConfig'
@@ -225,38 +227,6 @@ function SectionCard({
   )
 }
 
-function SaveBar({
-  saving,
-  saveOk,
-  dirty,
-  onSave,
-}: {
-  saving: boolean
-  saveOk: boolean
-  dirty: boolean
-  onSave: () => void
-}) {
-  return (
-    <div className="flex items-center justify-end pt-5 mt-2 border-t border-surface-700">
-      <button
-        onClick={onSave}
-        disabled={!dirty || saving}
-        className={cn(
-          'flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-medium transition-colors disabled:opacity-40',
-          saveOk
-            ? 'bg-emerald-600 text-white'
-            : 'bg-brand-600 hover:bg-brand-500 text-white',
-        )}
-      >
-        {saving   ? <Loader2 size={12} className="animate-spin" />
-         : saveOk ? <Check   size={12} />
-         :          <Save    size={12} />}
-        {saving ? 'Saving…' : saveOk ? 'Saved!' : 'Save changes'}
-      </button>
-    </div>
-  )
-}
-
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export function RiskSettingsPage() {
@@ -264,10 +234,8 @@ export function RiskSettingsPage() {
 
   const [config,  setConfig]  = useState<RiskConfig>(DEFAULTS)
   const [loading, setLoading] = useState(true)
-  const [saving,  setSaving]  = useState(false)
-  const [dirty,   setDirty]   = useState(false)
-  const [saveOk,  setSaveOk]  = useState(false)
-  const [error,   setError]   = useState<string | null>(null)
+  const [loadErr, setLoadErr] = useState<string | null>(null)
+  const { saving, saved, saveErr, dirty, setDirty, wrapSave } = useSaveState()
   const [tab,     setTab]     = useState<TabId>('criteria')
 
   const [sim, setSim] = useState<SimInputs>({
@@ -291,13 +259,13 @@ export function RiskSettingsPage() {
   const load = useCallback(async () => {
     if (!profileId) return
     setLoading(true)
-    setError(null)
+    setLoadErr(null)
     try {
       const data = await riskApi.getSettings(profileId)
       setConfig(hydrate(data.config))
       setDirty(false)
     } catch {
-      setError('Failed to load risk settings.')
+      setLoadErr('Failed to load risk settings.')
     } finally {
       setLoading(false)
     }
@@ -310,7 +278,6 @@ export function RiskSettingsPage() {
   function upd(fn: (c: RiskConfig) => RiskConfig) {
     setConfig(fn)
     setDirty(true)
-    setSaveOk(false)
   }
 
   function updCrit<K extends keyof RiskConfig['criteria']>(
@@ -324,19 +291,10 @@ export function RiskSettingsPage() {
 
   async function save() {
     if (!profileId) return
-    setSaving(true)
-    setError(null)
-    try {
+    await wrapSave(async () => {
       const data = await riskApi.updateSettings(profileId, config as unknown as Record<string, unknown>)
       setConfig(hydrate(data.config))
-      setDirty(false)
-      setSaveOk(true)
-      setTimeout(() => setSaveOk(false), 3000)
-    } catch {
-      setError('Failed to save risk settings.')
-    } finally {
-      setSaving(false)
-    }
+    })
   }
 
   // ── Loading ───────────────────────────────────────────────────────────────
@@ -370,10 +328,10 @@ export function RiskSettingsPage() {
         }
       />
 
-      {error && (
+      {loadErr && (
         <div className="flex items-center gap-2 px-4 py-3 rounded-lg bg-red-900/20 border border-red-800/50 text-red-400 text-xs max-w-2xl">
           <AlertTriangle size={13} />
-          {error}
+          {loadErr}
         </div>
       )}
 
@@ -424,7 +382,7 @@ export function RiskSettingsPage() {
               {enabledWeightTotal < 100 && <span>{100 - enabledWeightTotal}% left to assign</span>}
               <span className="font-semibold">{enabledWeightTotal}% / 100%</span>
             </div>
-            <SaveBar saving={saving} saveOk={saveOk} dirty={dirty} onSave={save} />
+            <SaveBar saving={saving} saved={saved} saveErr={saveErr} dirty={dirty} onSave={save} />
           </SectionCard>
         </div>
       )}
@@ -525,7 +483,7 @@ export function RiskSettingsPage() {
                 </div>
               ))}
             </div>
-            <SaveBar saving={saving} saveOk={saveOk} dirty={dirty} onSave={save} />
+            <SaveBar saving={saving} saved={saved} saveErr={saveErr} dirty={dirty} onSave={save} />
           </SectionCard>
         </div>
       )}
@@ -621,7 +579,7 @@ export function RiskSettingsPage() {
                 {config.alert_banner.trigger_threshold_pct.toFixed(0)}%
               </span>
             </div>
-            <SaveBar saving={saving} saveOk={saveOk} dirty={dirty} onSave={save} />
+            <SaveBar saving={saving} saved={saved} saveErr={saveErr} dirty={dirty} onSave={save} />
           </SectionCard>
         </div>
       )}
