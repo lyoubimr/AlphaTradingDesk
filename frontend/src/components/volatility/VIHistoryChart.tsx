@@ -244,14 +244,14 @@ function ChartOverlay({ hoverCoord, color }: { hoverCoord: { x: number; y: numbe
 function LastScoreLabel({ viewBox, value, color }: any) {
   if (!viewBox || value == null) return null
   const { x, y, width } = viewBox as { x: number; y: number; width: number }
-  const bx = x + width + 4   // 4px gap right of plot
-  const bw = 28, bh = 15
+  const bx = x + width + 3   // 3px gap right of plot
+  const bw = 22, bh = 11
   return (
     <g pointerEvents="none">
-      <rect x={bx} y={y - bh - 4} width={bw} height={bh} rx={3}
-        fill={color} fillOpacity={0.9} />
-      <text x={bx + bw / 2} y={y - bh / 2 - 4} textAnchor="middle" dominantBaseline="middle"
-        fill="#09090b" fontSize={9} fontFamily="monospace" fontWeight="bold">
+      <rect x={bx} y={y - bh - 3} width={bw} height={bh} rx={2}
+        fill={color} fillOpacity={0.85} />
+      <text x={bx + bw / 2} y={y - bh / 2 - 3} textAnchor="middle" dominantBaseline="middle"
+        fill="#09090b" fontSize={7} fontFamily="monospace" fontWeight="bold">
         {value}
       </text>
     </g>
