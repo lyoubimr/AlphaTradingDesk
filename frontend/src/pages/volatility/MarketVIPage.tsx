@@ -656,8 +656,8 @@ export function MarketVIPage() {
                   View full watchlist →
                 </Link>
               </div>
-              <div className="rounded-xl border border-zinc-800 bg-zinc-950 overflow-hidden">
-                <table className="w-full text-xs">
+              <div className="rounded-xl border border-zinc-800 bg-zinc-950 overflow-x-auto">
+                <table className="w-full min-w-[500px] text-xs">
                   <thead>
                     <tr className="border-b border-zinc-800 bg-zinc-900/50">
                       <th className="px-3 py-2 text-left text-zinc-600 font-mono w-8">#</th>

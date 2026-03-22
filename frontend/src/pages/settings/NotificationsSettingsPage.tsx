@@ -1038,7 +1038,7 @@ export function NotificationsSettingsPage() {
                   </div>
                 )}
 
-                <div className="grid grid-cols-3 gap-2">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                   <div>
                     <p className="text-[10px] text-slate-500 mb-1">Label <span className="text-zinc-600">(optional)</span></p>
                     <input

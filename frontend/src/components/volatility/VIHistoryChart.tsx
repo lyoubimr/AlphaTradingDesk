@@ -307,7 +307,7 @@ export function VIHistoryChart({ timeframe, defaultColor = '#a1a1aa', compact = 
   return (
     <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-4">
       {/* Header */}
-      <div className="flex items-center justify-between mb-3">
+      <div className="flex flex-wrap items-center justify-between gap-y-2 mb-3">
         <div className="flex items-center gap-2">
           <span
             className="text-xs font-mono font-bold px-2 py-0.5 rounded border"
