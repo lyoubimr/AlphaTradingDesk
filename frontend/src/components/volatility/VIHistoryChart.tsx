@@ -236,6 +236,27 @@ function ChartCrosshair() {
   )
 }
 
+// ── Last-score badge label — TradingView-style on right edge ──────────────────
+// Rendered as the `label` of the last-score ReferenceLine.
+// viewBox.y = SVG y of the reference line; viewBox.x + viewBox.width = right edge.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function LastScoreLabel({ viewBox, value, color }: any) {
+  if (!viewBox || value == null) return null
+  const { x, y, width } = viewBox as { x: number; y: number; width: number }
+  const bx = x + width + 4   // 4px gap right of plot
+  const bw = 28, bh = 15
+  return (
+    <g pointerEvents="none">
+      <rect x={bx} y={y - bh / 2} width={bw} height={bh} rx={3}
+        fill={color} fillOpacity={0.9} />
+      <text x={bx + bw / 2} y={y} textAnchor="middle" dominantBaseline="middle"
+        fill="#09090b" fontSize={9} fontFamily="monospace" fontWeight="bold">
+        {value}
+      </text>
+    </g>
+  )
+}
+
 // ── Y-axis tick — regime ticks in grey, S/R levels in amber ───────────────
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function CustomYAxisTick({ x, y, payload, showSmart, labelledLevels }: any) {
@@ -412,7 +433,7 @@ export function VIHistoryChart({ timeframe, defaultColor = '#a1a1aa', compact = 
           <ResponsiveContainer width="100%" height={chartHeight}>
             <AreaChart
               data={data}
-              margin={{ top: 6, right: 4, bottom: 0, left: -14 }}
+              margin={{ top: 6, right: compact ? 4 : 40, bottom: 0, left: -14 }}
               // eslint-disable-next-line @typescript-eslint/no-explicit-any
               onMouseMove={(e: any) => {
                 if (e?.activePayload?.[0]?.value != null) {
@@ -433,6 +454,21 @@ export function VIHistoryChart({ timeframe, defaultColor = '#a1a1aa', compact = 
                 stroke="#27272a"
                 vertical={false}
               />
+
+              {/* Last-score line — persistent, stays visible even during hover */}
+              {!compact && lastScore !== null && (
+                <ReferenceLine
+                  y={lastScore}
+                  stroke={activeColor}
+                  strokeDasharray="3 3"
+                  strokeOpacity={0.7}
+                  label={{
+                    content: (props: any) => (
+                      <LastScoreLabel {...props} value={Math.round(lastScore)} color={activeColor} />
+                    ),
+                  }}
+                />
+              )}
 
               {/* Regime boundary reference lines */}
               {REGIME_THRESHOLDS.filter(t => t > domainMin && t < domainMax).map((t) => (

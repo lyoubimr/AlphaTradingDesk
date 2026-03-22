@@ -107,6 +107,17 @@ def _send(bot_token: str, chat_id: str, text: str, parse_mode: str = "HTML") -> 
 
 # ── Cooldown helpers ──────────────────────────────────────────────────────────
 
+# Default send-interval (minutes) per timeframe — mirrors the frontend defaults.
+# Used as fallback when per_tf_status is absent from a DB record (e.g. records
+# created before per_tf_status was added in the notification settings refactor).
+_DEFAULT_STATUS_INTERVALS: dict[str, int] = {
+    "aggregated": 120,
+    "15m": 240,
+    "1h": 480,
+    "4h": 960,
+    "1d": 1440,
+}
+
 def _cooldown_key(alert_type: str, timeframe: str) -> str:
     return f"atd:alert_sent:{alert_type}:{timeframe}"
 
@@ -303,7 +314,11 @@ def send_market_vi_alert(
         logger.debug("send_market_vi_alert: TF %s disabled in per_tf_status", timeframe)
         return
 
-    cooldown_min: int = int(tf_cfg.get("interval_min", notification_cfg.get("cooldown_min", 60)))
+    cooldown_min: int = int(
+        tf_cfg.get("interval_min")
+        or notification_cfg.get("cooldown_min")
+        or _DEFAULT_STATUS_INTERVALS.get(timeframe, 60)
+    )
     if _is_on_cooldown("market_vi", timeframe, cooldown_min):
         logger.debug("send_market_vi_alert: on cooldown (%d min) for %s", cooldown_min, timeframe)
         return
