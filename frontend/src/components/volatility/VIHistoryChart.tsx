@@ -540,7 +540,7 @@ export function VIHistoryChart({ timeframe, defaultColor = '#a1a1aa', compact = 
                 strokeWidth={compact ? 1.5 : 2}
                 fill={`url(#${gradientId})`}
                 dot={false}
-                activeDot={{ r: 4, fill: activeColor, strokeWidth: 0 }}
+                activeDot={hoveredScore !== null ? { r: 4, fill: activeColor, strokeWidth: 0 } : false}
                 isAnimationActive={false}
               />
             </AreaChart>
