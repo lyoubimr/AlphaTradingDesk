@@ -330,6 +330,7 @@ export function VIHistoryChart({ timeframe, defaultColor = '#a1a1aa', compact = 
   const padding = Math.max(5, (rawMax - rawMin) * 0.12)
   const domainMin = Math.max(0, Math.floor(rawMin - padding))
   const domainMax = Math.min(100, Math.ceil(rawMax + padding))
+  const lastScore = data.length > 0 ? data[data.length - 1].score : null
 
   // Smart level detection (memoised on data change)
   const proposedLevels = useMemo(() => detectKeyLevels(data), [data])
@@ -470,7 +471,8 @@ export function VIHistoryChart({ timeframe, defaultColor = '#a1a1aa', compact = 
                   strokeDasharray="3 3"
                   strokeOpacity={0.7}
                   label={{
-                    content: (props: React.SVGProps<SVGElement>) => (
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                    content: (props: any) => (
                       <LastScoreLabel {...props} value={Math.round(lastScore)} color={activeColor} />
                     ),
                   }}
@@ -533,7 +535,8 @@ export function VIHistoryChart({ timeframe, defaultColor = '#a1a1aa', compact = 
               />
 
               <Tooltip
-                content={(props) => hoverCoord ? <CustomTooltip {...props} /> : null}
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                content={(props: any) => hoverCoord ? <CustomTooltip {...props} /> : null}
                 cursor={false}
               />
 
