@@ -248,9 +248,9 @@ function LastScoreLabel({ viewBox, value, color }: any) {
   const bw = 28, bh = 15
   return (
     <g pointerEvents="none">
-      <rect x={bx} y={y - bh / 2} width={bw} height={bh} rx={3}
+      <rect x={bx} y={y - bh - 4} width={bw} height={bh} rx={3}
         fill={color} fillOpacity={0.9} />
-      <text x={bx + bw / 2} y={y} textAnchor="middle" dominantBaseline="middle"
+      <text x={bx + bw / 2} y={y - bh / 2 - 4} textAnchor="middle" dominantBaseline="middle"
         fill="#09090b" fontSize={9} fontFamily="monospace" fontWeight="bold">
         {value}
       </text>
@@ -537,6 +537,10 @@ export function VIHistoryChart({ timeframe, defaultColor = '#a1a1aa', compact = 
               <Tooltip
                 // eslint-disable-next-line @typescript-eslint/no-explicit-any
                 content={(props: any) => hoverCoord ? <CustomTooltip {...props} /> : null}
+                // Position tooltip above the hovered dot — clamped so it never goes off-chart top
+                position={hoverCoord
+                  ? { x: hoverCoord.x - 52, y: Math.max(0, hoverCoord.y - 92) }
+                  : undefined}
                 cursor={false}
               />
 
