@@ -15,8 +15,6 @@ import {
   ReferenceLine,
   Customized,
   usePlotArea,
-  useActiveTooltipCoordinate,
-  useIsTooltipActive,
 } from 'recharts'
 import { Loader2, AlertTriangle, Bell, Lightbulb } from 'lucide-react'
 import { volatilityApi } from '../../lib/api'
@@ -217,24 +215,24 @@ function detectKeyLevels(data: ChartPoint[]): ProposedLevel[] {
   return results
 }
 
-// ── ChartInteractions — crosshair + active dot via Recharts v3 hooks ───────────
-// useIsTooltipActive() is the ONLY reliable source of truth:
-// it is true ONLY when Recharts has an active data point under the cursor.
-// This avoids any chicken-egg issues and DOM-level false positives.
-
-function ChartInteractions({ color }: { color: string }) {
-  const isActive = useIsTooltipActive()
+// ── ChartOverlay — crosshair + active dot via onMouseMove coords ──────────────
+// Driven purely by `hoverCoord` prop (set by AreaChart.onMouseMove, cleared by
+// onMouseLeave) — never reads Recharts internal tooltip state.
+// `Customized` forwards all extra props to this component.
+// Defined at module level (stable reference) so React never remounts it.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function ChartOverlay({ hoverCoord, color }: { hoverCoord: { x: number; y: number } | null; color: string; [k: string]: any }) {
   const plotArea = usePlotArea()
-  const coord = useActiveTooltipCoordinate()
-  if (!isActive || !coord || !plotArea) return null
+  if (!hoverCoord || !plotArea) return null
   const { x: px, y: py, width: pw, height: ph } = plotArea
   return (
     <g pointerEvents="none">
-      {/* Crosshair */}
-      <line x1={coord.x} y1={py}      x2={coord.x} y2={py + ph} stroke="#52525b" strokeWidth={1} strokeDasharray="3 3" />
-      <line x1={px}      y1={coord.y} x2={px + pw} y2={coord.y} stroke="#52525b" strokeWidth={1} strokeDasharray="3 3" />
+      {/* Vertical crosshair */}
+      <line x1={hoverCoord.x} y1={py}           x2={hoverCoord.x} y2={py + ph} stroke="#52525b" strokeWidth={1} strokeDasharray="3 3" />
+      {/* Horizontal crosshair */}
+      <line x1={px}           y1={hoverCoord.y} x2={px + pw}      y2={hoverCoord.y} stroke="#52525b" strokeWidth={1} strokeDasharray="3 3" />
       {/* Active dot */}
-      <circle cx={coord.x} cy={coord.y} r={4} fill={color} />
+      <circle cx={hoverCoord.x} cy={hoverCoord.y} r={4} fill={color} />
     </g>
   )
 }
@@ -322,6 +320,7 @@ export function VIHistoryChart({ timeframe, defaultColor = '#a1a1aa', compact = 
   // ── Alert feature state ───────────────────────────────────────────────
   const [showSmart, setShowSmart] = useState(false)
   const [hoveredScore, setHoveredScore] = useState<number | null>(null)
+  const [hoverCoord, setHoverCoord] = useState<{ x: number; y: number } | null>(null)
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; level: number } | null>(null)
 
   // Adaptive Y-axis: pad ±12% of range, clamped to [0, 100]
@@ -439,11 +438,14 @@ export function VIHistoryChart({ timeframe, defaultColor = '#a1a1aa', compact = 
               margin={{ top: 6, right: compact ? 4 : 40, bottom: 0, left: -14 }}
               // eslint-disable-next-line @typescript-eslint/no-explicit-any
               onMouseMove={(e: any) => {
-                if (e?.activePayload?.[0]?.value != null) {
-                  setHoveredScore(e.activePayload[0].value as number)
+                const val = e?.activePayload?.[0]?.value
+                const coord = e?.activeCoordinate
+                if (val != null && coord?.x != null && coord?.y != null) {
+                  setHoveredScore(val as number)
+                  setHoverCoord({ x: coord.x as number, y: coord.y as number })
                 }
               }}
-              onMouseLeave={() => setHoveredScore(null)}
+              onMouseLeave={() => { setHoveredScore(null); setHoverCoord(null) }}
             >
               <defs>
                 <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
@@ -529,12 +531,12 @@ export function VIHistoryChart({ timeframe, defaultColor = '#a1a1aa', compact = 
               />
 
               <Tooltip
-                content={<CustomTooltip />}
+                content={(props) => hoverCoord ? <CustomTooltip {...props} /> : null}
                 cursor={false}
               />
 
-              {/* Crosshair + active dot — only when Recharts has a real active datapoint */}
-              <Customized component={() => <ChartInteractions color={activeColor} />} />
+              {/* Crosshair + active dot — driven by hoverCoord from onMouseMove, not Recharts internal state */}
+              <Customized component={ChartOverlay} hoverCoord={hoverCoord} color={activeColor} />
 
               <Area
                 type="monotone"
