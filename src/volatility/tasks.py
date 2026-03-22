@@ -445,7 +445,7 @@ def compute_market_vi(self, timeframe: str) -> dict:  # type: ignore[override]
                 agg_levels = [lv for lv in vi_levels if lv.get("timeframe") == "aggregated"]
                 if agg_levels:
                     try:
-                        from src.volatility.cache import get_cached_market_vi, _get_redis
+                        from src.volatility.cache import _get_redis, get_cached_market_vi
                         agg_data = get_cached_market_vi("aggregated")
                         if agg_data:
                             agg_100 = float(agg_data["vi_score"]) * 100

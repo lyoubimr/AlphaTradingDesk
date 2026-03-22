@@ -605,7 +605,7 @@ def update_notification_settings(
 @router.post("/notifications/{profile_id}/test", status_code=200)
 def test_notification(
     profile_id: int,
-    body: "TestNotificationRequest | None" = Body(default=None),
+    body: TestNotificationRequest | None = Body(default=None),
     db: Session = Depends(get_db),
 ) -> dict:
     """Send a test Telegram message to verify bot configuration.
