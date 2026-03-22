@@ -13,6 +13,9 @@ import {
   CartesianGrid,
   Tooltip,
   ReferenceLine,
+  Customized,
+  usePlotArea,
+  useActiveTooltipCoordinate,
 } from 'recharts'
 import { Loader2, AlertTriangle, Bell, Lightbulb } from 'lucide-react'
 import { volatilityApi } from '../../lib/api'
@@ -213,23 +216,22 @@ function detectKeyLevels(data: ChartPoint[]): ProposedLevel[] {
   return results
 }
 
-// ── Crosshair cursor ───────────────────────────────────────────────────────
-// Recharts passes viewBox={x,y,width,height} (plot area) to cursor components;
-// width/height as direct props are unreliable — use viewBox as primary source.
+// ── Crosshair — Recharts v3 hooks: usePlotArea + useActiveTooltipCoordinate ───────
+// • coord.y  = active tooltip y (mouse position inside plot area)
+// • plotArea = {x, y, width, height} of the SVG plot area
+// These hooks resolve the v2 cursor issue where points[0].y was always 0
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function CrosshairCursor({ points, width, height, viewBox }: any) {
-  if (!points?.[0]) return null
-  const { x, y } = points[0] as { x: number; y: number }
-  const vb = viewBox as { x: number; y: number; width: number; height: number } | undefined
-  const left   = vb?.x ?? 0
-  const top    = vb?.y ?? 0
-  const right  = vb ? vb.x + vb.width  : (width  ?? 0)
-  const bottom = vb ? vb.y + vb.height : (height ?? 0)
+function ChartCrosshair() {
+  const plotArea = usePlotArea()
+  const coord = useActiveTooltipCoordinate()
+  if (!coord || !plotArea) return null
+  const { x: px, y: py, width: pw, height: ph } = plotArea
   return (
-    <g>
-      <line x1={x}    y1={top} x2={x}     y2={bottom} stroke="#52525b" strokeWidth={1} strokeDasharray="3 3" />
-      <line x1={left} y1={y}   x2={right} y2={y}      stroke="#52525b" strokeWidth={1} strokeDasharray="3 3" />
+    <g pointerEvents="none">
+      <line x1={coord.x} y1={py} x2={coord.x} y2={py + ph}
+        stroke="#52525b" strokeWidth={1} strokeDasharray="3 3" />
+      <line x1={px} y1={coord.y} x2={px + pw} y2={coord.y}
+        stroke="#52525b" strokeWidth={1} strokeDasharray="3 3" />
     </g>
   )
 }
@@ -479,7 +481,8 @@ export function VIHistoryChart({ timeframe, defaultColor = '#a1a1aa', compact = 
                 tick={compact
                   // eslint-disable-next-line @typescript-eslint/no-explicit-any
                   ? ({ fill: '#52525b', fontSize: 10, fontFamily: 'monospace' } as any)
-                  : <CustomYAxisTick showSmart={showSmart} labelledLevels={labelledLevels} />
+                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                  : (props: any) => <CustomYAxisTick {...props} showSmart={showSmart} labelledLevels={labelledLevels} />
                 }
                 axisLine={false}
                 tickLine={false}
@@ -488,8 +491,11 @@ export function VIHistoryChart({ timeframe, defaultColor = '#a1a1aa', compact = 
 
               <Tooltip
                 content={<CustomTooltip />}
-                cursor={<CrosshairCursor />}
+                cursor={false}
               />
+
+              {/* Crosshair via Recharts v3 hooks — rendered inside chart SVG */}
+              <Customized component={ChartCrosshair} />
 
               <Area
                 type="monotone"
