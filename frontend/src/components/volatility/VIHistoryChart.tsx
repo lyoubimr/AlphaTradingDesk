@@ -291,9 +291,18 @@ export function VIHistoryChart({ timeframe, defaultColor = '#a1a1aa', compact = 
   // Smart level detection (memoised on data change)
   const proposedLevels = useMemo(() => detectKeyLevels(data), [data])
 
-  // Y-axis: only regime thresholds — proposed levels shown via label on ReferenceLine
-  // Merging them into allYTicks caused overflow / hidden labels with 14+ ticks
-  const allYTicks = visibleTicks
+  // Collision-avoidance: only show floating label for levels far enough apart.
+  // Most-touched levels win priority. Gap ≥ 8% of visible domain range.
+  const labelledLevels = useMemo(() => {
+    if (!showSmart || proposedLevels.length === 0) return new Set<number>()
+    const minGap = Math.max(4, Math.round((domainMax - domainMin) * 0.08))
+    const byTouches = [...proposedLevels].sort((a, b) => b.touches - a.touches)
+    const kept: number[] = []
+    for (const pl of byTouches) {
+      if (!kept.some(v => Math.abs(v - pl.level) < minGap)) kept.push(pl.level)
+    }
+    return new Set(kept)
+  }, [proposedLevels, showSmart, domainMin, domainMax])
 
   return (
     <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-4">
@@ -422,7 +431,7 @@ export function VIHistoryChart({ timeframe, defaultColor = '#a1a1aa', compact = 
                   stroke="#f59e0b"
                   strokeDasharray="2 4"
                   strokeOpacity={0.5}
-                  label={{
+                  label={labelledLevels.has(pl.level) ? {
                     value: String(pl.level),
                     position: 'insideTopLeft',
                     fill: '#f59e0b99',
@@ -430,7 +439,7 @@ export function VIHistoryChart({ timeframe, defaultColor = '#a1a1aa', compact = 
                     fontFamily: 'monospace',
                     dx: 4,
                     dy: -3,
-                  }}
+                  } : undefined}
                 />
               ))}
 
