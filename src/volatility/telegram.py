@@ -148,6 +148,7 @@ def format_market_vi_message(
     timeframe: str,
     components: dict | None = None,
     template: str | None = None,
+    is_trigger: bool = False,
 ) -> str:
     """Format a Market VI alert message.
 
@@ -187,8 +188,12 @@ def format_market_vi_message(
     now = datetime.now().strftime("%d/%m %H:%M")
     r_emoji = _REGIME_EMOJI.get(regime, "📊")
     r_summary = _REGIME_SUMMARY.get(regime, "")
+    if is_trigger:
+        header = f"🎯 <b>VI Trigger</b> · {timeframe.upper()} — {now}"
+    else:
+        header = f"📡 <b>VI Status</b> · {timeframe.upper()} — {now}"
     lines = [
-        f"📡 <b>ATD Market VI</b> · {timeframe.upper()} — {now}",
+        header,
         f"📊 Score: <b>{vi_score:.3f}</b>",
         f"{r_emoji} Regime: <b>{regime}</b> — {r_summary}",
     ]
@@ -292,7 +297,9 @@ def send_market_vi_alert(
         return
 
     template: str | None = notification_cfg.get("message_template") or None
-    text = format_market_vi_message(vi_score, regime, timeframe, components, template=template)
+    # is_trigger = user configured specific regimes to watch (not "all regimes")
+    is_trigger = bool(allowed_regimes)
+    text = format_market_vi_message(vi_score, regime, timeframe, components, template=template, is_trigger=is_trigger)
     _dispatch(notification_cfg, text)
     _set_cooldown("market_vi", timeframe, cooldown_min)
 
