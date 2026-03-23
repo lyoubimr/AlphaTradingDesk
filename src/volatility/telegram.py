@@ -19,6 +19,7 @@ from __future__ import annotations
 import logging
 import os
 from datetime import datetime
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import httpx
 
@@ -27,6 +28,17 @@ logger = logging.getLogger(__name__)
 _TELEGRAM_API = "https://api.telegram.org"
 _TIMEOUT = 8.0  # seconds
 _APP_ENV = os.getenv("APP_ENV", "dev")
+
+
+def _now_local() -> datetime:
+    """Return current time in the configured timezone (APP_TIMEZONE env var, default UTC)."""
+    tz_name = os.getenv("APP_TIMEZONE", "UTC")
+    try:
+        tz = ZoneInfo(tz_name)
+    except (ZoneInfoNotFoundError, KeyError):
+        logger.warning("Telegram: unknown APP_TIMEZONE=%r, falling back to UTC", tz_name)
+        tz = ZoneInfo("UTC")
+    return datetime.now(tz)
 
 # Regime → display label
 _REGIME_LABEL: dict[str, str] = {
@@ -203,7 +215,7 @@ def format_market_vi_message(
             logger.warning("format_market_vi_message: invalid template, falling back to default")
 
     # Default format (HTML)
-    now_str = datetime.now().astimezone().strftime("%d/%m %H:%M")
+    now_str = _now_local().strftime("%d/%m %H:%M")
     score_100 = vi_score * 100
     if prev_score is not None:
         arrow = "\u2191" if vi_score > prev_score else ("\u2193" if vi_score < prev_score else "\u2192")
@@ -252,7 +264,7 @@ def format_watchlist_message(
 
         -> 3 pairs | setup_ready + opportunity
     """
-    now = datetime.now().astimezone().strftime("%d/%m %H:%M")
+    now = _now_local().strftime("%d/%m %H:%M")
     mr_emoji = _REGIME_EMOJI.get(market_regime, "📊")
     lines = [
         f"📋 <b>ATD Watchlist</b> · {timeframe.upper()} — {now}",
@@ -536,7 +548,7 @@ def send_vi_level_alerts(
 
         # ── Build & send message ──────────────────────────────────────────
         score_str = f"{curr:.1f}"
-        now_str = datetime.now().astimezone().strftime("%d/%m %H:%M")
+        now_str = _now_local().strftime("%d/%m %H:%M")
         regime = _score_100_to_regime(curr)
         r_emoji = _REGIME_EMOJI.get(regime, "📊")
         r_summary = _REGIME_SUMMARY.get(regime, "")
