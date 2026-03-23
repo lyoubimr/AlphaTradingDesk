@@ -17,6 +17,7 @@ Message format: Telegram HTML (parse_mode=HTML). Use <b>, <i>, <code> tags in cu
 from __future__ import annotations
 
 import logging
+import os
 from datetime import datetime
 
 import httpx
@@ -25,6 +26,7 @@ logger = logging.getLogger(__name__)
 
 _TELEGRAM_API = "https://api.telegram.org"
 _TIMEOUT = 8.0  # seconds
+_APP_ENV = os.getenv("APP_ENV", "dev")
 
 # Regime → display label
 _REGIME_LABEL: dict[str, str] = {
@@ -160,15 +162,19 @@ def format_market_vi_message(
     components: dict | None = None,
     template: str | None = None,
     is_trigger: bool = False,
+    prev_score: float | None = None,  # 0.0–1.0 range; arrow shown when provided
 ) -> str:
     """Format a Market VI alert message.
 
-    Example output:
-        ATD Market VI — 1H | 14/03 15:00 UTC
-        Score: 0.714   Regime: ACTIVE (0.67–0.83)
-        High momentum — opportunity window open
+    Example output (default HTML):
+        [DEV] 📡 VI Status · 1H
 
-        Components: RVOL 0.82 | MFI 0.61 | ATR 0.74 | BB 0.67
+        📊 Score: 57.2 ↑
+        📈 Regime: TRENDING — Sweet spot for trend-following setups
+
+        <code>Components: RVOL 0.82 | MFI 0.61 | ATR 0.74 | BB 0.67</code>
+
+        <i>23/03 18:23</i>
     """
     # Build component string
     comp_parts: list[str] = []
@@ -188,6 +194,7 @@ def format_market_vi_message(
             return template.format(
                 timeframe=timeframe.upper(),
                 score=f"{vi_score:.3f}",
+                score_100=f"{vi_score * 100:.1f}",
                 regime=_REGIME_LABEL.get(regime, regime),
                 summary=_REGIME_SUMMARY.get(regime, ""),
                 components=comp_str,
@@ -196,21 +203,31 @@ def format_market_vi_message(
             logger.warning("format_market_vi_message: invalid template, falling back to default")
 
     # Default format (HTML)
-    now = datetime.now().strftime("%d/%m %H:%M")
+    now_str = datetime.now().astimezone().strftime("%d/%m %H:%M")
+    score_100 = vi_score * 100
+    if prev_score is not None:
+        arrow = "\u2191" if vi_score > prev_score else ("\u2193" if vi_score < prev_score else "\u2192")
+    else:
+        arrow = ""
+    dev_prefix = "[DEV] " if _APP_ENV != "prod" else ""
     r_emoji = _REGIME_EMOJI.get(regime, "📊")
     r_summary = _REGIME_SUMMARY.get(regime, "")
     if is_trigger:
-        header = f"🎯 <b>VI Trigger</b> · {timeframe.upper()} — {now}"
+        header = f"{dev_prefix}\U0001f3af <b>VI Trigger</b> \u00b7 {timeframe.upper()}"
     else:
-        header = f"📡 <b>VI Status</b> · {timeframe.upper()} — {now}"
+        header = f"{dev_prefix}\U0001f4e1 <b>VI Status</b> \u00b7 {timeframe.upper()}"
+    score_line = f"\U0001f4ca Score: <b>{score_100:.1f}</b>" + (f" {arrow}" if arrow else "")
     lines = [
         header,
-        f"📊 Score: <b>{vi_score:.3f}</b>",
-        f"{r_emoji} Regime: <b>{regime}</b> — {r_summary}",
+        "",
+        score_line,
+        f"{r_emoji} Regime: <b>{regime}</b> \u2014 {r_summary}",
     ]
     if comp_parts:
         lines.append("")
         lines.append(f"<code>Components: {comp_str}</code>")
+    lines.append("")
+    lines.append(f"<i>{now_str}</i>")
     return "\n".join(lines)
 
 
@@ -235,7 +252,7 @@ def format_watchlist_message(
 
         -> 3 pairs | setup_ready + opportunity
     """
-    now = datetime.now().strftime("%d/%m %H:%M")
+    now = datetime.now().astimezone().strftime("%d/%m %H:%M")
     mr_emoji = _REGIME_EMOJI.get(market_regime, "📊")
     lines = [
         f"📋 <b>ATD Watchlist</b> · {timeframe.upper()} — {now}",
@@ -326,7 +343,24 @@ def send_market_vi_alert(
     template: str | None = tf_cfg.get("template") or notification_cfg.get("message_template") or None
     # is_trigger = user configured specific regimes to watch (not "all regimes")
     is_trigger = bool(allowed_regimes)
-    text = format_market_vi_message(vi_score, regime, timeframe, components, template=template, is_trigger=is_trigger)
+
+    # ── Fetch prev score from Redis for direction arrow ───────────────────
+    prev_score: float | None = None
+    try:
+        from src.volatility.cache import _get_redis  # noqa: PLC0415
+        _r = _get_redis()
+        _prev_key = f"atd:vi_prev_status:{timeframe}"
+        _prev_raw = _r.get(_prev_key)
+        if _prev_raw is not None:
+            prev_score = float(str(_prev_raw))
+        _r.set(_prev_key, str(vi_score))
+    except Exception:
+        pass
+
+    text = format_market_vi_message(
+        vi_score, regime, timeframe, components,
+        template=template, is_trigger=is_trigger, prev_score=prev_score,
+    )
     _dispatch(notification_cfg, text)
     _set_cooldown("market_vi", timeframe, cooldown_min)
 
@@ -502,7 +536,7 @@ def send_vi_level_alerts(
 
         # ── Build & send message ──────────────────────────────────────────
         score_str = f"{curr:.1f}"
-        now_str = datetime.now().strftime("%d/%m %H:%M")
+        now_str = datetime.now().astimezone().strftime("%d/%m %H:%M")
         regime = _score_100_to_regime(curr)
         r_emoji = _REGIME_EMOJI.get(regime, "📊")
         r_summary = _REGIME_SUMMARY.get(regime, "")
