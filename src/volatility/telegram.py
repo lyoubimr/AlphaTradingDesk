@@ -540,11 +540,12 @@ def send_vi_level_alerts(
         regime = _score_100_to_regime(curr)
         r_emoji = _REGIME_EMOJI.get(regime, "📊")
         r_summary = _REGIME_SUMMARY.get(regime, "")
+        dev_prefix = "[DEV] " if _APP_ENV != "prod" else ""
         if ltype == "crossing":
             tval = float(lv.get("value", 0))
             tol  = max(0.0, float(lv.get("tolerance", 0.5)))
             msg = (
-                f"🔔 <b>VI Level Alert</b> · {tf_label}\n\n"
+                f"{dev_prefix}🔔 <b>VI Level Alert</b> · {tf_label}\n\n"
                 f"📊 Score: <b>{score_str}</b> {direction_arrow}\n"
                 f"{r_emoji} Regime: <b>{regime}</b> — {r_summary}\n\n"
                 f"🎯 Target: <b>{tval:.0f}</b> (±{tol:.1f})"
@@ -556,8 +557,8 @@ def send_vi_level_alerts(
             rmin = float(lv.get("min", 0))
             rmax = float(lv.get("max", 100))
             msg = (
-                f"🔔 <b>VI Range Alert</b> · {tf_label}\n\n"
-                f"📊 Score: <b>{score_str}</b>\n"
+                f"{dev_prefix}🔔 <b>VI Range Alert</b> · {tf_label}\n\n"
+                f"📊 Score: <b>{score_str}</b> {direction_arrow}\n"
                 f"{r_emoji} Regime: <b>{regime}</b> — {r_summary}\n\n"
                 f"📏 Range: [<b>{rmin:.0f} – {rmax:.0f}</b>]"
             )
