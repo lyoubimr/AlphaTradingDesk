@@ -1861,7 +1861,7 @@ export function NewTradePage() {
               <CalcPill
                 label={isCFD ? 'Lot size (total)' : 'Position size'}
                 value={calc.lot_size != null ? fmt(calc.lot_size, isCFD ? 2 : 4) : '—'}
-                sub={isCFD ? 'lots' : 'units'}
+                sub={isCFD ? 'lots' : `units${notional != null ? ` · ${fmt(notional)} ${ccy}` : ''}`}
                 color={isCFD ? 'blue' : 'default'}
               />
               {/* Crypto: margin REQUIRED by the broker = notional / leverage. This is the minimum you must deposit. */}
