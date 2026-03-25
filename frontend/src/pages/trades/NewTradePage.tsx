@@ -30,7 +30,7 @@ import {
 } from 'lucide-react'
 import { PageHeader } from '../../components/ui/PageHeader'
 import { useProfile } from '../../context/ProfileContext'
-import { instrumentsApi, tradesApi, strategiesApi, statsApi, goalsApi } from '../../lib/api'
+import { instrumentsApi, tradesApi, strategiesApi, statsApi, goalsApi, maApi } from '../../lib/api'
 import { useRiskCalc } from '../../hooks/useRiskCalc'
 import type { RiskCalcResult } from '../../hooks/useRiskCalc'
 import { cn } from '../../lib/cn'
@@ -983,6 +983,15 @@ export function NewTradePage() {
   // ── Risk Advisor state ────────────────────────────────────────────────────
   const [advisorSnapshot, setAdvisorSnapshot] = useState<Record<string, unknown> | null>(null)
   const [forceOpen, setForceOpen]             = useState(false)
+  // Latest Market Analysis session — auto-fetched for ma_direction in Risk Advisor
+  const [latestMaSessionId, setLatestMaSessionId] = useState<number | null>(null)
+
+  useEffect(() => {
+    if (!activeProfile) return
+    maApi.listSessions(undefined, 1, activeProfile.id)
+      .then((sessions) => setLatestMaSessionId(sessions[0]?.id ?? null))
+      .catch(() => setLatestMaSessionId(null))
+  }, [activeProfile?.id])
 
   const handleAdvisorAccept = useCallback((suggestedRiskPct: number, snapshot: Record<string, unknown>) => {
     // Pre-fill the risk % field with the advisor's suggestion
@@ -1614,6 +1623,7 @@ export function NewTradePage() {
           direction={direction}
           strategyId={strategyIds[0] ?? null}
           confidence={confidence ? Number(confidence) : null}
+          maSessionId={latestMaSessionId}
           onAccept={handleAdvisorAccept}
           onReset={handleAdvisorReset}
           onForce={() => setForceOpen(true)}
@@ -1861,7 +1871,7 @@ export function NewTradePage() {
               <CalcPill
                 label={isCFD ? 'Lot size (total)' : 'Position size'}
                 value={calc.lot_size != null ? fmt(calc.lot_size, isCFD ? 2 : 4) : '—'}
-                sub={isCFD ? 'lots' : 'units'}
+                sub={isCFD ? 'lots' : `units${notional != null ? ` · ${fmt(notional)} ${ccy}` : ''}`}
                 color={isCFD ? 'blue' : 'default'}
               />
               {/* Crypto: margin REQUIRED by the broker = notional / leverage. This is the minimum you must deposit. */}
