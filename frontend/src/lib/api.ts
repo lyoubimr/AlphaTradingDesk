@@ -358,10 +358,11 @@ export const maApi = {
   listIndicators: (moduleId: number): Promise<MAIndicator[]> =>
     request(`/market-analysis/modules/${moduleId}/indicators`),
 
-  /** GET /api/market-analysis/sessions?module_id=&limit= (global — no profile filter) */
-  listSessions: (moduleId?: number, limit = 50): Promise<MASessionListItem[]> => {
+  /** GET /api/market-analysis/sessions?profile_id=&module_id=&limit= */
+  listSessions: (moduleId?: number, limit = 50, profileId?: number): Promise<MASessionListItem[]> => {
     const qs = new URLSearchParams({ limit: String(limit) })
     if (moduleId != null) qs.set('module_id', String(moduleId))
+    if (profileId != null) qs.set('profile_id', String(profileId))
     return request(`/market-analysis/sessions?${qs}`)
   },
 
