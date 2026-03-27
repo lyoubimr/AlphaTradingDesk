@@ -15,6 +15,7 @@ from datetime import UTC, datetime
 
 import httpx
 from fastapi import HTTPException
+from sqlalchemy import func as sa_func
 from sqlalchemy.orm import Session
 
 from src.core.models.broker import Profile
@@ -270,7 +271,7 @@ def _resolve_ma_direction_match(
     if timeframe:
         indicator = (
             db.query(MarketAnalysisIndicator.timeframe_level)
-            .filter(MarketAnalysisIndicator.tv_timeframe == timeframe.lower())
+            .filter(sa_func.lower(MarketAnalysisIndicator.tv_timeframe) == timeframe.lower())
             .limit(1)
             .scalar()
         )

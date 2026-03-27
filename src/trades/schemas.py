@@ -85,6 +85,10 @@ class TradeOpen(BaseModel):
     # Optional overrides — if None the profile default is used
     risk_pct_override: Decimal | None = Field(default=None, gt=0, le=10)
 
+    # Crypto position sizing — entered by the user in the form
+    leverage: Decimal | None = Field(default=None, gt=0)  # actual leverage used
+    margin_used: Decimal | None = Field(default=None, gt=0)  # actual margin deposited
+
     # Phase 3 — Dynamic Risk
     # force=True: override budget block (only honoured if risk_guard.force_allowed=True)
     force: bool = False

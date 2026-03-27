@@ -211,6 +211,7 @@ class Trade(Base):
 
     # CFD/Crypto specifics
     leverage: Mapped[Decimal | None] = mapped_column(Numeric(10, 2))
+    margin_used: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))  # user-entered margin (overrides computed)
     spread: Mapped[Decimal | None] = mapped_column(Numeric(20, 8))
     estimated_fees: Mapped[Decimal | None] = mapped_column(Numeric(20, 2))
     confidence_score: Mapped[int | None] = mapped_column(Integer)
