@@ -220,17 +220,23 @@ class TradeSizeResult(BaseModel):
 
     For Crypto:
         units = risk_amount / abs(entry_price - stop_loss)
+        notional = units x entry_price
 
     For CFD:
         lots  = risk_amount / (abs(entry_price - stop_loss) × tick_value)
         margin_warning = True if capital_current < safe_margin
+        leverage = notional / safe_margin * MARGIN_SAFETY_FACTOR
     """
 
     risk_amount: Decimal
     units_or_lots: Decimal  # units for Crypto, lots for CFD
     market_type: str  # 'Crypto' or 'CFD'
-    margin_warning: bool = False  # CFD only — safe_margin check
-    safe_margin: Decimal | None = None  # CFD only
+    notional: Decimal | None = None  # position size in USD (Crypto: units × entry)
+    leverage: Decimal | None = None  # max leverage from instrument config
+    margin_required: Decimal | None = None  # notional / leverage — actual margin to deposit
+    safe_margin: Decimal | None = None  # margin_required × MARGIN_SAFETY_FACTOR — recommended buffer
+    liq_price: Decimal | None = None  # estimated liquidation price
+    margin_warning: bool = False  # True when capital_current < safe_margin
 
 
 # ── Response schemas ──────────────────────────────────────────────────────────

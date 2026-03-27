@@ -1246,6 +1246,50 @@ export function TradeDetailPage() {
             <InfoRow label="Direction"
               value={trade.direction}
               accent={trade.direction === 'LONG' ? 'green' : 'red'} />
+            {trade.size_info != null && (() => {
+              const si = trade.size_info
+              const isCrypto = si.market_type === 'Crypto'
+              return (
+                <>
+                  <InfoRow
+                    label={isCrypto ? 'Quantity' : 'Lots'}
+                    value={isCrypto
+                      ? parseFloat(si.units_or_lots).toFixed(6)
+                      : parseFloat(si.units_or_lots).toFixed(2)}
+                  />
+                  {si.notional != null && (
+                    <InfoRow
+                      label="Position size"
+                      value={`${fmt(si.notional)} USD`}
+                    />
+                  )}
+                  {si.leverage != null && (
+                    <InfoRow label="Leverage" value={`${si.leverage}x`} accent="amber" />
+                  )}
+                  {si.margin_required != null && (
+                    <InfoRow
+                      label="Margin req."
+                      value={`${fmt(si.margin_required)} USD`}
+                      accent={si.margin_warning ? 'red' : 'amber'}
+                    />
+                  )}
+                  {si.safe_margin != null && (
+                    <InfoRow
+                      label="Safe margin (×2.5)"
+                      value={`${fmt(si.safe_margin)} USD`}
+                      accent={si.margin_warning ? 'red' : undefined}
+                    />
+                  )}
+                  {si.liq_price != null && (
+                    <InfoRow
+                      label="Liq. price (est.)"
+                      value={fmt(si.liq_price, 2)}
+                      accent="red"
+                    />
+                  )}
+                </>
+              )
+            })()}
           </Section>
 
           <Section title="⚠️ Risk">
@@ -1270,6 +1314,123 @@ export function TradeDetailPage() {
             )}
           </Section>
         </div>
+
+        {/* ── Entry Context (dynamic_risk_snapshot) ────────────────────── */}
+        {trade.dynamic_risk_snapshot != null && (() => {
+          const snap = trade.dynamic_risk_snapshot as {
+            multiplier?: number
+            adjusted_risk_pct?: number
+            adjusted_risk_amount?: number
+            budget_remaining_pct?: number
+            criteria?: { name: string; enabled: boolean; value_label: string; factor?: number }[]
+          }
+          const criteria = (snap.criteria ?? []).filter(c => c.enabled)
+
+          const CRITERION_LABELS: Record<string, string> = {
+            market_vi:   'Market VI',
+            pair_vi:     'Asset VI',
+            ma_direction: 'MA Direction',
+            strategy_wr: 'Strategy WR',
+            confidence:  'Confidence',
+          }
+
+          function criterionAccent(name: string, label: string): 'green' | 'red' | 'amber' | undefined {
+            if (name === 'ma_direction') {
+              const v = label.toLowerCase()
+              if (v === 'aligned') return 'green'
+              if (v === 'opposed') return 'red'
+              return undefined
+            }
+            if (name === 'market_vi' || name === 'pair_vi') {
+              const v = label.toUpperCase()
+              if (v === 'CALM' || v === 'NORMAL' || v === 'LOW') return 'green'
+              if (v === 'ACTIVE' || v === 'TRENDING' || v === 'MODERATE') return 'amber'
+              if (v === 'VOLATILE' || v === 'HIGH' || v === 'EXTREME') return 'red'
+            }
+            return undefined
+          }
+
+          const accentClass = (accent?: 'green' | 'red' | 'amber') =>
+            accent === 'green' ? 'text-emerald-400'
+            : accent === 'red' ? 'text-red-400'
+            : accent === 'amber' ? 'text-amber-400'
+            : 'text-slate-200'
+
+          const multNum = snap.multiplier ?? 1
+          const multAccent = multNum > 1 ? 'text-emerald-400' : multNum < 1 ? 'text-amber-400' : 'text-slate-200'
+
+          const hasStats = snap.multiplier != null || snap.adjusted_risk_pct != null || snap.budget_remaining_pct != null
+
+          return (
+            <div className="bg-surface-800 rounded-xl border border-surface-700 overflow-hidden">
+              <div className="px-5 py-3.5 border-b border-surface-700/50">
+                <span className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold">📊 Entry Context</span>
+              </div>
+
+              {/* ── Criteria chips ── */}
+              {criteria.length > 0 && (
+                <div className="px-4 pt-3 pb-2 grid grid-cols-2 sm:grid-cols-3 gap-2">
+                  {criteria.map(c => {
+                    const accent = criterionAccent(c.name, c.value_label)
+                    const dotColor =
+                      accent === 'green' ? 'bg-emerald-400' :
+                      accent === 'red'   ? 'bg-red-400' :
+                      accent === 'amber' ? 'bg-amber-400' :
+                      'bg-slate-500'
+                    return (
+                      <div key={c.name} className="flex flex-col gap-0.5 rounded-lg bg-surface-700/50 border border-surface-700 px-3 py-2">
+                        <span className="text-[10px] text-slate-500 font-medium truncate">
+                          {CRITERION_LABELS[c.name] ?? c.name}
+                        </span>
+                        <div className="flex items-center gap-1.5">
+                          <span className={cn('shrink-0 w-1.5 h-1.5 rounded-full', dotColor)} />
+                          <span className={cn('text-[12px] font-mono font-semibold truncate', accentClass(accent))}>
+                            {c.value_label}
+                          </span>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+
+              {/* ── Stats row ── */}
+              {hasStats && (
+                <div className={cn(
+                  'grid divide-x divide-surface-700/60 border-t border-surface-700/50 mt-2',
+                  [snap.multiplier, snap.adjusted_risk_pct, snap.budget_remaining_pct].filter(v => v != null).length === 3
+                    ? 'grid-cols-3' : 'grid-cols-2'
+                )}>
+                  {snap.multiplier != null && (
+                    <div className="flex flex-col items-center py-3 px-2 gap-0.5">
+                      <span className={cn('text-base font-mono font-bold', multAccent)}>{multNum.toFixed(2)}×</span>
+                      <span className="text-[9px] uppercase tracking-wider text-slate-500">Risk mult.</span>
+                    </div>
+                  )}
+                  {snap.adjusted_risk_pct != null && snap.adjusted_risk_amount != null && (
+                    <div className="flex flex-col items-center py-3 px-2 gap-0.5">
+                      <span className="text-base font-mono font-bold text-slate-200">{snap.adjusted_risk_pct.toFixed(2)}%</span>
+                      <span className="text-[10px] font-mono text-slate-400">{fmt(snap.adjusted_risk_amount)} USD</span>
+                      <span className="text-[9px] uppercase tracking-wider text-slate-500">Adj. risk</span>
+                    </div>
+                  )}
+                  {snap.budget_remaining_pct != null && (
+                    <div className="flex flex-col items-center py-3 px-2 gap-0.5">
+                      <span className={cn('text-base font-mono font-bold',
+                        snap.budget_remaining_pct <= 0.5 ? 'text-red-400' :
+                        snap.budget_remaining_pct <= 1.5 ? 'text-amber-400' :
+                        'text-emerald-400'
+                      )}>
+                        {snap.budget_remaining_pct.toFixed(2)}%
+                      </span>
+                      <span className="text-[9px] uppercase tracking-wider text-slate-500">Budget left</span>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )
+        })()}
 
         {/* ── TP Positions ─────────────────────────────────────────────── */}
         <div className="bg-surface-800 rounded-xl border border-surface-700 overflow-hidden">

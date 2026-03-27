@@ -984,14 +984,14 @@ export function NewTradePage() {
   const [advisorSnapshot, setAdvisorSnapshot] = useState<Record<string, unknown> | null>(null)
   const [forceOpen, setForceOpen]             = useState(false)
   // Latest Market Analysis session — auto-fetched for ma_direction in Risk Advisor
+  // NOTE: not filtered by profile — MA sessions represent global market context
   const [latestMaSessionId, setLatestMaSessionId] = useState<number | null>(null)
 
   useEffect(() => {
-    if (!activeProfile) return
-    maApi.listSessions(undefined, 1, activeProfile.id)
+    maApi.listSessions(undefined, 1)
       .then((sessions) => setLatestMaSessionId(sessions[0]?.id ?? null))
       .catch(() => setLatestMaSessionId(null))
-  }, [activeProfile?.id])
+  }, [])
 
   const handleAdvisorAccept = useCallback((suggestedRiskPct: number, snapshot: Record<string, unknown>) => {
     // Pre-fill the risk % field with the advisor's suggestion
