@@ -15,10 +15,10 @@ from datetime import UTC, datetime
 
 import httpx
 from fastapi import HTTPException
+from sqlalchemy import func as sa_func
 from sqlalchemy.orm import Session
 
 from src.core.models.broker import Profile
-from sqlalchemy import func as sa_func
 from src.core.models.market_analysis import MarketAnalysisIndicator, MarketAnalysisSession
 from src.core.models.trade import Strategy, Trade
 from src.risk_management.defaults import DEFAULT_RISK_CONFIG
