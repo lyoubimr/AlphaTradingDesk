@@ -19,7 +19,9 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.add_column('trades', sa.Column('margin_used', sa.Numeric(precision=12, scale=2), nullable=True))
+    # IF NOT EXISTS — idempotent: column may already exist if a previous
+    # failed deployment added it before the migration could be stamped.
+    op.execute("ALTER TABLE trades ADD COLUMN IF NOT EXISTS margin_used NUMERIC(12, 2)")
 
 
 def downgrade() -> None:
