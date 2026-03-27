@@ -136,8 +136,15 @@ export interface TradeSizeResult {
   risk_amount: string
   units_or_lots: string
   market_type: string
+  notional: string | null
+  leverage: string | null
+  /** Actual margin to deposit = notional / leverage */
+  margin_required: string | null
+  /** Recommended buffer = margin_required × 2.5 */
+  safe_margin: string | null
+  /** Estimated liquidation price */
+  liq_price: string | null
   margin_warning: boolean
-  safe_margin: boolean
 }
 
 export interface TradeListItem {
@@ -196,6 +203,8 @@ export interface TradeOut extends TradeListItem {
   entry_screenshot_urls: string[] | null
   close_notes: string | null
   close_screenshot_urls: string[] | null
+  /** Full risk advisor output at trade open — persisted for analysis */
+  dynamic_risk_snapshot: Record<string, unknown> | null
 }
 
 export interface TradeClose {

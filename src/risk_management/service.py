@@ -18,7 +18,7 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from src.core.models.broker import Profile
-from src.core.models.market_analysis import MarketAnalysisSession
+from src.core.models.market_analysis import MarketAnalysisIndicator, MarketAnalysisSession
 from src.core.models.trade import Strategy, Trade
 from src.risk_management.defaults import DEFAULT_RISK_CONFIG
 from src.risk_management.engine import _deep_merge, compute_risk_multiplier
@@ -248,11 +248,13 @@ def _resolve_ma_direction_match(
     ma_session_id: int | None,
     direction: str,
     db: Session,
+    timeframe: str | None = None,
 ) -> str | None:
     """Return "aligned", "opposed", or None based on session bias vs direction.
 
-    Uses ``bias_composite_a`` (v2 sessions) with fallback to ``bias_htf_a``
-    (v1 sessions).  Returns None if no session or no bias stored.
+    Resolves the timeframe tier (ltf/mtf/htf) from the market_analysis_indicators
+    table (tv_timeframe → timeframe_level), then selects the matching bias field.
+    Fallback chain: tier-specific → bias_composite_a → bias_htf_a.
     """
     if ma_session_id is None:
         return None
@@ -263,7 +265,24 @@ def _resolve_ma_direction_match(
     )
     if session is None:
         return None
-    bias = session.bias_composite_a or session.bias_htf_a
+
+    tier: str | None = None
+    if timeframe:
+        indicator = (
+            db.query(MarketAnalysisIndicator.timeframe_level)
+            .filter(MarketAnalysisIndicator.tv_timeframe == timeframe.lower())
+            .limit(1)
+            .scalar()
+        )
+        tier = indicator  # "ltf" | "mtf" | "htf" | None
+
+    if tier == "ltf":
+        bias = session.bias_ltf_a or session.bias_composite_a or session.bias_htf_a
+    elif tier == "mtf":
+        bias = session.bias_mtf_a or session.bias_composite_a or session.bias_htf_a
+    else:
+        bias = session.bias_composite_a or session.bias_htf_a
+
     if bias is None:
         return None
     bias_lower = bias.lower()
@@ -364,7 +383,7 @@ def orchestrate_risk_advisor(
         )
 
     # ── 6. MA direction match ─────────────────────────────────────────────────
-    ma_direction_match: str | None = _resolve_ma_direction_match(ma_session_id, direction, db)
+    ma_direction_match: str | None = _resolve_ma_direction_match(ma_session_id, direction, db, timeframe)
 
     # ── 7. Strategy stats ─────────────────────────────────────────────────────
     strategy_wr, strategy_has_stats = _resolve_strategy_stats(strategy_id, db)

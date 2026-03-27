@@ -163,40 +163,67 @@ def _compute_size_info(
     """
     market_type = profile.market_type  # 'Crypto' or 'CFD'
 
+    direction = data.direction.lower()
+
     if market_type == "Crypto":
         units = _compute_size_crypto(risk_amount, data.entry_price, data.stop_loss)
+        notional = (units * data.entry_price).quantize(Decimal("0.01"))
+        max_lev_crypto = instrument.max_leverage if instrument and instrument.max_leverage else None
+        if max_lev_crypto:
+            lev = Decimal(str(max_lev_crypto))
+            margin_required = (notional / lev).quantize(Decimal("0.01"))
+            safe_margin = (margin_required * MARGIN_SAFETY_FACTOR).quantize(Decimal("0.01"))
+            margin_warning = profile.capital_current < safe_margin
+            if direction == "long":
+                liq_price = (data.entry_price * (1 - 1 / lev)).quantize(Decimal("0.01"))
+            else:
+                liq_price = (data.entry_price * (1 + 1 / lev)).quantize(Decimal("0.01"))
+        else:
+            margin_required = None
+            safe_margin = None
+            margin_warning = False
+            liq_price = None
         return TradeSizeResult(
             risk_amount=risk_amount,
             units_or_lots=units,
             market_type=market_type,
+            notional=notional,
+            leverage=Decimal(str(max_lev_crypto)) if max_lev_crypto else None,
+            margin_required=margin_required,
+            safe_margin=safe_margin,
+            liq_price=liq_price,
+            margin_warning=margin_warning,
         )
 
     # -- CFD ------------------------------------------------------------------
     tick_value = instrument.tick_value if instrument and instrument.tick_value else Decimal("1")
     lots = _compute_size_cfd(risk_amount, data.entry_price, data.stop_loss, tick_value)
 
-    # Margin check
     max_lev = (
         instrument.max_leverage
         if instrument and instrument.max_leverage
         else DEFAULT_CFD_MAX_LEVERAGE
     )
-    safe_margin = (
-        lots
-        * DEFAULT_CFD_CONTRACT_SIZE
-        * data.entry_price
-        / Decimal(str(max_lev))
-        * MARGIN_SAFETY_FACTOR
-    ).quantize(Decimal("0.01"))
-
+    lev_cfd = Decimal(str(max_lev))
+    notional_cfd = (lots * DEFAULT_CFD_CONTRACT_SIZE * data.entry_price).quantize(Decimal("0.01"))
+    margin_required_cfd = (notional_cfd / lev_cfd).quantize(Decimal("0.01"))
+    safe_margin = (margin_required_cfd * MARGIN_SAFETY_FACTOR).quantize(Decimal("0.01"))
     margin_warning = profile.capital_current < safe_margin
+    if direction == "long":
+        liq_price = (data.entry_price * (1 - 1 / lev_cfd)).quantize(Decimal("0.01"))
+    else:
+        liq_price = (data.entry_price * (1 + 1 / lev_cfd)).quantize(Decimal("0.01"))
 
     return TradeSizeResult(
         risk_amount=risk_amount,
         units_or_lots=lots,
         market_type=market_type,
-        margin_warning=margin_warning,
+        notional=notional_cfd,
+        leverage=lev_cfd,
+        margin_required=margin_required_cfd,
         safe_margin=safe_margin,
+        liq_price=liq_price,
+        margin_warning=margin_warning,
     )
 
 
@@ -583,9 +610,97 @@ def list_trades(
     return items
 
 
+def _recompute_size_info_from_trade(trade: Trade, db: Session) -> TradeSizeResult | None:
+    """
+    Re-derive TradeSizeResult for an existing trade using persisted fields.
+
+    Used by get_trade() so the detail page always has size_info, even for
+    trades that were opened before size_info was exposed on the GET endpoint.
+    Returns None only if entry == stop_loss (invalid trade data).
+    """
+    dist = abs(trade.entry_price - (trade.initial_stop_loss or trade.stop_loss))
+    if dist == 0:
+        return None
+
+    profile = db.query(Profile).filter(Profile.id == trade.profile_id).first()
+    if profile is None:
+        return None
+
+    instrument = (
+        db.query(Instrument).filter(Instrument.id == trade.instrument_id).first()
+        if trade.instrument_id
+        else None
+    )
+
+    market_type = profile.market_type  # 'Crypto' or 'CFD'
+    risk_amount = trade.risk_amount
+
+    direction = (trade.direction or "long").lower()
+
+    if market_type == "Crypto":
+        units = _compute_size_crypto(risk_amount, trade.entry_price, trade.initial_stop_loss or trade.stop_loss)
+        notional = (units * trade.entry_price).quantize(Decimal("0.01"))
+        max_lev_crypto = instrument.max_leverage if instrument and instrument.max_leverage else None
+        if max_lev_crypto:
+            lev = Decimal(str(max_lev_crypto))
+            margin_required = (notional / lev).quantize(Decimal("0.01"))
+            safe_margin = (margin_required * MARGIN_SAFETY_FACTOR).quantize(Decimal("0.01"))
+            margin_warning = profile.capital_current < safe_margin
+            if direction == "long":
+                liq_price = (trade.entry_price * (1 - 1 / lev)).quantize(Decimal("0.01"))
+            else:
+                liq_price = (trade.entry_price * (1 + 1 / lev)).quantize(Decimal("0.01"))
+        else:
+            margin_required = None
+            safe_margin = None
+            margin_warning = False
+            liq_price = None
+        return TradeSizeResult(
+            risk_amount=risk_amount,
+            units_or_lots=units,
+            market_type=market_type,
+            notional=notional,
+            leverage=Decimal(str(max_lev_crypto)) if max_lev_crypto else None,
+            margin_required=margin_required,
+            safe_margin=safe_margin,
+            liq_price=liq_price,
+            margin_warning=margin_warning,
+        )
+
+    # CFD
+    tick_value = instrument.tick_value if instrument and instrument.tick_value else Decimal("1")
+    lots = _compute_size_cfd(risk_amount, trade.entry_price, trade.initial_stop_loss or trade.stop_loss, tick_value)
+    max_lev = (
+        instrument.max_leverage if instrument and instrument.max_leverage else DEFAULT_CFD_MAX_LEVERAGE
+    )
+    lev_cfd = Decimal(str(max_lev))
+    notional_cfd = (lots * DEFAULT_CFD_CONTRACT_SIZE * trade.entry_price).quantize(Decimal("0.01"))
+    margin_required_cfd = (notional_cfd / lev_cfd).quantize(Decimal("0.01"))
+    safe_margin = (margin_required_cfd * MARGIN_SAFETY_FACTOR).quantize(Decimal("0.01"))
+    margin_warning = profile.capital_current < safe_margin
+    if direction == "long":
+        liq_price = (trade.entry_price * (1 - 1 / lev_cfd)).quantize(Decimal("0.01"))
+    else:
+        liq_price = (trade.entry_price * (1 + 1 / lev_cfd)).quantize(Decimal("0.01"))
+    return TradeSizeResult(
+        risk_amount=risk_amount,
+        units_or_lots=lots,
+        market_type=market_type,
+        notional=notional_cfd,
+        leverage=lev_cfd,
+        margin_required=margin_required_cfd,
+        safe_margin=safe_margin,
+        liq_price=liq_price,
+        margin_warning=margin_warning,
+    )
+
+
 def get_trade(db: Session, trade_id: int) -> TradeOut:
     trade = _get_trade_or_404(db, trade_id)
-    out = _trade_to_out(trade)
+    # Re-compute size_info from persisted trade data so it is always available
+    # on GET (not just at open time).
+    size_info = _recompute_size_info_from_trade(trade, db)
+    out = _trade_to_out(trade, size_info)
     _populate_strategy_ids(out, db)
     return out
 
@@ -863,6 +978,11 @@ def partial_close(db: Session, trade_id: int, data: TradePartialClose) -> TradeO
     else:
         trade.current_risk = _recalculate_current_risk(trade, db)
 
+    # ── Credit capital immediately for this position's PnL ───────────────
+    profile = db.query(Profile).filter(Profile.id == trade.profile_id).first()
+    if profile and pnl is not None:
+        profile.capital_current = (profile.capital_current + pnl).quantize(Decimal("0.01"))
+
     # ── Auto-close when all positions are now closed ─────────────────────
     # After marking this position closed, check if any remain open.
     remaining_open = [p for p in trade.positions if p.status == "open"]
@@ -878,12 +998,8 @@ def partial_close(db: Session, trade_id: int, data: TradePartialClose) -> TradeO
         trade.closed_at = exit_dt
         trade.current_risk = Decimal("0.00")
 
-        # Atomic capital + WR stats update (profile + all linked strategies)
-        profile = db.query(Profile).filter(Profile.id == trade.profile_id).first()
+        # WR stats update (capital already credited above)
         if profile:
-            profile.capital_current = (profile.capital_current + trade.realized_pnl).quantize(
-                Decimal("0.01")
-            )
             _update_wr_stats(db, trade, profile)
     else:
         trade.status = "partial"
