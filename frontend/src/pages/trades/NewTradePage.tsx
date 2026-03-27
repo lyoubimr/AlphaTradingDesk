@@ -1380,6 +1380,8 @@ export function NewTradePage() {
           lot_percentage:     Number(t.pct),
         })),
         risk_pct_override:    riskPct || null,
+        ...(isCrypto && leverage && Number(leverage) > 1 && { leverage: Number(leverage) }),
+        ...(isCrypto && effectiveMargin != null && effectiveMargin > 0 && { margin_used: effectiveMargin }),
         strategy_ids:         strategyIds.length > 0 ? strategyIds : undefined,
         strategy_id:          strategyIds[0] ?? null,
         session_tag:          sessionTag || null,

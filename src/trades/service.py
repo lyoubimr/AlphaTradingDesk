@@ -530,6 +530,8 @@ def open_trade(db: Session, data: TradeOpen) -> TradeOut:
         session_tag=data.session_tag,
         notes=data.notes,
         confidence_score=data.confidence_score,
+        leverage=data.leverage,
+        margin_used=data.margin_used,
         entry_screenshot_urls=data.entry_screenshot_urls,
         dynamic_risk_snapshot=data.dynamic_risk_snapshot,
     )
@@ -640,16 +642,24 @@ def _recompute_size_info_from_trade(trade: Trade, db: Session) -> TradeSizeResul
     if market_type == "Crypto":
         units = _compute_size_crypto(risk_amount, trade.entry_price, trade.initial_stop_loss or trade.stop_loss)
         notional = (units * trade.entry_price).quantize(Decimal("0.01"))
-        max_lev_crypto = instrument.max_leverage if instrument and instrument.max_leverage else None
-        if max_lev_crypto:
-            lev = Decimal(str(max_lev_crypto))
-            margin_required = (notional / lev).quantize(Decimal("0.01"))
+        # Prefer stored margin (user-entered, exact) over computing from leverage
+        stored_margin = trade.margin_used
+        stored_lev = trade.leverage
+        lev_source = stored_lev if stored_lev else (
+            Decimal(str(instrument.max_leverage)) if instrument and instrument.max_leverage else None
+        )
+        if stored_margin or lev_source:
+            margin_required = stored_margin.quantize(Decimal("0.01")) if stored_margin else (notional / lev_source).quantize(Decimal("0.01"))
+            lev = (notional / stored_margin).quantize(Decimal("0.01")) if stored_margin else lev_source
             safe_margin = (margin_required * MARGIN_SAFETY_FACTOR).quantize(Decimal("0.01"))
             margin_warning = profile.capital_current < safe_margin
-            if direction == "long":
-                liq_price = (trade.entry_price * (1 - 1 / lev)).quantize(Decimal("0.01"))
+            if lev and lev > 0:
+                if direction == "long":
+                    liq_price = (trade.entry_price * (1 - 1 / lev)).quantize(Decimal("0.01"))
+                else:
+                    liq_price = (trade.entry_price * (1 + 1 / lev)).quantize(Decimal("0.01"))
             else:
-                liq_price = (trade.entry_price * (1 + 1 / lev)).quantize(Decimal("0.01"))
+                liq_price = None
         else:
             margin_required = None
             safe_margin = None
@@ -660,7 +670,7 @@ def _recompute_size_info_from_trade(trade: Trade, db: Session) -> TradeSizeResul
             units_or_lots=units,
             market_type=market_type,
             notional=notional,
-            leverage=Decimal(str(max_lev_crypto)) if max_lev_crypto else None,
+            leverage=lev_source,
             margin_required=margin_required,
             safe_margin=safe_margin,
             liq_price=liq_price,

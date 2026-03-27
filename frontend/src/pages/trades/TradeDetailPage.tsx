@@ -1268,16 +1268,9 @@ export function TradeDetailPage() {
                   )}
                   {si.margin_required != null && (
                     <InfoRow
-                      label="Margin req."
+                      label="Margin"
                       value={`${fmt(si.margin_required)} USD`}
                       accent={si.margin_warning ? 'red' : 'amber'}
-                    />
-                  )}
-                  {si.safe_margin != null && (
-                    <InfoRow
-                      label="Safe margin (×2.5)"
-                      value={`${fmt(si.safe_margin)} USD`}
-                      accent={si.margin_warning ? 'red' : undefined}
                     />
                   )}
                   {si.liq_price != null && (
@@ -1343,8 +1336,8 @@ export function TradeDetailPage() {
             }
             if (name === 'market_vi' || name === 'pair_vi') {
               const v = label.toUpperCase()
-              if (v === 'CALM' || v === 'NORMAL' || v === 'LOW') return 'green'
-              if (v === 'ACTIVE' || v === 'TRENDING' || v === 'MODERATE') return 'amber'
+              if (v === 'CALM' || v === 'NORMAL' || v === 'LOW' || v === 'TRENDING') return 'green'
+              if (v === 'ACTIVE' || v === 'MODERATE') return 'amber'
               if (v === 'VOLATILE' || v === 'HIGH' || v === 'EXTREME') return 'red'
             }
             return undefined

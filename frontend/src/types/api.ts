@@ -128,6 +128,10 @@ export interface TradeOpen {
   confidence_score?: number | null
   /** Risk Guard bypass — requires force_allowed=true in risk_settings */
   force?: boolean
+  /** Actual leverage used (Crypto only — user-entered) */
+  leverage?: number | null
+  /** Actual margin deposited (Crypto only — user-entered, takes priority over leverage-derived) */
+  margin_used?: number | null
   /** Snapshot of risk advisor output at time of trade open (persisted for audit) */
   dynamic_risk_snapshot?: Record<string, unknown> | null
 }
