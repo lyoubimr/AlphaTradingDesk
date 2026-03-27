@@ -122,6 +122,19 @@ def _validate_instrument_broker(instrument: Instrument, profile: Profile) -> Non
         )
 
 
+def _price_quant(price: Decimal) -> Decimal:
+    """Return a quantize string adapted to the price magnitude.
+    BTC 95000 → 0.01 | ETH 3200 → 0.01 | XRP 0.55 → 0.0001 | SHIB 0.000012 → 0.00000001
+    """
+    if price >= 100:
+        return Decimal("0.01")
+    if price >= 1:
+        return Decimal("0.0001")
+    if price >= Decimal("0.01"):
+        return Decimal("0.000001")
+    return Decimal("0.00000001")
+
+
 def _compute_price_distance(entry: Decimal, sl: Decimal) -> Decimal:
     return abs(entry - sl)
 
@@ -175,9 +188,9 @@ def _compute_size_info(
             safe_margin = (margin_required * MARGIN_SAFETY_FACTOR).quantize(Decimal("0.01"))
             margin_warning = profile.capital_current < safe_margin
             if direction == "long":
-                liq_price = (data.entry_price * (1 - 1 / lev)).quantize(Decimal("0.01"))
+                liq_price = (data.entry_price * (1 - 1 / lev)).quantize(_price_quant(data.entry_price))
             else:
-                liq_price = (data.entry_price * (1 + 1 / lev)).quantize(Decimal("0.01"))
+                liq_price = (data.entry_price * (1 + 1 / lev)).quantize(_price_quant(data.entry_price))
         else:
             margin_required = None
             safe_margin = None
@@ -210,9 +223,9 @@ def _compute_size_info(
     safe_margin = (margin_required_cfd * MARGIN_SAFETY_FACTOR).quantize(Decimal("0.01"))
     margin_warning = profile.capital_current < safe_margin
     if direction == "long":
-        liq_price = (data.entry_price * (1 - 1 / lev_cfd)).quantize(Decimal("0.01"))
+        liq_price = (data.entry_price * (1 - 1 / lev_cfd)).quantize(_price_quant(data.entry_price))
     else:
-        liq_price = (data.entry_price * (1 + 1 / lev_cfd)).quantize(Decimal("0.01"))
+        liq_price = (data.entry_price * (1 + 1 / lev_cfd)).quantize(_price_quant(data.entry_price))
 
     return TradeSizeResult(
         risk_amount=risk_amount,
@@ -655,9 +668,9 @@ def _recompute_size_info_from_trade(trade: Trade, db: Session) -> TradeSizeResul
             margin_warning = profile.capital_current < safe_margin
             if lev and lev > 0:
                 if direction == "long":
-                    liq_price = (trade.entry_price * (1 - 1 / lev)).quantize(Decimal("0.01"))
+                    liq_price = (trade.entry_price * (1 - 1 / lev)).quantize(_price_quant(trade.entry_price))
                 else:
-                    liq_price = (trade.entry_price * (1 + 1 / lev)).quantize(Decimal("0.01"))
+                    liq_price = (trade.entry_price * (1 + 1 / lev)).quantize(_price_quant(trade.entry_price))
             else:
                 liq_price = None
         else:
@@ -689,9 +702,9 @@ def _recompute_size_info_from_trade(trade: Trade, db: Session) -> TradeSizeResul
     safe_margin = (margin_required_cfd * MARGIN_SAFETY_FACTOR).quantize(Decimal("0.01"))
     margin_warning = profile.capital_current < safe_margin
     if direction == "long":
-        liq_price = (trade.entry_price * (1 - 1 / lev_cfd)).quantize(Decimal("0.01"))
+        liq_price = (trade.entry_price * (1 - 1 / lev_cfd)).quantize(_price_quant(trade.entry_price))
     else:
-        liq_price = (trade.entry_price * (1 + 1 / lev_cfd)).quantize(Decimal("0.01"))
+        liq_price = (trade.entry_price * (1 + 1 / lev_cfd)).quantize(_price_quant(trade.entry_price))
     return TradeSizeResult(
         risk_amount=risk_amount,
         units_or_lots=lots,
