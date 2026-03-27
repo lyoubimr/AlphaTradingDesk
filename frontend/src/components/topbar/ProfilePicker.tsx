@@ -138,7 +138,7 @@ export function ProfilePicker() {
                   <div className="flex items-center gap-1 mt-0.5">
                     <TrendingUp size={10} className="text-slate-600" />
                     <span className="text-[11px] text-slate-500 font-mono">
-                      {Number(p.capital_current).toLocaleString(undefined, {
+                      {Number(p.capital_current).toLocaleString('en-US', {
                         minimumFractionDigits: 0,
                         maximumFractionDigits: 0,
                       })}

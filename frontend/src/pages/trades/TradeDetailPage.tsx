@@ -30,7 +30,7 @@ function fmt(n: number | string | null | undefined, decimals = 2): string {
   if (n == null) return '—'
   const num = typeof n === 'string' ? parseFloat(n) : n
   if (isNaN(num)) return '—'
-  return num.toLocaleString(undefined, {
+  return num.toLocaleString('en-US', {
     minimumFractionDigits: decimals,
     maximumFractionDigits: decimals,
   })
@@ -48,7 +48,7 @@ function fmtPrice(n: number | string | null | undefined): string {
   if (isNaN(num)) return '—'
   const abs = Math.abs(num)
   const dp = abs >= 100 ? 2 : abs >= 1 ? 4 : abs >= 0.01 ? 6 : 8
-  return num.toLocaleString(undefined, { minimumFractionDigits: dp, maximumFractionDigits: dp })
+  return num.toLocaleString('en-US', { minimumFractionDigits: dp, maximumFractionDigits: dp })
 }
 
 /** Return the human-readable instrument name, falling back to the raw pair symbol. */
