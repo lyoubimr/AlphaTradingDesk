@@ -649,7 +649,7 @@ def _recompute_size_info_from_trade(trade: Trade, db: Session) -> TradeSizeResul
             Decimal(str(instrument.max_leverage)) if instrument and instrument.max_leverage else None
         )
         if stored_margin or lev_source:
-            margin_required = stored_margin.quantize(Decimal("0.01")) if stored_margin else (notional / lev_source).quantize(Decimal("0.01"))
+            margin_required = stored_margin.quantize(Decimal("0.01")) if stored_margin else (notional / lev_source).quantize(Decimal("0.01"))  # type: ignore[operator]
             lev = (notional / stored_margin).quantize(Decimal("0.01")) if stored_margin else lev_source
             safe_margin = (margin_required * MARGIN_SAFETY_FACTOR).quantize(Decimal("0.01"))
             margin_warning = profile.capital_current < safe_margin
