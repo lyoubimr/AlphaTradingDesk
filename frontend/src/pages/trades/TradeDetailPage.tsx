@@ -36,6 +36,21 @@ function fmt(n: number | string | null | undefined, decimals = 2): string {
   })
 }
 
+/** Format a price with dynamic precision based on magnitude.
+ * >= 100  → 2 dp  (BTC, ETH)
+ * >= 1    → 4 dp  (XRP, SOL)
+ * >= 0.01 → 6 dp  (DOGE, etc.)
+ * < 0.01  → 8 dp  (SHIB, etc.)
+ */
+function fmtPrice(n: number | string | null | undefined): string {
+  if (n == null) return '—'
+  const num = typeof n === 'string' ? parseFloat(n) : n
+  if (isNaN(num)) return '—'
+  const abs = Math.abs(num)
+  const dp = abs >= 100 ? 2 : abs >= 1 ? 4 : abs >= 0.01 ? 6 : 8
+  return num.toLocaleString(undefined, { minimumFractionDigits: dp, maximumFractionDigits: dp })
+}
+
 /** Return the human-readable instrument name, falling back to the raw pair symbol. */
 function displayPair(trade: TradeOut): string {
   return trade.instrument_display_name ?? trade.pair
@@ -546,11 +561,11 @@ function CloseAllModal({ trade, onClose, onSuccess }: {
           <div className="rounded-lg bg-surface-700/60 px-3 py-2 text-xs text-slate-400 space-y-0.5">
             <div className="flex justify-between">
               <span>Entry</span>
-              <span className="font-mono">{fmt(trade.entry_price)}</span>
+              <span className="font-mono">{fmtPrice(trade.entry_price)}</span>
             </div>
             <div className="flex justify-between">
               <span>Stop loss</span>
-              <span className="font-mono text-red-400">{fmt(trade.stop_loss, 4)}</span>
+              <span className="font-mono text-red-400">{fmtPrice(trade.stop_loss)}</span>
             </div>
             <div className="flex justify-between">
               <span>Initial risk</span>
@@ -754,7 +769,7 @@ function PartialCloseModal({ trade, positionNumber, onClose, onSuccess }: {
           <div className="rounded-lg bg-surface-700/60 px-3 py-2 text-xs text-slate-400 space-y-0.5">
             <div className="flex justify-between">
               <span>TP target</span>
-              <span className="font-mono text-emerald-400">{fmt(pos.take_profit_price)}</span>
+              <span className="font-mono text-emerald-400">{fmtPrice(pos.take_profit_price)}</span>
             </div>
             <div className="flex justify-between">
               <span>Allocation</span>
@@ -1276,7 +1291,7 @@ export function TradeDetailPage() {
                   {si.liq_price != null && (
                     <InfoRow
                       label="Liq. price (est.)"
-                      value={fmt(si.liq_price, 2)}
+                      value={fmtPrice(si.liq_price)}
                       accent="red"
                     />
                   )}
