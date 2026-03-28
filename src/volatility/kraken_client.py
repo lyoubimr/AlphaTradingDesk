@@ -266,6 +266,8 @@ class KrakenClient:
                     "is_active": bool(is_active),
                     "quote_volume_24h": volumes.get(symbol, 0.0),
                     "max_leverage": self._retail_max_leverage(inst),
+                    # Phase 5: quantity precision for automation (None if not present)
+                    "contract_value_precision": inst.get("contractValueTradePrecision"),
                 }
             )
         return result

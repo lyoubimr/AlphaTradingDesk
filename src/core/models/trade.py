@@ -203,6 +203,12 @@ class Trade(Base):
     # NULL for trades opened before Phase 3 or without the Advisor.
     dynamic_risk_snapshot: Mapped[dict | None] = mapped_column(JSONB)
 
+    # Kraken Execution automation (Phase 5)
+    # automation_enabled: True = ATD drives entry/SL/TP on Kraken Futures
+    # kraken_entry_order_id: Kraken order ID for the entry order (set after placement)
+    automation_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    kraken_entry_order_id: Mapped[str | None] = mapped_column(String(100))
+
     # Auto-trading (Phase 4+)
     auto_generated: Mapped[bool] = mapped_column(Boolean, default=False)
     signal_score: Mapped[Decimal | None] = mapped_column(Numeric(5, 2))
@@ -257,6 +263,8 @@ class Trade(Base):
     trade_tags: Mapped[list[TradeTag]] = relationship(
         back_populates="trade", cascade="all, delete-orphan", passive_deletes=True
     )
+    # Phase 5 — Kraken Execution
+    kraken_orders: Mapped[list[KrakenOrder]] = relationship(back_populates="trade", cascade="all, delete-orphan", passive_deletes=True)  # type: ignore[name-defined]
 
 
 class Position(Base):
