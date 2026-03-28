@@ -265,6 +265,27 @@ class KrakenClient:
                     "quote": quote,
                     "is_active": bool(is_active),
                     "quote_volume_24h": volumes.get(symbol, 0.0),
+                    "max_leverage": self._retail_max_leverage(inst),
                 }
             )
         return result
+
+    @staticmethod
+    def _retail_max_leverage(instrument: dict) -> int:
+        """Derive max retail leverage from retailMarginLevels[0].initialMargin."""
+        _TIERS: list[tuple[float, int]] = [
+            (0.021, 50),
+            (0.045, 25),
+            (0.09,  20),
+            (0.15,  10),
+            (0.25,   5),
+            (1.00,   2),
+        ]
+        levels: list[dict] = instrument.get("retailMarginLevels") or instrument.get("marginLevels") or []
+        if not levels:
+            return 5
+        first_im = float(levels[0].get("initialMargin", 0.5))
+        for threshold, lev in _TIERS:
+            if first_im <= threshold:
+                return lev
+        return 2

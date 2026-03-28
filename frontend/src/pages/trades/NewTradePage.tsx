@@ -1092,7 +1092,7 @@ export function NewTradePage() {
   const entryNum    = entry ? Number(entry) : null
   const slNum       = sl    ? Number(sl)    : null
   const maxLeverage = isCrypto ? (instrument?.max_leverage ?? 100) : 1
-  const leverageNum = isCrypto ? Math.max(1, Number(leverage) || 1) : 1
+  const leverageNum = isCrypto ? Math.max(1, Math.min(maxLeverage, Number(leverage) || 1)) : 1
 
   // Effective risk %
   const effectiveRisk = useMemo(() => {
