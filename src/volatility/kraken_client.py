@@ -283,7 +283,7 @@ class KrakenClient:
         Falls back to the top-level retailMarginLevels → marginLevels if
         marginSchedules is absent (older API response format).
         """
-        from src.core.config import settings  # noqa: PLC0415 — avoid circular import at module level
+        from src.core.config import settings  # noqa: PLC0415, I001
 
         _TIERS: list[tuple[float, int]] = [
             (0.021, 50),
