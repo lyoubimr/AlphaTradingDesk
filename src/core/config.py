@@ -80,6 +80,16 @@ class Settings(BaseSettings):
     xau_api_key: str = Field("", alias="XAU_API_KEY")
     xau_api_provider: str = Field("twelve_data", alias="XAU_API_PROVIDER")
 
+    # Kraken Futures — margin schedule selection.
+    # The instruments API exposes per-region, per-account-type margin schedules
+    # under the `marginSchedules` field. Use these two vars to select the right one:
+    #   KRAKEN_MARGIN_SCHEDULE: europa | europa_crypto | dlt | dlt_onboarding  (default: europa)
+    #   KRAKEN_CLIENT_TYPE:     retail | professional                           (default: retail)
+    # europa.retail gives 10× max for BTC — correct for EU/UK retail accounts.
+    # dlt.professional gives 50× max — correct for offshore pro accounts.
+    kraken_margin_schedule: str = Field("europa", alias="KRAKEN_MARGIN_SCHEDULE")
+    kraken_client_type: str = Field("retail", alias="KRAKEN_CLIENT_TYPE")
+
     @property
     def is_dev(self) -> bool:
         return self.environment == "dev"
