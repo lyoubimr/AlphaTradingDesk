@@ -9,10 +9,10 @@ SQLAlchemy models for Phase 5 Kraken Execution:
 from __future__ import annotations
 
 from datetime import datetime
+from typing import TYPE_CHECKING
 
 from sqlalchemy import (
     BigInteger,
-    Boolean,
     CheckConstraint,
     DateTime,
     ForeignKey,
@@ -26,6 +26,10 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
 from src.core.database import Base
+
+if TYPE_CHECKING:
+    from src.core.models.broker import Profile
+    from src.core.models.trade import Trade
 
 # ---------------------------------------------------------------------------
 # Default config — used only as seed when a profile has no row yet.

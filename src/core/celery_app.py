@@ -18,7 +18,8 @@ celery_app = Celery(
     broker=settings.redis_url,
     backend=settings.redis_url,
     include=[
-        "src.volatility.tasks",  # populated in P2-3
+        "src.volatility.tasks",  # P2-3
+        "src.kraken_execution.tasks",  # P5-8
     ],
 )
 
@@ -97,6 +98,15 @@ celery_app.conf.update(
         "cleanup-snapshots": {
             "task": "src.volatility.tasks.cleanup_old_snapshots",
             "schedule": crontab(minute=0, hour=3),  # daily at 03:00 UTC
+        },
+        # ── Phase 5 — Kraken Execution automation ─────────────────────────
+        "poll-pending-orders": {
+            "task": "src.kraken_execution.tasks.poll_pending_orders",
+            "schedule": 30.0,  # every 30 s — detect LIMIT entry fills
+        },
+        "sync-open-positions": {
+            "task": "src.kraken_execution.tasks.sync_open_positions",
+            "schedule": 60.0,  # every 60 s — detect SL/TP fills
         },
     },
 )

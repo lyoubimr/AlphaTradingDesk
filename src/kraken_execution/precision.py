@@ -17,7 +17,7 @@ Usage:
     size = quantize_size(Decimal("42600"), precision=-3)    # → Decimal("42000")
 """
 
-from decimal import Decimal, ROUND_DOWN
+from decimal import ROUND_DOWN, Decimal
 
 from src.kraken_execution import InsufficientSizeError
 
