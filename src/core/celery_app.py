@@ -108,5 +108,9 @@ celery_app.conf.update(
             "task": "src.kraken_execution.tasks.sync_open_positions",
             "schedule": 60.0,  # every 60 s — detect SL/TP fills
         },
+        "send-pnl-status": {
+            "task": "src.kraken_execution.tasks.send_pnl_status",
+            "schedule": 3600.0,  # every 60 min — default; per-profile config not yet dynamic
+        },
     },
 )

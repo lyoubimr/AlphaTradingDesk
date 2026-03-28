@@ -6,6 +6,7 @@ Phase 5 — Celery tasks for Kraken Futures execution automation.
 Tasks:
   poll_pending_orders  (every 30s) — detect LIMIT entry fills; place SL/TP after fill
   sync_open_positions  (every 60s) — detect SL/TP fills; reconcile trade lifecycle
+  send_pnl_status      (configurable) — push unrealized PnL to Telegram per open trade
 
 Idempotence:
   - kraken_fill_id UNIQUE constraint prevents double-processing fills.
@@ -41,6 +42,24 @@ def _get_db() -> Session:
 
     return get_session_factory()()
 
+# ── Notification helper ──────────────────────────────────────────────────────
+
+def _notify_event(profile_id: int, event: str, db: Session, **ctx) -> None:
+    """Fire-and-forget notification dispatch from tasks. Fails silently."""
+    try:
+        from src.volatility.models import NotificationSettings  # noqa: PLC0415
+        from src.volatility.telegram import send_execution_event  # noqa: PLC0415
+        notif = db.query(NotificationSettings).filter_by(profile_id=profile_id).first()
+        if notif is None:
+            return
+        send_execution_event(
+            execution_alerts_cfg=notif.execution_alerts,
+            bots=notif.bots,
+            event=event,
+            **ctx,
+        )
+    except Exception:  # noqa: BLE001
+        logger.warning("tasks.notification_failed", event=event, profile_id=profile_id)
 
 # ── poll_pending_orders ───────────────────────────────────────────────────────
 
@@ -136,6 +155,16 @@ def poll_pending_orders(self: Task) -> dict:
                         kraken_order_id=entry.kraken_order_id,
                         filled_price=entry.filled_price,
                     )
+                    # Notify: LIMIT_FILLED then TRADE_OPENED (entry confirmed)
+                    _ctx = dict(
+                        trade_id=entry.trade_id,
+                        pair=trade.pair if trade else "—",
+                        direction=trade.direction if trade else "",
+                        size=str(entry.filled_size or entry.size),
+                        filled_price=str(entry.filled_price or ""),
+                    )
+                    _notify_event(profile_id, "LIMIT_FILLED", db, **_ctx)
+                    _notify_event(profile_id, "TRADE_OPENED", db, **_ctx)
 
             except MissingAPIKeysError:
                 logger.warning("poll_pending_orders: missing API keys", profile_id=profile_id)
@@ -278,6 +307,12 @@ def _handle_fill(order: KrakenOrder, db: Session) -> None:
 
     if order.role == "sl":
         _close_trade(trade, filled_price=order.filled_price, db=db)
+        _notify_event(
+            trade.profile_id, "SL_HIT", db,
+            trade_id=trade.id, pair=trade.pair, direction=trade.direction,
+            filled_price=str(order.filled_price or ""),
+            size=str(order.filled_size or order.size),
+        )
 
     elif order.role in ("tp1", "tp2", "tp3"):
         tp_num = int(order.role[-1])  # "tp1" → 1
@@ -294,6 +329,14 @@ def _handle_fill(order: KrakenOrder, db: Session) -> None:
                     * (1 if trade.direction == "long" else -1)
                 )
                 break
+
+        event_name = f"TP{tp_num}_TAKEN"
+        _notify_event(
+            trade.profile_id, event_name, db,
+            trade_id=trade.id, pair=trade.pair, direction=trade.direction,
+            filled_price=str(order.filled_price or ""),
+            size=str(order.filled_size or order.size),
+        )
 
         # If all positions are closed → close the trade
         all_closed = all(p.status in ("closed", "cancelled") for p in trade.positions)
@@ -314,3 +357,83 @@ def _close_trade(trade: Trade, filled_price: float | None, db: Session) -> None:
             / abs(trade.entry_price - trade.stop_loss)
             * (1 if trade.direction == "long" else -1)
         )
+
+
+# ── send_pnl_status ───────────────────────────────────────────────────────────────
+
+@celery_app.task(
+    bind=True,
+    name="src.kraken_execution.tasks.send_pnl_status",
+    max_retries=2,
+    default_retry_delay=60,
+)
+def send_pnl_status(self: Task) -> dict:  # noqa: ARG001
+    """Push unrealized PnL to Telegram for each open automated trade.
+
+    Interval: controlled by automation_settings.config["pnl_status_interval_minutes"].
+    Fetches current positions from Kraken and dispatches PNL_STATUS notifications.
+
+    Returns:
+        {"notified": int} — count of notifications sent.
+    """
+    db = _get_db()
+    notified = 0
+    try:
+        open_trades: list[Trade] = (
+            db.query(Trade)
+            .filter(Trade.status == "open", Trade.automation_enabled.is_(True))
+            .all()
+        )
+        if not open_trades:
+            return {"notified": 0}
+
+        by_profile: dict[int, list[Trade]] = {}
+        for trade in open_trades:
+            by_profile.setdefault(trade.profile_id, []).append(trade)
+
+        for profile_id, trades in by_profile.items():
+            try:
+                settings_row = get_automation_settings(profile_id, db)
+                with _make_client(settings_row) as client:
+                    open_positions = client.get_open_positions()
+                pos_by_symbol = {p.get("symbol"): p for p in open_positions}
+
+                for trade in trades:
+                    instr = trade.instrument
+                    symbol = instr.symbol if instr else None
+                    pos = pos_by_symbol.get(symbol, {}) if symbol else {}
+                    unrealized_pnl = pos.get("unrealisedPnl") or pos.get("pnl")
+                    current_price = pos.get("markPrice") or pos.get("lastPrice")
+
+                    _notify_event(
+                        profile_id,
+                        "PNL_STATUS",
+                        db,
+                        trade_id=trade.id,
+                        pair=trade.pair,
+                        direction=trade.direction,
+                        entry_price=str(trade.entry_price),
+                        unrealized_pnl=unrealized_pnl,
+                        current_price=current_price,
+                    )
+                    notified += 1
+
+            except MissingAPIKeysError:
+                logger.warning("send_pnl_status: missing API keys", profile_id=profile_id)
+            except KrakenAPIError as exc:
+                logger.error(
+                    "send_pnl_status: Kraken API error",
+                    profile_id=profile_id,
+                    status_code=exc.status_code,
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.exception(
+                    "send_pnl_status: unexpected error", profile_id=profile_id, exc=exc
+                )
+
+        return {"notified": notified}
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("send_pnl_status: fatal error — %s", exc)
+        return {"notified": notified, "error": str(exc)}
+    finally:
+        db.close()

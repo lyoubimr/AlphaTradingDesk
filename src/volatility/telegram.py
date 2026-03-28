@@ -579,3 +579,157 @@ def send_vi_level_alerts(
             msg += f"\n\n<i>{now_str}</i>"
 
         _send(bot_token, chat_id, msg)
+
+
+# ── Phase 5 — Kraken execution events ────────────────────────────────────────
+
+# Default config used when a new NotificationSettings row is created.
+# Stored in `notification_settings.execution_alerts` JSONB column.
+DEFAULT_EXECUTION_ALERTS_CONFIG: dict = {
+    "enabled": True,
+    "bot_name": None,  # None → use first bot in `bots` list
+    "events": {
+        "LIMIT_PLACED": {"enabled": True},
+        "LIMIT_FILLED": {"enabled": True},
+        "TRADE_OPENED": {"enabled": True},
+        "TP1_TAKEN":    {"enabled": True},
+        "TP2_TAKEN":    {"enabled": True},
+        "TP3_TAKEN":    {"enabled": True},
+        "SL_HIT":       {"enabled": True},
+        "BE_MOVED":     {"enabled": True},
+        "PNL_STATUS":   {"enabled": True},
+        "ORDER_ERROR":  {"enabled": True},
+    },
+}
+
+# Event-to-emoji mapping
+_EXEC_EMOJI: dict[str, str] = {
+    "LIMIT_PLACED": "📋",
+    "LIMIT_FILLED": "✅",
+    "TRADE_OPENED": "🚀",
+    "TP1_TAKEN":    "🎯",
+    "TP2_TAKEN":    "🎯",
+    "TP3_TAKEN":    "🎯",
+    "SL_HIT":       "🛑",
+    "BE_MOVED":     "🔒",
+    "PNL_STATUS":   "📊",
+    "ORDER_ERROR":  "⚠️",
+}
+
+# Event-to-label mapping
+_EXEC_LABEL: dict[str, str] = {
+    "LIMIT_PLACED": "Limit Order Placed",
+    "LIMIT_FILLED": "Limit Entry Filled",
+    "TRADE_OPENED": "Trade Opened",
+    "TP1_TAKEN":    "Take Profit 1 Hit",
+    "TP2_TAKEN":    "Take Profit 2 Hit",
+    "TP3_TAKEN":    "Take Profit 3 Hit",
+    "SL_HIT":       "Stop Loss Hit",
+    "BE_MOVED":     "Moved to Breakeven",
+    "PNL_STATUS":   "PnL Status",
+    "ORDER_ERROR":  "Order Error",
+}
+
+
+def _resolve_bot_from_list(bots: list, bot_name: str | None) -> tuple[str | None, str | None]:
+    """Return (bot_token, chat_id) for named bot, or first bot as fallback."""
+    if bot_name:
+        for b in bots:
+            if b.get("bot_name") == bot_name:
+                return b.get("bot_token"), b.get("chat_id")
+    if bots:
+        return bots[0].get("bot_token"), bots[0].get("chat_id")
+    return None, None
+
+
+def format_execution_event_message(event: str, **ctx) -> str:
+    """Build a Telegram HTML message for a Kraken execution event.
+
+    Common context keys (all optional, rendered if present):
+      pair, direction, size, entry_price, limit_price, filled_price,
+      stop_price, unrealized_pnl, error_message, trade_id, symbol
+    """
+    emoji = _EXEC_EMOJI.get(event, "🔔")
+    label = _EXEC_LABEL.get(event, event)
+    now_str = _now_local().strftime("%d/%m %H:%M")
+    dev_prefix = "[DEV] " if _APP_ENV != "prod" else ""
+
+    pair       = ctx.get("pair") or ctx.get("symbol") or "—"
+    direction  = (ctx.get("direction") or "").upper()
+    dir_emoji  = "📈" if direction == "LONG" else "📉" if direction == "SHORT" else ""
+
+    lines = [f"{dev_prefix}{emoji} <b>{label}</b>"]
+    if pair != "—":
+        lines.append(f"🪙 Pair: <b>{_he(str(pair))}</b> {dir_emoji}")
+    if ctx.get("size") is not None:
+        lines.append(f"📦 Size: <code>{ctx['size']}</code>")
+
+    # Event-specific fields
+    if event == "LIMIT_PLACED" and ctx.get("limit_price") is not None:
+        lines.append(f"🎯 Limit: <code>{ctx['limit_price']}</code>")
+    elif event in ("LIMIT_FILLED", "TRADE_OPENED") and ctx.get("filled_price") is not None:
+        lines.append(f"💰 Fill: <code>{ctx['filled_price']}</code>")
+    elif event == "TRADE_OPENED" and ctx.get("entry_price") is not None:
+        lines.append(f"💰 Entry: <code>{ctx['entry_price']}</code>")
+    elif event in ("TP1_TAKEN", "TP2_TAKEN", "TP3_TAKEN") and ctx.get("filled_price") is not None:
+        lines.append(f"✅ TP Fill: <code>{ctx['filled_price']}</code>")
+    elif event == "SL_HIT" and ctx.get("filled_price") is not None:
+        lines.append(f"🛑 SL Fill: <code>{ctx['filled_price']}</code>")
+    elif event == "BE_MOVED" and ctx.get("stop_price") is not None:
+        lines.append(f"🔒 New SL (BE): <code>{ctx['stop_price']}</code>")
+    elif event == "PNL_STATUS":
+        if ctx.get("unrealized_pnl") is not None:
+            pnl = float(ctx["unrealized_pnl"])
+            pnl_str = f"+{pnl:.2f}" if pnl >= 0 else f"{pnl:.2f}"
+            lines.append(f"💵 Unrealized PnL: <code>{pnl_str}</code>")
+        if ctx.get("entry_price") is not None:
+            lines.append(f"🏷 Entry: <code>{ctx['entry_price']}</code>")
+        if ctx.get("current_price") is not None:
+            lines.append(f"📍 Current: <code>{ctx['current_price']}</code>")
+    elif event == "ORDER_ERROR" and ctx.get("error_message") is not None:
+        lines.append(f"❌ Error: {_he(str(ctx['error_message']))[:200]}")
+
+    if ctx.get("trade_id") is not None:
+        lines.append(f"🆔 Trade: <code>{ctx['trade_id']}</code>")
+
+    lines.append(f"\n<i>{now_str}</i>")
+    return "\n".join(lines)
+
+
+def send_execution_event(
+    execution_alerts_cfg: dict,
+    bots: list,
+    event: str,
+    **ctx,
+) -> bool:
+    """Send a Kraken execution event notification if enabled.
+
+    Args:
+        execution_alerts_cfg: the `execution_alerts` JSONB from NotificationSettings.
+        bots: the `bots` list from NotificationSettings.
+        event: one of LIMIT_PLACED, LIMIT_FILLED, TRADE_OPENED, TP1_TAKEN, TP2_TAKEN,
+               TP3_TAKEN, SL_HIT, BE_MOVED, PNL_STATUS, ORDER_ERROR.
+        **ctx: message context (pair, direction, size, filled_price, etc.)
+
+    Returns:
+        True if the message was sent, False otherwise.
+    """
+    if not execution_alerts_cfg.get("enabled", True):
+        return False
+
+    events_cfg: dict = execution_alerts_cfg.get("events", {})
+    event_cfg: dict = events_cfg.get(event, {})
+    if not event_cfg.get("enabled", True):
+        return False
+
+    bot_name: str | None = execution_alerts_cfg.get("bot_name")
+    bot_token, chat_id = _resolve_bot_from_list(bots, bot_name)
+    if not bot_token or not chat_id:
+        logger.debug("send_execution_event: no bot configured for event %s", event)
+        return False
+
+    text = format_execution_event_message(event, **ctx)
+    ok = _send(bot_token, chat_id, text)
+    if ok:
+        logger.debug("send_execution_event: sent %s to profile (pair=%s)", event, ctx.get("pair"))
+    return ok

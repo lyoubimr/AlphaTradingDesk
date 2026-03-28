@@ -536,11 +536,13 @@ def _get_or_create_notif_settings(db: Session, profile_id: int) -> NotificationS
         NotificationSettings.profile_id == profile_id
     ).first()
     if row is None:
+        from src.volatility.telegram import DEFAULT_EXECUTION_ALERTS_CONFIG  # noqa: PLC0415
         row = NotificationSettings(
             profile_id=profile_id,
             bots=[],
             market_vi_alerts={},
             watchlist_alerts={},
+            execution_alerts=DEFAULT_EXECUTION_ALERTS_CONFIG,
         )
         db.add(row)
         db.commit()
@@ -564,6 +566,7 @@ def get_notification_settings(
         bots=row.bots,
         market_vi_alerts=row.market_vi_alerts,
         watchlist_alerts=row.watchlist_alerts,
+        execution_alerts=row.execution_alerts,
         updated_at=row.updated_at,
     )
 
@@ -588,6 +591,8 @@ def update_notification_settings(
         row.market_vi_alerts = {**row.market_vi_alerts, **patch.market_vi_alerts}
     if patch.watchlist_alerts is not None:
         row.watchlist_alerts = {**row.watchlist_alerts, **patch.watchlist_alerts}
+    if patch.execution_alerts is not None:
+        row.execution_alerts = {**row.execution_alerts, **patch.execution_alerts}
 
     from datetime import UTC, datetime
     row.updated_at = datetime.now(UTC)
@@ -598,6 +603,7 @@ def update_notification_settings(
         bots=row.bots,
         market_vi_alerts=row.market_vi_alerts,
         watchlist_alerts=row.watchlist_alerts,
+        execution_alerts=row.execution_alerts,
         updated_at=row.updated_at,
     )
 

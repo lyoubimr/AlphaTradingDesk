@@ -273,6 +273,21 @@ def open_automated_trade(trade_id: int, db: Session) -> KrakenOrder:
         kraken_order_id=kraken_order_id,
         lot_size=str(lot_size),
     )
+
+    # Dispatch notification
+    exec_event = "TRADE_OPENED" if trade.order_type == "MARKET" else "LIMIT_PLACED"
+    _notify_execution_event(
+        profile_id=trade.profile_id,
+        event=exec_event,
+        db=db,
+        trade_id=trade_id,
+        pair=trade.pair,
+        direction=trade.direction,
+        size=str(lot_size),
+        limit_price=str(trade.entry_price) if trade.order_type == "LIMIT" else None,
+        entry_price=str(trade.entry_price),
+    )
+
     return order
 
 
@@ -502,6 +517,18 @@ def move_to_breakeven(trade_id: int, db: Session) -> KrakenOrder:
         new_sl_order_id=new_order_id,
         breakeven_price=str(trade.entry_price),
     )
+
+    # Dispatch notification
+    _notify_execution_event(
+        profile_id=trade.profile_id,
+        event="BE_MOVED",
+        db=db,
+        trade_id=trade_id,
+        pair=trade.pair,
+        direction=trade.direction,
+        stop_price=str(trade.entry_price),
+    )
+
     return new_sl
 
 
@@ -553,3 +580,35 @@ def list_kraken_orders(trade_id: int, db: Session) -> list[KrakenOrder]:
         .order_by(KrakenOrder.sent_at.desc())
         .all()
     )
+
+
+# ── Notification dispatch ─────────────────────────────────────────────────────
+
+def _notify_execution_event(
+    profile_id: int,
+    event: str,
+    db: Session,
+    **ctx,
+) -> None:
+    """Fire-and-forget: send a Kraken execution notification if configured.
+
+    Fails silently — never raises. All errors are logged as warnings.
+    """
+    try:
+        from src.volatility.models import NotificationSettings  # noqa: PLC0415
+        from src.volatility.telegram import send_execution_event  # noqa: PLC0415
+        notif = db.query(NotificationSettings).filter_by(profile_id=profile_id).first()
+        if notif is None:
+            return
+        send_execution_event(
+            execution_alerts_cfg=notif.execution_alerts,
+            bots=notif.bots,
+            event=event,
+            **ctx,
+        )
+    except Exception:  # noqa: BLE001
+        logger.warning(
+            "execution_notification_failed",
+            event=event,
+            profile_id=profile_id,
+        )
