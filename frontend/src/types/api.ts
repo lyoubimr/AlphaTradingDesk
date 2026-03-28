@@ -689,6 +689,7 @@ export interface NotificationSettingsOut {
   bots: Array<{ bot_name?: string; bot_token: string; chat_id: string }>
   market_vi_alerts: Record<string, unknown>
   watchlist_alerts: Record<string, unknown>
+  execution_alerts?: Record<string, unknown>
   updated_at: string
 }
 

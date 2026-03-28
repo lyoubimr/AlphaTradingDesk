@@ -333,11 +333,12 @@ export function SettingsPage() {
         <SettingsSection
           icon={<Bell size={16} />}
           title="Notifications"
-          description="Telegram alerts for volatility regimes and watchlist events"
+          description="Telegram alerts for volatility regimes, watchlist events and trade execution"
         >
           <SettingRow label="Bots"              value="Configurable"  info="Add one or more Telegram bots. Each can be targeted by a specific alert type." />
           <SettingRow label="Market VI alerts"  value="Toggle + regimes" info="Notify when aggregate VI enters a configured regime. Cooldown-based deduplication." />
           <SettingRow label="Watchlist alerts"  value="Per-TF"        info="Alert per timeframe when a new watchlist is generated. VI minimum threshold configurable." />
+          <SettingRow label="Execution alerts"  value="10 events"     info="Notifies on Kraken order events: limit placed/filled, TP1/2/3, SL hit, breakeven, PnL status." />
           <div className="pt-2">
             <Link
               to="/settings/notifications"
@@ -347,9 +348,6 @@ export function SettingsPage() {
             </Link>
           </div>
         </SettingsSection>
-
-        {/* ── System Health ────────────────────────────────────────────── */}
-        <SystemHealthSection />
 
         {/* ── Automation ───────────────────────────────────────────────── */}
         <SettingsSection
@@ -370,6 +368,9 @@ export function SettingsPage() {
             </Link>
           </div>
         </SettingsSection>
+
+        {/* ── System Health ────────────────────────────────────────────── */}
+        <SystemHealthSection />
 
         {/* ── System / API info ────────────────────────────────────────── */}
         <SettingsSection

@@ -9,7 +9,7 @@ import { AutomationSettings } from '../../components/automation/AutomationSettin
 import { useProfile } from '../../context/ProfileContext'
 
 export function AutomationSettingsPage() {
-  const { profile } = useProfile()
+  const { activeProfileId } = useProfile()
 
   return (
     <div className="max-w-2xl mx-auto space-y-6">
@@ -19,11 +19,11 @@ export function AutomationSettingsPage() {
         icon={<Zap size={18} />}
       />
 
-      {!profile ? (
+      {!activeProfileId ? (
         <p className="text-xs text-slate-500">Select a profile to configure automation.</p>
       ) : (
         <div className="rounded-xl bg-surface-800 border border-surface-700 px-5 py-5">
-          <AutomationSettings profileId={profile.id} />
+          <AutomationSettings profileId={activeProfileId} />
         </div>
       )}
     </div>
