@@ -576,7 +576,13 @@ function KpiBar({ trades, loading, profile }: {
   const maxRiskPct  = parseFloat(profile.max_concurrent_risk_pct)
   const currency    = profile.currency ?? 'USD'
 
-  const pnlAmount = capital - capitalStart
+  // Partial trades: booked_pnl is already locked-in but not yet in capital_current
+  const partialBooked   = trades
+    .filter((t) => t.status === 'partial' && t.booked_pnl != null)
+    .reduce((sum, t) => sum + pct(t.booked_pnl), 0)
+  const capitalAdjusted = capital + partialBooked
+
+  const pnlAmount = capitalAdjusted - capitalStart
   const pnlPct    = capitalStart > 0 ? (pnlAmount / capitalStart) * 100 : 0
 
   const openTrades  = trades.filter((t) => t.status === 'open' || t.status === 'partial')
@@ -588,8 +594,8 @@ function KpiBar({ trades, loading, profile }: {
 
   const totalRisk     = openTrades.reduce((sum, t) => sum + pct(t.current_risk ?? t.risk_amount), 0)
   const riskPct       = capital > 0 ? (totalRisk / capital) * 100 : 0
+  const maxRiskAmt   = capital * (maxRiskPct  / 100)
   const availRiskPct  = Math.max(0, maxRiskPct - riskPct)
-  const availRiskAmt  = capital * (availRiskPct / 100)
 
   // Risk status
   const riskExceeded  = riskPct > maxRiskPct
@@ -608,11 +614,8 @@ function KpiBar({ trades, loading, profile }: {
         label="Portfolio Balance"
         value={loading
           ? <Loader2 size={18} className="animate-spin text-slate-500" />
-          : <span className="flex items-baseline gap-1.5">
-              <span className="text-sm font-bold tabular-nums text-slate-100">
-                {capital.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
-              </span>
-              <span className="text-xs text-slate-500">{currency}</span>
+          : <span className="text-sm font-bold tabular-nums text-slate-100">
+              {fmtCurrency(capitalAdjusted, currency)}
             </span>
         }
         sub={loading ? '' : (
@@ -649,14 +652,20 @@ function KpiBar({ trades, loading, profile }: {
         valueSize="text-base"
         value={loading
           ? <Loader2 size={18} className="animate-spin text-slate-500" />
-          : <span className={riskColor}>{fmt(riskPct)}% / {fmt(maxRiskPct)}%</span>
+          : <span className="tabular-nums font-mono">
+              <span className={riskColor}>-{fmtCurrency(totalRisk, currency)}</span>
+              <span className="text-slate-600">&nbsp;/&nbsp;-{fmtCurrency(maxRiskAmt, currency)}</span>
+            </span>
         }
         sub={loading ? '' :
           riskExceeded
             ? <span className="text-red-400 font-semibold">🛑 LIMIT EXCEEDED — reduce positions</span> as unknown as string
             : <span className="text-slate-500">
-                Avail: <span className="text-slate-300 font-mono">{fmt(availRiskPct)}%</span>
-                <span className="text-slate-600"> ({fmtCurrency(availRiskAmt, currency)})</span>
+                <span className="text-slate-400 font-mono">{fmt(riskPct)}%</span>
+                <span className="text-slate-600"> / {fmt(maxRiskPct)}%</span>
+                {availRiskPct > 0 && (
+                  <span> · Avail: <span className="text-slate-300 font-mono">{fmt(availRiskPct)}%</span></span>
+                )}
               </span> as unknown as string
         }
         accent="neutral"

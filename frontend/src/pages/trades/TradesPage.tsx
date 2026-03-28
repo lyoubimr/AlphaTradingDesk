@@ -183,7 +183,11 @@ export function TradesPage() {
         />
         <StatCard
           label="Total P&L"
-          value={loading ? '…' : kpis.totalPnl}
+          value={loading ? '…' : kpis.totalPnl === '—' ? '—' : (
+            <span className={kpis.totalPnlPos ? 'text-emerald-400' : 'text-red-400'}>
+              {kpis.totalPnl}
+            </span>
+          )}
           sub="Closed trades only"
           accent={kpis.totalPnl.startsWith('-') ? 'bear' : kpis.totalPnl === '—' ? 'neutral' : 'bull'}
           info="Sum of P&L for all closed trades. Does not include open positions."
@@ -287,7 +291,7 @@ export function TradesPage() {
                           ? new Date(t.entry_date ?? t.created_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' })
                           : '—'}
                         {' · '}
-                        <span className="text-slate-600">@ {parseFloat(t.entry_price).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 5 })}</span>
+                        <span className="text-slate-600">@ {parseFloat(t.entry_price).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 5 })}</span>
                       </span>
                       {pnlNum !== null ? (
                         <span className={cn('font-semibold', isBull ? 'text-green-400' : isBear ? 'text-red-400' : 'text-slate-400')}>
@@ -407,7 +411,7 @@ export function TradesPage() {
 
                         {/* Entry */}
                         <td className="px-4 py-2.5 text-slate-400 tabular-nums font-mono">
-                          {parseFloat(t.entry_price).toLocaleString(undefined, {
+                          {parseFloat(t.entry_price).toLocaleString('en-US', {
                             minimumFractionDigits: 2,
                             maximumFractionDigits: 5,
                           })}
@@ -415,7 +419,7 @@ export function TradesPage() {
 
                         {/* Stop loss */}
                         <td className="px-4 py-2.5 text-red-500/70 tabular-nums font-mono">
-                          {parseFloat(t.stop_loss).toLocaleString(undefined, {
+                          {parseFloat(t.stop_loss).toLocaleString('en-US', {
                             minimumFractionDigits: 2,
                             maximumFractionDigits: 5,
                           })}

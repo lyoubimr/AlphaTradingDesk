@@ -84,10 +84,10 @@ interface ProfileCardProps {
 }
 
 function ProfileCard({ profile, isActive, onSelect, onEdit, onDelete }: ProfileCardProps) {
-  const capital = Number(profile.capital_current).toLocaleString(undefined, {
+  const capital = Number(profile.capital_current).toLocaleString('en-US', {
     minimumFractionDigits: 0, maximumFractionDigits: 0,
   })
-  const capitalStart = Number(profile.capital_start).toLocaleString(undefined, {
+  const capitalStart = Number(profile.capital_start).toLocaleString('en-US', {
     minimumFractionDigits: 0, maximumFractionDigits: 0,
   })
   const pnl = Number(profile.capital_current) - Number(profile.capital_start)

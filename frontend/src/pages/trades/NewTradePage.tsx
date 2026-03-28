@@ -522,7 +522,7 @@ const ALL_TAGS = [
 
 function fmt(n: number | null | undefined, decimals = 2): string {
   if (n == null) return '—'
-  return n.toLocaleString(undefined, { minimumFractionDigits: decimals, maximumFractionDigits: decimals })
+  return n.toLocaleString('en-US', { minimumFractionDigits: decimals, maximumFractionDigits: decimals })
 }
 
 interface TpRow { price: string; pct: string }
