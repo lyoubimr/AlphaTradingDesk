@@ -183,7 +183,11 @@ export function TradesPage() {
         />
         <StatCard
           label="Total P&L"
-          value={loading ? '…' : kpis.totalPnl}
+          value={loading ? '…' : kpis.totalPnl === '—' ? '—' : (
+            <span className={kpis.totalPnlPos ? 'text-emerald-400' : 'text-red-400'}>
+              {kpis.totalPnl}
+            </span>
+          )}
           sub="Closed trades only"
           accent={kpis.totalPnl.startsWith('-') ? 'bear' : kpis.totalPnl === '—' ? 'neutral' : 'bull'}
           info="Sum of P&L for all closed trades. Does not include open positions."

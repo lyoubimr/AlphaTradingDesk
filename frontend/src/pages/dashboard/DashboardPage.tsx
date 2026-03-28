@@ -576,7 +576,13 @@ function KpiBar({ trades, loading, profile }: {
   const maxRiskPct  = parseFloat(profile.max_concurrent_risk_pct)
   const currency    = profile.currency ?? 'USD'
 
-  const pnlAmount = capital - capitalStart
+  // Partial trades: booked_pnl is already locked-in but not yet in capital_current
+  const partialBooked   = trades
+    .filter((t) => t.status === 'partial' && t.booked_pnl != null)
+    .reduce((sum, t) => sum + pct(t.booked_pnl), 0)
+  const capitalAdjusted = capital + partialBooked
+
+  const pnlAmount = capitalAdjusted - capitalStart
   const pnlPct    = capitalStart > 0 ? (pnlAmount / capitalStart) * 100 : 0
 
   const openTrades  = trades.filter((t) => t.status === 'open' || t.status === 'partial')
@@ -610,7 +616,7 @@ function KpiBar({ trades, loading, profile }: {
         value={loading
           ? <Loader2 size={18} className="animate-spin text-slate-500" />
           : <span className="text-sm font-bold tabular-nums text-slate-100">
-              {fmtCurrency(capital, currency)}
+              {fmtCurrency(capitalAdjusted, currency)}
             </span>
         }
         sub={loading ? '' : (
@@ -647,8 +653,9 @@ function KpiBar({ trades, loading, profile }: {
         valueSize="text-base"
         value={loading
           ? <Loader2 size={18} className="animate-spin text-slate-500" />
-          : <span className={`${riskColor} tabular-nums font-mono`}>
-              -{fmtCurrency(totalRisk, currency)}&nbsp;/&nbsp;-{fmtCurrency(maxRiskAmt, currency)}
+          : <span className="tabular-nums font-mono">
+              <span className={riskColor}>-{fmtCurrency(totalRisk, currency)}</span>
+              <span className="text-slate-600">&nbsp;/&nbsp;-{fmtCurrency(maxRiskAmt, currency)}</span>
             </span>
         }
         sub={loading ? '' :
