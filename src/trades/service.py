@@ -476,6 +476,18 @@ def open_trade(db: Session, data: TradeOpen) -> TradeOut:
         instrument = _get_instrument_or_422(db, data.instrument_id)
         _validate_instrument_broker(instrument, profile)
 
+    # Validate leverage cap
+    if (
+        data.leverage is not None
+        and instrument is not None
+        and instrument.max_leverage is not None
+        and data.leverage > instrument.max_leverage
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Leverage {data.leverage}× exceeds the maximum allowed for this instrument ({instrument.max_leverage}×).",
+        )
+
     # Determine risk_amount
     risk_pct = data.risk_pct_override or profile.risk_percentage_default
     risk_amount = (profile.capital_current * risk_pct / 100).quantize(Decimal("0.01"))
