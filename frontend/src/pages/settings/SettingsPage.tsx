@@ -1,6 +1,6 @@
 // ── Settings page ──────────────────────────────────────────────────────────
 import { useEffect, useState } from 'react'
-import { User, Database, Bell, Shield, Info, Palette, BarChart2, Activity, CheckCircle2, XCircle, Loader2, RefreshCw } from 'lucide-react'
+import { User, Database, Bell, Shield, Info, Palette, BarChart2, Activity, CheckCircle2, XCircle, Loader2, RefreshCw, Zap } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { PageHeader } from '../../components/ui/PageHeader'
 import { Badge } from '../../components/ui/Badge'
@@ -350,6 +350,26 @@ export function SettingsPage() {
 
         {/* ── System Health ────────────────────────────────────────────── */}
         <SystemHealthSection />
+
+        {/* ── Automation ───────────────────────────────────────────────── */}
+        <SettingsSection
+          icon={<Zap size={16} />}
+          title="Automation"
+          description="Kraken Futures execution — API keys, engine config and connection test"
+        >
+          <SettingRow label="API keys"        value="Encrypted (Fernet)" info="API key + secret stored encrypted in DB. Write-only — never returned by the API." />
+          <SettingRow label="Engine"          value="Enable / disable"   info="Toggle automation per profile. Disabled profile cannot send any orders." />
+          <SettingRow label="PNL status"      value="Periodic (Telegram)" info="Send a PNL summary at a configurable interval." />
+          <SettingRow label="Leverage cap"    value="Override (optional)" info="Cap the leverage sent to Kraken Futures. Leave blank to use account default." />
+          <div className="pt-2">
+            <Link
+              to="/settings/automation"
+              className="inline-flex items-center gap-1.5 text-xs text-brand-400 hover:text-brand-300 transition-colors underline underline-offset-2"
+            >
+              Open Automation Settings →
+            </Link>
+          </div>
+        </SettingsSection>
 
         {/* ── System / API info ────────────────────────────────────────── */}
         <SettingsSection

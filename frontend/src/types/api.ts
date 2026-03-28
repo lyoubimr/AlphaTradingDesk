@@ -747,3 +747,59 @@ export interface PairVIOut {
   source: string
   computed_at: string
 }
+
+// ── Kraken Execution (Phase 5) ────────────────────────────────────────────
+
+export interface AutomationConfig {
+  enabled: boolean
+  pnl_status_interval_minutes: number
+  max_leverage_override: number | null
+}
+
+export interface AutomationSettingsOut {
+  profile_id: number
+  has_api_keys: boolean
+  config: AutomationConfig
+  updated_at: string
+}
+
+export interface AutomationSettingsUpdateIn {
+  enabled?: boolean
+  pnl_status_interval_minutes?: number
+  max_leverage_override?: number | null
+  /** Write-only: plaintext API key — encrypted server-side, never returned */
+  kraken_api_key?: string
+  /** Write-only: plaintext API secret — encrypted server-side, never returned */
+  kraken_api_secret?: string
+}
+
+export interface ConnectionTestOut {
+  connected: boolean
+  demo: boolean
+  base_url: string
+  error?: string | null
+}
+
+export type KrakenOrderRole   = 'entry' | 'sl' | 'tp1' | 'tp2' | 'tp3'
+export type KrakenOrderStatus = 'open' | 'filled' | 'cancelled' | 'error'
+
+export interface KrakenOrderOut {
+  id: number
+  trade_id: number
+  profile_id: number
+  kraken_order_id: string
+  kraken_fill_id: string | null
+  role: KrakenOrderRole
+  status: KrakenOrderStatus
+  order_type: string
+  symbol: string
+  side: 'buy' | 'sell'
+  size: number
+  limit_price: number | null
+  filled_price: number | null
+  filled_size: number | null
+  error_message: string | null
+  sent_at: string
+  filled_at: string | null
+  cancelled_at: string | null
+}

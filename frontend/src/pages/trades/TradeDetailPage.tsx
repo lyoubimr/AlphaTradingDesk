@@ -18,6 +18,7 @@ import {
 } from 'lucide-react'
 import { PageHeader } from '../../components/ui/PageHeader'
 import { tradesApi, strategiesApi } from '../../lib/api'
+import { KrakenOrdersPanel } from '../../components/automation/KrakenOrdersPanel'
 import { cn } from '../../lib/cn'
 import { useProfile } from '../../context/ProfileContext'
 import type { TradeOut, Strategy } from '../../types/api'
@@ -1643,6 +1644,12 @@ export function TradeDetailPage() {
             />
           </div>
         </div>
+
+        {/* ── Kraken Execution ─────────────────────────────────────────── */}
+        <KrakenOrdersPanel
+          tradeId={trade.id}
+          tradeStatus={trade.status}
+        />
 
         {/* ── Metadata ────────────────────────────────────────────────── */}
         <Section title="🗓 Metadata">

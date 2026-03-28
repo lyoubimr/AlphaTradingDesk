@@ -16,6 +16,7 @@ import type {
   MarketVIOut, AggregatedMarketVIOut, PairsVIOut, WatchlistOut, WatchlistMetaOut, LivePricesResponse,
   VolatilitySettingsOut, NotificationSettingsOut,
   RiskBudgetOut, RiskAdvisorOut, RiskSettingsOut, PairVIOut,
+  AutomationSettingsOut, AutomationSettingsUpdateIn, ConnectionTestOut, KrakenOrderOut,
 } from '../types/api'
 
 const BASE = '/api'
@@ -554,4 +555,39 @@ export const riskApi = {
   /** GET /api/risk/pair-vi */
   getPairVI: (pair: string, timeframe: string): Promise<PairVIOut> =>
     request(`/risk/pair-vi?pair=${encodeURIComponent(pair)}&timeframe=${encodeURIComponent(timeframe)}`),
+}
+
+// ── Kraken Execution (Phase 5) ──────────────────────────────────────────────
+export const automationApi = {
+  /** GET /api/kraken-execution/settings/{profileId} */
+  getSettings: (profileId: number): Promise<AutomationSettingsOut> =>
+    request(`/kraken-execution/settings/${profileId}`),
+
+  /** PUT /api/kraken-execution/settings/{profileId} */
+  updateSettings: (profileId: number, patch: AutomationSettingsUpdateIn): Promise<AutomationSettingsOut> =>
+    request(`/kraken-execution/settings/${profileId}`, { method: 'PUT', body: JSON.stringify(patch) }),
+
+  /** POST /api/kraken-execution/settings/{profileId}/test-connection */
+  testConnection: (profileId: number): Promise<ConnectionTestOut> =>
+    request(`/kraken-execution/settings/${profileId}/test-connection`, { method: 'POST' }),
+
+  /** GET /api/kraken-execution/orders/{tradeId} */
+  getOrders: (tradeId: number): Promise<KrakenOrderOut[]> =>
+    request(`/kraken-execution/orders/${tradeId}`),
+
+  /** POST /api/kraken-execution/trades/{tradeId}/open */
+  openTrade: (tradeId: number): Promise<KrakenOrderOut> =>
+    request(`/kraken-execution/trades/${tradeId}/open`, { method: 'POST' }),
+
+  /** POST /api/kraken-execution/trades/{tradeId}/close */
+  closeTrade: (tradeId: number): Promise<KrakenOrderOut> =>
+    request(`/kraken-execution/trades/${tradeId}/close`, { method: 'POST' }),
+
+  /** POST /api/kraken-execution/trades/{tradeId}/breakeven */
+  moveToBreakeven: (tradeId: number): Promise<KrakenOrderOut> =>
+    request(`/kraken-execution/trades/${tradeId}/breakeven`, { method: 'POST' }),
+
+  /** POST /api/kraken-execution/trades/{tradeId}/cancel-entry */
+  cancelEntry: (tradeId: number): Promise<KrakenOrderOut> =>
+    request(`/kraken-execution/trades/${tradeId}/cancel-entry`, { method: 'POST' }),
 }
