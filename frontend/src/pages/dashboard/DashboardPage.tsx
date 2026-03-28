@@ -596,7 +596,6 @@ function KpiBar({ trades, loading, profile }: {
   const riskPct       = capital > 0 ? (totalRisk / capital) * 100 : 0
   const maxRiskAmt   = capital * (maxRiskPct  / 100)
   const availRiskPct  = Math.max(0, maxRiskPct - riskPct)
-  const availRiskAmt  = capital * (availRiskPct / 100)
 
   // Risk status
   const riskExceeded  = riskPct > maxRiskPct
