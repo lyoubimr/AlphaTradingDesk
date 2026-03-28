@@ -272,7 +272,19 @@ class KrakenClient:
 
     @staticmethod
     def _retail_max_leverage(instrument: dict) -> int:
-        """Derive max retail leverage from retailMarginLevels[0].initialMargin."""
+        """Derive max leverage from marginSchedules[schedule][client_type][0].initialMargin.
+
+        Uses KRAKEN_MARGIN_SCHEDULE (default: europa) and KRAKEN_CLIENT_TYPE (default: retail)
+        to select the correct regulatory schedule for the account.
+
+        europa.retail   → 10× for BTC (EU/UK retail)
+        dlt.professional → 50× for BTC (offshore pro)
+
+        Falls back to the top-level retailMarginLevels → marginLevels if
+        marginSchedules is absent (older API response format).
+        """
+        from src.core.config import settings  # noqa: PLC0415, I001
+
         _TIERS: list[tuple[float, int]] = [
             (0.021, 50),
             (0.045, 25),
@@ -281,7 +293,18 @@ class KrakenClient:
             (0.25,   5),
             (1.00,   2),
         ]
-        levels: list[dict] = instrument.get("retailMarginLevels") or instrument.get("marginLevels") or []
+
+        # Prefer the per-region schedule when available (current API format)
+        schedules: dict = instrument.get("marginSchedules") or {}
+        schedule_levels = (
+            schedules
+            .get(settings.kraken_margin_schedule, {})
+            .get(settings.kraken_client_type, [])
+        )
+
+        # Fallback: top-level retailMarginLevels / marginLevels (legacy format)
+        levels: list[dict] = schedule_levels or instrument.get("retailMarginLevels") or instrument.get("marginLevels") or []
+
         if not levels:
             return 5
         first_im = float(levels[0].get("initialMargin", 0.5))
