@@ -1,8 +1,9 @@
 # 🤖 Phase 5 — Trade Automation (Kraken Execution)
 
 **Date:** 28 mars 2026
-**Version:** 1.0
-**Status:** 📝 Design validé — implémentation à venir
+**Updated:** 29 mars 2026
+**Version:** 1.2
+**Status:** ✅ Implémenté et déployé — commits `d9964c2` → `486282e` sur `develop`
 
 > Ce document synthétise toutes les décisions de design de Phase 5.
 > Voir `AlphaTradingDesk-ops/docs/deployment/phases/phase5/pre-implement-phase5.md` pour le scope détaillé.
@@ -107,13 +108,19 @@ open_trade() API call
   → trade.status = 'pending'
   → notif "Limite posée — BTC/USD LONG @X"
 
-[Celery poll_pending_orders / 30s]
-  → GET /derivatives/api/v3/openorders
-  → si order filled:
-      → update trade.status = 'open', trade.entry_price = fill_price
-      → place_sl_order(sl_price)
-      → place_tp_orders(tp1, tp2, tp3)
-      → notif "Limite triggered — BTC/USD LONG @X.XX (slippage: +0.01%)"
+[Frontend polling / 15s — TradeDetailPage, pendant que status=pending + automation_enabled]
+  → POST /api/kraken-execution/trades/{id}/sync-fill
+      → sync_pending_fill() dans service.py
+      → GET /openorders — si order_id absent = filled
+      → GET /fills — récupère fill price exact
+      → Si filled:
+          → kraken_orders.entry: status='filled', filled_price, filled_at
+          → activate_trade(): pending → open, current_risk = risk_amount
+          → place_sl_tp_orders() immédiatement
+          → notif "Limite triggered — BTC/USD LONG @X.XX"
+
+Note: Celery poll_pending_orders (30s) ALSO handles this — frontend is the
+  Celery-free fallback for dev environments where Celery may not be running.
 ```
 
 ---
@@ -121,23 +128,33 @@ open_trade() API call
 ## 🔄 Cycle de vie — Lifecycle continu (automation ON)
 
 ```
-[Celery sync_open_positions / 60s]
-  → Pour chaque trade open + automation_enabled:
-      → GET /openpositions → sync unrealized PnL
-      → GET /fills (depuis last_checked_at)
-      → Si fill = TP1:
-          → partial_close(position_1), update PnL
+[Frontend polling / 30s — TradeDetailPage, pendant que status=open/partial + automation_enabled]
+  → POST /api/kraken-execution/trades/{id}/sync-sl-tp
+      → sync_sl_tp_fills() dans service.py
+      → GET /fills — cherche fills pour les KrakenOrders role=sl/tp1/tp2/tp3 status=open
+      → Si fill = TP1/2/3:
+          → partial_close(position_N, fill_price)   ← trades/service.py canonical
+          → profile.capital_current += position_pnl (immediate dans partial_close)
+          → Si dernier TP → auto-close trade + _update_wr_stats()
           → notif "TP1 pris — +$X.XX"
       → Si fill = SL:
-          → close_trade(realized_pnl)
+          → full_close(fill_price)                  ← trades/service.py canonical
+          → profile.capital_current += realized_pnl (atomique dans full_close)
+          → _update_wr_stats() strategy + profile
           → notif "SL touché — -$X.XX"
-      → Si fill = TP2/3:
-          → partial_close(position_2/3), close_trade si dernier
-          → notif "TP2/3 pris — +$X.XX"
+
+[Celery sync_open_positions / 60s — même logique, parallèle au frontend]
+  → Même flow via _handle_fill() → canonical full_close/partial_close
+  → Idempotence garantie par kraken_fill_id UNIQUE constraint
 
 [Celery pnl_status / configurable par trade]
   → notif "BTC/USD LONG — Entrée $X, Prix actuel $Y, PnL non-réalisé: +$Z"
 ```
+
+⚠️ **Importante garantie de cohérence** : `full_close` et `partial_close` de `trades/service.py`
+sont les **seuls** chemins autorisés pour fermer un trade/position. Ils gèrent la mise à jour
+atomique de `profile.capital_current`, `trade.realized_pnl` et des stats WR.
+Le stub `_close_trade()` qui existait dans `tasks.py` a été **supprimé** (ne mettait pas à jour le capital).
 
 ---
 
@@ -147,6 +164,9 @@ open_trade() API call
 - La réconciliation compare `kraken_orders.status` (DB) vs `GET /openorders` + `GET /fills` (Kraken).
 - Statuts possibles : `pending | open | filled | cancelled | error`.
 - Les fills Kraken sont idempotents : on stocke `kraken_fill_id` dans `kraken_orders` pour éviter le double-traitement.
+- **Double path** : Celery ET frontend polling coexistent — Celery est la voie principale en prod,
+  le frontend est le fallback Celery-free pour les envs dev sans worker Redis/Celery.
+- Pas de double-counting possible : `kraken_fill_id` UNIQUE + guards HTTP 409/422 dans `full_close`/`partial_close`.
 
 ---
 
