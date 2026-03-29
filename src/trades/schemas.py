@@ -341,6 +341,12 @@ class TradeListItem(BaseModel):
     closed_at: datetime | None
     created_at: datetime
 
+    # ── Computed flags (not DB columns — set by list_trades service) ──────────
+    # True when current_risk == 0 and trade is open/partial (SL moved to BE)
+    is_be: bool = False
+    # True when at least one KrakenOrder row exists for this trade
+    has_kraken_orders: bool = False
+
     @model_validator(mode="after")
     def normalise_direction_list(self) -> TradeListItem:
         """Guarantee direction is always uppercase in API responses.

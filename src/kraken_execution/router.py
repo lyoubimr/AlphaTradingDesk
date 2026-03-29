@@ -47,6 +47,7 @@ from src.kraken_execution.service import (
     update_automation_settings,
     verify_connection,
 )
+from src.volatility.kraken_client import KrakenClient
 
 router = APIRouter(prefix="/kraken-execution", tags=["kraken-execution"])
 
@@ -178,3 +179,25 @@ def trigger_cancel_entry(
     except Exception as exc:
         raise _map_exc(exc) from exc
     return KrakenOrderOut.model_validate(order)
+
+
+# ── Public price endpoint (no auth) ──────────────────────────────────────────
+
+@router.get("/mark-price/{symbol}")
+def get_mark_price(symbol: str) -> dict:
+    """Return the current last/mark price for a Kraken Futures symbol.
+
+    Uses the public tickers endpoint — no API keys required.
+    Used by NewTradePage to prefill entry_price for MARKET orders.
+    """
+    try:
+        with KrakenClient() as client:
+            ticker = client.fetch_ticker(symbol)
+        return {"symbol": symbol, "mark_price": ticker["last"]}
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Kraken price unavailable: {exc}",
+        ) from exc

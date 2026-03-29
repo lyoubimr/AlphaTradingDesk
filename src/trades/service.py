@@ -43,6 +43,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from src.core.models.broker import Instrument, Profile
 from src.core.models.trade import Position, Strategy, Trade, TradeStrategy
+from src.kraken_execution.models import KrakenOrder
 from src.risk_management.defaults import DEFAULT_RISK_CONFIG
 from src.risk_management.engine import _deep_merge
 from src.risk_management.service import get_risk_budget, get_risk_settings
@@ -619,6 +620,17 @@ def list_trades(
     for trade_id, strategy_id in strat_rows:
         strat_map.setdefault(trade_id, []).append(strategy_id)
 
+    # Bulk-fetch which trades have at least one KrakenOrder (avoid N+1)
+    kraken_trade_ids: set[int] = set()
+    if trade_ids:
+        kraken_rows = (
+            db.query(KrakenOrder.trade_id)
+            .filter(KrakenOrder.trade_id.in_(trade_ids))
+            .distinct()
+            .all()
+        )
+        kraken_trade_ids = {r[0] for r in kraken_rows}
+
     items = []
     for t in trades:
         item = TradeListItem.model_validate(t)
@@ -633,6 +645,13 @@ def list_trades(
             or None
         )
         item.strategy_ids = strat_map.get(t.id, [])
+        # is_be: SL has been moved to breakeven (current_risk == 0, trade still active)
+        item.is_be = (
+            t.status in ("open", "partial")
+            and t.current_risk is not None
+            and t.current_risk == Decimal("0")
+        )
+        item.has_kraken_orders = t.id in kraken_trade_ids
         items.append(item)
     return items
 

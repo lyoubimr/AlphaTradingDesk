@@ -175,6 +175,10 @@ export interface TradeListItem {
   strategy_ids: number[]
   closed_at: string | null
   created_at: string
+  /** SL moved to breakeven — current_risk == 0 and trade is open/partial */
+  is_be: boolean
+  /** At least one KrakenOrder row exists for this trade */
+  has_kraken_orders: boolean
 }
 
 export interface TradePosition_Out {
