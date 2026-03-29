@@ -26,11 +26,11 @@ import type React from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   TrendingUp, TrendingDown, Loader2,
-  AlertTriangle, ChevronDown, ChevronUp, Search, X, Info, Clock, Plus, ShieldAlert, ImagePlus, Trash2, Star,
+  AlertTriangle, ChevronDown, ChevronUp, Search, X, Info, Clock, Plus, ShieldAlert, ImagePlus, Trash2, Star, Zap,
 } from 'lucide-react'
 import { PageHeader } from '../../components/ui/PageHeader'
 import { useProfile } from '../../context/ProfileContext'
-import { instrumentsApi, tradesApi, strategiesApi, statsApi, goalsApi, maApi } from '../../lib/api'
+import { instrumentsApi, tradesApi, strategiesApi, statsApi, goalsApi, maApi, automationApi } from '../../lib/api'
 import { useRiskCalc } from '../../hooks/useRiskCalc'
 import type { RiskCalcResult } from '../../hooks/useRiskCalc'
 import { cn } from '../../lib/cn'
@@ -980,9 +980,26 @@ export function NewTradePage() {
   const [submitting, setSubmitting] = useState(false)
   const [error, setError]           = useState<string | null>(null)
 
+  // ── Stable object URLs for screenshot thumbnails (avoids scroll-jump on add) ──
+  const [screenshotUrls, setScreenshotUrls] = useState<{ file: File; url: string }[]>([])
+  useEffect(() => {
+    setScreenshotUrls((prev) => {
+      prev.filter((p) => !entryScreenshots.includes(p.file)).forEach((p) => URL.revokeObjectURL(p.url))
+      return entryScreenshots.map((file) => {
+        const existing = prev.find((p) => p.file === file)
+        return existing ?? { file, url: URL.createObjectURL(file) }
+      })
+    })
+  }, [entryScreenshots])
+
   // ── Risk Advisor state ────────────────────────────────────────────────────
   const [advisorSnapshot, setAdvisorSnapshot] = useState<Record<string, unknown> | null>(null)
   const [forceOpen, setForceOpen]             = useState(false)
+
+  // ── Automation (Crypto profiles only) ────────────────────────────────────
+  const [automateOnCreate,        setAutomateOnCreate]        = useState(false)
+  const [profileAutomationEnabled, setProfileAutomationEnabled] = useState(false)
+
   // Latest Market Analysis session — auto-fetched for ma_direction in Risk Advisor
   // NOTE: not filtered by profile — MA sessions represent global market context
   const [latestMaSessionId, setLatestMaSessionId] = useState<number | null>(null)
@@ -1016,6 +1033,34 @@ export function NewTradePage() {
   const isCrypto = activeProfile?.market_type === 'Crypto'
   const isCFD    = activeProfile?.market_type === 'CFD'
   const ccy      = activeProfile?.currency ?? ''
+
+  // Fetch profile-level automation enabled flag (Crypto only)
+  // If automation is enabled at profile level → default the per-trade toggle to ON
+  useEffect(() => {
+    if (!isCrypto || !activeProfile?.id) {
+      setProfileAutomationEnabled(false)
+      setAutomateOnCreate(false)
+      return
+    }
+    automationApi.getSettings(activeProfile.id)
+      .then(s => {
+        const enabled = s.config.enabled ?? false
+        setProfileAutomationEnabled(enabled)
+        setAutomateOnCreate(enabled)   // default ON when profile automation is active
+      })
+      .catch(() => {
+        setProfileAutomationEnabled(false)
+        setAutomateOnCreate(false)
+      })
+  }, [isCrypto, activeProfile?.id])
+
+  // ── Prefill entry price from Kraken mark price (MARKET orders, Crypto only) ─
+  useEffect(() => {
+    if (!isCrypto || !instrument?.symbol || orderType !== 'MARKET') return
+    automationApi.getMarkPrice(instrument.symbol)
+      .then(({ mark_price }) => setEntry(String(mark_price)))
+      .catch(() => { /* silent — user can type manually */ })
+  }, [isCrypto, instrument?.symbol, orderType])
 
   // ── Load instruments when profile broker changes ──────────────────────────
   useEffect(() => {
@@ -1398,6 +1443,14 @@ export function NewTradePage() {
           // screenshot upload failure is non-fatal — trade is already created
         }
       }
+      // Automation: send to Kraken Futures if requested (non-fatal — trade is already in journal)
+      if (automateOnCreate && profileAutomationEnabled) {
+        try {
+          await automationApi.openTrade(newTrade.id)
+        } catch {
+          // non-fatal
+        }
+      }
       navigate('/trades')
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Unknown error'
@@ -1436,7 +1489,7 @@ export function NewTradePage() {
   )
 
   const autoSession = detectSession()
-  const isFormValid = !!instrument && pctValid && !slSideError && !tpSideErrors
+  const isFormValid = !!instrument && !!entry && pctValid && !slSideError && !tpSideErrors
 
   // Goal circuit-breaker
   const blockedGoals = goalsProgress.filter((g) => g.limit_hit && g.show_on_dashboard)
@@ -1490,6 +1543,57 @@ export function NewTradePage() {
           <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-900/10 border border-amber-800/30 text-amber-400/70 text-xs">
             <AlertTriangle size={12} className="shrink-0" />
             Override active — you are trading outside your risk limits. Proceed with caution.
+          </div>
+        )}
+
+        {/* ── Automation toggle (Crypto profiles only) ──────────────────── */}
+        {isCrypto && (
+          <div className={cn(
+            'flex items-center justify-between gap-4 rounded-xl border p-4',
+            automateOnCreate
+              ? 'bg-brand-500/10 border-brand-500/30'
+              : 'bg-surface-800 border-surface-700',
+          )}>
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <Zap size={14} className={automateOnCreate ? 'text-brand-400' : 'text-slate-500'} />
+                <p className="text-sm font-semibold text-slate-200">Enable automation</p>
+              </div>
+              {profileAutomationEnabled ? (
+                <p className="text-[11px] text-slate-500 mt-0.5">
+                  Places a LIMIT entry order on Kraken Futures immediately after creation.
+                </p>
+              ) : (
+                <p className="text-[11px] text-amber-400/80 mt-0.5 flex items-center gap-1">
+                  <AlertTriangle size={10} className="shrink-0" />
+                  Profile automation disabled —{' '}
+                  <a href="/settings/automation" className="underline text-amber-400 hover:text-amber-300">
+                    Settings → Automation
+                  </a>
+                </p>
+              )}
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={automateOnCreate}
+              disabled={!profileAutomationEnabled}
+              onClick={() => setAutomateOnCreate((v) => !v)}
+              className={cn(
+                'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent',
+                'transition-colors duration-200 focus:outline-none',
+                'disabled:opacity-40 disabled:cursor-not-allowed',
+                automateOnCreate ? 'bg-brand-500' : 'bg-surface-500',
+              )}
+            >
+              <span
+                className={cn(
+                  'pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow',
+                  'transition-transform duration-200',
+                  automateOnCreate ? 'translate-x-5' : 'translate-x-0',
+                )}
+              />
+            </button>
           </div>
         )}
 
@@ -2075,13 +2179,13 @@ export function NewTradePage() {
               Entry screenshots
               <span className="text-[10px] text-slate-600 font-normal ml-1">(optional — chart setup, confluences)</span>
             </span>
-            {/* Thumbnails row */}
-            {entryScreenshots.length > 0 && (
+            {/* Thumbnails row — stable objectURLs to avoid scroll-jump */}
+            {screenshotUrls.length > 0 && (
               <div className="flex flex-wrap gap-2 mb-2">
-                {entryScreenshots.map((file, idx) => (
-                  <div key={idx} className="relative group w-20 h-20 rounded-lg overflow-hidden border border-surface-600 bg-surface-700">
+                {screenshotUrls.map(({ file, url }, idx) => (
+                  <div key={url} className="relative group w-20 h-20 rounded-lg overflow-hidden border border-surface-600 bg-surface-700">
                     <img
-                      src={URL.createObjectURL(file)}
+                      src={url}
                       alt={file.name}
                       className="w-full h-full object-cover"
                     />
