@@ -71,14 +71,16 @@ class KrakenExecutionClient:
         """Compute Kraken Futures HMAC-SHA512 signature.
 
         Algorithm (Kraken Futures API docs):
-          message   = post_data + nonce + endpoint_path
-          sha256    = SHA256(message.encode('utf-8')).digest()
-          signature = base64( HMAC-SHA512(base64decode(api_secret), sha256) )
+          signed_path = endpoint_path without /derivatives prefix → "/api/v3/sendorder"
+          message     = post_data + nonce + signed_path
+          sha256      = SHA256(message.encode('utf-8')).digest()
+          signature   = base64( HMAC-SHA512(base64decode(api_secret), sha256) )
 
         For GET requests: post_data is an empty string.
         For POST requests: post_data is the URL-encoded request body.
         """
-        message = post_data + nonce + endpoint_path
+        signed_path = endpoint_path.removeprefix("/derivatives")
+        message = post_data + nonce + signed_path
         sha256_hash = hashlib.sha256(message.encode("utf-8")).digest()
         raw_sig = _hmac.new(
             base64.b64decode(self._api_secret),
@@ -175,6 +177,9 @@ class KrakenExecutionClient:
             payload["reduceOnly"] = "true"
 
         result = self._post("/derivatives/api/v3/sendorder", payload)
+        logger.debug("kraken_sendorder_raw", raw=result)
+        if result.get("result") != "success":
+            raise KrakenAPIError(0, str(result))
         logger.info(
             "kraken_order_placed",
             symbol=symbol,
@@ -182,7 +187,7 @@ class KrakenExecutionClient:
             order_type=order_type,
             size=size,
             status=result.get("sendStatus", {}).get("status"),
-            order_id=result.get("sendStatus", {}).get("orderId"),
+            order_id=result.get("sendStatus", {}).get("order_id"),
         )
         return result
 
@@ -235,14 +240,18 @@ class KrakenExecutionClient:
         data = self._get("/derivatives/api/v3/openpositions")
         return data.get("openPositions", [])  # type: ignore[return-value]
 
-    def ping(self) -> bool:
+    def ping(self) -> tuple[bool, str | None]:
         """Test API connectivity by calling GET /openorders.
 
-        Returns True if the request succeeds (authenticated connection works).
-        Returns False on any error — never raises.
+        Returns (True, None) if authenticated connection works.
+        Returns (False, error_message) on any error — never raises.
         """
         try:
-            self._get("/derivatives/api/v3/openorders")
-            return True
-        except (KrakenAPIError, httpx.HTTPError, Exception):
-            return False
+            data = self._get("/derivatives/api/v3/openorders")
+            if data.get("result") not in ("success", None):
+                return False, data.get("error", "unknown error")
+            return True, None
+        except KrakenAPIError as exc:
+            return False, str(exc)
+        except Exception as exc:
+            return False, str(exc)

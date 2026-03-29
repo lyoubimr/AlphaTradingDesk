@@ -147,12 +147,15 @@ def verify_connection(profile_id: int, db: Session) -> dict:
             "error": "No API keys configured.",
         }
     with _make_client(row) as client:
-        ok = client.ping()
-    return {
+        ok, error = client.ping()
+    result: dict = {
         "connected": ok,
         "demo": settings.kraken_demo or settings.environment == "dev",
         "base_url": settings.kraken_futures_base_url,
     }
+    if error:
+        result["error"] = error
+    return result
 
 
 # ── Internal helpers ──────────────────────────────────────────────────────────
@@ -202,8 +205,23 @@ def _exit_side(trade: Trade) -> str:
 
 
 def _kraken_order_type(atd_order_type: str) -> str:
-    """Map ATD order type to Kraken order type string."""
+    """Map ATD order type to Kraken API wire format."""
     return "lmt" if atd_order_type == "LIMIT" else "mkt"
+
+
+# Kraken API wire format → DB-constrained value
+# DB constraint: 'market' | 'limit' | 'stop' | 'take_profit'
+_KRAKEN_TO_DB_ORDER_TYPE: dict[str, str] = {
+    "mkt": "market",
+    "lmt": "limit",
+    "stp": "stop",
+    "take_profit": "take_profit",
+}
+
+
+def _db_order_type(kraken_type: str) -> str:
+    """Map Kraken API order type to the DB-constrained value."""
+    return _KRAKEN_TO_DB_ORDER_TYPE.get(kraken_type, kraken_type)
 
 
 # ── Trade automation actions ──────────────────────────────────────────────────
@@ -223,15 +241,14 @@ def open_automated_trade(trade_id: int, db: Session) -> KrakenOrder:
     """
     trade = _get_trade_or_404(trade_id, db)
 
-    if not trade.automation_enabled:
+    settings_row = get_automation_settings(trade.profile_id, db)
+    if not settings_row.config.get("enabled", False):
         raise AutomationNotEnabledError(
-            f"Trade {trade_id} does not have automation enabled."
+            f"Profile {trade.profile_id} does not have automation enabled."
         )
 
     instrument = _resolve_instrument(trade, db)
     lot_size = _compute_lot_size(trade, instrument)
-
-    settings_row = get_automation_settings(trade.profile_id, db)
 
     with _make_client(settings_row) as client:
         kraken_type = _kraken_order_type(trade.order_type)
@@ -246,7 +263,7 @@ def open_automated_trade(trade_id: int, db: Session) -> KrakenOrder:
         )
 
     send_status = result.get("sendStatus", {})
-    kraken_order_id = send_status.get("orderId", "")
+    kraken_order_id = send_status.get("order_id", "")
 
     order = KrakenOrder(
         trade_id=trade.id,
@@ -254,7 +271,7 @@ def open_automated_trade(trade_id: int, db: Session) -> KrakenOrder:
         kraken_order_id=kraken_order_id,
         role="entry",
         status="open",
-        order_type=kraken_type,
+        order_type=_db_order_type(kraken_type),
         symbol=instrument.symbol,
         side=_entry_side(trade),
         size=float(lot_size),
@@ -263,6 +280,7 @@ def open_automated_trade(trade_id: int, db: Session) -> KrakenOrder:
     db.add(order)
 
     trade.kraken_entry_order_id = kraken_order_id
+    trade.automation_enabled = True
     db.commit()
     db.refresh(order)
 
@@ -321,14 +339,14 @@ def place_sl_tp_orders(
         stop_price=str(trade.stop_loss),
         reduce_only=True,
     )
-    sl_order_id = sl_result.get("sendStatus", {}).get("orderId", "")
+    sl_order_id = sl_result.get("sendStatus", {}).get("order_id", "")
     sl_order = KrakenOrder(
         trade_id=trade.id,
         profile_id=trade.profile_id,
         kraken_order_id=sl_order_id,
         role="sl",
         status="open",
-        order_type="stp",
+        order_type="stop",
         symbol=instrument.symbol,
         side=exit_side,
         size=float(entry_size),
@@ -357,7 +375,7 @@ def place_sl_tp_orders(
             limit_price=str(pos.take_profit_price),
             reduce_only=True,
         )
-        tp_order_id = tp_result.get("sendStatus", {}).get("orderId", "")
+        tp_order_id = tp_result.get("sendStatus", {}).get("order_id", "")
         role = role_map.get(pos.position_number, "tp1")
         tp_order = KrakenOrder(
             trade_id=trade.id,
@@ -436,14 +454,14 @@ def close_automated_trade(trade_id: int, db: Session) -> KrakenOrder:
             reduce_only=True,
         )
 
-    close_order_id = close_result.get("sendStatus", {}).get("orderId", "")
+    close_order_id = close_result.get("sendStatus", {}).get("order_id", "")
     close_order = KrakenOrder(
         trade_id=trade.id,
         profile_id=trade.profile_id,
         kraken_order_id=close_order_id,
         role="entry",
         status="open",
-        order_type="mkt",
+        order_type="market",
         symbol=instrument.symbol,
         side=_exit_side(trade),
         size=float(close_size) if close_size != "0" else 0.0,
@@ -494,14 +512,14 @@ def move_to_breakeven(trade_id: int, db: Session) -> KrakenOrder:
             reduce_only=True,
         )
 
-    new_order_id = sl_result.get("sendStatus", {}).get("orderId", "")
+    new_order_id = sl_result.get("sendStatus", {}).get("order_id", "")
     new_sl = KrakenOrder(
         trade_id=trade.id,
         profile_id=trade.profile_id,
         kraken_order_id=new_order_id,
         role="sl",
         status="open",
-        order_type="stp",
+        order_type="stop",
         symbol=instrument.symbol,
         side=_exit_side(trade),
         size=sl_order.size if sl_order else 0.0,
