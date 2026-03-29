@@ -5,12 +5,15 @@ Integration tests for GET /api/risk/advisor
 from __future__ import annotations
 
 from decimal import Decimal
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from src.core.models.broker import Broker, Profile
 from src.core.models.trade import Strategy
+from src.volatility.models import MarketVISnapshot
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -138,14 +141,25 @@ class TestRiskAdvisor:
         assert abs(conf["factor"] - 1.2) < 1e-4
 
     def test_vi_shows_no_data_when_cache_cold(self, client: TestClient, db_session: Session):
-        """Redis cache cold + Kraken bogus symbol → VI criteria show 'No data' (neutral factor)."""
+        """Redis cache cold + Kraken bogus symbol → VI criteria show 'No data' (neutral factor).
+
+        We mock both the Redis cache (to return None) and clear any MarketVISnapshot
+        rows from the DB (within the savepoint, rolled back after the test) so
+        the service has no market VI data available, regardless of the local dev env.
+        """
+        # Clear DB snapshots within this savepoint
+        db_session.execute(text("DELETE FROM market_vi_snapshots"))
+        db_session.flush()
+
         broker = _make_broker(db_session, name="VIBroker")
         profile = _make_profile(db_session, broker, name="VITrader")
 
-        resp = client.get(
-            "/api/risk/advisor",
-            params={"profile_id": profile.id, **self.NEUTRAL_PARAMS},
-        )
+        # Mock Redis so local dev Redis data doesn't bleed into tests
+        with patch("src.risk_management.service.get_cached_market_vi", return_value=None):
+            resp = client.get(
+                "/api/risk/advisor",
+                params={"profile_id": profile.id, **self.NEUTRAL_PARAMS},
+            )
         assert resp.status_code == 200
 
         criteria = {c["name"]: c for c in resp.json()["criteria"]}
@@ -165,10 +179,15 @@ class TestRiskAdvisor:
         broker = _make_broker(db_session, name="NeutBroker")
         profile = _make_profile(db_session, broker, name="NeutTrader")
 
-        resp = client.get(
-            "/api/risk/advisor",
-            params={"profile_id": profile.id, **self.NEUTRAL_PARAMS},
-        )
+        # Isolate from local dev Redis data (market_vi: CALM → 0.6 would break this)
+        db_session.execute(text("DELETE FROM market_vi_snapshots"))
+        db_session.flush()
+
+        with patch("src.risk_management.service.get_cached_market_vi", return_value=None):
+            resp = client.get(
+                "/api/risk/advisor",
+                params={"profile_id": profile.id, **self.NEUTRAL_PARAMS},
+            )
         assert resp.status_code == 200
 
         data = resp.json()
