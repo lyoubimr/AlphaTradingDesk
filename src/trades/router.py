@@ -29,6 +29,7 @@ from sqlalchemy.orm import Session
 
 from src.core.config import settings
 from src.core.deps import get_db
+from src.core.models.trade import Trade
 from src.trades import service
 from src.trades.schemas import (
     TradeClose,
@@ -122,7 +123,20 @@ def full_close(
     Fully close a trade at the given exit_price.
     Closes all remaining open positions, sums PnL,
     and atomically updates profile.capital_current.
+
+    Blocked for automated trades — use the Kraken automation panel instead
+    to prevent leaving orphaned exchange orders.
     """
+    trade = db.query(Trade).filter(Trade.id == trade_id).first()
+    if trade and trade.automation_enabled:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "This trade is managed by Kraken automation. "
+                "Use the automation panel to close it — "
+                "manual close would leave exchange orders orphaned."
+            ),
+        )
     return service.full_close(db, trade_id, data)
 
 

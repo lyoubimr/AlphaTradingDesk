@@ -2,10 +2,11 @@
 // Shows the list of Kraken execution orders for a trade + the AutomationToggle.
 // Also exposes hasOrders / hasOpenEntry upward via onOrdersLoaded so the parent
 // (TradeDetailPage) can pass them down to AutomationToggle.
+// Provides Close position + Move to BE quick actions for live automated trades.
 // ────────────────────────────────────────────────────────────────────────────
 
-import { useEffect } from 'react'
-import { RefreshCw, Loader2 } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { RefreshCw, Loader2, CheckCircle2, ShieldCheck } from 'lucide-react'
 import { automationApi } from '../../lib/api'
 import { useApi } from '../../hooks/useApi'
 import { AutomationStatusBadge } from './AutomationStatusBadge'
@@ -21,16 +22,24 @@ function fmtDate(iso: string | null): string {
 }
 
 interface Props {
-  tradeId:          number
-  tradeStatus:      string
-  onOrdersLoaded?:  (orders: KrakenOrderOut[]) => void
+  tradeId:            number
+  tradeStatus:        string
+  automationEnabled?: boolean
+  onOrdersLoaded?:    (orders: KrakenOrderOut[]) => void
+  onTradeUpdated?:    () => void
 }
 
-export function KrakenOrdersPanel({ tradeId, tradeStatus, onOrdersLoaded }: Props) {
+export function KrakenOrdersPanel({ tradeId, tradeStatus, automationEnabled, onOrdersLoaded, onTradeUpdated }: Props) {
   const { data: orders, loading, error, refetch } = useApi(
     () => automationApi.getOrders(tradeId),
     [tradeId],
   )
+
+  // Quick-action state
+  const [closingTrade, setClosingTrade] = useState(false)
+  const [movingBe,     setMovingBe]     = useState(false)
+  const [confirmClose, setConfirmClose] = useState(false)
+  const [actionError,  setActionError]  = useState<string | null>(null)
 
   // Notify parent whenever orders change
   useEffect(() => {
@@ -41,6 +50,34 @@ export function KrakenOrdersPanel({ tradeId, tradeStatus, onOrdersLoaded }: Prop
 
   const hasOrders    = (orders?.length ?? 0) > 0
   const hasOpenEntry = orders?.some((o) => o.role === 'entry' && o.status === 'open') ?? false
+  const isLive       = automationEnabled && (tradeStatus === 'open' || tradeStatus === 'partial')
+
+  async function handleClose() {
+    setClosingTrade(true); setActionError(null)
+    try {
+      await automationApi.closeTrade(tradeId)
+      refetch()
+      onTradeUpdated?.()
+    } catch (e: unknown) {
+      setActionError((e as Error).message)
+    } finally {
+      setClosingTrade(false)
+      setConfirmClose(false)
+    }
+  }
+
+  async function handleBreakeven() {
+    setMovingBe(true); setActionError(null)
+    try {
+      await automationApi.moveToBreakeven(tradeId)
+      refetch()
+      onTradeUpdated?.()
+    } catch (e: unknown) {
+      setActionError((e as Error).message)
+    } finally {
+      setMovingBe(false)
+    }
+  }
 
   return (
     <div className="rounded-xl bg-surface-800 border border-surface-700 overflow-hidden">
@@ -70,6 +107,58 @@ export function KrakenOrdersPanel({ tradeId, tradeStatus, onOrdersLoaded }: Prop
           onAction={refetch}
         />
       </div>
+
+      {/* ── Quick actions (live automated trades only) ────────────────────── */}
+      {isLive && (
+        <div className="px-4 py-3 border-b border-surface-700 flex flex-wrap items-center gap-2">
+          {/* Close position */}
+          {confirmClose ? (
+            <>
+              <span className="text-xs text-amber-300">Market close?</span>
+              <button
+                type="button"
+                onClick={() => void handleClose()}
+                disabled={closingTrade}
+                className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-600/30 border border-emerald-500/50 text-xs text-emerald-300 font-medium hover:bg-emerald-600/40 transition-colors disabled:opacity-40"
+              >
+                {closingTrade ? <Loader2 size={10} className="animate-spin" /> : <CheckCircle2 size={10} />}
+                Confirm
+              </button>
+              <button
+                type="button"
+                onClick={() => setConfirmClose(false)}
+                className="px-2 py-1 rounded-lg bg-surface-700 border border-surface-600 text-xs text-slate-400 hover:text-slate-200 transition-colors"
+              >
+                Cancel
+              </button>
+            </>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setConfirmClose(true)}
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-600/15 border border-emerald-500/30 text-xs text-emerald-300 font-medium hover:bg-emerald-600/25 transition-colors"
+            >
+              <CheckCircle2 size={10} />
+              Close position
+            </button>
+          )}
+
+          {/* Move to breakeven */}
+          <button
+            type="button"
+            onClick={() => void handleBreakeven()}
+            disabled={movingBe}
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-amber-500/10 border border-amber-500/30 text-xs text-amber-300 font-medium hover:bg-amber-500/20 transition-colors disabled:opacity-40"
+          >
+            {movingBe ? <Loader2 size={10} className="animate-spin" /> : <ShieldCheck size={10} />}
+            Move to BE
+          </button>
+
+          {actionError && (
+            <p className="w-full text-xs text-red-400">{actionError}</p>
+          )}
+        </div>
+      )}
 
       {/* ── Orders table ──────────────────────────────────────────────────── */}
       <div className="px-4 py-3">

@@ -36,6 +36,7 @@ from src.kraken_execution.client import KrakenExecutionClient
 from src.kraken_execution.models import DEFAULT_AUTOMATION_CONFIG, AutomationSettings, KrakenOrder
 from src.kraken_execution.precision import quantize_size
 from src.risk_management.engine import _deep_merge
+from src.volatility.kraken_client import KrakenClient as PublicKrakenClient
 
 logger = structlog.get_logger()
 
@@ -412,7 +413,11 @@ def place_sl_tp_orders(
 
 
 def close_automated_trade(trade_id: int, db: Session) -> KrakenOrder:
-    """Cancel all open SL/TP orders and place a market close order.
+    """Cancel all open SL/TP orders, place a market close order, and journal the trade.
+
+    Uses the Kraken public mark price as the exit price for PnL journaling.
+    If the mark price fetch fails, the close order is still placed and the trade
+    is still journaled at the entry price (worst-case approximation).
 
     Returns:
         The market close KrakenOrder row.
@@ -475,7 +480,61 @@ def close_automated_trade(trade_id: int, db: Session) -> KrakenOrder:
     db.add(close_order)
     db.commit()
     db.refresh(close_order)
+
+    # ── Journal the trade using the current mark price as exit approximation ──
+    # Market orders fill near the mark price. This is updated as the best
+    # available approximation; a future sync worker can refine it from fills.
+    _journal_automated_close(trade_id=trade_id, symbol=instrument.symbol, db=db)
+
     return close_order
+
+
+def _journal_automated_close(trade_id: int, symbol: str, db: Session) -> None:
+    """Journal a trade as closed using the Kraken mark price as exit approximation.
+
+    Called internally after a market close order is placed. Wraps in a
+    try/except so a price-fetch failure does not prevent the close order from
+    being persisted.
+    """
+    from src.trades.schemas import TradeClose
+    from src.trades.service import full_close as journal_full_close
+
+    # Fetch current mark price (public endpoint — no auth required)
+    exit_price: Decimal | None = None
+    try:
+        with PublicKrakenClient() as public_client:
+            ticker = public_client.fetch_ticker(symbol)
+            exit_price = Decimal(str(ticker["last"]))
+    except Exception as exc:
+        logger.warning(
+            "automation_close_mark_price_failed",
+            trade_id=trade_id,
+            symbol=symbol,
+            error=str(exc),
+        )
+
+    if exit_price is None:
+        # Fallback: reload trade and use entry_price (rare edge case)
+        trade = db.query(Trade).filter(Trade.id == trade_id).first()
+        exit_price = trade.entry_price if trade else Decimal("1")
+
+    try:
+        data = TradeClose(
+            exit_price=exit_price,
+            close_notes="Closed via Kraken automation (market order). Exit price is mark price approximation.",
+        )
+        journal_full_close(db=db, trade_id=trade_id, data=data)
+        logger.info(
+            "automation_trade_journaled",
+            trade_id=trade_id,
+            exit_price=str(exit_price),
+        )
+    except Exception as exc:
+        logger.error(
+            "automation_journal_failed",
+            trade_id=trade_id,
+            error=str(exc),
+        )
 
 
 def move_to_breakeven(trade_id: int, db: Session) -> KrakenOrder:

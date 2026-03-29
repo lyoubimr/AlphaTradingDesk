@@ -179,6 +179,8 @@ export interface TradeListItem {
   is_be: boolean
   /** At least one KrakenOrder row exists for this trade */
   has_kraken_orders: boolean
+  /** Entry was placed through Kraken automation — manual close is blocked */
+  automation_enabled: boolean
 }
 
 export interface TradePosition_Out {
@@ -729,10 +731,17 @@ export interface RiskAdvisorOut {
   adjusted_risk_amount: number
   multiplier: number
   criteria: CriterionDetail[]
+  // Live budget (open/partial, current_risk — BE trades = 0)
   budget_remaining_pct: number
   budget_remaining_amount: number
   budget_blocking: boolean
   suggested_risk_pct: number
+  // Pending LIMIT orders (potential future exposure)
+  pending_risk_pct: number
+  pending_risk_amount: number
+  budget_remaining_if_pending_fill_pct: number
+  budget_remaining_if_pending_fill_amount: number
+  pending_budget_warning: boolean
   force_allowed: boolean
 }
 

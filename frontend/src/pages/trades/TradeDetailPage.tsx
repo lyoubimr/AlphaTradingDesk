@@ -17,7 +17,7 @@ import {
   ImagePlus, Maximize2,
 } from 'lucide-react'
 import { PageHeader } from '../../components/ui/PageHeader'
-import { tradesApi, strategiesApi } from '../../lib/api'
+import { tradesApi, strategiesApi, automationApi } from '../../lib/api'
 import { KrakenOrdersPanel } from '../../components/automation/KrakenOrdersPanel'
 import { cn } from '../../lib/cn'
 import { useProfile } from '../../context/ProfileContext'
@@ -495,6 +495,69 @@ function EditTradeModal({ trade, onClose, onSuccess }: {
           </button>
         </div>
       </div>
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Automated close button — sends market close via Kraken automation
+// ─────────────────────────────────────────────────────────────────────────────
+
+function AutomatedCloseButton({ tradeId, onSuccess }: {
+  tradeId: number
+  onSuccess: (updated: TradeOut) => void
+}) {
+  const [closing, setClosing] = useState(false)
+  const [err, setErr]         = useState<string | null>(null)
+  const [confirm, setConfirm] = useState(false)
+
+  async function handleClose() {
+    setClosing(true); setErr(null)
+    try {
+      await automationApi.closeTrade(tradeId)
+      const updated = await tradesApi.get(tradeId)
+      onSuccess(updated)
+    } catch (e: unknown) {
+      setErr((e as Error).message)
+    } finally {
+      setClosing(false)
+      setConfirm(false)
+    }
+  }
+
+  if (!confirm) {
+    return (
+      <button
+        type="button"
+        onClick={() => setConfirm(true)}
+        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600/20 border border-emerald-500/40 text-xs text-emerald-300 font-medium hover:bg-emerald-600/30 transition-colors"
+      >
+        <CheckCircle2 size={11} />
+        Close on Kraken
+      </button>
+    )
+  }
+
+  return (
+    <div className="flex items-center gap-1.5">
+      <span className="text-xs text-amber-300">Market close?</span>
+      <button
+        type="button"
+        onClick={() => void handleClose()}
+        disabled={closing}
+        className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-emerald-600/30 border border-emerald-500/50 text-xs text-emerald-300 font-medium hover:bg-emerald-600/40 transition-colors disabled:opacity-40"
+      >
+        {closing ? <Loader2 size={10} className="animate-spin" /> : <CheckCircle2 size={10} />}
+        Confirm
+      </button>
+      <button
+        type="button"
+        onClick={() => setConfirm(false)}
+        className="px-2 py-1.5 rounded-lg bg-surface-700 border border-surface-600 text-xs text-slate-400 hover:text-slate-200 transition-colors"
+      >
+        Cancel
+      </button>
+      {err && <span className="text-xs text-red-400">{err}</span>}
     </div>
   )
 }
@@ -978,8 +1041,15 @@ export function TradeDetailPage() {
     if (!trade) return
     setMovingBe(true); setConfirmBe(false); setActionError(null)
     try {
-      const updated = await tradesApi.breakeven(trade.id)
-      setTrade(updated)
+      if (trade.automation_enabled) {
+        await automationApi.moveToBreakeven(trade.id)
+        // Reload trade to pick up updated current_risk
+        const updated = await tradesApi.get(trade.id)
+        setTrade(updated)
+      } else {
+        const updated = await tradesApi.breakeven(trade.id)
+        setTrade(updated)
+      }
     } catch (e: unknown) {
       setActionError((e as Error).message)
     } finally {
@@ -1140,11 +1210,16 @@ export function TradeDetailPage() {
               {/* OPEN / PARTIAL actions */}
               {isActive && (
                 <>
-                  <button type="button" onClick={() => setShowCloseAll(true)}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600/20 border border-emerald-500/40 text-xs text-emerald-300 font-medium hover:bg-emerald-600/30 transition-colors">
-                    <CheckCircle2 size={11} />
-                    Close all
-                  </button>
+                  {trade.automation_enabled ? (
+                    // Automated trade — close is handled by Kraken automation panel
+                    <AutomatedCloseButton tradeId={trade.id} onSuccess={(updated) => setTrade(updated)} />
+                  ) : (
+                    <button type="button" onClick={() => setShowCloseAll(true)}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600/20 border border-emerald-500/40 text-xs text-emerald-300 font-medium hover:bg-emerald-600/30 transition-colors">
+                      <CheckCircle2 size={11} />
+                      Close all
+                    </button>
+                  )}
 
                   {!isAtBe && !confirmBe && (
                     <button type="button" onClick={() => setConfirmBe(true)} disabled={movingBe}
@@ -1649,6 +1724,11 @@ export function TradeDetailPage() {
         <KrakenOrdersPanel
           tradeId={trade.id}
           tradeStatus={trade.status}
+          automationEnabled={trade.automation_enabled}
+          onTradeUpdated={async () => {
+            const updated = await tradesApi.get(trade.id)
+            setTrade(updated)
+          }}
         />
 
         {/* ── Metadata ────────────────────────────────────────────────── */}

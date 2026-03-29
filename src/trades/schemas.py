@@ -298,6 +298,9 @@ class TradeOut(BaseModel):
     # Computed on open — not stored, re-attached by the service
     size_info: TradeSizeResult | None = None
 
+    # True when this trade has an active automation workflow on Kraken
+    automation_enabled: bool = False
+
     @model_validator(mode="after")
     def normalise_direction_out(self) -> TradeOut:
         """Guarantee direction is always uppercase in API responses.
@@ -346,6 +349,8 @@ class TradeListItem(BaseModel):
     is_be: bool = False
     # True when at least one KrakenOrder row exists for this trade
     has_kraken_orders: bool = False
+    # True when the trade entry was placed through Kraken automation
+    automation_enabled: bool = False
 
     @model_validator(mode="after")
     def normalise_direction_list(self) -> TradeListItem:
