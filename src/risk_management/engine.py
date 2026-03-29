@@ -144,6 +144,7 @@ def compute_risk_multiplier(
     base_risk_pct: float,
     capital: float,
     budget_remaining_pct: float,
+    pending_risk_pct: float = 0.0,
 ) -> RiskMultiplierResult:
     """
     Compute the dynamic risk multiplier and return the full breakdown.
@@ -269,9 +270,20 @@ def compute_risk_multiplier(
     budget_remaining_amount = budget_remaining_pct / 100.0 * capital
     effective_risk_amount = adjusted_risk_amount
 
+    # budget_blocking: this new trade doesn't fit in the live budget RIGHT NOW.
     budget_blocking = effective_risk_amount > budget_remaining_amount and budget_remaining_pct >= 0
     suggested_risk_pct = (
         budget_remaining_pct if budget_blocking else adjusted_risk_pct
+    )
+
+    # pending_budget_warning: trade fits now, but would overflow if all LIMITs fill.
+    pending_risk_amount = pending_risk_pct / 100.0 * capital
+    budget_remaining_if_pending_fill_pct = budget_remaining_pct - pending_risk_pct
+    budget_remaining_if_pending_fill_amount = budget_remaining_amount - pending_risk_amount
+    pending_budget_warning = (
+        not budget_blocking
+        and pending_risk_amount > 0
+        and effective_risk_amount > budget_remaining_if_pending_fill_amount
     )
 
     return RiskMultiplierResult(
@@ -284,4 +296,9 @@ def compute_risk_multiplier(
         budget_remaining_amount=round(budget_remaining_amount, 4),
         budget_blocking=budget_blocking,
         suggested_risk_pct=round(suggested_risk_pct, 6),
+        pending_risk_pct=round(pending_risk_pct, 6),
+        pending_risk_amount=round(pending_risk_amount, 4),
+        budget_remaining_if_pending_fill_pct=round(budget_remaining_if_pending_fill_pct, 6),
+        budget_remaining_if_pending_fill_amount=round(budget_remaining_if_pending_fill_amount, 4),
+        pending_budget_warning=pending_budget_warning,
     )

@@ -977,8 +977,9 @@ export function NewTradePage() {
   const [showSession, setShowSession] = useState(false)
   const [sessionTag, setSessionTag]   = useState<SessionLabel | ''>(detectSession)
 
-  const [submitting, setSubmitting] = useState(false)
-  const [error, setError]           = useState<string | null>(null)
+  const [submitting, setSubmitting]       = useState(false)
+  const [error, setError]                 = useState<string | null>(null)
+  const [automationWarning, setAutomationWarning] = useState<string | null>(null)
 
   // ── Stable object URLs for screenshot thumbnails (avoids scroll-jump on add) ──
   const [screenshotUrls, setScreenshotUrls] = useState<{ file: File; url: string }[]>([])
@@ -1447,8 +1448,12 @@ export function NewTradePage() {
       if (automateOnCreate && profileAutomationEnabled) {
         try {
           await automationApi.openTrade(newTrade.id)
-        } catch {
-          // non-fatal
+        } catch (autoErr) {
+          const autoMsg = autoErr instanceof Error ? autoErr.message : 'Unknown automation error'
+          // Trade is created — stay on page to show warning, user can go to journal manually
+          setAutomationWarning(`Trade created in journal but Kraken automation failed: ${autoMsg}. Open the trade details to retry.`)
+          setSubmitting(false)
+          return
         }
       }
       navigate('/trades')
@@ -1511,6 +1516,22 @@ export function NewTradePage() {
         {error && (
           <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/30 text-red-400 text-xs">
             <AlertTriangle size={14} className="shrink-0" />{error}
+          </div>
+        )}
+
+        {automationWarning && (
+          <div className="px-3 py-2 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-400 text-xs space-y-1">
+            <div className="flex items-start gap-2">
+              <AlertTriangle size={14} className="shrink-0 mt-0.5" />
+              <span>{automationWarning}</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => navigate('/trades')}
+              className="ml-5 text-amber-300 underline hover:text-amber-200"
+            >
+              Go to Journal →
+            </button>
           </div>
         )}
 
