@@ -306,6 +306,12 @@ def open_automated_trade(trade_id: int, db: Session) -> KrakenOrder:
         entry_price=str(trade.entry_price),
     )
 
+    # For MARKET orders: fill is immediate → place SL/TP right away.
+    # For LIMIT orders: Celery poll_pending_orders handles SL/TP after fill.
+    if trade.order_type == "MARKET":
+        with _make_client(settings_row) as sl_tp_client:
+            place_sl_tp_orders(trade, lot_size, sl_tp_client, db)
+
     return order
 
 
@@ -368,7 +374,7 @@ def place_sl_tp_orders(
         tp_size = _qs(tp_size, instrument.contract_value_precision)
 
         tp_result = client.send_order(
-            order_type="take_profit",
+            order_type="lmt",
             symbol=instrument.symbol,
             side=exit_side,
             size=str(tp_size),
@@ -383,7 +389,7 @@ def place_sl_tp_orders(
             kraken_order_id=tp_order_id,
             role=role,
             status="open",
-            order_type="take_profit",
+            order_type="limit",
             symbol=instrument.symbol,
             side=exit_side,
             size=float(tp_size),
