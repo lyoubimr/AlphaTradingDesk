@@ -41,6 +41,10 @@ async function request<T>(
           return field ? `${field}: ${e.msg}` : (e.msg ?? JSON.stringify(e))
         })
         .join(' · ')
+    } else if (body?.detail && typeof body.detail === 'object') {
+      // Risk Guard and similar return detail as a dict with a nested "detail" string.
+      detail = (body.detail as Record<string, unknown>).detail as string
+        ?? JSON.stringify(body.detail)
     } else {
       detail = body?.detail ?? `HTTP ${res.status}`
     }
@@ -590,4 +594,8 @@ export const automationApi = {
   /** POST /api/kraken-execution/trades/{tradeId}/cancel-entry */
   cancelEntry: (tradeId: number): Promise<KrakenOrderOut> =>
     request(`/kraken-execution/trades/${tradeId}/cancel-entry`, { method: 'POST' }),
+
+  /** GET /api/kraken-execution/mark-price/{symbol} — public, no auth required */
+  getMarkPrice: (symbol: string): Promise<{ symbol: string; mark_price: number }> =>
+    request(`/kraken-execution/mark-price/${encodeURIComponent(symbol)}`),
 }

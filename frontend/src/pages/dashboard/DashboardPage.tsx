@@ -585,7 +585,8 @@ function KpiBar({ trades, loading, profile }: {
   const pnlAmount = capitalAdjusted - capitalStart
   const pnlPct    = capitalStart > 0 ? (pnlAmount / capitalStart) * 100 : 0
 
-  const openTrades  = trades.filter((t) => t.status === 'open' || t.status === 'partial')
+  // Include pending — their risk_amount is already committed against the budget
+  const openTrades  = trades.filter((t) => t.status === 'open' || t.status === 'partial' || t.status === 'pending')
   const closedToday = trades.filter((t) => {
     if (t.status !== 'closed' || !t.closed_at) return false
     return new Date(t.closed_at).toDateString() === new Date().toDateString()
