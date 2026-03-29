@@ -991,6 +991,31 @@ export function TradeDetailPage() {
 
   useEffect(() => { void load() }, [load])
 
+  // ── Pending fill polling (automated LIMIT trades only) ────────────────────
+  // Polls sync-fill every 15 s while the trade is pending + has automation.
+  // When the LIMIT entry fills on Kraken: activates trade + places SL/TP.
+  useEffect(() => {
+    if (!trade?.automation_enabled || trade.status !== 'pending') return
+
+    const poll = async () => {
+      try {
+        const res = await automationApi.syncFill(trade.id)
+        if (res.filled) {
+          // Reload full trade to pick up new status + risk
+          const updated = await tradesApi.get(trade.id)
+          setTrade(updated)
+        }
+      } catch {
+        // Polling errors are silent — do not spam the UI
+      }
+    }
+
+    // Run immediately, then every 15 s
+    void poll()
+    const timer = setInterval(poll, 15_000)
+    return () => clearInterval(timer)
+  }, [trade?.id, trade?.automation_enabled, trade?.status])
+
   // Load strategies to resolve names for strategy_ids on this trade
   useEffect(() => {
     if (!activeProfile) { setStrategies([]); return }
@@ -1167,7 +1192,17 @@ export function TradeDetailPage() {
 
       <div className="max-w-2xl space-y-4 mt-2">
 
-        {/* ── Status + action bar ─────────────────────────────────────── */}
+        {/* ── Pending automation fill banner ───────────────────────────── */}
+        {trade.automation_enabled && trade.status === 'pending' && (
+          <div className="flex items-start gap-3 px-4 py-3 rounded-xl bg-amber-500/10 border border-amber-500/40">
+            <Loader2 size={14} className="animate-spin text-amber-400 mt-0.5 flex-shrink-0" />
+            <div className="text-xs text-amber-300 leading-relaxed">
+              <span className="font-semibold">Waiting for LIMIT fill on Kraken.</span>{' '}
+              Checking every 15 s — SL/TP will be placed automatically once the entry is filled.
+              Do not manually activate this trade.
+            </div>
+          </div>
+        )}
         <div className="bg-surface-800 rounded-xl border border-surface-700 p-4 space-y-3">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex items-center gap-3">

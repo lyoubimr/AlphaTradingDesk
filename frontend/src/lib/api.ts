@@ -595,6 +595,12 @@ export const automationApi = {
   cancelEntry: (tradeId: number): Promise<KrakenOrderOut> =>
     request(`/kraken-execution/trades/${tradeId}/cancel-entry`, { method: 'POST' }),
 
+  /** POST /api/kraken-execution/trades/{tradeId}/sync-fill
+   *  Check if a pending LIMIT entry was filled. On fill: activates trade + places SL/TP.
+   */
+  syncFill: (tradeId: number): Promise<{ filled: boolean; fill_price: number | null; skipped?: boolean }> =>
+    request(`/kraken-execution/trades/${tradeId}/sync-fill`, { method: 'POST' }),
+
   /** GET /api/kraken-execution/mark-price/{symbol} — public, no auth required */
   getMarkPrice: (symbol: string): Promise<{ symbol: string; mark_price: number }> =>
     request(`/kraken-execution/mark-price/${encodeURIComponent(symbol)}`),

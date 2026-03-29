@@ -14,6 +14,7 @@ Endpoints:
   POST /trades/{trade_id}/close                — Trigger: close automated position
   POST /trades/{trade_id}/breakeven            — Trigger: move SL to entry price
   POST /trades/{trade_id}/cancel-entry         — Trigger: cancel pending LIMIT entry
+  POST /trades/{trade_id}/sync-fill            — Check if pending LIMIT entry was filled → activate + place SL/TP
 """
 
 from __future__ import annotations
@@ -44,6 +45,7 @@ from src.kraken_execution.service import (
     list_kraken_orders,
     move_to_breakeven,
     open_automated_trade,
+    sync_pending_fill,
     update_automation_settings,
     verify_connection,
 )
@@ -181,7 +183,23 @@ def trigger_cancel_entry(
     return KrakenOrderOut.model_validate(order)
 
 
-# ── Public price endpoint (no auth) ──────────────────────────────────────────
+@router.post("/trades/{trade_id}/sync-fill")
+def trigger_sync_fill(
+    trade_id: int,
+    db: Session = Depends(get_db),
+) -> dict:
+    """Check whether a pending LIMIT entry has been filled on Kraken.
+
+    Called by the frontend every ~15 s while the trade is pending + automated.
+    On fill detection: activates trade (pending → open) and places SL/TP orders.
+
+    Returns:
+        {"filled": bool, "fill_price": float | null, "skipped"?: bool}
+    """
+    try:
+        return sync_pending_fill(trade_id, db)
+    except Exception as exc:
+        raise _map_exc(exc) from exc
 
 @router.get("/mark-price/{symbol}")
 def get_mark_price(symbol: str) -> dict:

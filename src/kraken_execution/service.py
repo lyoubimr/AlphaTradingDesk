@@ -655,6 +655,152 @@ def cancel_entry(trade_id: int, db: Session) -> KrakenOrder:
     return entry_order
 
 
+def sync_pending_fill(trade_id: int, db: Session) -> dict:
+    """Check whether a pending LIMIT entry order has been filled on Kraken.
+
+    This is the Celery-free alternative to poll_pending_orders — called on
+    demand (frontend polls every 15 s while trade is pending + automated).
+
+    Flow:
+        1. Find the open entry KrakenOrder for this trade.
+        2. Call get_open_orders() — if the order_id is NOT there, it was filled
+           (or cancelled/rejected).
+        3. Call get_fills() to confirm fill and get the exact fill price.
+        4. If filled:
+             a. Update KrakenOrder: status='filled', filled_price, filled_at.
+             b. Activate the ATD trade: pending → open (reserves risk budget).
+             c. Place SL/TP orders on Kraken immediately.
+
+    Returns:
+        {"filled": True,  "fill_price": float} on fill detected.
+        {"filled": False, "fill_price": None}  if still pending.
+        {"filled": False, "fill_price": None, "skipped": True} if trade is
+          already open/closed (idempotent).
+
+    Raises:
+        AutomationNotEnabledError if automation is off.
+        ValueError if no open entry order exists.
+    """
+    from datetime import datetime as _dt  # noqa: PLC0415
+
+    trade = _get_trade_or_404(trade_id, db)
+
+    # Idempotent — if already open/closed, nothing to do
+    if trade.status in ("open", "partial", "closed"):
+        return {"filled": False, "fill_price": None, "skipped": True}
+
+    if not trade.automation_enabled:
+        raise AutomationNotEnabledError(f"Trade {trade_id} does not have automation enabled.")
+
+    entry_order = (
+        db.query(KrakenOrder)
+        .filter(
+            KrakenOrder.trade_id == trade_id,
+            KrakenOrder.role == "entry",
+            KrakenOrder.status == "open",
+        )
+        .first()
+    )
+    if entry_order is None:
+        # Already processed (filled row exists) — still idempotent
+        filled_entry = (
+            db.query(KrakenOrder)
+            .filter(
+                KrakenOrder.trade_id == trade_id,
+                KrakenOrder.role == "entry",
+                KrakenOrder.status == "filled",
+            )
+            .first()
+        )
+        fill_price = float(filled_entry.filled_price) if filled_entry and filled_entry.filled_price else None
+        return {"filled": bool(filled_entry), "fill_price": fill_price, "skipped": True}
+
+    settings_row = get_automation_settings(trade.profile_id, db)
+
+    with _make_client(settings_row) as client:
+        # Step 1 — is the order still open on Kraken?
+        open_orders = client.get_open_orders()
+        open_ids = {o.get("order_id") or o.get("orderId") for o in open_orders}
+
+        if entry_order.kraken_order_id in open_ids:
+            # Not filled yet
+            return {"filled": False, "fill_price": None}
+
+        # Step 2 — order gone from open orders → look for a fill
+        fills = client.get_fills()
+        matched_fill = next(
+            (f for f in fills if (f.get("order_id") or f.get("orderId")) == entry_order.kraken_order_id),
+            None,
+        )
+
+        fill_price_raw = None
+        fill_id = None
+        if matched_fill:
+            fill_price_raw = matched_fill.get("price") or matched_fill.get("fillPrice")
+            fill_id = matched_fill.get("fill_id") or matched_fill.get("fillId")
+
+        # Fall back to mark price if fill not found (edge case: old fill purged)
+        if fill_price_raw is None:
+            instrument = _resolve_instrument(trade, db)
+            try:
+                from src.volatility.kraken_client import KrakenClient as _PubClient  # noqa: PLC0415
+                with _PubClient() as pub:
+                    ticker = pub.fetch_ticker(instrument.symbol)
+                fill_price_raw = ticker["last"]
+            except Exception:
+                fill_price_raw = float(trade.entry_price)
+            logger.warning(
+                "sync_fill_no_fill_record_found",
+                trade_id=trade_id,
+                kraken_order_id=entry_order.kraken_order_id,
+                using_fallback=fill_price_raw,
+            )
+
+        fill_price = Decimal(str(fill_price_raw))
+
+        # Step 3 — update entry order row
+        entry_order.status = "filled"
+        entry_order.filled_price = float(fill_price)
+        entry_order.filled_size = entry_order.size
+        entry_order.filled_at = _dt.utcnow()
+        if fill_id:
+            entry_order.kraken_fill_id = fill_id
+
+        # Step 4a — activate trade (pending → open, current_risk = risk_amount)
+        from src.trades.service import activate_trade as _activate  # noqa: PLC0415
+        try:
+            _activate(db=db, trade_id=trade_id)
+        except Exception as exc:
+            # If trade was already activated (race condition), don't fail
+            logger.warning("sync_fill_activate_skipped", trade_id=trade_id, error=str(exc))
+
+        # Step 4b — place SL/TP
+        instrument = _resolve_instrument(trade, db)
+        entry_size = Decimal(str(entry_order.size))
+        # Reload trade to get fresh relationships after activate
+        db.refresh(trade)
+        place_sl_tp_orders(trade, entry_size, client, db)
+
+    logger.info(
+        "sync_fill_detected",
+        trade_id=trade_id,
+        fill_price=str(fill_price),
+        kraken_order_id=entry_order.kraken_order_id,
+    )
+
+    _notify_execution_event(
+        profile_id=trade.profile_id,
+        event="LIMIT_FILLED",
+        db=db,
+        trade_id=trade_id,
+        pair=trade.pair,
+        direction=trade.direction,
+        fill_price=str(fill_price),
+    )
+
+    return {"filled": True, "fill_price": float(fill_price)}
+
+
 def list_kraken_orders(trade_id: int, db: Session) -> list[KrakenOrder]:
     """Return all KrakenOrder rows for a trade, ordered by sent_at DESC."""
     return (
