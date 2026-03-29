@@ -46,6 +46,7 @@ from src.kraken_execution.service import (
     move_to_breakeven,
     open_automated_trade,
     sync_pending_fill,
+    sync_sl_tp_fills,
     update_automation_settings,
     verify_connection,
 )
@@ -200,6 +201,27 @@ def trigger_sync_fill(
         return sync_pending_fill(trade_id, db)
     except Exception as exc:
         raise _map_exc(exc) from exc
+
+
+@router.post("/trades/{trade_id}/sync-sl-tp")
+def trigger_sync_sl_tp(
+    trade_id: int,
+    db: Session = Depends(get_db),
+) -> dict:
+    """Check Kraken fills for SL/TP orders of a specific open/partial trade.
+
+    Called by the frontend every ~30 s while the trade is open/partial + automated.
+    On fill detection: reconciles trade status, PnL and profile.capital_current
+    via the canonical partial_close / full_close service functions.
+
+    Returns:
+        {"processed": int, "events": list[dict], "skipped"?: bool}
+    """
+    try:
+        return sync_sl_tp_fills(trade_id, db)
+    except Exception as exc:
+        raise _map_exc(exc) from exc
+
 
 @router.get("/mark-price/{symbol}")
 def get_mark_price(symbol: str) -> dict:

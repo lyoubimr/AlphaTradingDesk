@@ -1016,6 +1016,32 @@ export function TradeDetailPage() {
     return () => clearInterval(timer)
   }, [trade?.id, trade?.automation_enabled, trade?.status])
 
+  // ── SL/TP fill polling (automated open/partial trades) ───────────────────
+  // Polls sync-sl-tp every 30 s while trade is open/partial + automated.
+  // When a SL or TP fills on Kraken: reconciles PnL + profile capital.
+  useEffect(() => {
+    if (!trade?.automation_enabled) return
+    if (trade.status !== 'open' && trade.status !== 'partial') return
+
+    const poll = async () => {
+      try {
+        const res = await automationApi.syncSlTp(trade.id)
+        if (res.processed > 0) {
+          // Reload full trade to reflect new status / PnL
+          const updated = await tradesApi.get(trade.id)
+          setTrade(updated)
+        }
+      } catch {
+        // Polling errors are silent
+      }
+    }
+
+    // Run immediately, then every 30 s
+    void poll()
+    const timer = setInterval(poll, 30_000)
+    return () => clearInterval(timer)
+  }, [trade?.id, trade?.automation_enabled, trade?.status])
+
   // Load strategies to resolve names for strategy_ids on this trade
   useEffect(() => {
     if (!activeProfile) { setStrategies([]); return }

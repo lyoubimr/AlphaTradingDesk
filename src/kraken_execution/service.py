@@ -811,6 +811,132 @@ def list_kraken_orders(trade_id: int, db: Session) -> list[KrakenOrder]:
     )
 
 
+def sync_sl_tp_fills(trade_id: int, db: Session) -> dict:
+    """On-demand: detect SL/TP fills for one trade and reconcile ATD state.
+
+    Celery-free alternative to sync_open_positions — called on demand by the
+    frontend (polls every 30 s while trade is open/partial + automated).
+
+    Uses the canonical partial_close / full_close from trades.service so that
+    profile.capital_current and WR stats are always correctly updated.
+
+    Returns:
+        {"processed": int, "events": list[dict]}              — fills found
+        {"processed": 0, "events": [], "skipped": True}       — nothing to do
+    """
+    from decimal import Decimal  # noqa: PLC0415
+    from datetime import datetime as _dt  # noqa: PLC0415
+
+    from fastapi import HTTPException  # noqa: PLC0415
+
+    from src.trades.schemas import TradeClose, TradePartialClose  # noqa: PLC0415
+    from src.trades.service import full_close, partial_close  # noqa: PLC0415
+
+    trade = _get_trade_or_404(trade_id, db)
+
+    if trade.status in ("closed", "cancelled", "pending"):
+        return {"processed": 0, "events": [], "skipped": True}
+
+    if not trade.automation_enabled:
+        raise AutomationNotEnabledError(f"Trade {trade_id} does not have automation enabled.")
+
+    open_orders = (
+        db.query(KrakenOrder)
+        .filter(
+            KrakenOrder.trade_id == trade_id,
+            KrakenOrder.role.in_(["sl", "tp1", "tp2", "tp3"]),
+            KrakenOrder.status == "open",
+        )
+        .all()
+    )
+    if not open_orders:
+        return {"processed": 0, "events": []}
+
+    settings_row = get_automation_settings(trade.profile_id, db)
+    with _make_client(settings_row) as client:
+        fills = client.get_fills()
+
+    fill_by_order_id = {
+        (f.get("order_id") or f.get("orderId")): f
+        for f in fills
+        if (f.get("order_id") or f.get("orderId"))
+    }
+
+    processed = 0
+    events: list[dict] = []
+
+    for order in open_orders:
+        fill = fill_by_order_id.get(order.kraken_order_id)
+        if fill is None:
+            continue
+
+        fill_id = fill.get("fill_id") or fill.get("uid", "")
+        if order.kraken_fill_id == fill_id:
+            continue  # idempotent
+
+        fill_price = Decimal(str(fill.get("price", 0)))
+        fill_size = float(fill.get("size", order.size or 0))
+
+        order.status = "filled"
+        order.filled_price = float(fill_price)
+        order.filled_size = fill_size
+        order.filled_at = _dt.utcnow()
+        if fill_id:
+            order.kraken_fill_id = fill_id
+
+        if order.role == "sl":
+            try:
+                full_close(
+                    db=db,
+                    trade_id=trade_id,
+                    data=TradeClose(
+                        exit_price=fill_price,
+                        close_notes="SL hit via Kraken automation",
+                    ),
+                )
+            except HTTPException as exc:
+                if exc.status_code == 409:
+                    logger.warning("sync_sl_tp: trade_already_closed", trade_id=trade_id)
+                else:
+                    raise
+            events.append({"role": "sl", "fill_price": float(fill_price)})
+
+        elif order.role in ("tp1", "tp2", "tp3"):
+            tp_num = int(order.role[-1])
+            try:
+                partial_close(
+                    db=db,
+                    trade_id=trade_id,
+                    data=TradePartialClose(
+                        position_number=tp_num,
+                        exit_price=fill_price,
+                    ),
+                )
+            except HTTPException as exc:
+                if exc.status_code in (409, 422):
+                    logger.warning(
+                        "sync_sl_tp: position_already_closed",
+                        trade_id=trade_id,
+                        role=order.role,
+                    )
+                else:
+                    raise
+            events.append({"role": order.role, "fill_price": float(fill_price)})
+
+        # full_close / partial_close already commit; flush the order row update too
+        db.commit()
+        processed += 1
+
+        logger.info(
+            "sync_sl_tp_fill_detected",
+            trade_id=trade_id,
+            role=order.role,
+            fill_price=float(fill_price),
+        )
+
+    return {"processed": processed, "events": events}
+
+
 # ── Notification dispatch ─────────────────────────────────────────────────────
 
 def _notify_execution_event(

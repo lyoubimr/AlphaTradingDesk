@@ -601,6 +601,13 @@ export const automationApi = {
   syncFill: (tradeId: number): Promise<{ filled: boolean; fill_price: number | null; skipped?: boolean }> =>
     request(`/kraken-execution/trades/${tradeId}/sync-fill`, { method: 'POST' }),
 
+  /** POST /api/kraken-execution/trades/{tradeId}/sync-sl-tp
+   *  Check Kraken fills for SL/TP orders of an open/partial trade.
+   *  On fill: reconciles trade status, PnL and profile capital via canonical service.
+   */
+  syncSlTp: (tradeId: number): Promise<{ processed: number; events: { role: string; fill_price: number }[]; skipped?: boolean }> =>
+    request(`/kraken-execution/trades/${tradeId}/sync-sl-tp`, { method: 'POST' }),
+
   /** GET /api/kraken-execution/mark-price/{symbol} — public, no auth required */
   getMarkPrice: (symbol: string): Promise<{ symbol: string; mark_price: number }> =>
     request(`/kraken-execution/mark-price/${encodeURIComponent(symbol)}`),

@@ -237,7 +237,11 @@ def sync_open_positions(self: Task) -> dict:
                 settings_row = get_automation_settings(profile_id, db)
                 with _make_client(settings_row) as client:
                     fills = client.get_fills()
-                fill_by_order_id = {f.get("order_id"): f for f in fills}
+                fill_by_order_id = {
+                    (f.get("order_id") or f.get("orderId")): f
+                    for f in fills
+                    if (f.get("order_id") or f.get("orderId"))
+                }
 
                 for order in orders:
                     fill = fill_by_order_id.get(order.kraken_order_id)
@@ -296,17 +300,40 @@ def sync_open_positions(self: Task) -> dict:
 def _handle_fill(order: KrakenOrder, db: Session) -> None:
     """Update Trade/Position state based on a freshly-detected fill.
 
-    Called from sync_open_positions for each matched fill.
-    Does NOT commit — caller commits after all fills for a profile are processed.
+    Delegates to the canonical partial_close / full_close from trades.service
+    so that profile.capital_current and WR stats are always correctly updated.
+
+    Both partial_close and full_close commit internally — the outer task commit
+    after this call is a harmless no-op.
     """
     from decimal import Decimal  # noqa: PLC0415
+
+    from fastapi import HTTPException  # noqa: PLC0415
+
+    from src.trades.schemas import TradeClose, TradePartialClose  # noqa: PLC0415
+    from src.trades.service import full_close, partial_close  # noqa: PLC0415
 
     trade = db.query(Trade).filter(Trade.id == order.trade_id).first()
     if trade is None:
         return
 
+    fill_price = Decimal(str(order.filled_price or 0))
+
     if order.role == "sl":
-        _close_trade(trade, filled_price=order.filled_price, db=db)
+        try:
+            full_close(
+                db=db,
+                trade_id=trade.id,
+                data=TradeClose(
+                    exit_price=fill_price,
+                    close_notes="SL hit via Kraken automation",
+                ),
+            )
+        except HTTPException as exc:
+            if exc.status_code == 409:
+                logger.warning("sl_fill_trade_already_closed", trade_id=trade.id)
+            else:
+                raise
         _notify_event(
             trade.profile_id, "SL_HIT", db,
             trade_id=trade.id, pair=trade.pair, direction=trade.direction,
@@ -316,19 +343,24 @@ def _handle_fill(order: KrakenOrder, db: Session) -> None:
 
     elif order.role in ("tp1", "tp2", "tp3"):
         tp_num = int(order.role[-1])  # "tp1" → 1
-        for pos in trade.positions:
-            if pos.position_number == tp_num and pos.status == "open":
-                pos.status = "closed"
-                pos.exit_price = Decimal(str(order.filled_price or 0))
-                pos.exit_date = datetime.now(UTC)
-                from decimal import Decimal as _D  # noqa: PLC0415
-                pos.realized_pnl = (
-                    (pos.exit_price - trade.entry_price)
-                    * _D(str(pos.lot_percentage / 100))
-                    * _D(str(order.filled_size or 0))
-                    * (1 if trade.direction == "long" else -1)
+        try:
+            partial_close(
+                db=db,
+                trade_id=trade.id,
+                data=TradePartialClose(
+                    position_number=tp_num,
+                    exit_price=fill_price,
+                ),
+            )
+        except HTTPException as exc:
+            if exc.status_code in (409, 422):
+                logger.warning(
+                    "tp_fill_position_already_closed",
+                    trade_id=trade.id,
+                    role=order.role,
                 )
-                break
+            else:
+                raise
 
         event_name = f"TP{tp_num}_TAKEN"
         _notify_event(
@@ -336,26 +368,6 @@ def _handle_fill(order: KrakenOrder, db: Session) -> None:
             trade_id=trade.id, pair=trade.pair, direction=trade.direction,
             filled_price=str(order.filled_price or ""),
             size=str(order.filled_size or order.size),
-        )
-
-        # If all positions are closed → close the trade
-        all_closed = all(p.status in ("closed", "cancelled") for p in trade.positions)
-        if all_closed:
-            _close_trade(trade, filled_price=order.filled_price, db=db)
-
-
-def _close_trade(trade: Trade, filled_price: float | None, db: Session) -> None:
-    """Mark trade as closed and update capital (simplified — full PnL calc in trade service)."""
-    from decimal import Decimal  # noqa: PLC0415
-
-    trade.status = "closed"
-    trade.closed_at = datetime.now(UTC)
-    if filled_price:
-        trade.realized_pnl = (
-            (Decimal(str(filled_price)) - trade.entry_price)
-            * trade.risk_amount
-            / abs(trade.entry_price - trade.stop_loss)
-            * (1 if trade.direction == "long" else -1)
         )
 
 
