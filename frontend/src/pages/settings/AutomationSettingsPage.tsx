@@ -18,7 +18,7 @@ export function AutomationSettingsPage() {
       <PageHeader
         title="Automation Settings"
         subtitle="Kraken Futures execution — API keys, engine configuration and connection test"
-        icon={<Zap size={18} />}
+        icon="⚡"
       />
 
       {/* Profile context badge */}
