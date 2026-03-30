@@ -29,26 +29,18 @@ def upgrade() -> None:
     # ------------------------------------------------------------------
     # 1. instruments — add contract_value_precision
     # ------------------------------------------------------------------
-    op.add_column(
-        "instruments",
-        sa.Column("contract_value_precision", sa.Integer(), nullable=True),
+    op.execute(
+        "ALTER TABLE instruments ADD COLUMN IF NOT EXISTS contract_value_precision INTEGER"
     )
 
     # ------------------------------------------------------------------
     # 2. trades — add automation columns
     # ------------------------------------------------------------------
-    op.add_column(
-        "trades",
-        sa.Column(
-            "automation_enabled",
-            sa.Boolean(),
-            nullable=False,
-            server_default=sa.text("false"),
-        ),
+    op.execute(
+        "ALTER TABLE trades ADD COLUMN IF NOT EXISTS automation_enabled BOOLEAN NOT NULL DEFAULT false"
     )
-    op.add_column(
-        "trades",
-        sa.Column("kraken_entry_order_id", sa.String(100), nullable=True),
+    op.execute(
+        "ALTER TABLE trades ADD COLUMN IF NOT EXISTS kraken_entry_order_id VARCHAR(100)"
     )
 
     # ------------------------------------------------------------------
@@ -129,9 +121,9 @@ def upgrade() -> None:
         sa.UniqueConstraint("kraken_fill_id"),
         if_not_exists=True,
     )
-    op.create_index("ix_kraken_orders_trade_id", "kraken_orders", ["trade_id"])
-    op.create_index("ix_kraken_orders_status", "kraken_orders", ["status"])
-    op.create_index("ix_kraken_orders_role", "kraken_orders", ["role"])
+    op.create_index("ix_kraken_orders_trade_id", "kraken_orders", ["trade_id"], if_not_exists=True)
+    op.create_index("ix_kraken_orders_status", "kraken_orders", ["status"], if_not_exists=True)
+    op.create_index("ix_kraken_orders_role", "kraken_orders", ["role"], if_not_exists=True)
 
 
 def downgrade() -> None:
