@@ -371,7 +371,7 @@ export function TradesPage() {
               <table className="w-full text-xs">
                 <thead>
                   <tr className="border-b border-surface-700">
-                    {['Date', 'Pair', 'Side', 'Status', 'Entry', 'Stop Loss', 'Risk', 'Strategy', 'P&L', ''].map((h, i) => (
+                    {['Date', 'Pair', 'Side', 'Status', 'Entry', 'Exit', 'Stop Loss', 'Risk', 'Strategy', 'P&L', ''].map((h, i) => (
                       <th
                         key={i}
                         className="px-4 py-2.5 text-left text-slate-600 font-medium uppercase tracking-wider whitespace-nowrap"
@@ -444,6 +444,20 @@ export function TradesPage() {
                             minimumFractionDigits: 2,
                             maximumFractionDigits: 5,
                           })}
+                        </td>
+
+                        {/* Exit price */}
+                        <td className="px-4 py-2.5 tabular-nums font-mono">
+                          {t.exit_price != null ? (
+                            <span className={t.realized_pnl != null && parseFloat(t.realized_pnl) < 0 ? 'text-red-400/80' : 'text-emerald-400/80'}>
+                              {parseFloat(t.exit_price).toLocaleString('en-US', {
+                                minimumFractionDigits: 2,
+                                maximumFractionDigits: 5,
+                              })}
+                            </span>
+                          ) : (
+                            <span className="text-slate-700">—</span>
+                          )}
                         </td>
 
                         {/* Stop loss */}

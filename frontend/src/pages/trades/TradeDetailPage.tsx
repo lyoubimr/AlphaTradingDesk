@@ -1394,6 +1394,13 @@ export function TradeDetailPage() {
           <Section title="📍 Prices">
             <InfoRow label="Entry price"     value={fmt(trade.entry_price, 4)} />
             <InfoRow label="Stop loss"       value={fmt(trade.stop_loss, 4)}   accent="red" />
+            {trade.exit_price != null && (
+              <InfoRow
+                label="Exit price"
+                value={fmt(trade.exit_price, 4)}
+                accent={trade.realized_pnl != null && parseFloat(trade.realized_pnl) < 0 ? 'red' : 'green'}
+              />
+            )}
             {slDist != null && <InfoRow label="SL distance" value={`${fmt(slDist, 4)} (${fmt(slPct, 2)}%)`} />}
             <InfoRow label="Direction"
               value={trade.direction}

@@ -323,6 +323,14 @@ def _trade_to_out(trade: Trade, size_info: TradeSizeResult | None = None) -> Tra
         Decimal("0.00"),
     )
     out.booked_pnl = booked if booked != Decimal("0.00") else None
+    # Compute exit_price: lot-percentage weighted average of closed positions' exit prices
+    closed_pos = [p for p in trade.positions if p.status == "closed" and p.exit_price is not None]
+    if closed_pos:
+        total_pct = sum(p.lot_percentage for p in closed_pos)
+        if total_pct > 0:
+            out.exit_price = (
+                sum(p.exit_price * p.lot_percentage for p in closed_pos) / total_pct
+            ).quantize(Decimal("0.00000001"))
     return out
 
 
@@ -644,6 +652,14 @@ def list_trades(
             )
             or None
         )
+        # exit_price: lot-percentage weighted average of closed positions' exit prices
+        closed_pos = [p for p in t.positions if p.status == "closed" and p.exit_price is not None]
+        if closed_pos:
+            total_pct = sum(p.lot_percentage for p in closed_pos)
+            if total_pct > 0:
+                item.exit_price = (
+                    sum(p.exit_price * p.lot_percentage for p in closed_pos) / total_pct
+                ).quantize(Decimal("0.00000001"))
         item.strategy_ids = strat_map.get(t.id, [])
         # is_be: SL has been moved to breakeven (current_risk == 0, trade still active)
         item.is_be = (

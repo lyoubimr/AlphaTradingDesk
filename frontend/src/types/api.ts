@@ -170,6 +170,7 @@ export interface TradeListItem {
   status: 'pending' | 'open' | 'partial' | 'closed' | 'cancelled'
   realized_pnl: string | null       // non-null only when fully closed
   booked_pnl: string | null         // sum of closed-position PnLs (partial trades)
+  exit_price: string | null         // weighted-avg exit price of closed positions
   strategy_id: number | null        // primary strategy (first of strategy_ids, compat)
   /** All strategy IDs linked to this trade (via trade_strategies junction table) */
   strategy_ids: number[]
