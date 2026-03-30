@@ -314,8 +314,8 @@ class _MockClient:
     def __init__(self, *, ping_result: bool):
         self._ping = ping_result
 
-    def ping(self) -> bool:
-        return self._ping
+    def ping(self) -> tuple[bool, str | None]:
+        return self._ping, None if self._ping else "mock ping failure"
 
     def close(self) -> None:
         pass

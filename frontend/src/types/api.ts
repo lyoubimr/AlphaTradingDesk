@@ -376,7 +376,19 @@ export interface GoalProgressItem {
 }
 
 // ── Goal Overrides ────────────────────────────────────────────────────────
-
+export interface GoalHistoryItem {
+  period: string
+  period_start: string   // ISO date
+  period_end: string     // ISO date
+  pnl_pct: string        // Decimal as string
+  pnl_amount: string     // Decimal as string (absolute realized P&L)
+  goal_pct: string | null
+  limit_pct: string | null
+  goal_hit: boolean
+  limit_hit: boolean
+  trade_count: number
+  avg_r: string | null
+}
 export interface GoalOverrideCreate {
   style_id?: number | null
   period: GoalPeriod

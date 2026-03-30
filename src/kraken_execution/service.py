@@ -824,8 +824,8 @@ def sync_sl_tp_fills(trade_id: int, db: Session) -> dict:
         {"processed": int, "events": list[dict]}              — fills found
         {"processed": 0, "events": [], "skipped": True}       — nothing to do
     """
-    from decimal import Decimal  # noqa: PLC0415
     from datetime import datetime as _dt  # noqa: PLC0415
+    from decimal import Decimal  # noqa: PLC0415
 
     from fastapi import HTTPException  # noqa: PLC0415
 

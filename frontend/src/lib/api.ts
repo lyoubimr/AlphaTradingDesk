@@ -10,7 +10,7 @@ import type {
   Strategy, StrategyCreate, StrategyUpdate,
   WinRateStats,
   TradingStyle,
-  GoalOut, GoalCreate, GoalUpdate, GoalProgressItem, GoalOverrideCreate, GoalOverrideOut,
+  GoalOut, GoalCreate, GoalUpdate, GoalProgressItem, GoalHistoryItem, GoalOverrideCreate, GoalOverrideOut,
   MAModule, MAIndicator, MAIndicatorConfig, MAIndicatorConfigOut, MAIndicatorUpdate, MAIndicatorCreate,
   MASessionCreate, MASessionOut, MASessionListItem, MAStalenessItem, MATradeConclusion,
   MarketVIOut, AggregatedMarketVIOut, PairsVIOut, WatchlistOut, WatchlistMetaOut, LivePricesResponse,
@@ -339,6 +339,12 @@ export const goalsApi = {
 
   progress: (profileId: number): Promise<GoalProgressItem[]> =>
     request(`/profiles/${profileId}/goals/progress`),
+
+  /** GET — last N completed periods, oldest-first, for history chart */
+  history: (profileId: number, period = 'weekly', limit = 12): Promise<GoalHistoryItem[]> => {
+    const qs = new URLSearchParams({ period, limit: String(limit) })
+    return request(`/profiles/${profileId}/goals/history?${qs}`)
+  },
 
   /** POST — log a circuit-breaker override (reason_text ≥ 20 chars) */
   createOverride: (profileId: number, data: GoalOverrideCreate): Promise<GoalOverrideOut> =>

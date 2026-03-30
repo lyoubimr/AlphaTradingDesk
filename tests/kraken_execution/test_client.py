@@ -67,7 +67,9 @@ class TestSign:
         post_data = ""
         nonce = "1700000000000"
 
-        message = post_data + nonce + path
+        # Kraken Futures strips the /derivatives prefix before hashing.
+        signed_path = path.removeprefix("/derivatives")  # → "/api/v3/openorders"
+        message = post_data + nonce + signed_path
         sha256 = hashlib.sha256(message.encode("utf-8")).digest()
         expected = base64.b64encode(
             _hmac.new(base64.b64decode(_FAKE_API_SECRET), sha256, hashlib.sha512).digest()
@@ -157,7 +159,7 @@ class TestPostMethod:
 
 class TestSendOrder:
     def test_send_order_passes_core_fields(self, client: KrakenExecutionClient):
-        mock_resp = _mock_response(200, {"sendStatus": {"orderId": "ord1", "status": "placed"}})
+        mock_resp = _mock_response(200, {"result": "success", "sendStatus": {"orderId": "ord1", "status": "placed"}})
         with patch.object(client._http, "post", return_value=mock_resp) as mock_post:
             result = client.send_order("mkt", "PF_XBTUSD", "buy", "0.1")
         assert result["sendStatus"]["orderId"] == "ord1"
@@ -170,21 +172,21 @@ class TestSendOrder:
         assert "size=0.1" in content
 
     def test_send_order_passes_reduce_only_when_true(self, client: KrakenExecutionClient):
-        mock_resp = _mock_response(200, {"sendStatus": {}})
+        mock_resp = _mock_response(200, {"result": "success", "sendStatus": {}})
         with patch.object(client._http, "post", return_value=mock_resp) as mock_post:
             client.send_order("stp", "PF_XBTUSD", "sell", "0.1", reduce_only=True)
         content: str = mock_post.call_args[1].get("content", "")
         assert "reduceOnly=true" in content
 
     def test_send_order_passes_limit_price_when_provided(self, client: KrakenExecutionClient):
-        mock_resp = _mock_response(200, {"sendStatus": {}})
+        mock_resp = _mock_response(200, {"result": "success", "sendStatus": {}})
         with patch.object(client._http, "post", return_value=mock_resp) as mock_post:
             client.send_order("lmt", "PF_XBTUSD", "buy", "0.5", limit_price="50000")
         content: str = mock_post.call_args[1].get("content", "")
         assert "limitPrice=50000" in content
 
     def test_send_order_passes_stop_price_when_provided(self, client: KrakenExecutionClient):
-        mock_resp = _mock_response(200, {"sendStatus": {}})
+        mock_resp = _mock_response(200, {"result": "success", "sendStatus": {}})
         with patch.object(client._http, "post", return_value=mock_resp) as mock_post:
             client.send_order("stp", "PF_XBTUSD", "sell", "0.5", stop_price="49000")
         content: str = mock_post.call_args[1].get("content", "")
@@ -236,18 +238,24 @@ class TestPing:
     def test_ping_returns_true_on_success(self, client: KrakenExecutionClient):
         mock_resp = _mock_response(200, {"openOrders": []})
         with patch.object(client._http, "get", return_value=mock_resp):
-            assert client.ping() is True
+            ok, error = client.ping()
+        assert ok is True
+        assert error is None
 
     def test_ping_returns_false_on_kraken_api_error(self, client: KrakenExecutionClient):
         mock_resp = _mock_response(401, {"error": "unauthorized"})
         with patch.object(client._http, "get", return_value=mock_resp):
-            assert client.ping() is False
+            ok, error = client.ping()
+        assert ok is False
+        assert error is not None
 
     def test_ping_returns_false_on_network_error(self, client: KrakenExecutionClient):
         import httpx as _httpx
 
         with patch.object(client._http, "get", side_effect=_httpx.ConnectError("timeout")):
-            assert client.ping() is False
+            ok, error = client.ping()
+        assert ok is False
+        assert error is not None
 
 
 # ── Context manager ───────────────────────────────────────────────────────────

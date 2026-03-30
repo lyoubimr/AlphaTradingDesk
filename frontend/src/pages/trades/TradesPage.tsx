@@ -315,7 +315,14 @@ export function TradesPage() {
                           ? new Date(t.entry_date ?? t.created_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' })
                           : '—'}
                         {' · '}
-                        <span className="text-slate-600">@ {parseFloat(t.entry_price).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 5 })}</span>
+                        <span className="text-slate-600">
+                          @ {parseFloat(t.entry_price).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 5 })}
+                          {t.exit_price != null && (
+                            <span className={cn('ml-1', isBull ? 'text-green-500/70' : isBear ? 'text-red-500/70' : 'text-slate-500')}>
+                              → {parseFloat(t.exit_price).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 5 })}
+                            </span>
+                          )}
+                        </span>
                       </span>
                       {pnlNum !== null ? (
                         <span className={cn('font-semibold', isBull ? 'text-green-400' : isBear ? 'text-red-400' : 'text-slate-400')}>

@@ -411,6 +411,82 @@ def get_progress(db: Session, profile_id: int) -> list[GoalProgressItem]:
     return items
 
 
+# ── Goals History ────────────────────────────────────────────────────────────
+
+
+def get_history(
+    db: Session,
+    profile_id: int,
+    period: str,
+    limit: int = 12,
+) -> list:
+    """
+    Compute P&L vs goals for the N most recent *completed* periods.
+    The current period is excluded (visible via /progress).
+    Returns oldest-first (chronological order for charts).
+    """
+    from src.goals.schemas import GoalHistoryItem
+
+    profile = _get_profile_or_404(db, profile_id)
+    today = date.today()
+
+    # Build period windows — skip the current period, go back `limit` periods
+    windows: list[tuple[date, date]] = []
+    ref = today
+    for i in range(limit + 1):
+        start, end = _period_window(period, ref)
+        if i > 0:  # index 0 is the current period — skip it
+            windows.append((start, end))
+        ref = start - timedelta(days=1)
+        if len(windows) >= limit:
+            break
+
+    # Fetch the first active goal for this period (global, style_id = NULL)
+    goal = (
+        db.query(ProfileGoal)
+        .filter(
+            ProfileGoal.profile_id == profile_id,
+            ProfileGoal.period == period,
+            ProfileGoal.is_active.is_(True),
+        )
+        .first()
+    )
+
+    items: list[GoalHistoryItem] = []
+    for period_start, period_end in windows:
+        pnl_pct, trade_count, avg_r, _ = _compute_period_data(
+            db,
+            profile_id,
+            None,
+            profile.capital_current,
+            period_start,
+            period_end,
+        )
+        pnl_amount = (pnl_pct * profile.capital_current / 100).quantize(Decimal("0.01"))
+        goal_hit = bool(goal and pnl_pct >= goal.goal_pct)
+        limit_hit = bool(
+            goal and goal.period_type == "outcome" and pnl_pct <= goal.limit_pct
+        )
+        items.append(
+            GoalHistoryItem(
+                period=period,
+                period_start=period_start.isoformat(),
+                period_end=period_end.isoformat(),
+                pnl_pct=pnl_pct,
+                pnl_amount=pnl_amount,
+                goal_pct=goal.goal_pct if goal else None,
+                limit_pct=goal.limit_pct if goal else None,
+                goal_hit=goal_hit,
+                limit_hit=limit_hit,
+                trade_count=trade_count,
+                avg_r=avg_r,
+            )
+        )
+
+    # Chronological order (oldest first) — natural for bar charts
+    return list(reversed(items))
+
+
 # ── Goal Override Log ─────────────────────────────────────────────────────────
 
 

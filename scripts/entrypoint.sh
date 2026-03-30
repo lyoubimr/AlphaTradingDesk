@@ -113,6 +113,10 @@ fi
 
 # In dev, auto-seed test profiles+trades if the DB has no profiles yet.
 # This makes the app immediately usable after a fresh volume or db-reset.
+#
+# SAFETY: default to "error" (not "0") when the query fails — so a transient
+# connection hiccup never mistakenly triggers seed_test_data and wipes real
+# user data. Seeding only happens on an EXPLICIT "0" from a successful query.
 APP_ENV="${APP_ENV:-dev}"
 if [ "$APP_ENV" = "dev" ]; then
   PROFILE_COUNT=$(python -c "
@@ -120,11 +124,13 @@ import os, psycopg
 raw = os.environ.get('DATABASE_URL','').replace('postgresql+psycopg://','postgresql://')
 with psycopg.connect(raw) as c:
     print(c.execute('SELECT COUNT(*) FROM profiles').fetchone()[0])
-" 2>/dev/null || echo "0")
+" 2>/dev/null || echo "error")
   if [ "$PROFILE_COUNT" = "0" ]; then
     echo "🧪 No profiles found — seeding test data (dev only)…"
     python -m database.migrations.seeds.seed_test_data
     echo "✅ Test data seeded."
+  elif [ "$PROFILE_COUNT" = "error" ]; then
+    echo "⚠️  Could not query profile count — skipping test seed (safe default)."
   else
     echo "ℹ️  Profiles already present (${PROFILE_COUNT}) — skipping test seed."
   fi
