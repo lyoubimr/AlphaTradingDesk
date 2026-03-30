@@ -11,7 +11,14 @@ import { cn } from '../../lib/cn'
 import type { TradeListItem, Strategy } from '../../types/api'
 
 // ── Status badge ──────────────────────────────────────────────────────────
-function StatusBadge({ status, orderType }: { status: string; orderType?: string }) {
+function StatusBadge({
+  status, orderType, isBe, isAutomated,
+}: {
+  status: string
+  orderType?: string
+  isBe?: boolean
+  isAutomated?: boolean
+}) {
   const map: Record<string, { label: string; className: string }> = {
     pending:   { label: '⏳ Pending',   className: 'text-yellow-300 bg-yellow-500/10 border border-yellow-500/30' },
     open:      { label: 'Open',         className: 'text-brand-300 bg-brand-600/15 border border-brand-600/30' },
@@ -21,10 +28,22 @@ function StatusBadge({ status, orderType }: { status: string; orderType?: string
   }
   const s = map[status] ?? { label: status, className: 'text-slate-500' }
   return (
-    <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium ${s.className}`}>
-      {s.label}
-      {status === 'pending' && orderType === 'LIMIT' && (
-        <span className="text-yellow-600 font-mono">LIMIT</span>
+    <span className="inline-flex flex-wrap items-center gap-1">
+      <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium ${s.className}`}>
+        {s.label}
+        {status === 'pending' && orderType === 'LIMIT' && (
+          <span className="text-yellow-600 font-mono">LIMIT</span>
+        )}
+      </span>
+      {isBe && (
+        <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold text-emerald-300 bg-emerald-500/10 border border-emerald-500/30">
+          BE
+        </span>
+      )}
+      {isAutomated && (
+        <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-medium text-violet-300 bg-violet-500/10 border border-violet-500/30">
+          ⚡
+        </span>
       )}
     </span>
   )
@@ -282,7 +301,12 @@ export function TradesPage() {
                           {t.instrument_display_name ?? t.pair}
                         </span>
                       </div>
-                      <StatusBadge status={t.status} orderType={t.order_type} />
+                      <StatusBadge
+                        status={t.status}
+                        orderType={t.order_type}
+                        isBe={t.is_be}
+                        isAutomated={t.has_kraken_orders}
+                      />
                     </div>
                     {/* date + entry + pnl */}
                     <div className="flex items-center justify-between text-[11px] font-mono">
@@ -291,7 +315,14 @@ export function TradesPage() {
                           ? new Date(t.entry_date ?? t.created_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' })
                           : '—'}
                         {' · '}
-                        <span className="text-slate-600">@ {parseFloat(t.entry_price).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 5 })}</span>
+                        <span className="text-slate-600">
+                          @ {parseFloat(t.entry_price).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 5 })}
+                          {t.exit_price != null && (
+                            <span className={cn('ml-1', isBull ? 'text-green-500/70' : isBear ? 'text-red-500/70' : 'text-slate-500')}>
+                              → {parseFloat(t.exit_price).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 5 })}
+                            </span>
+                          )}
+                        </span>
                       </span>
                       {pnlNum !== null ? (
                         <span className={cn('font-semibold', isBull ? 'text-green-400' : isBear ? 'text-red-400' : 'text-slate-400')}>
@@ -347,7 +378,7 @@ export function TradesPage() {
               <table className="w-full text-xs">
                 <thead>
                   <tr className="border-b border-surface-700">
-                    {['Date', 'Pair', 'Side', 'Status', 'Entry', 'Stop Loss', 'Risk', 'Strategy', 'P&L', ''].map((h, i) => (
+                    {['Date', 'Pair', 'Side', 'Status', 'Entry', 'Exit', 'Stop Loss', 'Risk', 'Strategy', 'P&L', ''].map((h, i) => (
                       <th
                         key={i}
                         className="px-4 py-2.5 text-left text-slate-600 font-medium uppercase tracking-wider whitespace-nowrap"
@@ -406,7 +437,12 @@ export function TradesPage() {
 
                         {/* Status */}
                         <td className="px-4 py-2.5">
-                          <StatusBadge status={t.status} orderType={t.order_type} />
+                          <StatusBadge
+                            status={t.status}
+                            orderType={t.order_type}
+                            isBe={t.is_be}
+                            isAutomated={t.has_kraken_orders}
+                          />
                         </td>
 
                         {/* Entry */}
@@ -415,6 +451,20 @@ export function TradesPage() {
                             minimumFractionDigits: 2,
                             maximumFractionDigits: 5,
                           })}
+                        </td>
+
+                        {/* Exit price */}
+                        <td className="px-4 py-2.5 tabular-nums font-mono">
+                          {t.exit_price != null ? (
+                            <span className={t.realized_pnl != null && parseFloat(t.realized_pnl) < 0 ? 'text-red-400/80' : 'text-emerald-400/80'}>
+                              {parseFloat(t.exit_price).toLocaleString('en-US', {
+                                minimumFractionDigits: 2,
+                                maximumFractionDigits: 5,
+                              })}
+                            </span>
+                          ) : (
+                            <span className="text-slate-700">—</span>
+                          )}
                         </td>
 
                         {/* Stop loss */}

@@ -22,6 +22,7 @@ from src.core.deps import get_db
 from src.goals import service
 from src.goals.schemas import (
     GoalCreate,
+    GoalHistoryItem,
     GoalMatrixCreate,
     GoalOut,
     GoalOverrideCreate,
@@ -93,6 +94,23 @@ def delete_goal(
 @router.get("/goals/progress", response_model=list[GoalProgressItem])
 def get_progress(profile_id: int, db: Session = Depends(get_db)) -> list:
     return service.get_progress(db, profile_id)
+
+
+@router.get("/goals/history", response_model=list[GoalHistoryItem])
+def get_history(
+    profile_id: int,
+    period: str = "weekly",
+    limit: int = 12,
+    db: Session = Depends(get_db),
+) -> list:
+    """Return the last N completed periods (oldest first) for charting."""
+    if period not in ("daily", "weekly", "monthly"):
+        from fastapi import HTTPException
+        raise HTTPException(status_code=422, detail="period must be daily, weekly, or monthly")
+    if limit < 1 or limit > 52:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=422, detail="limit must be between 1 and 52")
+    return service.get_history(db, profile_id, period, limit)
 
 
 # ── Goal Override Log ─────────────────────────────────────────────────────────

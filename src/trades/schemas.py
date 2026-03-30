@@ -280,6 +280,9 @@ class TradeOut(BaseModel):
     # Sum of realized_pnl from already-closed positions (partial trades).
     # Populated by _trade_to_out — not a DB column.
     booked_pnl: Decimal | None = None
+    # Weighted-average exit price of closed positions — populated by _trade_to_out.
+    # For SL hits all positions share same price; for multi-TP it's lot-weighted avg.
+    exit_price: Decimal | None = None
     session_tag: str | None
     notes: str | None
     confidence_score: int | None
@@ -297,6 +300,9 @@ class TradeOut(BaseModel):
 
     # Computed on open — not stored, re-attached by the service
     size_info: TradeSizeResult | None = None
+
+    # True when this trade has an active automation workflow on Kraken
+    automation_enabled: bool = False
 
     @model_validator(mode="after")
     def normalise_direction_out(self) -> TradeOut:
@@ -338,8 +344,19 @@ class TradeListItem(BaseModel):
     # Sum of realized_pnl across all already-closed positions (for partial trades).
     # Equals realized_pnl once the trade is fully closed.
     booked_pnl: Decimal | None = None
+    # Weighted-average exit price of closed positions (populated by service).
+    # For SL hits all positions share same price. For multi-TP it's lot-weighted avg.
+    exit_price: Decimal | None = None
     closed_at: datetime | None
     created_at: datetime
+
+    # ── Computed flags (not DB columns — set by list_trades service) ──────────
+    # True when current_risk == 0 and trade is open/partial (SL moved to BE)
+    is_be: bool = False
+    # True when at least one KrakenOrder row exists for this trade
+    has_kraken_orders: bool = False
+    # True when the trade entry was placed through Kraken automation
+    automation_enabled: bool = False
 
     @model_validator(mode="after")
     def normalise_direction_list(self) -> TradeListItem:

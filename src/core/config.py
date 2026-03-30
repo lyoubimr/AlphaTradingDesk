@@ -90,6 +90,18 @@ class Settings(BaseSettings):
     kraken_margin_schedule: str = Field("europa", alias="KRAKEN_MARGIN_SCHEDULE")
     kraken_client_type: str = Field("retail", alias="KRAKEN_CLIENT_TYPE")
 
+    # Kraken Futures execution mode (Phase 5)
+    # KRAKEN_DEMO=true  → demo-futures.kraken.com (sandbox — default in dev)
+    # KRAKEN_DEMO=false → futures.kraken.com (live prod)
+    # Automatically true when APP_ENV=dev unless explicitly set false.
+    kraken_demo: bool = Field(False, alias="KRAKEN_DEMO")
+
+    @property
+    def kraken_futures_base_url(self) -> str:
+        if self.kraken_demo or self.environment == "dev":
+            return "https://demo-futures.kraken.com"
+        return "https://futures.kraken.com"
+
     @property
     def is_dev(self) -> bool:
         return self.environment == "dev"

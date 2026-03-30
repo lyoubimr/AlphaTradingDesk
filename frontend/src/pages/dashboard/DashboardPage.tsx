@@ -585,17 +585,25 @@ function KpiBar({ trades, loading, profile }: {
   const pnlAmount = capitalAdjusted - capitalStart
   const pnlPct    = capitalStart > 0 ? (pnlAmount / capitalStart) * 100 : 0
 
-  const openTrades  = trades.filter((t) => t.status === 'open' || t.status === 'partial')
+  // Include pending — their risk_amount is already committed against the budget
+  const openTrades  = trades.filter((t) => t.status === 'open' || t.status === 'partial' || t.status === 'pending')
   const closedToday = trades.filter((t) => {
     if (t.status !== 'closed' || !t.closed_at) return false
     return new Date(t.closed_at).toDateString() === new Date().toDateString()
   })
   const todayPnl = closedToday.reduce((sum, t) => sum + pct(t.realized_pnl), 0)
 
-  const totalRisk     = openTrades.reduce((sum, t) => sum + pct(t.current_risk ?? t.risk_amount), 0)
-  const riskPct       = capital > 0 ? (totalRisk / capital) * 100 : 0
-  const maxRiskAmt   = capital * (maxRiskPct  / 100)
-  const availRiskPct  = Math.max(0, maxRiskPct - riskPct)
+  // Live risk: actual capital at risk RIGHT NOW (open/partial using current_risk).
+  // BE trades have current_risk=0 — they’re free. Pending LIMITs not counted as live.
+  const liveTrades    = openTrades.filter((t) => t.status !== 'pending')
+  const pendingTrades = openTrades.filter((t) => t.status === 'pending')
+  const totalRisk     = liveTrades.reduce((sum, t) => sum + pct(t.current_risk ?? t.risk_amount), 0)
+  const pendingRisk   = pendingTrades.reduce((sum, t) => sum + pct(t.risk_amount), 0)
+  const riskPct         = capital > 0 ? (totalRisk / capital) * 100 : 0
+  const pendingRiskPct  = capital > 0 ? (pendingRisk / capital) * 100 : 0
+  const maxRiskAmt      = capital * (maxRiskPct  / 100)
+  const availRiskPct    = Math.max(0, maxRiskPct - riskPct)
+  const availIfFillPct  = Math.max(0, maxRiskPct - riskPct - pendingRiskPct)
 
   // Risk status
   const riskExceeded  = riskPct > maxRiskPct
@@ -664,12 +672,24 @@ function KpiBar({ trades, loading, profile }: {
                 <span className="text-slate-400 font-mono">{fmt(riskPct)}%</span>
                 <span className="text-slate-600"> / {fmt(maxRiskPct)}%</span>
                 {availRiskPct > 0 && (
-                  <span> · Avail: <span className="text-slate-300 font-mono">{fmt(availRiskPct)}%</span></span>
+                  <span>
+                    {' · Avail: '}
+                    <span className="text-slate-300 font-mono">{fmt(availRiskPct)}%</span>
+                    {pendingRiskPct > 0 && (
+                      <span className="text-slate-600">
+                        {' (⚡'}
+                        <span className={availIfFillPct < 0.5 ? 'text-amber-500' : 'text-slate-500'}>
+                          {fmt(availIfFillPct)}%
+                        </span>
+                        {' if LIMITs fill)'}
+                      </span>
+                    )}
+                  </span>
                 )}
               </span> as unknown as string
         }
         accent="neutral"
-        info={`Current risk / max allowed (${fmt(maxRiskPct)}%). Available risk = max − used. Trades at BE count as 0.`}
+        info={`Live risk (open/partial using current_risk) / max allowed (${fmt(maxRiskPct)}%). Avail = max − live used. BE trades count as 0. ⚡ shows available if all pending LIMITs fill simultaneously.`}
       />
 
       {/* Win Rate — shown from 1 trade */}

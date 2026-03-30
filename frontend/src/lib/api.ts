@@ -10,12 +10,13 @@ import type {
   Strategy, StrategyCreate, StrategyUpdate,
   WinRateStats,
   TradingStyle,
-  GoalOut, GoalCreate, GoalUpdate, GoalProgressItem, GoalOverrideCreate, GoalOverrideOut,
+  GoalOut, GoalCreate, GoalUpdate, GoalProgressItem, GoalHistoryItem, GoalOverrideCreate, GoalOverrideOut,
   MAModule, MAIndicator, MAIndicatorConfig, MAIndicatorConfigOut, MAIndicatorUpdate, MAIndicatorCreate,
   MASessionCreate, MASessionOut, MASessionListItem, MAStalenessItem, MATradeConclusion,
   MarketVIOut, AggregatedMarketVIOut, PairsVIOut, WatchlistOut, WatchlistMetaOut, LivePricesResponse,
   VolatilitySettingsOut, NotificationSettingsOut,
   RiskBudgetOut, RiskAdvisorOut, RiskSettingsOut, PairVIOut,
+  AutomationSettingsOut, AutomationSettingsUpdateIn, ConnectionTestOut, KrakenOrderOut,
 } from '../types/api'
 
 const BASE = '/api'
@@ -40,6 +41,10 @@ async function request<T>(
           return field ? `${field}: ${e.msg}` : (e.msg ?? JSON.stringify(e))
         })
         .join(' · ')
+    } else if (body?.detail && typeof body.detail === 'object') {
+      // Risk Guard and similar return detail as a dict with a nested "detail" string.
+      detail = (body.detail as Record<string, unknown>).detail as string
+        ?? JSON.stringify(body.detail)
     } else {
       detail = body?.detail ?? `HTTP ${res.status}`
     }
@@ -335,6 +340,12 @@ export const goalsApi = {
   progress: (profileId: number): Promise<GoalProgressItem[]> =>
     request(`/profiles/${profileId}/goals/progress`),
 
+  /** GET — last N completed periods, oldest-first, for history chart */
+  history: (profileId: number, period = 'weekly', limit = 12): Promise<GoalHistoryItem[]> => {
+    const qs = new URLSearchParams({ period, limit: String(limit) })
+    return request(`/profiles/${profileId}/goals/history?${qs}`)
+  },
+
   /** POST — log a circuit-breaker override (reason_text ≥ 20 chars) */
   createOverride: (profileId: number, data: GoalOverrideCreate): Promise<GoalOverrideOut> =>
     request(`/profiles/${profileId}/goal-overrides`, {
@@ -554,4 +565,56 @@ export const riskApi = {
   /** GET /api/risk/pair-vi */
   getPairVI: (pair: string, timeframe: string): Promise<PairVIOut> =>
     request(`/risk/pair-vi?pair=${encodeURIComponent(pair)}&timeframe=${encodeURIComponent(timeframe)}`),
+}
+
+// ── Kraken Execution (Phase 5) ──────────────────────────────────────────────
+export const automationApi = {
+  /** GET /api/kraken-execution/settings/{profileId} */
+  getSettings: (profileId: number): Promise<AutomationSettingsOut> =>
+    request(`/kraken-execution/settings/${profileId}`),
+
+  /** PUT /api/kraken-execution/settings/{profileId} */
+  updateSettings: (profileId: number, patch: AutomationSettingsUpdateIn): Promise<AutomationSettingsOut> =>
+    request(`/kraken-execution/settings/${profileId}`, { method: 'PUT', body: JSON.stringify(patch) }),
+
+  /** POST /api/kraken-execution/settings/{profileId}/test-connection */
+  testConnection: (profileId: number): Promise<ConnectionTestOut> =>
+    request(`/kraken-execution/settings/${profileId}/test-connection`, { method: 'POST' }),
+
+  /** GET /api/kraken-execution/orders/{tradeId} */
+  getOrders: (tradeId: number): Promise<KrakenOrderOut[]> =>
+    request(`/kraken-execution/orders/${tradeId}`),
+
+  /** POST /api/kraken-execution/trades/{tradeId}/open */
+  openTrade: (tradeId: number): Promise<KrakenOrderOut> =>
+    request(`/kraken-execution/trades/${tradeId}/open`, { method: 'POST' }),
+
+  /** POST /api/kraken-execution/trades/{tradeId}/close */
+  closeTrade: (tradeId: number): Promise<KrakenOrderOut> =>
+    request(`/kraken-execution/trades/${tradeId}/close`, { method: 'POST' }),
+
+  /** POST /api/kraken-execution/trades/{tradeId}/breakeven */
+  moveToBreakeven: (tradeId: number): Promise<KrakenOrderOut> =>
+    request(`/kraken-execution/trades/${tradeId}/breakeven`, { method: 'POST' }),
+
+  /** POST /api/kraken-execution/trades/{tradeId}/cancel-entry */
+  cancelEntry: (tradeId: number): Promise<KrakenOrderOut> =>
+    request(`/kraken-execution/trades/${tradeId}/cancel-entry`, { method: 'POST' }),
+
+  /** POST /api/kraken-execution/trades/{tradeId}/sync-fill
+   *  Check if a pending LIMIT entry was filled. On fill: activates trade + places SL/TP.
+   */
+  syncFill: (tradeId: number): Promise<{ filled: boolean; fill_price: number | null; skipped?: boolean }> =>
+    request(`/kraken-execution/trades/${tradeId}/sync-fill`, { method: 'POST' }),
+
+  /** POST /api/kraken-execution/trades/{tradeId}/sync-sl-tp
+   *  Check Kraken fills for SL/TP orders of an open/partial trade.
+   *  On fill: reconciles trade status, PnL and profile capital via canonical service.
+   */
+  syncSlTp: (tradeId: number): Promise<{ processed: number; events: { role: string; fill_price: number }[]; skipped?: boolean }> =>
+    request(`/kraken-execution/trades/${tradeId}/sync-sl-tp`, { method: 'POST' }),
+
+  /** GET /api/kraken-execution/mark-price/{symbol} — public, no auth required */
+  getMarkPrice: (symbol: string): Promise<{ symbol: string; mark_price: number }> =>
+    request(`/kraken-execution/mark-price/${encodeURIComponent(symbol)}`),
 }

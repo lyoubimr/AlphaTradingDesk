@@ -18,6 +18,7 @@ from src.core.models import (  # noqa: F401
     sessions,
     trade,
 )
+from src.kraken_execution import models as _kraken_execution_models  # noqa: F401
 from src.risk_management import models as _risk_models  # noqa: F401
 from src.volatility import models as _volatility_models  # noqa: F401
 

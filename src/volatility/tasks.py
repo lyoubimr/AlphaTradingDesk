@@ -847,6 +847,7 @@ def sync_instruments(self) -> dict:  # type: ignore[override]
                         is_predefined=True,
                         is_active=sym["is_active"],
                         max_leverage=sym.get("max_leverage"),
+                        contract_value_precision=sym.get("contract_value_precision"),
                     )
                     .on_conflict_do_update(
                         index_elements=["broker_id", "symbol"],
@@ -855,6 +856,7 @@ def sync_instruments(self) -> dict:  # type: ignore[override]
                             "base_currency": sym.get("base"),
                             "quote_currency": sym.get("quote"),
                             "max_leverage": sym.get("max_leverage"),
+                            "contract_value_precision": sym.get("contract_value_precision"),
                         },
                     )
                 )

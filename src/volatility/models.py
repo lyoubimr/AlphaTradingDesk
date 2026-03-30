@@ -180,6 +180,7 @@ class NotificationSettings(Base):
     bots JSONB: [{bot_token, chat_id, bot_name}]
     market_vi_alerts JSONB: {enabled, bot_name, cooldown_min, regimes: []}
     watchlist_alerts JSONB: {enabled, bot_name, per_tf: {15m: {enabled, cooldown_min, vi_min}}}
+    execution_alerts JSONB: {enabled, bot_name, events: {EVENT_NAME: {enabled}}}
     """
 
     __tablename__ = "notification_settings"
@@ -190,6 +191,7 @@ class NotificationSettings(Base):
     bots: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
     market_vi_alerts: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
     watchlist_alerts: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    execution_alerts: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

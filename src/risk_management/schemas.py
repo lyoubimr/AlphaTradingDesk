@@ -42,11 +42,18 @@ class RiskMultiplierResult:
     adjusted_risk_pct: float = 0.0  # base_risk_pct * multiplier
     adjusted_risk_amount: float = 0.0  # adjusted_risk_pct / 100 * capital
 
-    # Budget
-    budget_remaining_pct: float = 0.0    # max_concurrent - current_used
+    # Budget — live (open/partial, uses current_risk — BE trades = 0)
+    budget_remaining_pct: float = 0.0    # max_concurrent - live_used
     budget_remaining_amount: float = 0.0
-    budget_blocking: bool = False        # True if effective risk > budget
+    budget_blocking: bool = False        # True if effective risk > live budget
     suggested_risk_pct: float = 0.0     # min(adjusted_risk_pct, budget) if blocking
+
+    # Pending LIMITs (potential future risk if all fill simultaneously)
+    pending_risk_pct: float = 0.0
+    pending_risk_amount: float = 0.0
+    budget_remaining_if_pending_fill_pct: float = 0.0
+    budget_remaining_if_pending_fill_amount: float = 0.0
+    pending_budget_warning: bool = False  # fits now but would overflow if all LIMITs fill
 
 
 # ── API request/response models ───────────────────────────────────────────────
@@ -73,10 +80,18 @@ class RiskAdvisorOut(BaseModel):
     multiplier: float
     criteria: list[CriterionDetailOut]
 
+    # Live budget (open/partial trades only, using current_risk)
     budget_remaining_pct: float
     budget_remaining_amount: float
     budget_blocking: bool
     suggested_risk_pct: float
+
+    # Pending LIMIT orders (potential future exposure)
+    pending_risk_pct: float = 0.0
+    pending_risk_amount: float = 0.0
+    budget_remaining_if_pending_fill_pct: float = 0.0
+    budget_remaining_if_pending_fill_amount: float = 0.0
+    pending_budget_warning: bool = False
 
     # Guard metadata forwarded to the UI
     force_allowed: bool = True
@@ -89,11 +104,17 @@ class RiskBudgetOut(BaseModel):
     capital_current: float
     risk_pct_default: float
     max_concurrent_risk_pct: float
+    # Live risk (open/partial, using current_risk — BE trades count as 0)
     concurrent_risk_used_pct: float
     budget_remaining_pct: float
     budget_remaining_amount: float
     open_trades_count: int
     pending_trades_count: int
+    # Pending LIMIT orders (potential future exposure)
+    pending_risk_pct: float = 0.0
+    pending_risk_amount: float = 0.0
+    budget_remaining_if_pending_fill_pct: float = 0.0
+    budget_remaining_if_pending_fill_amount: float = 0.0
     alert_risk_saturated: bool
     alert_threshold_pct: float
     force_allowed: bool

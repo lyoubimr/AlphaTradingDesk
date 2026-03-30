@@ -186,20 +186,48 @@ export function RiskAdvisorPanel({
   )
 
   // ── Budget info bar ───────────────────────────────────────────────────────
+  const hasPending = advisor.pending_risk_pct > 0
   const budgetBar = (
     <div className={cn(
-      'flex items-center gap-3 px-4 py-2 border-t text-[10px]',
+      'px-4 py-2 border-t text-[10px] space-y-1',
       advisor.budget_blocking
-        ? 'border-red-700/30 bg-red-900/10 text-red-400'
-        : 'border-surface-700/40 text-slate-500',
+        ? 'border-red-700/30 bg-red-900/10'
+        : advisor.pending_budget_warning
+        ? 'border-amber-700/30 bg-amber-900/10'
+        : 'border-surface-700/40',
     )}>
-      <span>Budget remaining:</span>
-      <span className={cn('font-mono font-bold', advisor.budget_remaining_pct < 1 ? 'text-red-400' : 'text-slate-300')}>
-        {fmt2(advisor.budget_remaining_pct)}%
-      </span>
-      <span className="text-slate-600">({advisor.budget_remaining_amount.toFixed(2)})</span>
-      {advisor.budget_blocking && !advisor.force_allowed && (
-        <span className="ml-auto text-red-400">New trades blocked — reduce open positions first</span>
+      {/* Live budget row */}
+      <div className="flex items-center gap-2">
+        <span className={advisor.budget_blocking ? 'text-red-400' : 'text-slate-500'}>
+          Budget remaining (live):
+        </span>
+        <span className={cn('font-mono font-bold', advisor.budget_remaining_pct < 1 ? 'text-red-400' : 'text-slate-300')}>
+          {fmt2(advisor.budget_remaining_pct)}%
+        </span>
+        <span className="text-slate-600">({advisor.budget_remaining_amount.toFixed(2)})</span>
+        {advisor.budget_blocking && !advisor.force_allowed && (
+          <span className="ml-auto text-red-400">New trades blocked — reduce open positions first</span>
+        )}
+      </div>
+
+      {/* Pending LIMITs warning row */}
+      {hasPending && (
+        <div className={cn(
+          'flex items-center gap-2',
+          advisor.pending_budget_warning ? 'text-amber-400' : 'text-slate-600',
+        )}>
+          <span>If LIMIT orders fill:</span>
+          <span className="font-mono font-bold">
+            {fmt2(advisor.budget_remaining_if_pending_fill_pct)}%
+          </span>
+          <span>({advisor.budget_remaining_if_pending_fill_amount.toFixed(2)})</span>
+          <span className="text-slate-700">
+            · {fmt2(advisor.pending_risk_pct)}% locked in {Math.round(advisor.pending_risk_amount)} pending
+          </span>
+          {advisor.pending_budget_warning && (
+            <span className="ml-auto text-amber-400 font-medium">⚠ Would exceed budget if all LIMITs fill</span>
+          )}
+        </div>
       )}
     </div>
   )

@@ -112,6 +112,22 @@ class GoalProgressItem(BaseModel):
     trades: list[dict] = []
 
 
+class GoalHistoryItem(BaseModel):
+    """One completed period's P&L vs goal — returned by GET /goals/history."""
+
+    period: str
+    period_start: str  # ISO date "2026-03-17"
+    period_end: str    # ISO date "2026-03-23"
+    pnl_pct: Decimal
+    pnl_amount: Decimal   # absolute P&L (sum of realized_pnl in that period)
+    goal_pct: Decimal | None = None   # None when no active goal defined for the period
+    limit_pct: Decimal | None = None
+    goal_hit: bool = False
+    limit_hit: bool = False
+    trade_count: int = 0
+    avg_r: Decimal | None = None
+
+
 # ── Goal Override Log ─────────────────────────────────────────────────────────
 
 

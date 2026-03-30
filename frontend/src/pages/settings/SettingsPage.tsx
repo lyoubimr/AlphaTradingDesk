@@ -1,6 +1,6 @@
 // ── Settings page ──────────────────────────────────────────────────────────
 import { useEffect, useState } from 'react'
-import { User, Database, Bell, Shield, Info, Palette, BarChart2, Activity, CheckCircle2, XCircle, Loader2, RefreshCw } from 'lucide-react'
+import { User, Database, Bell, Shield, Info, Palette, BarChart2, Activity, CheckCircle2, XCircle, Loader2, RefreshCw, Zap } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { PageHeader } from '../../components/ui/PageHeader'
 import { Badge } from '../../components/ui/Badge'
@@ -333,17 +333,38 @@ export function SettingsPage() {
         <SettingsSection
           icon={<Bell size={16} />}
           title="Notifications"
-          description="Telegram alerts for volatility regimes and watchlist events"
+          description="Telegram alerts for volatility regimes, watchlist events and trade execution"
         >
           <SettingRow label="Bots"              value="Configurable"  info="Add one or more Telegram bots. Each can be targeted by a specific alert type." />
           <SettingRow label="Market VI alerts"  value="Toggle + regimes" info="Notify when aggregate VI enters a configured regime. Cooldown-based deduplication." />
           <SettingRow label="Watchlist alerts"  value="Per-TF"        info="Alert per timeframe when a new watchlist is generated. VI minimum threshold configurable." />
+          <SettingRow label="Execution alerts"  value="10 events"     info="Notifies on Kraken order events: limit placed/filled, TP1/2/3, SL hit, breakeven, PnL status." />
           <div className="pt-2">
             <Link
               to="/settings/notifications"
               className="inline-flex items-center gap-1.5 text-xs text-brand-400 hover:text-brand-300 transition-colors underline underline-offset-2"
             >
               Open Notification Settings →
+            </Link>
+          </div>
+        </SettingsSection>
+
+        {/* ── Automation ───────────────────────────────────────────────── */}
+        <SettingsSection
+          icon={<Zap size={16} />}
+          title="Automation"
+          description="Kraken Futures execution — API keys, engine config and connection test"
+        >
+          <SettingRow label="API keys"        value="Encrypted (Fernet)" info="API key + secret stored encrypted in DB. Write-only — never returned by the API." />
+          <SettingRow label="Engine"          value="Enable / disable"   info="Toggle automation per profile. Disabled profile cannot send any orders." />
+          <SettingRow label="PNL status"      value="Periodic (Telegram)" info="Send a PNL summary at a configurable interval." />
+          <SettingRow label="Leverage cap"    value="Override (optional)" info="Cap the leverage sent to Kraken Futures. Leave blank to use account default." />
+          <div className="pt-2">
+            <Link
+              to="/settings/automation"
+              className="inline-flex items-center gap-1.5 text-xs text-brand-400 hover:text-brand-300 transition-colors underline underline-offset-2"
+            >
+              Open Automation Settings →
             </Link>
           </div>
         </SettingsSection>

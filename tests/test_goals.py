@@ -344,3 +344,96 @@ class TestGoalProgress:
             "trades",
         }
         assert set(item.keys()) == expected_keys
+
+
+# ── Tests: GET /api/profiles/{id}/goals/history ──────────────────────────────
+
+
+class TestGoalHistory:
+    def test_returns_empty_list_for_unknown_profile(self, client: TestClient):
+        resp = client.get("/api/profiles/99999/goals/history")
+        assert resp.status_code == 404
+
+    def test_returns_weekly_history_oldest_first(self, client: TestClient, db_session: Session):
+        profile = _make_profile(db_session)
+        client.post(
+            f"/api/profiles/{profile.id}/goals",
+            json=_goal_payload(period="weekly", goal_pct="2.0", limit_pct="-1.0"),
+        )
+
+        resp = client.get(f"/api/profiles/{profile.id}/goals/history?period=weekly&limit=4")
+        assert resp.status_code == 200
+        items = resp.json()
+        assert len(items) == 4
+        # Oldest first — period_start should be ascending
+        starts = [item["period_start"] for item in items]
+        assert starts == sorted(starts)
+
+    def test_returns_monthly_history_with_limit(self, client: TestClient, db_session: Session):
+        profile = _make_profile(db_session)
+
+        resp = client.get(f"/api/profiles/{profile.id}/goals/history?period=monthly&limit=6")
+        assert resp.status_code == 200
+        items = resp.json()
+        assert len(items) == 6
+
+    def test_current_period_excluded(self, client: TestClient, db_session: Session):
+        """History must NOT include the current week/month (that's /progress)."""
+        from datetime import date, timedelta
+
+        profile = _make_profile(db_session)
+        today = date.today()
+        # Current week start = last Monday
+        current_week_start = today - timedelta(days=today.weekday())
+
+        resp = client.get(f"/api/profiles/{profile.id}/goals/history?period=weekly&limit=4")
+        assert resp.status_code == 200
+        for item in resp.json():
+            assert item["period_start"] != current_week_start.isoformat()
+
+    def test_pnl_computed_from_trades(self, client: TestClient, db_session: Session):
+        """A trade closed last week must appear in history."""
+        from datetime import date, timedelta
+
+        profile = _make_profile(db_session)
+        client.post(
+            f"/api/profiles/{profile.id}/goals",
+            json=_goal_payload(period="weekly", goal_pct="2.0", limit_pct="-1.0"),
+        )
+        # Insert a trade closed on last Monday (middle of last week)
+        today = date.today()
+        last_monday = today - timedelta(days=today.weekday() + 7)
+        closed_at = datetime(last_monday.year, last_monday.month, last_monday.day, 14, 0, 0)
+        _make_closed_trade(db_session, profile, realized_pnl=300.0, closed_at=closed_at)
+        db_session.flush()
+
+        resp = client.get(f"/api/profiles/{profile.id}/goals/history?period=weekly&limit=2")
+        assert resp.status_code == 200
+        items = resp.json()
+        # The most recent past week is the last item (oldest-first)
+        last_item = items[-1]
+        assert last_item["period_start"] == last_monday.isoformat()
+        assert float(last_item["pnl_pct"]) > 0
+        assert last_item["trade_count"] == 1
+        # 300 / 10000 * 100 = 3.0% > 2.0% goal → goal_hit
+        assert last_item["goal_hit"] is True
+
+    def test_invalid_period_returns_422(self, client: TestClient, db_session: Session):
+        profile = _make_profile(db_session)
+        resp = client.get(f"/api/profiles/{profile.id}/goals/history?period=yearly")
+        assert resp.status_code == 422
+
+    def test_history_response_shape(self, client: TestClient, db_session: Session):
+        profile = _make_profile(db_session)
+        resp = client.get(f"/api/profiles/{profile.id}/goals/history?period=weekly&limit=1")
+        assert resp.status_code == 200
+        item = resp.json()[0]
+        expected_keys = {
+            "period", "period_start", "period_end",
+            "pnl_pct", "pnl_amount",
+            "goal_pct", "limit_pct",
+            "goal_hit", "limit_hit",
+            "trade_count", "avg_r",
+        }
+        assert set(item.keys()) == expected_keys
+

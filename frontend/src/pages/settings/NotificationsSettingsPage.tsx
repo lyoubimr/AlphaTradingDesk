@@ -72,7 +72,40 @@ interface WatchlistAlertsCfg {
   per_tf: Partial<Record<string, TFAlertCfg>>
 }
 
+interface ExecEventCfg { enabled: boolean }
+interface ExecAlertsCfg {
+  enabled: boolean
+  bot_name?: string | null
+  events: Record<string, ExecEventCfg>
+}
+
 // ── Defaults ─────────────────────────────────────────────────────────────────
+
+const EXEC_EVENTS = [
+  'LIMIT_PLACED', 'LIMIT_FILLED', 'TRADE_OPENED',
+  'TP1_TAKEN', 'TP2_TAKEN', 'TP3_TAKEN',
+  'SL_HIT', 'BE_MOVED', 'PNL_STATUS', 'ORDER_ERROR',
+] as const
+
+const EXEC_EMOJI: Record<string, string> = {
+  LIMIT_PLACED: '📋', LIMIT_FILLED: '✅', TRADE_OPENED: '🚀',
+  TP1_TAKEN: '🎯', TP2_TAKEN: '🎯', TP3_TAKEN: '🎯',
+  SL_HIT: '🛑', BE_MOVED: '🔒', PNL_STATUS: '📊', ORDER_ERROR: '⚠️',
+}
+
+const EXEC_LABEL: Record<string, string> = {
+  LIMIT_PLACED: 'Limit Order Placed', LIMIT_FILLED: 'Limit Entry Filled',
+  TRADE_OPENED: 'Trade Opened', TP1_TAKEN: 'Take Profit 1 Hit',
+  TP2_TAKEN: 'Take Profit 2 Hit', TP3_TAKEN: 'Take Profit 3 Hit',
+  SL_HIT: 'Stop Loss Hit', BE_MOVED: 'Moved to Breakeven',
+  PNL_STATUS: 'PnL Status', ORDER_ERROR: 'Order Error',
+}
+
+const D_EXEC_ALERTS: ExecAlertsCfg = {
+  enabled: true,
+  bot_name: null,
+  events: Object.fromEntries(EXEC_EVENTS.map(e => [e, { enabled: true }])),
+}
 
 const STATUS_TFS = ['aggregated', '15m', '1h', '4h', '1d'] as const
 type StatusTF = typeof STATUS_TFS[number]
@@ -153,6 +186,18 @@ function hydrateWL(raw: Record<string, unknown>): WatchlistAlertsCfg {
   }
 }
 
+function hydrateExec(raw: Record<string, unknown>): ExecAlertsCfg {
+  const rawEvents = (raw.events ?? {}) as Record<string, Record<string, unknown>>
+  const events: Record<string, ExecEventCfg> = Object.fromEntries(
+    EXEC_EVENTS.map(e => [e, { enabled: (rawEvents[e]?.enabled as boolean | undefined) ?? true }]),
+  )
+  return {
+    enabled:  (raw.enabled  as boolean        | undefined) ?? D_EXEC_ALERTS.enabled,
+    bot_name: (raw.bot_name as string | null  | undefined) ?? null,
+    events,
+  }
+}
+
 // ── Atoms ─────────────────────────────────────────────────────────────────────
 
 function Toggle({
@@ -209,6 +254,10 @@ export function NotificationsSettingsPage() {
   const [bots, setBots] = useState<TelegramBot[]>([])
   const [mviA, setMviA] = useState<MarketVIAlertsCfg>(D_MVI_ALERTS)
   const [wlA,  setWlA]  = useState<WatchlistAlertsCfg>(D_WL_ALERTS)
+  const [execA, setExecA] = useState<ExecAlertsCfg>(D_EXEC_ALERTS)
+
+  type Tab = 'bots' | 'market-vi' | 'watchlist' | 'execution'
+  const [activeTab, setActiveTab] = useState<Tab>('bots')
 
   // New bot form state
   const [newName,  setNewName]  = useState('')
@@ -269,6 +318,7 @@ export function NotificationsSettingsPage() {
       setBots(n.bots ?? [])
       setMviA(hydrateMVI(n.market_vi_alerts as Record<string, unknown>))
       setWlA(hydrateWL(n.watchlist_alerts as Record<string, unknown>))
+      setExecA(hydrateExec((n.execution_alerts ?? {}) as Record<string, unknown>))
       setDirty(false)
     } catch {
       setLoadErr('Failed to load notification settings')
@@ -289,11 +339,11 @@ export function NotificationsSettingsPage() {
     }
   }, [loading])
 
-  // Mark as dirty on any mviA/wlA change — except during load
+  // Mark as dirty on any mviA/wlA/execA change — except during load
   useEffect(() => {
     if (skipDirtyRef.current) return
     setDirty(true)
-  }, [mviA, wlA, setDirty])
+  }, [mviA, wlA, execA, setDirty])
 
   const save = async () => {
     if (!profileId) return
@@ -302,6 +352,7 @@ export function NotificationsSettingsPage() {
         bots,
         market_vi_alerts: mviA,
         watchlist_alerts: wlA,
+        execution_alerts: execA,
       })
     })
   }
@@ -497,9 +548,31 @@ export function NotificationsSettingsPage() {
         }
       />
 
-      <div className="space-y-5 max-w-2xl">
+      <div className="max-w-2xl space-y-4">
 
-        {/* ── Telegram Bots ─────────────────────────────────────────────────── */}
+        {/* ── Tab bar ───────────────────────────────────────────────────── */}
+        <div role="tablist" className="flex gap-0 border-b border-surface-700">
+          {([ ['bots', '🤖', 'Bots'], ['market-vi', '📡', 'Market VI'], ['watchlist', '👁', 'Watchlist'], ['execution', '⚡', 'Execution'] ] as [Tab, string, string][]).map(([id, emoji, label]) => (
+            <button
+              key={id}
+              role="tab"
+              type="button"
+              aria-selected={activeTab === id}
+              onClick={() => setActiveTab(id)}
+              className={cn(
+                'px-4 py-2.5 text-xs font-medium transition-colors border-b-2 -mb-px flex items-center gap-1.5',
+                activeTab === id
+                  ? 'border-brand-500 text-brand-400'
+                  : 'border-transparent text-slate-500 hover:text-slate-300',
+              )}
+            >
+              <span>{emoji}</span> {label}
+            </button>
+          ))}
+        </div>
+
+        {/* ── Tab: Bots ─────────────────────────────────────────────────── */}
+        {activeTab === 'bots' && (
         <section className="rounded-xl bg-surface-800 border border-surface-700 overflow-hidden">
           <div className="px-5 py-3.5 border-b border-surface-700">
             <h2 className="text-sm font-semibold text-slate-300">Telegram Bots</h2>
@@ -613,8 +686,10 @@ export function NotificationsSettingsPage() {
             )}
           </div>
         </section>
+        )}
 
-        {/* ── Market VI Alerts ──────────────────────────────────────────────── */}
+        {/* ── Tab: Market VI ────────────────────────────────────────────── */}
+        {activeTab === 'market-vi' && (
         <section className="rounded-xl bg-surface-800 border border-surface-700 overflow-hidden">
           <div className="px-5 py-3.5 border-b border-surface-700 flex items-center justify-between">
             <div>
@@ -1084,8 +1159,10 @@ export function NotificationsSettingsPage() {
             </div>
           </div>
         </section>
+        )}
 
-        {/* ── Watchlist Alerts ──────────────────────────────────────────────── */}
+        {/* ── Tab: Watchlist ────────────────────────────────────────────── */}
+        {activeTab === 'watchlist' && (
         <section className="rounded-xl bg-surface-800 border border-surface-700 overflow-hidden">
           <div className="px-5 py-3.5 border-b border-surface-700 flex items-center justify-between">
             <div>
@@ -1175,9 +1252,74 @@ export function NotificationsSettingsPage() {
             </div>
           </div>
         </section>
+        )}
 
-        {/* ── Global save bar ───────────────────────────────────────────────── */}
-        <SaveBar saving={saving} saved={saved} saveErr={saveErr} dirty={dirty} onSave={() => void save()} />
+        {/* ── Tab: Execution ────────────────────────────────────────────── */}
+        {activeTab === 'execution' && (
+        <section className="rounded-xl bg-surface-800 border border-surface-700 overflow-hidden">
+          <div className="px-5 py-3.5 border-b border-surface-700 flex items-center justify-between">
+            <div>
+              <h2 className="text-sm font-semibold text-slate-300">Execution Alerts</h2>
+              <p className="text-xs text-slate-600 mt-0.5">
+                Telegram notifications for Kraken Futures order events
+              </p>
+            </div>
+            <Toggle
+              on={execA.enabled}
+              onChange={v => setExecA(p => ({ ...p, enabled: v }))}
+              label="Enable execution alerts"
+            />
+          </div>
+
+          <div className={cn('px-5 py-4 space-y-4 transition-opacity', !execA.enabled && 'opacity-40 pointer-events-none')}>
+            {/* Bot select */}
+            <div className="flex items-center justify-between gap-4">
+              <span className="text-xs text-slate-400">Target bot</span>
+              <select
+                value={execA.bot_name ?? ''}
+                onChange={e => setExecA(p => ({ ...p, bot_name: e.target.value || null }))}
+                className="bg-surface-700 border border-surface-600 text-xs text-slate-300 rounded-lg px-3 py-1.5 focus:outline-none focus:border-brand-500/60"
+              >
+                <option value="">— First available —</option>
+                {bots.map((b, i) => (
+                  <option key={i} value={b.bot_name ?? ''}>
+                    {b.bot_name ?? `…${b.bot_token.slice(-8)}`}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Event rows */}
+            <div className="space-y-1.5">
+              <p className="text-[10px] text-slate-500 uppercase tracking-wide font-semibold mb-2">Events</p>
+              {EXEC_EVENTS.map(evt => (
+                <div
+                  key={evt}
+                  className="flex items-center justify-between gap-3 py-2 px-3 rounded-lg bg-surface-700/50 border border-surface-600/50"
+                >
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <span className="text-base leading-none shrink-0">{EXEC_EMOJI[evt]}</span>
+                    <div className="min-w-0">
+                      <p className="text-xs text-slate-300">{EXEC_LABEL[evt]}</p>
+                      <p className="text-[10px] font-mono text-slate-600">{evt}</p>
+                    </div>
+                  </div>
+                  <Toggle
+                    on={execA.events[evt]?.enabled ?? true}
+                    onChange={v => setExecA(p => ({ ...p, events: { ...p.events, [evt]: { enabled: v } } }))}
+                    label={`Toggle ${evt}`}
+                  />
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+        )}
+
+        {/* ── Save bar (all tabs except Bots — bots are auto-saved) ─────── */}
+        {activeTab !== 'bots' && (
+          <SaveBar saving={saving} saved={saved} saveErr={saveErr} dirty={dirty} onSave={() => void save()} />
+        )}
 
       </div>
     </div>

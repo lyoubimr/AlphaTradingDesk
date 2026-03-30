@@ -17,7 +17,8 @@ import {
   ImagePlus, Maximize2,
 } from 'lucide-react'
 import { PageHeader } from '../../components/ui/PageHeader'
-import { tradesApi, strategiesApi } from '../../lib/api'
+import { tradesApi, strategiesApi, automationApi } from '../../lib/api'
+import { KrakenOrdersPanel } from '../../components/automation/KrakenOrdersPanel'
 import { cn } from '../../lib/cn'
 import { useProfile } from '../../context/ProfileContext'
 import type { TradeOut, Strategy } from '../../types/api'
@@ -499,6 +500,69 @@ function EditTradeModal({ trade, onClose, onSuccess }: {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Automated close button — sends market close via Kraken automation
+// ─────────────────────────────────────────────────────────────────────────────
+
+function AutomatedCloseButton({ tradeId, onSuccess }: {
+  tradeId: number
+  onSuccess: (updated: TradeOut) => void
+}) {
+  const [closing, setClosing] = useState(false)
+  const [err, setErr]         = useState<string | null>(null)
+  const [confirm, setConfirm] = useState(false)
+
+  async function handleClose() {
+    setClosing(true); setErr(null)
+    try {
+      await automationApi.closeTrade(tradeId)
+      const updated = await tradesApi.get(tradeId)
+      onSuccess(updated)
+    } catch (e: unknown) {
+      setErr((e as Error).message)
+    } finally {
+      setClosing(false)
+      setConfirm(false)
+    }
+  }
+
+  if (!confirm) {
+    return (
+      <button
+        type="button"
+        onClick={() => setConfirm(true)}
+        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600/20 border border-emerald-500/40 text-xs text-emerald-300 font-medium hover:bg-emerald-600/30 transition-colors"
+      >
+        <CheckCircle2 size={11} />
+        Close on Kraken
+      </button>
+    )
+  }
+
+  return (
+    <div className="flex items-center gap-1.5">
+      <span className="text-xs text-amber-300">Market close?</span>
+      <button
+        type="button"
+        onClick={() => void handleClose()}
+        disabled={closing}
+        className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-emerald-600/30 border border-emerald-500/50 text-xs text-emerald-300 font-medium hover:bg-emerald-600/40 transition-colors disabled:opacity-40"
+      >
+        {closing ? <Loader2 size={10} className="animate-spin" /> : <CheckCircle2 size={10} />}
+        Confirm
+      </button>
+      <button
+        type="button"
+        onClick={() => setConfirm(false)}
+        className="px-2 py-1.5 rounded-lg bg-surface-700 border border-surface-600 text-xs text-slate-400 hover:text-slate-200 transition-colors"
+      >
+        Cancel
+      </button>
+      {err && <span className="text-xs text-red-400">{err}</span>}
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Close-all modal (with close notes + screenshot upload)
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -927,6 +991,57 @@ export function TradeDetailPage() {
 
   useEffect(() => { void load() }, [load])
 
+  // ── Pending fill polling (automated LIMIT trades only) ────────────────────
+  // Polls sync-fill every 15 s while the trade is pending + has automation.
+  // When the LIMIT entry fills on Kraken: activates trade + places SL/TP.
+  useEffect(() => {
+    if (!trade?.automation_enabled || trade.status !== 'pending') return
+
+    const poll = async () => {
+      try {
+        const res = await automationApi.syncFill(trade.id)
+        if (res.filled) {
+          // Reload full trade to pick up new status + risk
+          const updated = await tradesApi.get(trade.id)
+          setTrade(updated)
+        }
+      } catch {
+        // Polling errors are silent — do not spam the UI
+      }
+    }
+
+    // Run immediately, then every 15 s
+    void poll()
+    const timer = setInterval(poll, 15_000)
+    return () => clearInterval(timer)
+  }, [trade?.id, trade?.automation_enabled, trade?.status])
+
+  // ── SL/TP fill polling (automated open/partial trades) ───────────────────
+  // Polls sync-sl-tp every 30 s while trade is open/partial + automated.
+  // When a SL or TP fills on Kraken: reconciles PnL + profile capital.
+  useEffect(() => {
+    if (!trade?.automation_enabled) return
+    if (trade.status !== 'open' && trade.status !== 'partial') return
+
+    const poll = async () => {
+      try {
+        const res = await automationApi.syncSlTp(trade.id)
+        if (res.processed > 0) {
+          // Reload full trade to reflect new status / PnL
+          const updated = await tradesApi.get(trade.id)
+          setTrade(updated)
+        }
+      } catch {
+        // Polling errors are silent
+      }
+    }
+
+    // Run immediately, then every 30 s
+    void poll()
+    const timer = setInterval(poll, 30_000)
+    return () => clearInterval(timer)
+  }, [trade?.id, trade?.automation_enabled, trade?.status])
+
   // Load strategies to resolve names for strategy_ids on this trade
   useEffect(() => {
     if (!activeProfile) { setStrategies([]); return }
@@ -977,8 +1092,15 @@ export function TradeDetailPage() {
     if (!trade) return
     setMovingBe(true); setConfirmBe(false); setActionError(null)
     try {
-      const updated = await tradesApi.breakeven(trade.id)
-      setTrade(updated)
+      if (trade.automation_enabled) {
+        await automationApi.moveToBreakeven(trade.id)
+        // Reload trade to pick up updated current_risk
+        const updated = await tradesApi.get(trade.id)
+        setTrade(updated)
+      } else {
+        const updated = await tradesApi.breakeven(trade.id)
+        setTrade(updated)
+      }
     } catch (e: unknown) {
       setActionError((e as Error).message)
     } finally {
@@ -1096,7 +1218,17 @@ export function TradeDetailPage() {
 
       <div className="max-w-2xl space-y-4 mt-2">
 
-        {/* ── Status + action bar ─────────────────────────────────────── */}
+        {/* ── Pending automation fill banner ───────────────────────────── */}
+        {trade.automation_enabled && trade.status === 'pending' && (
+          <div className="flex items-start gap-3 px-4 py-3 rounded-xl bg-amber-500/10 border border-amber-500/40">
+            <Loader2 size={14} className="animate-spin text-amber-400 mt-0.5 flex-shrink-0" />
+            <div className="text-xs text-amber-300 leading-relaxed">
+              <span className="font-semibold">Waiting for LIMIT fill on Kraken.</span>{' '}
+              Checking every 15 s — SL/TP will be placed automatically once the entry is filled.
+              Do not manually activate this trade.
+            </div>
+          </div>
+        )}
         <div className="bg-surface-800 rounded-xl border border-surface-700 p-4 space-y-3">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex items-center gap-3">
@@ -1139,11 +1271,16 @@ export function TradeDetailPage() {
               {/* OPEN / PARTIAL actions */}
               {isActive && (
                 <>
-                  <button type="button" onClick={() => setShowCloseAll(true)}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600/20 border border-emerald-500/40 text-xs text-emerald-300 font-medium hover:bg-emerald-600/30 transition-colors">
-                    <CheckCircle2 size={11} />
-                    Close all
-                  </button>
+                  {trade.automation_enabled ? (
+                    // Automated trade — close is handled by Kraken automation panel
+                    <AutomatedCloseButton tradeId={trade.id} onSuccess={(updated) => setTrade(updated)} />
+                  ) : (
+                    <button type="button" onClick={() => setShowCloseAll(true)}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600/20 border border-emerald-500/40 text-xs text-emerald-300 font-medium hover:bg-emerald-600/30 transition-colors">
+                      <CheckCircle2 size={11} />
+                      Close all
+                    </button>
+                  )}
 
                   {!isAtBe && !confirmBe && (
                     <button type="button" onClick={() => setConfirmBe(true)} disabled={movingBe}
@@ -1257,6 +1394,13 @@ export function TradeDetailPage() {
           <Section title="📍 Prices">
             <InfoRow label="Entry price"     value={fmt(trade.entry_price, 4)} />
             <InfoRow label="Stop loss"       value={fmt(trade.stop_loss, 4)}   accent="red" />
+            {trade.exit_price != null && (
+              <InfoRow
+                label="Exit price"
+                value={fmt(trade.exit_price, 4)}
+                accent={trade.realized_pnl != null && parseFloat(trade.realized_pnl) < 0 ? 'red' : 'green'}
+              />
+            )}
             {slDist != null && <InfoRow label="SL distance" value={`${fmt(slDist, 4)} (${fmt(slPct, 2)}%)`} />}
             <InfoRow label="Direction"
               value={trade.direction}
@@ -1643,6 +1787,17 @@ export function TradeDetailPage() {
             />
           </div>
         </div>
+
+        {/* ── Kraken Execution ─────────────────────────────────────────── */}
+        <KrakenOrdersPanel
+          tradeId={trade.id}
+          tradeStatus={trade.status}
+          automationEnabled={trade.automation_enabled}
+          onTradeUpdated={async () => {
+            const updated = await tradesApi.get(trade.id)
+            setTrade(updated)
+          }}
+        />
 
         {/* ── Metadata ────────────────────────────────────────────────── */}
         <Section title="🗓 Metadata">

@@ -1155,4 +1155,137 @@ WHERE s.id = sub.strategy_id;
 
 ---
 
+## 📊 PHASE 5 Schema (Trade Automation — Kraken Execution)
+
+### Modifications tables existantes
+
+#### `instruments` — ajout `contract_value_precision`
+
+```sql
+ALTER TABLE instruments
+  ADD COLUMN contract_value_precision INTEGER;
+-- Rempli automatiquement par sync_instruments (Celery daily) via Kraken API.
+-- Positif n  → min_lot = 10^(-n)   ex: prec=4 → 0.0001 (PF_XBTUSD)
+-- Négatif n  → min_lot = 10^abs(n) ex: prec=-3 → 1000   (PF_BONKUSD)
+-- Utilisé par quantize_size() dans kraken_execution/precision.py
+```
+
+#### `trades` — ajout colonnes automation
+
+```sql
+ALTER TABLE trades
+  ADD COLUMN automation_enabled     BOOLEAN     NOT NULL DEFAULT FALSE,
+  ADD COLUMN kraken_entry_order_id  VARCHAR(255);
+-- automation_enabled: opt-in par trade — false = journal pur (comportements Phase 1-4)
+-- kraken_entry_order_id: référence rapide vers l'ordre d'entrée Kraken (aussi dans kraken_orders)
+```
+
+---
+
+### `automation_settings`
+
+Config Table Pattern (JSONB) — une ligne par profil.
+
+```sql
+CREATE TABLE automation_settings (
+    profile_id  BIGINT  PRIMARY KEY REFERENCES profiles(id) ON DELETE CASCADE,
+    config      JSONB   NOT NULL DEFAULT '{}',
+    updated_at  TIMESTAMP NOT NULL DEFAULT NOW()
+);
+```
+
+**Structure du JSONB `config` :**
+
+```json
+{
+  "enabled": true,
+  "api_key_encrypted": "<Fernet ciphertext>",
+  "api_secret_encrypted": "<Fernet ciphertext>",
+  "pnl_status_interval_minutes": 60,
+  "max_open_automated_trades": 5
+}
+```
+
+- `api_key_encrypted` / `api_secret_encrypted` : chiffrés Fernet (`ENCRYPTION_KEY` env var)
+- `pnl_status_interval_minutes` : fréquence des notifs PnL courant (0 = désactivé)
+- `max_open_automated_trades` : garde-fou — refuse d'ouvrir si déjà N trades auto ouverts
+
+---
+
+### `kraken_orders`
+
+Tracking granulaire de chaque ordre envoyé à Kraken Futures.
+Un trade peut avoir jusqu'à 5 ordres : 1 entrée + 1 SL + jusqu'à 3 TP.
+
+```sql
+CREATE TABLE kraken_orders (
+    id                BIGSERIAL PRIMARY KEY,
+
+    -- Liens ATD
+    trade_id          BIGINT NOT NULL REFERENCES trades(id) ON DELETE CASCADE,
+    position_id       BIGINT REFERENCES positions(id) ON DELETE SET NULL,
+    -- position_id renseigné uniquement pour les ordres TP (lié à la position concerned)
+
+    -- Identifiant Kraken
+    kraken_order_id   VARCHAR(255) UNIQUE,
+    -- NULL tant que l'ordre n'a pas été confirmé par Kraken
+    -- Unique constraint empêche le double-insert en cas de retry idempotent
+
+    -- Rôle dans le trade
+    role              VARCHAR(20) NOT NULL,
+    -- 'entry' | 'sl' | 'tp1' | 'tp2' | 'tp3'
+
+    -- Caractéristiques de l'ordre
+    order_type        VARCHAR(20) NOT NULL,
+    -- 'market' | 'limit' | 'stop' | 'take_profit'
+    side              VARCHAR(10) NOT NULL,
+    -- 'buy' | 'sell'
+    size              NUMERIC(20, 8) NOT NULL,
+    -- quantisé via quantize_size() AVANT envoi — jamais de float
+    limit_price       NUMERIC(20, 8),   -- NULL pour market
+    stop_price        NUMERIC(20, 8),   -- NULL sauf stop orders
+
+    -- Résultat du fill
+    status            VARCHAR(20) NOT NULL DEFAULT 'pending',
+    -- 'pending' | 'open' | 'filled' | 'cancelled' | 'error'
+    filled_price      NUMERIC(20, 8),   -- prix réel du fill
+    filled_size       NUMERIC(20, 8),   -- peut différer de size (partial fills)
+    kraken_fill_id    VARCHAR(255) UNIQUE,
+    -- stocké pour prévenir le double-traitement (idempotence)
+    error_msg         TEXT,             -- message d'erreur Kraken si status='error'
+
+    -- Timestamps
+    created_at        TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at        TIMESTAMP NOT NULL DEFAULT NOW(),
+    filled_at         TIMESTAMP,
+
+    -- Contraintes
+    CHECK (role IN ('entry', 'sl', 'tp1', 'tp2', 'tp3')),
+    CHECK (order_type IN ('market', 'limit', 'stop', 'take_profit')),
+    CHECK (side IN ('buy', 'sell')),
+    CHECK (status IN ('pending', 'open', 'filled', 'cancelled', 'error')),
+    CHECK (size > 0)
+);
+
+CREATE INDEX idx_kraken_orders_trade_id ON kraken_orders(trade_id);
+CREATE INDEX idx_kraken_orders_status   ON kraken_orders(status) WHERE status IN ('pending', 'open');
+CREATE INDEX idx_kraken_orders_role     ON kraken_orders(trade_id, role);
+```
+
+---
+
+### Relations Phase 5
+
+```
+trades (1) ──────────────── (N) kraken_orders
+   │                               │
+   │  automation_enabled = true    │  role = 'tp1' / 'tp2' / 'tp3'
+   │                               ↓
+   └──────────────── (N) positions (1) ──── (1) kraken_orders (TP lié)
+
+profiles (1) ──── (1) automation_settings
+```
+
+---
+
 **Next Document:** → `API_SPEC.md` (REST API endpoints)

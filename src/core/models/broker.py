@@ -65,6 +65,11 @@ class Instrument(Base):
     # Max leverage cap per instrument (crypto only — enforced with UI warning, not a hard block)
     # e.g. BTC/ETH: 50, large caps: 25, mid caps: 10, meme coins: 5
     max_leverage: Mapped[int | None] = mapped_column(Integer)
+    # Kraken Futures contract value trade precision (Phase 5)
+    # From contractValueTradePrecision field in Kraken instruments API.
+    # Positive = decimal places (e.g. 4 → step 0.0001 for BTC)
+    # Negative = integer multiples (e.g. -3 → step 1000 for BONK)
+    contract_value_precision: Mapped[int | None] = mapped_column(Integer)
     is_predefined: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_at: Mapped[datetime] = mapped_column(
@@ -184,6 +189,9 @@ class Profile(Base):
     market_analysis_configs: Mapped[list[MarketAnalysisConfig]] = relationship(
         back_populates="profile"
     )  # type: ignore[name-defined]
+    # Phase 5 — Kraken Execution
+    automation_settings: Mapped[AutomationSettings | None] = relationship(back_populates="profile")  # type: ignore[name-defined]
+    kraken_orders: Mapped[list[KrakenOrder]] = relationship(back_populates="profile")  # type: ignore[name-defined]
 
 
 # Forward-reference imports (resolved at runtime, avoid circular imports)
@@ -198,3 +206,4 @@ from src.core.models.market_analysis import (  # noqa: E402
 )
 from src.core.models.sessions import UserPreferences  # noqa: E402
 from src.core.models.trade import Strategy, Tag, Trade  # noqa: E402
+from src.kraken_execution.models import AutomationSettings, KrakenOrder  # noqa: E402

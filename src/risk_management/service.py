@@ -12,6 +12,7 @@ from __future__ import annotations
 import copy
 import logging
 from datetime import UTC, datetime
+from decimal import Decimal
 
 import httpx
 from fastapi import HTTPException
@@ -204,11 +205,25 @@ def get_risk_budget(profile_id: int, db: Session) -> dict:
     )
     open_count = sum(1 for t in active_trades if t.status in ("open", "partial"))
     pending_count = sum(1 for t in active_trades if t.status == "pending")
-    risk_used_amount = sum(float(t.risk_amount) for t in active_trades)
 
-    concurrent_used_pct = (risk_used_amount / capital * 100) if capital > 0 else 0.0
+    # Live risk: actual capital at risk RIGHT NOW.
+    # Uses current_risk for open/partial — BE trades (current_risk=0) are free.
+    live_risk_used_amount = sum(
+        float(t.current_risk or Decimal("0")) for t in active_trades if t.status in ("open", "partial")
+    )
+    # Pending risk: LIMIT orders not yet filled — reserved budget if they all trigger.
+    pending_risk_amount = sum(
+        float(t.risk_amount or Decimal("0")) for t in active_trades if t.status == "pending"
+    )
+
+    concurrent_used_pct = (live_risk_used_amount / capital * 100) if capital > 0 else 0.0
     budget_remaining_pct = max_concurrent - concurrent_used_pct
     budget_remaining_amount = budget_remaining_pct / 100 * capital
+
+    # Worst-case budget: what remains if all pending LIMITs fill simultaneously.
+    pending_risk_pct = (pending_risk_amount / capital * 100) if capital > 0 else 0.0
+    budget_remaining_if_pending_fill_pct = budget_remaining_pct - pending_risk_pct
+    budget_remaining_if_pending_fill_amount = budget_remaining_if_pending_fill_pct / 100 * capital
 
     # ── Risk settings ─────────────────────────────────────────────────────────
     settings = get_risk_settings(profile_id, db)
@@ -219,11 +234,12 @@ def get_risk_budget(profile_id: int, db: Session) -> dict:
     force_allowed: bool = bool(config.get("risk_guard", {}).get("force_allowed", True))
 
     # ── Alert flag ────────────────────────────────────────────────────────────
-    # Triggered when the used budget crosses alert_threshold_pct % of the max
-    # ceiling AND there is at least one pending trade waiting to be opened.
+    # Fires when total exposure (live + all pending if filled) crosses the
+    # alert threshold — conservative: warns before budget is actually hit.
+    total_risk_used_pct = concurrent_used_pct + pending_risk_pct
     alert_risk_saturated = (
         alert_enabled
-        and concurrent_used_pct >= (max_concurrent * alert_threshold_pct / 100)
+        and total_risk_used_pct >= (max_concurrent * alert_threshold_pct / 100)
         and pending_count > 0
     )
 
@@ -237,6 +253,10 @@ def get_risk_budget(profile_id: int, db: Session) -> dict:
         "budget_remaining_amount": round(budget_remaining_amount, 4),
         "open_trades_count": open_count,
         "pending_trades_count": pending_count,
+        "pending_risk_pct": round(pending_risk_pct, 4),
+        "pending_risk_amount": round(pending_risk_amount, 4),
+        "budget_remaining_if_pending_fill_pct": round(budget_remaining_if_pending_fill_pct, 4),
+        "budget_remaining_if_pending_fill_amount": round(budget_remaining_if_pending_fill_amount, 4),
         "alert_risk_saturated": alert_risk_saturated,
         "alert_threshold_pct": alert_threshold_pct,
         "force_allowed": force_allowed,
@@ -404,6 +424,7 @@ def orchestrate_risk_advisor(
         base_risk_pct=base_risk_pct,
         capital=capital,
         budget_remaining_pct=budget_remaining_pct,
+        pending_risk_pct=budget["pending_risk_pct"],
     )
 
     return {
@@ -426,5 +447,10 @@ def orchestrate_risk_advisor(
         "budget_remaining_amount": result.budget_remaining_amount,
         "budget_blocking": result.budget_blocking,
         "suggested_risk_pct": result.suggested_risk_pct,
+        "pending_risk_pct": result.pending_risk_pct,
+        "pending_risk_amount": result.pending_risk_amount,
+        "budget_remaining_if_pending_fill_pct": result.budget_remaining_if_pending_fill_pct,
+        "budget_remaining_if_pending_fill_amount": result.budget_remaining_if_pending_fill_amount,
+        "pending_budget_warning": result.pending_budget_warning,
         "force_allowed": force_allowed,
     }

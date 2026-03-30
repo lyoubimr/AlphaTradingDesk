@@ -14,6 +14,7 @@ import {
   Crosshair,
   Bell,
   Shield,
+  Zap,
   X,
 } from 'lucide-react'
 import { cn } from '../../lib/cn'
@@ -87,7 +88,7 @@ const NAV_GROUPS: NavGroup[] = [
       },
       {
         to: '/settings/goals',
-        label: 'Goals Settings',
+        label: 'Goals',
         icon: <Target size={16} />,
       },
       {
@@ -97,12 +98,12 @@ const NAV_GROUPS: NavGroup[] = [
       },
       {
         to: '/settings/market-analysis',
-        label: 'Indicator Editor',
+        label: 'Indicators',
         icon: <SlidersHorizontal size={16} />,
       },
       {
         to: '/settings/volatility',
-        label: 'Volatility Settings',
+        label: 'Volatility',
         icon: <Activity size={16} />,
       },
       {
@@ -111,13 +112,18 @@ const NAV_GROUPS: NavGroup[] = [
         icon: <Bell size={16} />,
       },
       {
+        to: '/settings/automation',
+        label: 'Automation',
+        icon: <Zap size={16} />,
+      },
+      {
         to: '/settings/risk',
-        label: 'Risk Settings',
+        label: 'Risk',
         icon: <Shield size={16} />,
       },
       {
         to: '/settings',
-        label: 'Settings',
+        label: 'General',
         icon: <Settings size={16} />,
       },
     ],

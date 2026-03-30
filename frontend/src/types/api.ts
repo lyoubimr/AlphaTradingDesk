@@ -170,11 +170,18 @@ export interface TradeListItem {
   status: 'pending' | 'open' | 'partial' | 'closed' | 'cancelled'
   realized_pnl: string | null       // non-null only when fully closed
   booked_pnl: string | null         // sum of closed-position PnLs (partial trades)
+  exit_price: string | null         // weighted-avg exit price of closed positions
   strategy_id: number | null        // primary strategy (first of strategy_ids, compat)
   /** All strategy IDs linked to this trade (via trade_strategies junction table) */
   strategy_ids: number[]
   closed_at: string | null
   created_at: string
+  /** SL moved to breakeven — current_risk == 0 and trade is open/partial */
+  is_be: boolean
+  /** At least one KrakenOrder row exists for this trade */
+  has_kraken_orders: boolean
+  /** Entry was placed through Kraken automation — manual close is blocked */
+  automation_enabled: boolean
 }
 
 export interface TradePosition_Out {
@@ -369,7 +376,19 @@ export interface GoalProgressItem {
 }
 
 // ── Goal Overrides ────────────────────────────────────────────────────────
-
+export interface GoalHistoryItem {
+  period: string
+  period_start: string   // ISO date
+  period_end: string     // ISO date
+  pnl_pct: string        // Decimal as string
+  pnl_amount: string     // Decimal as string (absolute realized P&L)
+  goal_pct: string | null
+  limit_pct: string | null
+  goal_hit: boolean
+  limit_hit: boolean
+  trade_count: number
+  avg_r: string | null
+}
 export interface GoalOverrideCreate {
   style_id?: number | null
   period: GoalPeriod
@@ -689,6 +708,7 @@ export interface NotificationSettingsOut {
   bots: Array<{ bot_name?: string; bot_token: string; chat_id: string }>
   market_vi_alerts: Record<string, unknown>
   watchlist_alerts: Record<string, unknown>
+  execution_alerts?: Record<string, unknown>
   updated_at: string
 }
 
@@ -724,10 +744,17 @@ export interface RiskAdvisorOut {
   adjusted_risk_amount: number
   multiplier: number
   criteria: CriterionDetail[]
+  // Live budget (open/partial, current_risk — BE trades = 0)
   budget_remaining_pct: number
   budget_remaining_amount: number
   budget_blocking: boolean
   suggested_risk_pct: number
+  // Pending LIMIT orders (potential future exposure)
+  pending_risk_pct: number
+  pending_risk_amount: number
+  budget_remaining_if_pending_fill_pct: number
+  budget_remaining_if_pending_fill_amount: number
+  pending_budget_warning: boolean
   force_allowed: boolean
 }
 
@@ -746,4 +773,60 @@ export interface PairVIOut {
   ema_signal: string | null
   source: string
   computed_at: string
+}
+
+// ── Kraken Execution (Phase 5) ────────────────────────────────────────────
+
+export interface AutomationConfig {
+  enabled: boolean
+  pnl_status_interval_minutes: number
+  max_leverage_override: number | null
+}
+
+export interface AutomationSettingsOut {
+  profile_id: number
+  has_api_keys: boolean
+  config: AutomationConfig
+  updated_at: string
+}
+
+export interface AutomationSettingsUpdateIn {
+  enabled?: boolean
+  pnl_status_interval_minutes?: number
+  max_leverage_override?: number | null
+  /** Write-only: plaintext API key — encrypted server-side, never returned */
+  kraken_api_key?: string
+  /** Write-only: plaintext API secret — encrypted server-side, never returned */
+  kraken_api_secret?: string
+}
+
+export interface ConnectionTestOut {
+  connected: boolean
+  demo: boolean
+  base_url: string
+  error?: string | null
+}
+
+export type KrakenOrderRole   = 'entry' | 'sl' | 'tp1' | 'tp2' | 'tp3'
+export type KrakenOrderStatus = 'open' | 'filled' | 'cancelled' | 'error'
+
+export interface KrakenOrderOut {
+  id: number
+  trade_id: number
+  profile_id: number
+  kraken_order_id: string
+  kraken_fill_id: string | null
+  role: KrakenOrderRole
+  status: KrakenOrderStatus
+  order_type: string
+  symbol: string
+  side: 'buy' | 'sell'
+  size: number
+  limit_price: number | null
+  filled_price: number | null
+  filled_size: number | null
+  error_message: string | null
+  sent_at: string
+  filled_at: string | null
+  cancelled_at: string | null
 }

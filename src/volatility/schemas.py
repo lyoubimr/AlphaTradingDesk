@@ -158,6 +158,7 @@ class NotificationSettingsOut(BaseModel):
     bots: list
     market_vi_alerts: dict
     watchlist_alerts: dict
+    execution_alerts: dict
     updated_at: datetime
 
 
@@ -170,3 +171,4 @@ class NotificationSettingsPatch(BaseModel):
     bots: list | None = None
     market_vi_alerts: dict | None = None
     watchlist_alerts: dict | None = None
+    execution_alerts: dict | None = None

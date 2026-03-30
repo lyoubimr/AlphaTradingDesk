@@ -43,6 +43,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from src.core.models.broker import Instrument, Profile
 from src.core.models.trade import Position, Strategy, Trade, TradeStrategy
+from src.kraken_execution.models import KrakenOrder
 from src.risk_management.defaults import DEFAULT_RISK_CONFIG
 from src.risk_management.engine import _deep_merge
 from src.risk_management.service import get_risk_budget, get_risk_settings
@@ -322,6 +323,18 @@ def _trade_to_out(trade: Trade, size_info: TradeSizeResult | None = None) -> Tra
         Decimal("0.00"),
     )
     out.booked_pnl = booked if booked != Decimal("0.00") else None
+    # Compute exit_price: lot-percentage weighted average of closed positions' exit prices
+    closed_pos = [p for p in trade.positions if p.status == "closed" and p.exit_price is not None]
+    if closed_pos:
+        total_pct = sum((Decimal(str(p.lot_percentage)) for p in closed_pos), Decimal("0"))
+        if total_pct > 0:
+            out.exit_price = (
+                sum(
+                    (Decimal(str(p.exit_price)) * Decimal(str(p.lot_percentage)) for p in closed_pos),
+                    Decimal("0"),
+                )
+                / total_pct
+            ).quantize(Decimal("0.00000001"))
     return out
 
 
@@ -619,6 +632,17 @@ def list_trades(
     for trade_id, strategy_id in strat_rows:
         strat_map.setdefault(trade_id, []).append(strategy_id)
 
+    # Bulk-fetch which trades have at least one KrakenOrder (avoid N+1)
+    kraken_trade_ids: set[int] = set()
+    if trade_ids:
+        kraken_rows = (
+            db.query(KrakenOrder.trade_id)
+            .filter(KrakenOrder.trade_id.in_(trade_ids))
+            .distinct()
+            .all()
+        )
+        kraken_trade_ids = {r[0] for r in kraken_rows}
+
     items = []
     for t in trades:
         item = TradeListItem.model_validate(t)
@@ -632,7 +656,26 @@ def list_trades(
             )
             or None
         )
+        # exit_price: lot-percentage weighted average of closed positions' exit prices
+        closed_pos = [p for p in t.positions if p.status == "closed" and p.exit_price is not None]
+        if closed_pos:
+            total_pct = sum((Decimal(str(p.lot_percentage)) for p in closed_pos), Decimal("0"))
+            if total_pct > 0:
+                item.exit_price = (
+                    sum(
+                        (Decimal(str(p.exit_price)) * Decimal(str(p.lot_percentage)) for p in closed_pos),
+                        Decimal("0"),
+                    )
+                    / total_pct
+                ).quantize(Decimal("0.00000001"))
         item.strategy_ids = strat_map.get(t.id, [])
+        # is_be: SL has been moved to breakeven (current_risk == 0, trade still active)
+        item.is_be = (
+            t.status in ("open", "partial")
+            and t.current_risk is not None
+            and t.current_risk == Decimal("0")
+        )
+        item.has_kraken_orders = t.id in kraken_trade_ids
         items.append(item)
     return items
 
