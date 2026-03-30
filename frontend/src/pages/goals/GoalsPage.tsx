@@ -320,17 +320,21 @@ function GoalHistorySection({
   const [loading,       setLoading]       = useState(false)
   const [error,         setError]         = useState<string | null>(null)
 
-  const fetchHistory = useCallback(() => {
-    setLoading(true)
-    setError(null)
+  useEffect(() => {
     const limit = historyPeriod === 'daily' ? 30 : historyPeriod === 'weekly' ? 12 : 6
-    goalsApi.history(profileId, historyPeriod, limit)
-      .then(setData)
-      .catch((e: Error) => setError(e.message))
-      .finally(() => setLoading(false))
+    void (async () => {
+      setLoading(true)
+      setError(null)
+      try {
+        const result = await goalsApi.history(profileId, historyPeriod, limit)
+        setData(result)
+      } catch (e: unknown) {
+        setError(e instanceof Error ? e.message : 'Unknown error')
+      } finally {
+        setLoading(false)
+      }
+    })()
   }, [profileId, historyPeriod])
-
-  useEffect(() => { fetchHistory() }, [fetchHistory])
 
   const fmt = new Intl.NumberFormat('en-US', {
     style: 'currency', currency: currency || 'USD', maximumFractionDigits: 0,
