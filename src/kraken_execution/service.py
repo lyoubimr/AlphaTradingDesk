@@ -192,7 +192,7 @@ def _compute_lot_size(trade: Trade, instrument: Instrument) -> Decimal:
     Returns the quantized Decimal lot size ready for Kraken.
     """
     raw_size = trade.risk_amount / abs(trade.entry_price - trade.stop_loss)
-    return quantize_size(raw_size, instrument.contract_value_precision)
+    return quantize_size(raw_size, instrument.contract_value_precision or 2)
 
 
 def _entry_side(trade: Trade) -> str:
@@ -334,6 +334,7 @@ def place_sl_tp_orders(
         List of inserted KrakenOrder rows.
     """
     instrument = trade.instrument
+    assert instrument is not None, f"Trade {trade.id} has no instrument loaded"
     exit_side = _exit_side(trade)
     orders: list[KrakenOrder] = []
 
@@ -372,7 +373,7 @@ def place_sl_tp_orders(
         tp_size = (Decimal(str(pos.lot_percentage)) / Decimal("100")) * entry_size
         # Quantize TP size — use same precision
         from src.kraken_execution.precision import quantize_size as _qs  # noqa: PLC0415
-        tp_size = _qs(tp_size, instrument.contract_value_precision)
+        tp_size = _qs(tp_size, instrument.contract_value_precision or 2)
 
         tp_result = client.send_order(
             order_type="lmt",
@@ -712,8 +713,11 @@ def sync_pending_fill(trade_id: int, db: Session) -> dict:
             )
             .first()
         )
-        fill_price = float(filled_entry.filled_price) if filled_entry and filled_entry.filled_price else None
-        return {"filled": bool(filled_entry), "fill_price": fill_price, "skipped": True}
+        return {
+            "filled": bool(filled_entry),
+            "fill_price": float(filled_entry.filled_price) if filled_entry and filled_entry.filled_price else None,
+            "skipped": True,
+        }
 
     settings_row = get_automation_settings(trade.profile_id, db)
 

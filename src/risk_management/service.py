@@ -12,6 +12,7 @@ from __future__ import annotations
 import copy
 import logging
 from datetime import UTC, datetime
+from decimal import Decimal
 
 import httpx
 from fastapi import HTTPException
@@ -208,11 +209,11 @@ def get_risk_budget(profile_id: int, db: Session) -> dict:
     # Live risk: actual capital at risk RIGHT NOW.
     # Uses current_risk for open/partial — BE trades (current_risk=0) are free.
     live_risk_used_amount = sum(
-        float(t.current_risk) for t in active_trades if t.status in ("open", "partial")
+        float(t.current_risk or Decimal("0")) for t in active_trades if t.status in ("open", "partial")
     )
     # Pending risk: LIMIT orders not yet filled — reserved budget if they all trigger.
     pending_risk_amount = sum(
-        float(t.risk_amount) for t in active_trades if t.status == "pending"
+        float(t.risk_amount or Decimal("0")) for t in active_trades if t.status == "pending"
     )
 
     concurrent_used_pct = (live_risk_used_amount / capital * 100) if capital > 0 else 0.0
