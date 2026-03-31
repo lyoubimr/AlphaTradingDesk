@@ -743,8 +743,20 @@ def sync_pending_fill(trade_id: int, db: Session) -> dict:
             fill_price_raw = matched_fill.get("price") or matched_fill.get("fillPrice")
             fill_id = matched_fill.get("fill_id") or matched_fill.get("fillId")
 
-        # Fall back to mark price if fill not found (edge case: old fill purged)
+        # If order left open_orders but has no fill record:
+        # - LIMIT orders: the order was cancelled/rejected by Kraken — never use mark price.
+        #   A LIMIT buy fills at ≤ limit_price, so a mark price fill is factually wrong.
+        # - MARKET orders only: fill record may be purged from the 100-fill window → fallback ok.
         if fill_price_raw is None:
+            if entry_order.order_type == "limit":
+                logger.warning(
+                    "sync_fill_limit_order_not_found_skipped",
+                    trade_id=trade_id,
+                    kraken_order_id=entry_order.kraken_order_id,
+                )
+                return {"filled": False, "fill_price": None}
+
+            # Market order only: fall back to mark price (fill may be > 100 fills ago)
             instrument = _resolve_instrument(trade, db)
             try:
                 from src.volatility.kraken_client import KrakenClient as _PubClient  # noqa: PLC0415
@@ -761,6 +773,29 @@ def sync_pending_fill(trade_id: int, db: Session) -> dict:
             )
 
         fill_price = Decimal(str(fill_price_raw))
+
+        # Sanity-check: a LIMIT buy can never fill above its limit price (and vice versa).
+        # If Kraken returns a physically impossible fill price, abort rather than book a wrong trade.
+        if entry_order.order_type == "limit" and trade.entry_price:
+            limit_price = Decimal(str(trade.entry_price))
+            # Allow 0.1% tolerance for rounding differences
+            tolerance = Decimal("0.001")
+            if entry_order.side == "buy" and fill_price > limit_price * (1 + tolerance):
+                logger.error(
+                    "sync_fill_invalid_fill_price_above_limit",
+                    trade_id=trade_id,
+                    fill_price=str(fill_price),
+                    limit_price=str(limit_price),
+                )
+                return {"filled": False, "fill_price": None}
+            if entry_order.side == "sell" and fill_price < limit_price * (1 - tolerance):
+                logger.error(
+                    "sync_fill_invalid_fill_price_below_limit",
+                    trade_id=trade_id,
+                    fill_price=str(fill_price),
+                    limit_price=str(limit_price),
+                )
+                return {"filled": False, "fill_price": None}
 
         # Step 3 — update entry order row
         entry_order.status = "filled"
