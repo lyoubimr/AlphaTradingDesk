@@ -76,6 +76,14 @@ def _he(s: str) -> str:
     return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
+def _fmt_price(v) -> str:
+    """Format a price value removing trailing decimal zeros (e.g. '315.25000000' → '315.25')."""
+    try:
+        return f"{float(v):.8g}"
+    except (TypeError, ValueError):
+        return str(v)
+
+
 def _score_100_to_regime(score_100: float) -> str:
     """Map VI score (0–100) to regime using default thresholds."""
     s = score_100 / 100.0
@@ -704,29 +712,40 @@ def format_execution_event_message(event: str, **ctx) -> str:
     elif event == "BE_MOVED" and ctx.get("stop_price") is not None:
         lines.append(f"🔒 New SL (BE): <code>{ctx['stop_price']}</code>")
     elif event == "PNL_STATUS":
-        if ctx.get("current_price") is not None:
-            lines.append(f"📍 Current: <code>{ctx['current_price']}</code>")
-        if ctx.get("entry_price") is not None:
-            lines.append(f"🏷 Entry: <code>{ctx['entry_price']}</code>")
+        entry   = ctx.get("entry_price")
+        current = ctx.get("current_price")
         pnl_pct = ctx.get("pnl_pct")
+        # Current price + pnl% on one line
+        if current is not None:
+            price_line = f"📍 Current: <code>{_fmt_price(current)}</code>"
+            if pnl_pct is not None:
+                price_line += f"  ·  <code>{pnl_pct}%</code>"
+            lines.append(price_line)
+        if entry is not None:
+            lines.append(f"🏷 Entry: <code>{_fmt_price(entry)}</code>")
+        # Unrealized PnL in quote currency (if available from position size)
         if ctx.get("unrealized_pnl") is not None:
             pnl = float(ctx["unrealized_pnl"])
             pnl_str = f"+{pnl:.2f}" if pnl >= 0 else f"{pnl:.2f}"
-            if pnl_pct is not None:
-                lines.append(f"💵 Unrealized PnL: <code>{pnl_str} ({pnl_pct}%)</code>")
-            else:
-                lines.append(f"💵 Unrealized PnL: <code>{pnl_str}</code>")
-        elif pnl_pct is not None:
-            lines.append(f"💵 Est. PnL: <code>{pnl_pct}%</code>")
+            lines.append(f"💵 Unrealized: <code>{pnl_str}</code>")
+        # TPs compact (TP1 · TP2 · TP3) — only non-None, open TPs
+        tp_parts = []
+        for n in (1, 2, 3):
+            v = ctx.get(f"tp{n}_price")
+            if v is not None:
+                tp_parts.append(f"TP{n} {_fmt_price(v)}")
+        if tp_parts:
+            lines.append(f"🎯 {' · '.join(tp_parts)}")
+        # SL + distance from current price
         if ctx.get("sl_price") is not None:
-            sl_line = f"🛑 SL: <code>{ctx['sl_price']}</code>"
-            if ctx.get("current_price") is not None:
+            sl_line = f"🛑 SL: <code>{_fmt_price(ctx['sl_price'])}</code>"
+            if current is not None:
                 try:
-                    cp = float(ctx["current_price"])
+                    cp = float(current)
                     sl = float(ctx["sl_price"])
                     d = ctx.get("direction", "").upper()
                     dist_pct = (cp - sl) / cp * 100 if d == "LONG" else (sl - cp) / cp * 100
-                    sl_line += f" · <code>−{dist_pct:.1f}% away</code>"
+                    sl_line += f"  ·  <code>−{dist_pct:.1f}% away</code>"
                 except (TypeError, ValueError, ZeroDivisionError):
                     pass
             lines.append(sl_line)

@@ -195,7 +195,7 @@ def get_market_vi_history(
 
     rows = (
         q.order_by(MarketVISnapshot.timestamp.desc())
-        .limit(min(limit, 500))
+        .limit(min(limit, 2000))
         .all()
     )
     return [

@@ -442,11 +442,17 @@ def send_pnl_status(self: Task) -> dict:  # noqa: ARG001
 
                 with _make_client(settings_row) as client:
                     open_positions = client.get_open_positions()
+                    # Tickers provide markPrice — openPositions does NOT include it
+                    try:
+                        tickers = client.get_tickers()
+                    except Exception:  # noqa: BLE001
+                        tickers = {}
                 pos_by_symbol = {p.get("symbol"): p for p in open_positions}
                 logger.debug(
                     "send_pnl_status: positions fetched",
                     profile_id=profile_id,
                     position_symbols=list(pos_by_symbol.keys()),
+                    ticker_count=len(tickers),
                     trade_count=len(trades),
                 )
 
@@ -470,10 +476,34 @@ def send_pnl_status(self: Task) -> dict:  # noqa: ARG001
                     instr = trade.instrument
                     symbol = instr.symbol if instr else None
                     pos = pos_by_symbol.get(symbol, {}) if symbol else {}
-                    unrealized_pnl = pos.get("unrealisedPnl") or pos.get("pnl")
-                    current_price = pos.get("markPrice") or pos.get("lastPrice")
+                    ticker = tickers.get(symbol, {}) if symbol else {}
+
+                    # markPrice comes from tickers — openPositions returns no live price
+                    raw_mark = ticker.get("markPrice") or ticker.get("last")
+                    current_price = str(raw_mark) if raw_mark is not None else None
+
+                    # Unrealized PnL in quote currency (size × price diff)
+                    unrealized_pnl: float | None = None
+                    pos_size = pos.get("size")
+                    if raw_mark is not None and pos_size:
+                        try:
+                            cp = float(raw_mark)
+                            ep = float(trade.entry_price)
+                            sz = float(pos_size)
+                            if trade.direction == "long":
+                                unrealized_pnl = round(sz * (cp - ep), 2)
+                            else:
+                                unrealized_pnl = round(sz * (ep - cp), 2)
+                        except (TypeError, ValueError):
+                            pass
 
                     pnl_pct = _compute_pnl_pct(trade.direction, current_price, trade.entry_price)
+
+                    # TPs from the positions relationship (sorted by position_number)
+                    tp_ctx: dict[str, str | None] = {}
+                    for p in sorted(trade.positions, key=lambda x: x.position_number):
+                        if p.status != "cancelled":
+                            tp_ctx[f"tp{p.position_number}_price"] = str(p.take_profit_price)
 
                     _notify_event(
                         profile_id,
@@ -487,6 +517,7 @@ def send_pnl_status(self: Task) -> dict:  # noqa: ARG001
                         current_price=current_price,
                         pnl_pct=pnl_pct,
                         sl_price=str(trade.stop_loss) if trade.stop_loss else None,
+                        **tp_ctx,
                     )
                     notified += 1
 
