@@ -528,7 +528,7 @@ export function MarketVIPage() {
             <p className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-3">History</p>
             {activeTF === null ? (
               <div className="space-y-4">
-                <VIHistoryChart timeframe="aggregated" defaultColor={heroColor} onCreateAlert={handleCreateAlert} />
+                <VIHistoryChart timeframe="aggregated" defaultColor={heroColor} onCreateAlert={handleCreateAlert} expandable />
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   {TIMEFRAMES.map((tf) => (
                     <VIHistoryChart key={tf} timeframe={tf} compact />
@@ -536,7 +536,7 @@ export function MarketVIPage() {
                 </div>
               </div>
             ) : (
-              <VIHistoryChart timeframe={activeTF} defaultColor={heroColor} onCreateAlert={handleCreateAlert} />
+              <VIHistoryChart timeframe={activeTF} defaultColor={heroColor} onCreateAlert={handleCreateAlert} expandable />
             )}
           </div>
 
