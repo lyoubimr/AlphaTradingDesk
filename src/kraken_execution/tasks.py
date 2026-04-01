@@ -387,6 +387,21 @@ def _handle_fill(order: KrakenOrder, db: Session) -> None:
             trade_pnl=str(trade.realized_pnl) if trade.realized_pnl is not None else None,
         )
 
+        # Auto break-even on TP1 — if opted-in, move SL to entry_price automatically
+        if tp_num == 1 and trade.be_on_tp1:
+            try:
+                db.refresh(trade)
+                if trade.status in ("open", "partial") and trade.stop_loss != trade.entry_price:
+                    from src.kraken_execution.service import (
+                        move_to_breakeven as _kraken_be,  # noqa: PLC0415
+                    )
+                    from src.trades.service import move_to_breakeven as _db_be  # noqa: PLC0415
+                    _db_be(db, trade.id)         # update stop_loss + current_risk in DB
+                    _kraken_be(trade.id, db)     # cancel/replace SL on Kraken + BE_MOVED notif
+                    logger.info("be_on_tp1_triggered", trade_id=trade.id)
+            except Exception:  # noqa: BLE001
+                logger.exception("be_on_tp1_auto_failed", trade_id=trade.id)
+
 
 # ── send_pnl_status ───────────────────────────────────────────────────────────────
 
