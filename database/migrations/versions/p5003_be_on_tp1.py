@@ -11,7 +11,6 @@ Create Date: 2026-04-01
 
 from __future__ import annotations
 
-import sqlalchemy as sa
 from alembic import op
 
 # revision identifiers, used by Alembic.
@@ -22,14 +21,8 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.add_column(
-        "trades",
-        sa.Column(
-            "be_on_tp1",
-            sa.Boolean,
-            nullable=False,
-            server_default=sa.text("false"),
-        ),
+    op.execute(
+        "ALTER TABLE trades ADD COLUMN IF NOT EXISTS be_on_tp1 BOOLEAN NOT NULL DEFAULT false"
     )
 
 
