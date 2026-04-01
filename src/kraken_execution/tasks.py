@@ -128,7 +128,30 @@ def poll_pending_orders(self: Task) -> dict:
 
                     fill = fill_by_order_id.get(entry.kraken_order_id)
                     if fill is None:
-                        continue  # no fill found yet — check again next cycle
+                        # Order left Kraken's open book with no matching fill:
+                        # it was cancelled/rejected on Kraken's side (margin check,
+                        # post-only, user cancel on exchange, etc.).
+                        # Mark it cancelled so the trade stops looping forever.
+                        logger.warning(
+                            "limit_entry_cancelled_on_kraken",
+                            trade_id=entry.trade_id,
+                            kraken_order_id=entry.kraken_order_id,
+                        )
+                        entry.status = "cancelled"
+                        trade_for_cancel = db.query(Trade).filter(Trade.id == entry.trade_id).first()
+                        if trade_for_cancel and trade_for_cancel.status == "pending":
+                            trade_for_cancel.automation_enabled = False
+                        db.commit()
+                        _notify_event(
+                            profile_id,
+                            "ORDER_FAILED",
+                            db,
+                            trade_id=entry.trade_id,
+                            pair=entry.symbol,
+                            direction=trade_for_cancel.direction if trade_for_cancel else "",
+                            error_message="Limit order disappeared from Kraken with no fill (cancelled/rejected)",
+                        )
+                        continue
 
                     fill_id = fill.get("fill_id") or fill.get("uid", "")
                     if entry.kraken_fill_id == fill_id:
