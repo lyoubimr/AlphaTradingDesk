@@ -347,18 +347,38 @@ def place_sl_tp_orders(
         stop_price=str(trade.stop_loss),
         reduce_only=True,
     )
-    sl_order_id = sl_result.get("sendStatus", {}).get("order_id", "")
+    sl_send_status = sl_result.get("sendStatus", {})
+    sl_order_id = sl_send_status.get("order_id", "") or ""
+    sl_placement_status = sl_send_status.get("status", "unknown")
+    # Kraken can return an order_id even for orders it will cancel (reduce_only with no
+    # position). We store the real placement status so phantom orders are visible as "error"
+    # instead of "open" — prevents false monitoring and UI confusion.
+    sl_order_db_status = "open" if sl_placement_status == "placed" else "error"
+    if sl_order_db_status == "error":
+        logger.error(
+            "automation_sl_placement_rejected",
+            trade_id=trade.id,
+            kraken_status=sl_placement_status,
+            kraken_order_id=sl_order_id or "(none)",
+            reason=sl_send_status.get("receivedTime", ""),
+        )
+    # If Kraken returned no order_id (extremely rare), generate a unique synthetic ID.
+    # Must be unique due to UNIQUE constraint on kraken_order_id.
+    if not sl_order_id:
+        import uuid as _uuid  # noqa: PLC0415
+        sl_order_id = f"NO-ID-sl-{trade.id}-{_uuid.uuid4().hex[:8]}"
     sl_order = KrakenOrder(
         trade_id=trade.id,
         profile_id=trade.profile_id,
         kraken_order_id=sl_order_id,
         role="sl",
-        status="open",
+        status=sl_order_db_status,
         order_type="stop",
         symbol=instrument.symbol,
         side=exit_side,
         size=float(entry_size),
         limit_price=None,
+        error_message=None if sl_order_db_status == "open" else f"Kraken rejected: {sl_placement_status}",
     )
     db.add(sl_order)
     orders.append(sl_order)
@@ -383,19 +403,34 @@ def place_sl_tp_orders(
             limit_price=str(pos.take_profit_price),
             reduce_only=True,
         )
-        tp_order_id = tp_result.get("sendStatus", {}).get("order_id", "")
+        tp_send_status = tp_result.get("sendStatus", {})
+        tp_order_id = tp_send_status.get("order_id", "") or ""
+        tp_placement_status = tp_send_status.get("status", "unknown")
+        tp_order_db_status = "open" if tp_placement_status == "placed" else "error"
+        if tp_order_db_status == "error":
+            logger.error(
+                "automation_tp_placement_rejected",
+                trade_id=trade.id,
+                position_number=pos.position_number,
+                kraken_status=tp_placement_status,
+                kraken_order_id=tp_order_id or "(none)",
+            )
         role = role_map.get(pos.position_number, "tp1")
+        if not tp_order_id:
+            import uuid as _uuid  # noqa: PLC0415
+            tp_order_id = f"NO-ID-{role}-{trade.id}-{_uuid.uuid4().hex[:8]}"
         tp_order = KrakenOrder(
             trade_id=trade.id,
             profile_id=trade.profile_id,
             kraken_order_id=tp_order_id,
             role=role,
-            status="open",
+            status=tp_order_db_status,
             order_type="limit",
             symbol=instrument.symbol,
             side=exit_side,
             size=float(tp_size),
             limit_price=float(pos.take_profit_price),
+            error_message=None if tp_order_db_status == "open" else f"Kraken rejected: {tp_placement_status}",
         )
         db.add(tp_order)
         orders.append(tp_order)
@@ -404,11 +439,15 @@ def place_sl_tp_orders(
     for o in orders:
         db.refresh(o)
 
+    placed_count = sum(1 for o in orders if o.status == "open")
     logger.info(
         "automation_sl_tp_placed",
         trade_id=trade.id,
         sl_order_id=sl_order_id,
+        sl_status=sl_placement_status,
         tp_count=len(open_positions),
+        placed_count=placed_count,
+        error_count=len(orders) - placed_count,
     )
     return orders
 
