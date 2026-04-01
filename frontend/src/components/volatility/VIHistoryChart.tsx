@@ -11,7 +11,6 @@ import {
   XAxis,
   YAxis,
   CartesianGrid,
-  Tooltip,
   ReferenceLine,
   Customized,
   usePlotArea,
@@ -122,33 +121,6 @@ function formatXTick(ts: number, range: Range): string {
   return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
 }
 
-// ── Custom tooltip ─────────────────────────────────────────────────────────
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function CustomTooltip({ active, payload }: { active?: boolean; payload?: any[] }) {
-  if (!active || !payload?.length) return null
-  const d = payload[0].payload as ChartPoint
-  const color = REGIME_COLOR_HEX[d.regime] ?? '#a1a1aa'
-  const dt = new Date(d.ts)
-  const dateStr = dt.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
-  const timeStr = dt.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
-  return (
-    <div
-      className="rounded px-2 py-1 pointer-events-none"
-      style={{ background: '#181818cc', border: '1px solid #3f3f46', fontSize: 10 }}
-    >
-      <div>
-        <span className="font-mono font-bold" style={{ color }}>{d.score.toFixed(1)}</span>
-        <span className="text-zinc-600 mx-1">·</span>
-        <span style={{ color }}>{d.regime}</span>
-      </div>
-      <div className="text-zinc-500 font-mono" style={{ fontSize: 9, marginTop: 2 }}>
-        {dateStr} {timeStr}
-      </div>
-    </div>
-  )
-}
-
 // ── Smart level detection ─────────────────────────────────────────────────
 
 interface ProposedLevel {
@@ -255,7 +227,6 @@ function detectKeyLevels(data: ChartPoint[]): ProposedLevel[] {
 // rawMousePos: actual mouse cursor in SVG coordinates (horizontal crosshair + badge).
 // Drawn segments rendered as SVG lines in plot-area ratio coordinates (resize-safe).
 // Defined at module level (stable reference) so React never remounts it.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function ChartOverlay({ hoverCoord, rawMousePos, color, domainMin, domainMax, drawMode, pendingPoint, drawnSegments, selectedSegIdx, hoveredTs, range, onPlotArea }: {
   hoverCoord:     { x: number; y: number } | null
   rawMousePos:    { x: number; y: number } | null
@@ -450,7 +421,6 @@ export function VIHistoryChart({ timeframe, defaultColor = '#a1a1aa', compact = 
 
   useEffect(() => {
     let cancelled = false
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoading(true)
     setError(null)
 
