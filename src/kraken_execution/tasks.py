@@ -35,6 +35,18 @@ from src.kraken_execution.service import (
 logger = structlog.get_logger()
 
 
+# ── PnL helper ────────────────────────────────────────────────────────────────
+
+def _compute_pnl_pct(direction: str, fill_price, entry_price) -> str | None:
+    """Return formatted PnL % string (e.g. '+7.82') for a fill vs entry, or None."""
+    try:
+        sign = 1 if direction == "long" else -1
+        pct = sign * (float(fill_price) - float(entry_price)) / float(entry_price) * 100
+        return f"{pct:+.2f}"
+    except (TypeError, ValueError, ZeroDivisionError):
+        return None
+
+
 # ── DB helper (mirrors pattern from volatility/tasks.py) ─────────────────────
 
 def _get_db() -> Session:
@@ -162,6 +174,7 @@ def poll_pending_orders(self: Task) -> dict:
                         direction=trade.direction if trade else "",
                         size=str(entry.filled_size or entry.size),
                         filled_price=str(entry.filled_price or ""),
+                        sl_price=str(trade.stop_loss) if trade and trade.stop_loss else None,
                     )
                     _notify_event(profile_id, "LIMIT_FILLED", db, **_ctx)
                     _notify_event(profile_id, "TRADE_OPENED", db, **_ctx)
@@ -339,6 +352,8 @@ def _handle_fill(order: KrakenOrder, db: Session) -> None:
             trade_id=trade.id, pair=trade.pair, direction=trade.direction,
             filled_price=str(order.filled_price or ""),
             size=str(order.filled_size or order.size),
+            pnl_pct=_compute_pnl_pct(trade.direction, fill_price, trade.entry_price),
+            trade_pnl=str(trade.realized_pnl) if trade.realized_pnl is not None else None,
         )
 
     elif order.role in ("tp1", "tp2", "tp3"):
@@ -368,6 +383,8 @@ def _handle_fill(order: KrakenOrder, db: Session) -> None:
             trade_id=trade.id, pair=trade.pair, direction=trade.direction,
             filled_price=str(order.filled_price or ""),
             size=str(order.filled_size or order.size),
+            pnl_pct=_compute_pnl_pct(trade.direction, fill_price, trade.entry_price),
+            trade_pnl=str(trade.realized_pnl) if trade.realized_pnl is not None else None,
         )
 
 
@@ -406,16 +423,42 @@ def send_pnl_status(self: Task) -> dict:  # noqa: ARG001
         for profile_id, trades in by_profile.items():
             try:
                 settings_row = get_automation_settings(profile_id, db)
+                interval_min = int(settings_row.config.get("pnl_status_interval_minutes", 60))
+
                 with _make_client(settings_row) as client:
                     open_positions = client.get_open_positions()
                 pos_by_symbol = {p.get("symbol"): p for p in open_positions}
+                logger.debug(
+                    "send_pnl_status: positions fetched",
+                    profile_id=profile_id,
+                    position_symbols=list(pos_by_symbol.keys()),
+                    trade_count=len(trades),
+                )
 
                 for trade in trades:
+                    # Per-trade Redis cooldown
+                    redis_key = f"atd:pnl_status_sent:{profile_id}:{trade.id}"
+                    try:
+                        from src.volatility.cache import _get_redis  # noqa: PLC0415
+                        r = _get_redis()
+                        if r.get(redis_key):
+                            logger.debug(
+                                "send_pnl_status: cooldown active, skipping",
+                                trade_id=trade.id,
+                                profile_id=profile_id,
+                            )
+                            continue
+                        r.setex(redis_key, interval_min * 60, "1")
+                    except Exception:  # noqa: BLE001
+                        pass  # Redis unavailable — proceed without cooldown
+
                     instr = trade.instrument
                     symbol = instr.symbol if instr else None
                     pos = pos_by_symbol.get(symbol, {}) if symbol else {}
                     unrealized_pnl = pos.get("unrealisedPnl") or pos.get("pnl")
                     current_price = pos.get("markPrice") or pos.get("lastPrice")
+
+                    pnl_pct = _compute_pnl_pct(trade.direction, current_price, trade.entry_price)
 
                     _notify_event(
                         profile_id,
@@ -427,6 +470,8 @@ def send_pnl_status(self: Task) -> dict:  # noqa: ARG001
                         entry_price=str(trade.entry_price),
                         unrealized_pnl=unrealized_pnl,
                         current_price=current_price,
+                        pnl_pct=pnl_pct,
+                        sl_price=str(trade.stop_loss) if trade.stop_loss else None,
                     )
                     notified += 1
 

@@ -270,12 +270,17 @@ def _resolve_ma_direction_match(
     direction: str,
     db: Session,
     timeframe: str | None = None,
+    pair: str | None = None,
 ) -> str | None:
     """Return "aligned", "opposed", or None based on session bias vs direction.
 
     Resolves the timeframe tier (ltf/mtf/htf) from the market_analysis_indicators
     table (tv_timeframe → timeframe_level), then selects the matching bias field.
-    Fallback chain: tier-specific → bias_composite_a → bias_htf_a.
+
+    Asset selection (for BTC-vs-Alts modules):
+      - Pairs containing XBT or BTC → use _a bias (Asset A = BTC).
+      - All other pairs             → use _b bias (Asset B = Alts), fallback to _a.
+    Fallback chain: tier-specific → bias_composite → bias_htf.
     """
     if ma_session_id is None:
         return None
@@ -297,12 +302,33 @@ def _resolve_ma_direction_match(
         )
         tier = indicator  # "ltf" | "mtf" | "htf" | None
 
-    if tier == "ltf":
-        bias = session.bias_ltf_a or session.bias_composite_a or session.bias_htf_a
-    elif tier == "mtf":
-        bias = session.bias_mtf_a or session.bias_composite_a or session.bias_htf_a
+    # BTC/XBT pairs → use Asset A bias; everything else → Asset B (Alts) with _a fallback
+    pair_upper = (pair or "").upper()
+    is_btc = any(x in pair_upper for x in ("XBT", "BTC"))
+
+    if is_btc:
+        if tier == "ltf":
+            bias = session.bias_ltf_a or session.bias_composite_a or session.bias_htf_a
+        elif tier == "mtf":
+            bias = session.bias_mtf_a or session.bias_composite_a or session.bias_htf_a
+        else:
+            bias = session.bias_composite_a or session.bias_htf_a
     else:
-        bias = session.bias_composite_a or session.bias_htf_a
+        if tier == "ltf":
+            bias = (
+                session.bias_ltf_b or session.bias_composite_b or session.bias_htf_b
+                or session.bias_ltf_a or session.bias_composite_a or session.bias_htf_a
+            )
+        elif tier == "mtf":
+            bias = (
+                session.bias_mtf_b or session.bias_composite_b or session.bias_htf_b
+                or session.bias_mtf_a or session.bias_composite_a or session.bias_htf_a
+            )
+        else:
+            bias = (
+                session.bias_composite_b or session.bias_htf_b
+                or session.bias_composite_a or session.bias_htf_a
+            )
 
     if bias is None:
         return None
@@ -404,7 +430,7 @@ def orchestrate_risk_advisor(
         )
 
     # ── 6. MA direction match ─────────────────────────────────────────────────
-    ma_direction_match: str | None = _resolve_ma_direction_match(ma_session_id, direction, db, timeframe)
+    ma_direction_match: str | None = _resolve_ma_direction_match(ma_session_id, direction, db, timeframe, pair=pair)
 
     # ── 7. Strategy stats ─────────────────────────────────────────────────────
     strategy_wr, strategy_has_stats = _resolve_strategy_stats(strategy_id, db)
