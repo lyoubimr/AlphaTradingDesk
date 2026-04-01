@@ -1000,6 +1000,7 @@ export function NewTradePage() {
   // ── Automation (Crypto profiles only) ────────────────────────────────────
   const [automateOnCreate,        setAutomateOnCreate]        = useState(false)
   const [profileAutomationEnabled, setProfileAutomationEnabled] = useState(false)
+  const [beOnTp1,                 setBeOnTp1]                 = useState(false)
 
   // Latest Market Analysis session — auto-fetched for ma_direction in Risk Advisor
   // NOTE: not filtered by profile — MA sessions represent global market context
@@ -1041,6 +1042,7 @@ export function NewTradePage() {
     if (!isCrypto || !activeProfile?.id) {
       setProfileAutomationEnabled(false)
       setAutomateOnCreate(false)
+      setBeOnTp1(false)
       return
     }
     automationApi.getSettings(activeProfile.id)
@@ -1435,6 +1437,7 @@ export function NewTradePage() {
         confidence_score:     confidence ? Number(confidence) : null,
         force:                forceOpen || undefined,
         dynamic_risk_snapshot: advisorSnapshot ?? undefined,
+        be_on_tp1:            automateOnCreate && beOnTp1 ? true : undefined,
       })
       // Upload entry screenshots sequentially (fire-and-forget errors — non-blocking)
       for (const file of entryScreenshots) {
@@ -1569,52 +1572,93 @@ export function NewTradePage() {
 
         {/* ── Automation toggle (Crypto profiles only) ──────────────────── */}
         {isCrypto && (
-          <div className={cn(
-            'flex items-center justify-between gap-4 rounded-xl border p-4',
-            automateOnCreate
-              ? 'bg-brand-500/10 border-brand-500/30'
-              : 'bg-surface-800 border-surface-700',
-          )}>
-            <div className="min-w-0">
-              <div className="flex items-center gap-2">
-                <Zap size={14} className={automateOnCreate ? 'text-brand-400' : 'text-slate-500'} />
-                <p className="text-sm font-semibold text-slate-200">Enable automation</p>
-              </div>
-              {profileAutomationEnabled ? (
-                <p className="text-[11px] text-slate-500 mt-0.5">
-                  Places a LIMIT entry order on Kraken Futures immediately after creation.
-                </p>
-              ) : (
-                <p className="text-[11px] text-amber-400/80 mt-0.5 flex items-center gap-1">
-                  <AlertTriangle size={10} className="shrink-0" />
-                  Profile automation disabled —{' '}
-                  <a href="/settings/automation" className="underline text-amber-400 hover:text-amber-300">
-                    Settings → Automation
-                  </a>
-                </p>
-              )}
-            </div>
-            <button
-              type="button"
-              role="switch"
-              aria-checked={automateOnCreate}
-              disabled={!profileAutomationEnabled}
-              onClick={() => setAutomateOnCreate((v) => !v)}
-              className={cn(
-                'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent',
-                'transition-colors duration-200 focus:outline-none',
-                'disabled:opacity-40 disabled:cursor-not-allowed',
-                automateOnCreate ? 'bg-brand-500' : 'bg-surface-500',
-              )}
-            >
-              <span
-                className={cn(
-                  'pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow',
-                  'transition-transform duration-200',
-                  automateOnCreate ? 'translate-x-5' : 'translate-x-0',
+          <div className="flex flex-col gap-2">
+            <div className={cn(
+              'flex items-center justify-between gap-4 rounded-xl border p-4',
+              automateOnCreate
+                ? 'bg-brand-500/10 border-brand-500/30'
+                : 'bg-surface-800 border-surface-700',
+            )}>
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <Zap size={14} className={automateOnCreate ? 'text-brand-400' : 'text-slate-500'} />
+                  <p className="text-sm font-semibold text-slate-200">Enable automation</p>
+                </div>
+                {profileAutomationEnabled ? (
+                  <p className="text-[11px] text-slate-500 mt-0.5">
+                    Places a LIMIT entry order on Kraken Futures immediately after creation.
+                  </p>
+                ) : (
+                  <p className="text-[11px] text-amber-400/80 mt-0.5 flex items-center gap-1">
+                    <AlertTriangle size={10} className="shrink-0" />
+                    Profile automation disabled —{' '}
+                    <a href="/settings/automation" className="underline text-amber-400 hover:text-amber-300">
+                      Settings → Automation
+                    </a>
+                  </p>
                 )}
-              />
-            </button>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={automateOnCreate}
+                disabled={!profileAutomationEnabled}
+                onClick={() => { setAutomateOnCreate((v) => !v); if (automateOnCreate) setBeOnTp1(false) }}
+                className={cn(
+                  'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent',
+                  'transition-colors duration-200 focus:outline-none',
+                  'disabled:opacity-40 disabled:cursor-not-allowed',
+                  automateOnCreate ? 'bg-brand-500' : 'bg-surface-500',
+                )}
+              >
+                <span
+                  className={cn(
+                    'pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow',
+                    'transition-transform duration-200',
+                    automateOnCreate ? 'translate-x-5' : 'translate-x-0',
+                  )}
+                />
+              </button>
+            </div>
+
+            {/* BE on TP1 sub-toggle — only visible when automation is ON */}
+            {automateOnCreate && profileAutomationEnabled && (
+              <div className={cn(
+                'flex items-center justify-between gap-4 rounded-xl border px-4 py-3',
+                beOnTp1
+                  ? 'bg-emerald-500/5 border-emerald-500/20'
+                  : 'bg-surface-800 border-surface-700',
+              )}>
+                <div className="min-w-0">
+                  <div className="flex items-center gap-1.5">
+                    <ShieldAlert size={12} className={beOnTp1 ? 'text-emerald-400' : 'text-slate-500'} />
+                    <p className="text-xs font-medium text-slate-300">Move SL to break-even on TP1</p>
+                  </div>
+                  <p className="text-[11px] text-slate-500 mt-0.5">
+                    When TP1 fills, ATD automatically cancels the SL and replaces it at entry price.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={beOnTp1}
+                  onClick={() => setBeOnTp1((v) => !v)}
+                  className={cn(
+                    'relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent',
+                    'transition-colors duration-200 focus:outline-none',
+                    beOnTp1 ? 'bg-emerald-500' : 'bg-surface-500',
+                  )}
+                >
+                  <span
+                    className={cn(
+                      'pointer-events-none inline-block h-4 w-4 rounded-full bg-white shadow',
+                      'transition-transform duration-200',
+                      beOnTp1 ? 'translate-x-4' : 'translate-x-0',
+                    )}
+                  />
+                </button>
+              </div>
+            )}
           </div>
         )}
 

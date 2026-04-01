@@ -105,6 +105,8 @@ class TradeOpen(BaseModel):
     notes: str | None = None
     confidence_score: int | None = Field(default=None, ge=0, le=100)
     entry_screenshot_urls: list[str] | None = None
+    # When True and automation_enabled, ATD automatically moves SL to break-even on TP1 fill.
+    be_on_tp1: bool = False
 
     @model_validator(mode="after")
     def normalise_and_validate(self) -> TradeOpen:
@@ -303,6 +305,8 @@ class TradeOut(BaseModel):
 
     # True when this trade has an active automation workflow on Kraken
     automation_enabled: bool = False
+    # Auto move SL to BE on TP1 fill
+    be_on_tp1: bool = False
 
     @model_validator(mode="after")
     def normalise_direction_out(self) -> TradeOut:
@@ -357,6 +361,8 @@ class TradeListItem(BaseModel):
     has_kraken_orders: bool = False
     # True when the trade entry was placed through Kraken automation
     automation_enabled: bool = False
+    # Auto move SL to BE on TP1 fill
+    be_on_tp1: bool = False
 
     @model_validator(mode="after")
     def normalise_direction_list(self) -> TradeListItem:

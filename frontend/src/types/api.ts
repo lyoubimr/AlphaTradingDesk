@@ -134,6 +134,8 @@ export interface TradeOpen {
   margin_used?: number | null
   /** Snapshot of risk advisor output at time of trade open (persisted for audit) */
   dynamic_risk_snapshot?: Record<string, unknown> | null
+  /** Auto move SL to break-even when TP1 is filled (requires automation_enabled) */
+  be_on_tp1?: boolean
 }
 
 export interface TradeSizeResult {
@@ -182,6 +184,8 @@ export interface TradeListItem {
   has_kraken_orders: boolean
   /** Entry was placed through Kraken automation — manual close is blocked */
   automation_enabled: boolean
+  /** Auto move SL to break-even when TP1 is filled */
+  be_on_tp1: boolean
 }
 
 export interface TradePosition_Out {

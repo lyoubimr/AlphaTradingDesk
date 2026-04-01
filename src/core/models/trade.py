@@ -212,6 +212,8 @@ class Trade(Base):
     # kraken_entry_order_id: Kraken order ID for the entry order (set after placement)
     automation_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     kraken_entry_order_id: Mapped[str | None] = mapped_column(String(100))
+    # be_on_tp1: when True, ATD automatically moves SL to break-even when TP1 is filled.
+    be_on_tp1: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
     # Auto-trading (Phase 4+)
     auto_generated: Mapped[bool] = mapped_column(Boolean, default=False)

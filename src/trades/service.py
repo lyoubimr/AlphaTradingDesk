@@ -572,6 +572,7 @@ def open_trade(db: Session, data: TradeOpen) -> TradeOut:
         margin_used=data.margin_used,
         entry_screenshot_urls=data.entry_screenshot_urls,
         dynamic_risk_snapshot=data.dynamic_risk_snapshot,
+        be_on_tp1=data.be_on_tp1,
     )
     db.add(trade)
     db.flush()  # get trade.id before adding positions

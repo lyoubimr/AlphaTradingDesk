@@ -661,31 +661,75 @@ def format_execution_event_message(event: str, **ctx) -> str:
     lines = [f"{dev_prefix}{emoji} <b>{label}</b>"]
     if pair != "—":
         lines.append(f"🪙 Pair: <b>{_he(str(pair))}</b> {dir_emoji}")
-    if ctx.get("size") is not None:
-        lines.append(f"📦 Size: <code>{ctx['size']}</code>")
 
     # Event-specific fields
-    if event == "LIMIT_PLACED" and ctx.get("limit_price") is not None:
-        lines.append(f"🎯 Limit: <code>{ctx['limit_price']}</code>")
-    elif event in ("LIMIT_FILLED", "TRADE_OPENED") and ctx.get("filled_price") is not None:
-        lines.append(f"💰 Fill: <code>{ctx['filled_price']}</code>")
-    elif event == "TRADE_OPENED" and ctx.get("entry_price") is not None:
-        lines.append(f"💰 Entry: <code>{ctx['entry_price']}</code>")
-    elif event in ("TP1_TAKEN", "TP2_TAKEN", "TP3_TAKEN") and ctx.get("filled_price") is not None:
-        lines.append(f"✅ TP Fill: <code>{ctx['filled_price']}</code>")
-    elif event == "SL_HIT" and ctx.get("filled_price") is not None:
-        lines.append(f"🛑 SL Fill: <code>{ctx['filled_price']}</code>")
+    if event == "LIMIT_PLACED":
+        if ctx.get("limit_price") is not None:
+            lines.append(f"🎯 Limit: <code>{ctx['limit_price']}</code>")
+        if ctx.get("size") is not None:
+            lines.append(f"📦 Size: <code>{ctx['size']}</code>")
+    elif event in ("LIMIT_FILLED", "TRADE_OPENED"):
+        if ctx.get("filled_price") is not None:
+            lines.append(f"💰 Fill: <code>{ctx['filled_price']}</code>")
+        elif ctx.get("entry_price") is not None:
+            lines.append(f"💰 Entry: <code>{ctx['entry_price']}</code>")
+        if ctx.get("size") is not None:
+            lines.append(f"📦 Size: <code>{ctx['size']}</code>")
+        if ctx.get("sl_price") is not None:
+            lines.append(f"🛑 SL: <code>{ctx['sl_price']}</code>")
+    elif event in ("TP1_TAKEN", "TP2_TAKEN", "TP3_TAKEN"):
+        if ctx.get("filled_price") is not None:
+            pnl_pct = ctx.get("pnl_pct")
+            tp_str = f"{ctx['filled_price']} ({pnl_pct}%)" if pnl_pct is not None else ctx["filled_price"]
+            lines.append(f"✅ TP Fill: <code>{tp_str}</code>")
+        if ctx.get("trade_pnl") is not None:
+            try:
+                tp = float(ctx["trade_pnl"])
+                tp_str = f"+{tp:.2f}" if tp >= 0 else f"{tp:.2f}"
+                lines.append(f"💵 Trade PnL: <code>{tp_str}</code>")
+            except (ValueError, TypeError):
+                pass
+    elif event == "SL_HIT":
+        if ctx.get("filled_price") is not None:
+            pnl_pct = ctx.get("pnl_pct")
+            sl_str = f"{ctx['filled_price']} ({pnl_pct}%)" if pnl_pct is not None else ctx["filled_price"]
+            lines.append(f"🛑 SL Fill: <code>{sl_str}</code>")
+        if ctx.get("trade_pnl") is not None:
+            try:
+                tp = float(ctx["trade_pnl"])
+                tp_str = f"+{tp:.2f}" if tp >= 0 else f"{tp:.2f}"
+                lines.append(f"💵 Trade PnL: <code>{tp_str}</code>")
+            except (ValueError, TypeError):
+                pass
     elif event == "BE_MOVED" and ctx.get("stop_price") is not None:
         lines.append(f"🔒 New SL (BE): <code>{ctx['stop_price']}</code>")
     elif event == "PNL_STATUS":
+        if ctx.get("current_price") is not None:
+            lines.append(f"📍 Current: <code>{ctx['current_price']}</code>")
+        if ctx.get("entry_price") is not None:
+            lines.append(f"🏷 Entry: <code>{ctx['entry_price']}</code>")
+        pnl_pct = ctx.get("pnl_pct")
         if ctx.get("unrealized_pnl") is not None:
             pnl = float(ctx["unrealized_pnl"])
             pnl_str = f"+{pnl:.2f}" if pnl >= 0 else f"{pnl:.2f}"
-            lines.append(f"💵 Unrealized PnL: <code>{pnl_str}</code>")
-        if ctx.get("entry_price") is not None:
-            lines.append(f"🏷 Entry: <code>{ctx['entry_price']}</code>")
-        if ctx.get("current_price") is not None:
-            lines.append(f"📍 Current: <code>{ctx['current_price']}</code>")
+            if pnl_pct is not None:
+                lines.append(f"💵 Unrealized PnL: <code>{pnl_str} ({pnl_pct}%)</code>")
+            else:
+                lines.append(f"💵 Unrealized PnL: <code>{pnl_str}</code>")
+        elif pnl_pct is not None:
+            lines.append(f"💵 Est. PnL: <code>{pnl_pct}%</code>")
+        if ctx.get("sl_price") is not None:
+            sl_line = f"🛑 SL: <code>{ctx['sl_price']}</code>"
+            if ctx.get("current_price") is not None:
+                try:
+                    cp = float(ctx["current_price"])
+                    sl = float(ctx["sl_price"])
+                    d = ctx.get("direction", "").upper()
+                    dist_pct = (cp - sl) / cp * 100 if d == "LONG" else (sl - cp) / cp * 100
+                    sl_line += f" · <code>−{dist_pct:.1f}% away</code>"
+                except (TypeError, ValueError, ZeroDivisionError):
+                    pass
+            lines.append(sl_line)
     elif event == "ORDER_ERROR" and ctx.get("error_message") is not None:
         lines.append(f"❌ Error: {_he(str(ctx['error_message']))[:200]}")
 
