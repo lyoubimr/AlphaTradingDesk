@@ -633,12 +633,15 @@ def list_trades(
     for trade_id, strategy_id in strat_rows:
         strat_map.setdefault(trade_id, []).append(strategy_id)
 
-    # Bulk-fetch which trades have at least one KrakenOrder (avoid N+1)
+    # Bulk-fetch which trades have at least one non-cancelled KrakenOrder (avoid N+1)
     kraken_trade_ids: set[int] = set()
     if trade_ids:
         kraken_rows = (
             db.query(KrakenOrder.trade_id)
-            .filter(KrakenOrder.trade_id.in_(trade_ids))
+            .filter(
+                KrakenOrder.trade_id.in_(trade_ids),
+                KrakenOrder.status != "cancelled",
+            )
             .distinct()
             .all()
         )
@@ -670,11 +673,13 @@ def list_trades(
                     / total_pct
                 ).quantize(Decimal("0.00000001"))
         item.strategy_ids = strat_map.get(t.id, [])
-        # is_be: SL has been moved to breakeven (current_risk == 0, trade still active)
+        # is_be: SL has been moved to breakeven (SL == entry_price, trade still active).
+        # currentrisk==0 alone is a false-positive for unactivated LIMIT orders.
         item.is_be = (
             t.status in ("open", "partial")
-            and t.current_risk is not None
-            and t.current_risk == Decimal("0")
+            and t.stop_loss is not None
+            and t.entry_price is not None
+            and t.stop_loss == t.entry_price
         )
         item.has_kraken_orders = t.id in kraken_trade_ids
         items.append(item)

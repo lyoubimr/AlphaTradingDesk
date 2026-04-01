@@ -48,7 +48,8 @@ export function KrakenOrdersPanel({ tradeId, tradeStatus, automationEnabled, onO
     }
   }, [orders, onOrdersLoaded])
 
-  const hasOrders    = (orders?.length ?? 0) > 0
+  const activeOrders = orders?.filter((o) => o.status !== 'cancelled') ?? []
+  const hasOrders    = activeOrders.length > 0
   const hasOpenEntry = orders?.some((o) => o.role === 'entry' && o.status === 'open') ?? false
   const isLive       = automationEnabled && (tradeStatus === 'open' || tradeStatus === 'partial')
 
