@@ -232,13 +232,27 @@ class KrakenExecutionClient:
         return data.get("fills", [])  # type: ignore[return-value]
 
     def get_open_positions(self) -> list[dict]:
-        """Return all current open positions with unrealized PnL.
+        """Return all current open positions.
 
         Returns:
-            List of position dicts from Kraken.
+            List of position dicts from Kraken. Each dict includes:
+            side, symbol, price (avg entry), fillTime, size, unrealisedFunding, pnlCurrency.
+            NOTE: does NOT include markPrice or unrealisedPnl — use get_tickers() for that.
         """
         data = self._get("/derivatives/api/v3/openpositions")
         return data.get("openPositions", [])  # type: ignore[return-value]
+
+    def get_tickers(self) -> dict[str, dict]:
+        """Return current market data for all instruments, keyed by symbol.
+
+        Calls the public /tickers endpoint (auth headers accepted but not required).
+        Each ticker dict includes: markPrice, bid, ask, last, vol24h, etc.
+
+        Returns:
+            Dict mapping symbol (e.g. "PF_TAOUSD") → ticker dict.
+        """
+        data = self._get("/derivatives/api/v3/tickers")
+        return {t["symbol"]: t for t in data.get("tickers", [])}
 
     def ping(self) -> tuple[bool, str | None]:
         """Test API connectivity by calling GET /openorders.
