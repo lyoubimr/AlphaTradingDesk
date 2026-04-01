@@ -12,8 +12,6 @@ Create Date: 2026-03-28
 from __future__ import annotations
 
 from alembic import op
-import sqlalchemy as sa
-from sqlalchemy.dialects.postgresql import JSONB
 
 # revision identifiers, used by Alembic.
 revision = "p5002_execution_alerts"
@@ -23,14 +21,8 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.add_column(
-        "notification_settings",
-        sa.Column(
-            "execution_alerts",
-            JSONB,
-            nullable=False,
-            server_default="{}",
-        ),
+    op.execute(
+        "ALTER TABLE notification_settings ADD COLUMN IF NOT EXISTS execution_alerts JSONB NOT NULL DEFAULT '{}'"
     )
 
 
