@@ -172,21 +172,21 @@ class TestSendOrder:
         assert "size=0.1" in content
 
     def test_send_order_passes_reduce_only_when_true(self, client: KrakenExecutionClient):
-        mock_resp = _mock_response(200, {"result": "success", "sendStatus": {}})
+        mock_resp = _mock_response(200, {"result": "success", "sendStatus": {"status": "placed"}})
         with patch.object(client._http, "post", return_value=mock_resp) as mock_post:
             client.send_order("stp", "PF_XBTUSD", "sell", "0.1", reduce_only=True)
         content: str = mock_post.call_args[1].get("content", "")
         assert "reduceOnly=true" in content
 
     def test_send_order_passes_limit_price_when_provided(self, client: KrakenExecutionClient):
-        mock_resp = _mock_response(200, {"result": "success", "sendStatus": {}})
+        mock_resp = _mock_response(200, {"result": "success", "sendStatus": {"status": "placed"}})
         with patch.object(client._http, "post", return_value=mock_resp) as mock_post:
             client.send_order("lmt", "PF_XBTUSD", "buy", "0.5", limit_price="50000")
         content: str = mock_post.call_args[1].get("content", "")
         assert "limitPrice=50000" in content
 
     def test_send_order_passes_stop_price_when_provided(self, client: KrakenExecutionClient):
-        mock_resp = _mock_response(200, {"result": "success", "sendStatus": {}})
+        mock_resp = _mock_response(200, {"result": "success", "sendStatus": {"status": "placed"}})
         with patch.object(client._http, "post", return_value=mock_resp) as mock_post:
             client.send_order("stp", "PF_XBTUSD", "sell", "0.5", stop_price="49000")
         content: str = mock_post.call_args[1].get("content", "")
