@@ -192,7 +192,7 @@ def _compute_lot_size(trade: Trade, instrument: Instrument) -> Decimal:
     Returns the quantized Decimal lot size ready for Kraken.
     """
     raw_size = trade.risk_amount / abs(trade.entry_price - trade.stop_loss)
-    return quantize_size(raw_size, instrument.contract_value_precision or 2)
+    return quantize_size(raw_size, instrument.contract_value_precision if instrument.contract_value_precision is not None else 2)
 
 
 def _entry_side(trade: Trade) -> str:
@@ -393,7 +393,7 @@ def place_sl_tp_orders(
         tp_size = (Decimal(str(pos.lot_percentage)) / Decimal("100")) * entry_size
         # Quantize TP size — use same precision
         from src.kraken_execution.precision import quantize_size as _qs  # noqa: PLC0415
-        tp_size = _qs(tp_size, instrument.contract_value_precision or 2)
+        tp_size = _qs(tp_size, instrument.contract_value_precision if instrument.contract_value_precision is not None else 2)
 
         tp_result = client.send_order(
             order_type="lmt",
