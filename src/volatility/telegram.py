@@ -622,6 +622,7 @@ _EXEC_EMOJI: dict[str, str] = {
     "BE_MOVED":     "🔒",
     "PNL_STATUS":   "📊",
     "ORDER_ERROR":  "⚠️",
+    "ORDER_FAILED": "❌",
 }
 
 # Event-to-label mapping
@@ -636,6 +637,7 @@ _EXEC_LABEL: dict[str, str] = {
     "BE_MOVED":     "Moved to Breakeven",
     "PNL_STATUS":   "PnL Status",
     "ORDER_ERROR":  "Order Error",
+    "ORDER_FAILED": "Order Failed / Cancelled",
 }
 
 
@@ -711,6 +713,8 @@ def format_execution_event_message(event: str, **ctx) -> str:
                 pass
     elif event == "BE_MOVED" and ctx.get("stop_price") is not None:
         lines.append(f"🔒 New SL (BE): <code>{ctx['stop_price']}</code>")
+    elif event in ("ORDER_FAILED", "ORDER_ERROR") and ctx.get("error_message"):
+        lines.append(f"⚠️ Reason: <code>{_he(str(ctx['error_message']))}</code>")
     elif event == "PNL_STATUS":
         entry   = ctx.get("entry_price")
         current = ctx.get("current_price")

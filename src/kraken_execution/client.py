@@ -180,14 +180,24 @@ class KrakenExecutionClient:
         logger.debug("kraken_sendorder_raw", raw=result)
         if result.get("result") != "success":
             raise KrakenAPIError(0, str(result))
+        # Guard against Kraken returning result="success" with a rejected sendStatus
+        # (e.g. insufficientFunds, invalidArgument, wouldNotReducePosition)
+        send_status = result.get("sendStatus", {})
+        placement_status = send_status.get("status", "")
+        if placement_status != "placed":
+            raise KrakenAPIError(
+                0,
+                f"Order rejected by Kraken — sendStatus.status={placement_status!r} | "
+                f"order_id={send_status.get('order_id')!r} | symbol={symbol} side={side} size={size}",
+            )
         logger.info(
             "kraken_order_placed",
             symbol=symbol,
             side=side,
             order_type=order_type,
             size=size,
-            status=result.get("sendStatus", {}).get("status"),
-            order_id=result.get("sendStatus", {}).get("order_id"),
+            status=placement_status,
+            order_id=send_status.get("order_id"),
         )
         return result
 
