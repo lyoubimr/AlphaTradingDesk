@@ -334,21 +334,21 @@ def get_trade_conclusion(
     if bias == "bearish" and participation < Decimal("40"):
         return TradeConclusion(
             emoji="🔴",
-            label="Risk-Off — No Longs",
-            detail="USDT.D rising + weak participation. Longs not recommended.",
-            trade_types=[],
-            size_advice="cash or short only",
+            label="Risk-Off — Shorts Only",
+            detail="USDT.D rising + weak participation. No longs. Short only on confirmed breakdowns.",
+            trade_types=["short"],
+            size_advice="shorts only or cash",
             color="red",
         )
 
-    # 1b. Bearish — avoid longs (participation not collapsed but bias is still bearish)
+    # 1b. Bearish — no longs, go short on A+ setups
     if bias == "bearish":
         return TradeConclusion(
             emoji="🔴",
-            label="Bearish — Avoid Longs",
-            detail="Bearish composite. No new longs. Shorts valid on A+ setups.",
-            trade_types=[],
-            size_advice="shorts only or cash",
+            label="Bearish — Go Short",
+            detail="Bearish composite. No longs. Look for short setups on A+ confirmations.",
+            trade_types=["short"],
+            size_advice="shorts only (50–100%)",
             color="red",
         )
 
