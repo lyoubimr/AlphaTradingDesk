@@ -1,9 +1,9 @@
 """
-Seed: market_analysis_modules + market_analysis_indicators  (v4)
+Seed: market_analysis_modules + market_analysis_indicators  (v5)
 
 ──────────────────────────────────────────────────────────────────────────────
 Modules:
-  1. Crypto  — dual (BTC + Alts) — default-on set: 15 indicators
+  1. Crypto  — dual (BTC + Alts) — default-on set: 25 indicators (15 core + 10 enrichment)
   2. Gold    — single (XAUUSD)   — default-on set: 12 indicators
 
 ──────────────────────────────────────────────────────────────────────────────
@@ -670,6 +670,359 @@ CRYPTO_INDICATORS: list[dict] = [
         "answer_bearish": "🔴 Volume up on sell candles — bearish",
         "default_enabled": False,
         "sort_order": 21,
+    },
+
+    # ── ENRICHMENT v5 — 2026-04 (10 new indicators, all default_enabled=True) ──
+    #
+    # BTC side (a):
+    #   23 — btc_mtf_structure_sequence  : 4H HH/HL or LH/LL sequence (trend block)
+    #   25 — btc_mtf_candle_quality      : 4H body acceptance vs wick rejection (momentum)
+    #   27 — btc_htf_obv_type            : OBV divergence type — hidden bull / regular bear (momentum)
+    #
+    # Alts side (b):
+    #   50 — alts_ltf_micro_structure    : ETH 1H micro HH/HL at level (momentum)
+    #   52 — alts_ltf_test_quality_1h    : ETH 1H body vs wick at S/R (momentum)
+    #   54 — alts_ltf_candle_followthrough: ETH 1H candle after test — expansion or stall (momentum)
+    #   56 — alts_ltf_volume_at_level    : ETH 1H volume at level — conviction or fakeout (momentum)
+    #   58 — alts_ltf_15m_structure      : ETH 15min HH/HL confirms 1H (momentum)
+    #   60 — alts_mtf_total2_4h          : TOTAL2 4H alt market tailwind (trend)
+    #   62 — alts_htf_ethbtc_obv         : ETHBTC OBV 1D relative accumulation (participation)
+    # ──────────────────────────────────────────────────────────────────────────
+
+    # ── BTC MTF: 4H structure sequence (sort 23) ──────────────────────────
+    {
+        "key": "btc_mtf_structure_sequence",
+        "label": "BTC 4H Structure Sequence (MTF)",
+        "asset_target": "a",
+        "tv_symbol": "BTCUSDT",
+        "tv_timeframe": "4H",
+        "timeframe_level": "mtf",
+        "score_block": "trend",
+        "question": "🌊 BTC 4H — clear HH/HL sequence or LH/LL downtrend?",
+        "tooltip": (
+            "Open BTCUSDT 4H — no indicators needed, just swing highs and lows.\n"
+            "btc_mtf_sr_reaction (#5) tells you if a specific level is holding or broken. "
+            "This question reads the SEQUENCE of 4H swing points — the 4H trend STATE.\n\n"
+            "✅ Bullish: the last 2–3 4H swing lows are higher than the previous (HL chain), "
+            "AND the swing highs are also rising (HH chain). Clear 4H uptrend.\n\n"
+            "🟡 Ranging: 4H swing highs and lows at roughly equal levels (Equal Highs / Equal Lows). "
+            "No trending sequence. A bounce from a level inside this context may not follow through.\n\n"
+            "🔴 Bearish: the last 2–3 4H swing highs are lower (LH chain) and swing lows are also "
+            "falling (LL chain). Clear 4H downtrend — good context for shorts.\n\n"
+            "⚠️ A level hold (#5 bullish) inside a 4H LH/LL = dead cat bounce, not a trend continuation. "
+            "A level hold inside 4H HH/HL = high-conviction long entry. "
+            "A level break inside 4H LH/LL = high-conviction short entry."
+        ),
+        "answer_bullish": "🟢 Clear HH/HL — 4H uptrend active",
+        "answer_partial": "🟡 Equal highs/lows — 4H ranging",
+        "answer_bearish": "🔴 LH/LL confirmed — 4H downtrend active",
+        "default_enabled": True,
+        "sort_order": 23,
+    },
+
+    # ── BTC MTF: 4H candle quality at level (sort 25) ─────────────────────
+    {
+        "key": "btc_mtf_candle_quality",
+        "label": "BTC 4H Candle Quality at Level (MTF)",
+        "asset_target": "a",
+        "tv_symbol": "BTCUSDT",
+        "tv_timeframe": "4H",
+        "timeframe_level": "mtf",
+        "score_block": "momentum",
+        "question": "🕯️ BTC 4H — full body acceptance or wick-only rejection?",
+        "tooltip": (
+            "Open BTCUSDT 4H — look at the most recent candle that interacted with the key level.\n"
+            "btc_mtf_sr_reaction (#5) records the OUTCOME (holding / broken / reclaim). "
+            "This question records the CANDLE ANATOMY — body vs wick commitment.\n\n"
+            "✅ Bullish — body commitment:\n"
+            "  Full 4H body CLOSED above the level (support case) or above the breakout point. "
+            "  Buyers committed. This is acceptance, not just a temporary wick poke.\n\n"
+            "🟡 Partial — wick present, body partially in zone:\n"
+            "  Long wick at support/resistance, body partially overlapping the zone. "
+            "  Mixed — neither side committed yet.\n\n"
+            "🔴 Bearish — wick-only, no body follow-through:\n"
+            "  Candle wicked through the level but BODY closed back inside the prior range. "
+            "  Classic stop hunt / false break. No directional commitment.\n\n"
+            "📌 VSA rule: body close = commitment. Wick = test or stop hunt. "
+            "Bearish here = good context for short entries (body close below level)."
+        ),
+        "answer_bullish": "🟢 Full body close above/away — acceptance",
+        "answer_partial": "🟡 Long wick, body partially in zone — indecision",
+        "answer_bearish": "🔴 Wick-only / body back in range — no commitment",
+        "default_enabled": True,
+        "sort_order": 25,
+    },
+
+    # ── BTC HTF: OBV divergence TYPE (sort 27) ────────────────────────────
+    {
+        "key": "btc_htf_obv_type",
+        "label": "BTC OBV Divergence Type (HTF)",
+        "asset_target": "a",
+        "tv_symbol": "BTCUSDT",
+        "tv_timeframe": "1D",
+        "timeframe_level": "htf",
+        "score_block": "momentum",
+        "question": "🔍 BTC OBV 1D — hidden bull div or regular bearish divergence?",
+        "tooltip": (
+            "Open BTCUSDT 1D — add OBV indicator.\n"
+            "btc_htf_obv (#8) records whether OBV confirms, is flat, or diverges. "
+            "This question identifies WHICH TYPE of divergence — a separate analytical step.\n\n"
+            "✅ Bullish — 2 scenarios:\n"
+            "  1. Hidden bullish divergence: price makes a Higher Low (HL), OBV also makes a HL "
+            "     → continuation signal. The pullback is being absorbed, trend continues up.\n"
+            "  2. OBV slope turning up after a sustained decline: OBV was falling for weeks "
+            "     and is now flattening or making higher lows → early accumulation signal.\n\n"
+            "🟡 Partial: OBV slope is flat or ambiguous — no divergence type identifiable. "
+            "Normal during consolidation. Score btc_htf_obv first.\n\n"
+            "🔴 Bearish: Regular bearish divergence — price makes a Higher High (HH) "
+            "but OBV makes a Lower High (LH) → distribution signal. "
+            "Smart money selling into the retail rally. Good context for short entries.\n\n"
+            "⚠️ Treating all divergences the same is a category error: "
+            "hidden bullish = add to longs. Regular bearish = distribution warning / short context."
+        ),
+        "answer_bullish": "🟢 Hidden bull div or slope turning up — continuation",
+        "answer_partial": "🟡 Flat / ambiguous — no divergence type",
+        "answer_bearish": "🔴 Regular bearish div (HH price / LH OBV) — distribution",
+        "default_enabled": True,
+        "sort_order": 27,
+    },
+
+    # ── Alts LTF: ETH 1H micro structure at level (sort 50) ───────────────
+    {
+        "key": "alts_ltf_micro_structure",
+        "label": "ETH 1H Micro Structure at Level (LTF)",
+        "asset_target": "b",
+        "tv_symbol": "ETHUSD",
+        "tv_timeframe": "1H",
+        "timeframe_level": "ltf",
+        "score_block": "momentum",
+        "question": "🏗️ ETH 1H — micro HH/HL or LH/LL at the test zone?",
+        "tooltip": (
+            "Open ETHUSD 1H — look at the swing structure AT the level being tested.\n"
+            "alts_ltf_structure (#12) reads for BOS/CHoCH EVENTS (when a break occurs). "
+            "This question reads the ongoing HH/HL STATE before or during the BOS.\n\n"
+            "✅ Bullish:\n"
+            "  A 1H higher low has formed at or near the tested level — price dropped to the zone "
+            "  but printed a HL above the previous swing low. "
+            "  Micro inverse H&S forming = absorption in progress (Wyckoff Phase C).\n\n"
+            "🟡 Partial (slow bleed / rounded):\n"
+            "  Price grinding slowly into the level without forming a clear HL. "
+            "  Selling pressure not yet exhausted — wait for a HL before entering.\n\n"
+            "🔴 Bearish:\n"
+            "  Hard 1H lower high rejection at or near the level, or expanding volatility downward. "
+            "  Pattern consistent with a distribution top — good context for short entries.\n\n"
+            "📌 Wyckoff: sharp impulse into level + HL formation = buyers stepping in (Spring). "
+            "Slow grind = no absorption, level likely to fail."
+        ),
+        "answer_bullish": "🟢 1H HL forming at level — absorption in progress",
+        "answer_partial": "🟡 Slow bleed / no clear HL — absorption unclear",
+        "answer_bearish": "🔴 Hard LH rejection / expanding volatility down",
+        "default_enabled": True,
+        "sort_order": 50,
+    },
+
+    # ── Alts LTF: ETH 1H candle quality at S/R (sort 52) ─────────────────
+    {
+        "key": "alts_ltf_test_quality_1h",
+        "label": "ETH 1H Test Quality at S/R (LTF)",
+        "asset_target": "b",
+        "tv_symbol": "ETHUSD",
+        "tv_timeframe": "1H",
+        "timeframe_level": "ltf",
+        "score_block": "momentum",
+        "question": "🕯️ ETH 1H — body acceptance or wick rejection at the level?",
+        "tooltip": (
+            "Open ETHUSD 1H — examine the CANDLE BODY vs WICK at the key S/R level.\n"
+            "alts_mtf_sr_reaction (#6) reads the 4H level outcome. "
+            "This zooms into the 1H candle anatomy at the same area.\n\n"
+            "✅ Bullish — body commitment above level:\n"
+            "  Full 1H BODY CLOSED above the support/demand zone. "
+            "  Buyers committed — the level was accepted and closed above. "
+            "  Distinctly stronger than a wick poke.\n\n"
+            "🟡 Partial — wick present, body partially overlapping:\n"
+            "  Long lower wick at support with body partially in zone. "
+            "  Test occurred but no strong commitment either way yet — wait one more candle.\n\n"
+            "🔴 Bearish — body closed through the level:\n"
+            "  Full 1H body CLOSED BELOW the support zone. Not just a wick — "
+            "  this is directional commitment to the downside. Short context.\n\n"
+            "📌 VSA: a wick into support ≠ a body close above it. "
+            "Wick = stop hunt / test. Body close = directional commitment."
+        ),
+        "answer_bullish": "🟢 Full body close above/away — buyers committed",
+        "answer_partial": "🟡 Long wick, body overlapping zone — indecision",
+        "answer_bearish": "🔴 Body closed below level — sellers committed",
+        "default_enabled": True,
+        "sort_order": 52,
+    },
+
+    # ── Alts LTF: ETH 1H follow-through candle after test (sort 54) ───────
+    {
+        "key": "alts_ltf_candle_followthrough",
+        "label": "ETH 1H Follow-Through After Test (LTF)",
+        "asset_target": "b",
+        "tv_symbol": "ETHUSD",
+        "tv_timeframe": "1H",
+        "timeframe_level": "ltf",
+        "score_block": "momentum",
+        "question": "🚀 ETH 1H — expansion or stall on the candle after the test?",
+        "tooltip": (
+            "Open ETHUSD 1H — look at the candle AFTER the level was first tested.\n"
+            "alts_ltf_test_quality_1h reads the FIRST reaction candle at the level. "
+            "This reads the NEXT candle — the market's verdict on whether the test held.\n\n"
+            "✅ Bullish — expansion away from level:\n"
+            "  Engulfing candle, wide bullish body, or clear expansion away from the zone. "
+            "  Wyckoff Spring SOS: a valid spring requires a follow-through impulse. "
+            "  Do not enter on the test candle — wait for this expansion confirmation.\n\n"
+            "🟡 Partial — indecision / compression:\n"
+            "  Inside bar, doji, or narrow body. No follow-through yet. "
+            "  Level may still hold — wait for additional candles before entering.\n\n"
+            "🔴 Bearish — continuation into/through the level:\n"
+            "  Bearish candle after the test, or next candle takes out the test candle low. "
+            "  The spring failed — level is breaking. Good short context.\n\n"
+            "📌 Rule: wait for this candle before pressing any entry button."
+        ),
+        "answer_bullish": "🟢 Engulfing / expansion away — follow-through confirmed",
+        "answer_partial": "🟡 Inside bar / doji — no follow-through yet",
+        "answer_bearish": "🔴 Bearish candle after test — level failing",
+        "default_enabled": True,
+        "sort_order": 54,
+    },
+
+    # ── Alts LTF: ETH 1H volume at level (sort 56) ────────────────────────
+    {
+        "key": "alts_ltf_volume_at_level",
+        "label": "ETH 1H Volume at Level (LTF)",
+        "asset_target": "b",
+        "tv_symbol": "ETHUSD",
+        "tv_timeframe": "1H",
+        "timeframe_level": "ltf",
+        "score_block": "momentum",
+        "question": "🔊 ETH 1H — volume expanding on rejection or fading?",
+        "tooltip": (
+            "Open ETHUSD 1H — enable Volume indicator.\n"
+            "alts_htf_obv (#10) reads the Daily OBV trend. "
+            "This is a spot volume check at a specific 1H candle — event-based, not trend-based.\n\n"
+            "✅ Bullish — conviction on the rejection/bounce:\n"
+            "  Volume spike on the rejection or bounce candle at support. "
+            "  VSA: high volume at support = institutional absorption. "
+            "  Volume expanding + price holds = real demand present.\n\n"
+            "🟡 Partial — average / neutral volume:\n"
+            "  Normal volume at the level — no special reading. "
+            "  Move is unconvincing but not outright negative. Watch the next candle.\n\n"
+            "🔴 Bearish — heavy volume on dumps or thin volume on bounces:\n"
+            "  High volume on the dump INTO the level with no price recovery = supply overwhelming demand. "
+            "  OR thin volume on the bounce candle = fakeout risk, no real buyers. Short context.\n\n"
+            "📌 Most actionable filter: high-volume rejection candle at 1H support "
+            "is the strongest pre-long-entry signal. Inverse = short signal."
+        ),
+        "answer_bullish": "🟢 Volume spike on rejection — conviction present",
+        "answer_partial": "🟡 Average volume — no special signal",
+        "answer_bearish": "🔴 Volume on dumps / thin on bounces — fakeout risk",
+        "default_enabled": True,
+        "sort_order": 56,
+    },
+
+    # ── Alts LTF: ETH 15min structure confirmation (sort 58) ──────────────
+    {
+        "key": "alts_ltf_15m_structure",
+        "label": "ETH 15min Structure Confirmation (LTF)",
+        "asset_target": "b",
+        "tv_symbol": "ETHUSD",
+        "tv_timeframe": "15",
+        "timeframe_level": "ltf",
+        "score_block": "momentum",
+        "question": "🔬 ETH 15min — HH/HL sequence confirming 1H direction?",
+        "tooltip": (
+            "Open ETHUSD 15min — look at the swing structure.\n"
+            "This is the only 15min question in the system — the final timing gate before entry.\n\n"
+            "✅ Bullish — 15min aligned with 1H:\n"
+            "  15min printing HH/HL sequence in the same direction as the 1H bullish bias. "
+            "  Multi-timeframe alignment: 1H bullish + 15min bullish = enter on next 15min HL.\n\n"
+            "🟡 Partial — 15min ranging / inside bars:\n"
+            "  15min is coiling or consolidating near the level. 1H idea may still be valid "
+            "  but timing not confirmed — wait for 15min to print direction.\n\n"
+            "🔴 Bearish — 15min diverging from 1H:\n"
+            "  15min making LH/LL while 1H is bullish. Entry is premature. "
+            "  This often means a stop-hunt / double-bottom sweep is coming before the real move. "
+            "  Bearish 15min structure = good short context OR wait for 15min to flip before long.\n\n"
+            "⚠️ If 15min is still bearish and you enter anyway: you will get stopped by the "
+            "liquidity sweep that triggers the real 1H move. Wait for 15min to flip first."
+        ),
+        "answer_bullish": "🟢 15min HH/HL confirmed — timing aligned",
+        "answer_partial": "🟡 15min ranging — confirmation pending",
+        "answer_bearish": "🔴 15min LH/LL — entry premature, wait or short",
+        "default_enabled": True,
+        "sort_order": 58,
+    },
+
+    # ── Alts MTF: TOTAL2 4H trend (sort 60) ───────────────────────────────
+    {
+        "key": "alts_mtf_total2_4h",
+        "label": "TOTAL2 4H — Alt Market Trend (MTF)",
+        "asset_target": "b",
+        "tv_symbol": "CRYPTOCAP:TOTAL2",
+        "tv_timeframe": "4H",
+        "timeframe_level": "mtf",
+        "score_block": "trend",
+        "question": "🌬️ TOTAL2 4H — alt market trending or bleeding?",
+        "tooltip": (
+            "Open CRYPTOCAP:TOTAL2 on the 4H chart.\n"
+            "alts_htf_total2 (#4) reads TOTAL2 on the Daily for macro trend context. "
+            "This reads TOTAL2 on 4H — the execution timeframe — catching the case where "
+            "the Daily is bullish but the current week is an alt-bleed.\n\n"
+            "✅ Bullish — broad alt bid confirmed:\n"
+            "  TOTAL2 4H in an uptrend: HH/HL sequence, or breaking above a 4H consolidation range. "
+            "  Rising TOTAL2 4H = broad alt participation, not just an ETH-specific move.\n\n"
+            "🟡 Partial — choppy / no clear direction:\n"
+            "  TOTAL2 4H inside a messy range — overlapping candles, no trending sequence. "
+            "  ETH may still offer an individual setup, but the alt tailwind is absent.\n\n"
+            "🔴 Bearish — alt bleed in progress:\n"
+            "  TOTAL2 4H in a LH/LL downtrend or below a broken 4H support. "
+            "  An ETH bounce in this context is likely isolated, not an alt rotation. "
+            "  Good context for shorts on mid-cap alts (AVAX, FET, ONT).\n\n"
+            "📌 Key filter for mid-cap entries: if TOTAL2 4H is bearish, "
+            "even a clean ETH 4H setup has lower follow-through probability across alts."
+        ),
+        "answer_bullish": "🟢 TOTAL2 4H uptrend / HH — broad alt bid",
+        "answer_partial": "🟡 TOTAL2 4H choppy / ranging — no tailwind",
+        "answer_bearish": "🔴 TOTAL2 4H downtrend / LH — alt bleed active",
+        "default_enabled": True,
+        "sort_order": 60,
+    },
+
+    # ── Alts HTF: ETHBTC OBV relative accumulation (sort 62) ──────────────
+    {
+        "key": "alts_htf_ethbtc_obv",
+        "label": "ETH/BTC OBV — Relative Accumulation (HTF)",
+        "asset_target": "b",
+        "tv_symbol": "ETHBTC",
+        "tv_timeframe": "1D",
+        "timeframe_level": "htf",
+        "score_block": "participation",
+        "question": "⚖️ ETH/BTC OBV 1D — rotation into alts or BTC still dominant?",
+        "tooltip": (
+            "Open ETHBTC on the 1D chart — add the OBV indicator.\n"
+            "This reads RELATIVE accumulation: is money flowing into ETH faster than BTC?\n"
+            "Completely different from alts_htf_obv (#10) which reads ETH/USD OBV (absolute).\n\n"
+            "✅ Bullish — rotation into alts confirmed:\n"
+            "  ETHBTC OBV making Higher Highs — relative buying pressure on ETH vs BTC. "
+            "  When combined with BTC.D falling (#14): double confirmation of genuine alt rotation. "
+            "  This is the highest-conviction alt long context.\n\n"
+            "🟡 Partial — no clear rotation:\n"
+            "  ETHBTC OBV flat — ETH and BTC moving together at the same pace. "
+            "  No rotation signal. Alts will move with BTC but not outperform.\n\n"
+            "🔴 Bearish — BTC dominance persists:\n"
+            "  ETHBTC OBV declining — money flowing into BTC faster than ETH. "
+            "  Even if ETHUSD looks bullish, the move is BTC-driven, not alt rotation. "
+            "  Bearish ETHBTC OBV = avoid alt longs, good context for BTC-relative shorts on alts.\n\n"
+            "📌 ETH/USD can rise while ETHBTC OBV falls — that is a BTC-led rally, not alt season. "
+            "This question separates those two scenarios definitively."
+        ),
+        "answer_bullish": "🟢 ETHBTC OBV making HH — rotation into alts active",
+        "answer_partial": "🟡 ETHBTC OBV flat — no clear rotation signal",
+        "answer_bearish": "🔴 ETHBTC OBV declining — BTC dominance persists",
+        "default_enabled": True,
+        "sort_order": 62,
     },
 ]
 
