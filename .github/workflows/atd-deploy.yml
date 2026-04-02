@@ -11,10 +11,13 @@ name: ATD — Deploy
 # Scripts sync is handled by AlphaTradingDesk-ops repo (separate CI/CD).
 #
 # ── Bump rules (commit prefix → semver) ──────────────────────────────────────
-#   fix: / chore: / refactor:  → PATCH  v1.0.0 → v1.0.1
-#   feat:                      → MINOR  v1.0.1 → v1.1.0
+#   fix: / fix(scope):         → PATCH  v1.0.0 → v1.0.1
+#   chore: / chore(scope):     → PATCH
+#   refactor: / refactor(scope): → PATCH
+#   perf: / perf(scope):       → PATCH
+#   feat: / feat(scope):       → MINOR  v1.0.1 → v1.1.0
 #   feat!: / BREAKING CHANGE   → MAJOR  v1.1.0 → v2.0.0
-#   docs: / test: / ci:        → no bump (no release, no deploy)
+#   docs: / test: / ci: / db:  → no bump (no release, no deploy)
 #
 # ── Re-run behaviour ─────────────────────────────────────────────────────────
 # If the `deploy` job fails (e.g. SSH timeout) you can re-run it alone.
@@ -62,7 +65,9 @@ jobs:
           release_branches: main
           default_bump: false
           tag_prefix: v
-          custom_release_rules: "chore:patch,refactor:patch"
+          # Explicitly list all bump-worthy types (scoped variants handled natively).
+          # feat(scope): → minor  |  fix(scope): → patch  |  chore/refactor/perf → patch
+          custom_release_rules: "feat:minor,fix:patch,chore:patch,refactor:patch,perf:patch"
 
       # ── 1c. Resolve the tag to use downstream ────────────────────────────
       # First run : new_tag      = "v1.2.0"  → release_tag = "v1.2.0"
@@ -85,13 +90,15 @@ jobs:
             echo "release_tag=$NEW" >> "$GITHUB_OUTPUT"
             echo "✅ New release: $NEW"
           else
-            # Check if HEAD commit is bump-worthy (re-run scenario)
-            MSG=$(git log -1 --pretty=%s)
-            if echo "$MSG" | grep -qE '^(feat|fix|chore|refactor)(\(.+\))?!?:'; then
+            # Re-run scenario: tag already exists → scan ALL commits since last tag
+            # (git log -1 would return "Merge pull request #XX" which never matches)
+            if git log "${PREV}..HEAD" --pretty=%s 2>/dev/null \
+                | grep -qE '^(feat|fix|chore|refactor|perf)(\(.+\))?!?:'; then
               echo "release_tag=$PREV" >> "$GITHUB_OUTPUT"
               echo "♻️  Re-run detected — reusing existing tag: $PREV"
             else
               echo "release_tag=" >> "$GITHUB_OUTPUT"
+              MSG=$(git log -1 --pretty=%s)
               echo "ℹ️  No version bump — commit: $MSG"
             fi
           fi

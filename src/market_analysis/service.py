@@ -322,21 +322,33 @@ def get_trade_conclusion(
     trade recommendation.
 
     Rules evaluated in priority order:
-      1. Risk-Off         — bearish bias + very weak participation
-      2. Late Stage       — strong trend but momentum fading
-      3. Full Trend       — all 3 factors aligned bullish
-      4. Wait             — trend present but momentum/participation lagging
-      5. Day Trade Only   — momentum spike without trend backing
-      6. Neutral (default)
+      1.  Risk-Off         — bearish bias + participation < 40
+      1b. Bearish          — bearish bias (any participation)
+      2.  Late Stage       — strong trend but momentum fading
+      3.  Full Trend       — all 3 factors aligned bullish
+      4.  Wait             — trend present but momentum/participation lagging
+      5.  Day Trade Only   — momentum spike without trend backing
+      6.  Neutral (default)
     """
-    # 1. Risk-Off
+    # 1. Risk-Off — bearish + participation collapsed
     if bias == "bearish" and participation < Decimal("40"):
         return TradeConclusion(
             emoji="🔴",
-            label="Risk-Off — No Longs",
-            detail="USDT.D rising + weak participation. Longs not recommended.",
-            trade_types=[],
-            size_advice="cash or short only",
+            label="Risk-Off — Shorts Only",
+            detail="USDT.D rising + weak participation. No longs. Short only on confirmed breakdowns.",
+            trade_types=["short"],
+            size_advice="shorts only or cash",
+            color="red",
+        )
+
+    # 1b. Bearish — no longs, go short on A+ setups
+    if bias == "bearish":
+        return TradeConclusion(
+            emoji="🔴",
+            label="Bearish — Go Short",
+            detail="Bearish composite. No longs. Look for short setups on A+ confirmations.",
+            trade_types=["short"],
+            size_advice="shorts only (50–100%)",
             color="red",
         )
 
