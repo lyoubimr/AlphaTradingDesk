@@ -147,17 +147,21 @@ class KrakenExecutionClient:
         limit_price: str | None = None,
         stop_price: str | None = None,
         reduce_only: bool = False,
+        raise_on_rejection: bool = True,
     ) -> dict:
         """Place an order on Kraken Futures.
 
         Args:
-            order_type:  "mkt" | "lmt" | "stp" | "take_profit"
-            symbol:      instrument symbol (e.g. "PF_XBTUSD")
-            side:        "buy" | "sell"
-            size:        lot size as decimal string (e.g. "0.0375") — never float repr
-            limit_price: required for "lmt" and "take_profit" orders
-            stop_price:  required for "stp" orders
-            reduce_only: True for all SL/TP orders (close-only protection)
+            order_type:        "mkt" | "lmt" | "stp" | "take_profit"
+            symbol:            instrument symbol (e.g. "PF_XBTUSD")
+            side:              "buy" | "sell"
+            size:              lot size as decimal string — never float repr
+            limit_price:       required for "lmt" and "take_profit" orders
+            stop_price:        required for "stp" orders
+            reduce_only:       True for all SL/TP orders (close-only protection)
+            raise_on_rejection: True (default) for entry orders — raises KrakenAPIError if
+                               Kraken rejects. Pass False for SL/TP orders so that
+                               place_sl_tp_orders can handle failures gracefully.
 
         Returns:
             Kraken API response dict. The "sendStatus.orderId" field holds the
@@ -185,20 +189,23 @@ class KrakenExecutionClient:
         send_status = result.get("sendStatus", {})
         placement_status = send_status.get("status", "")
         if placement_status != "placed":
-            raise KrakenAPIError(
-                0,
-                f"Order rejected by Kraken — sendStatus.status={placement_status!r} | "
-                f"order_id={send_status.get('order_id')!r} | symbol={symbol} side={side} size={size}",
+            if raise_on_rejection:
+                raise KrakenAPIError(
+                    0,
+                    f"Order rejected by Kraken — sendStatus.status={placement_status!r} | "
+                    f"order_id={send_status.get('order_id')!r} | symbol={symbol} side={side} size={size}",
+                )
+            logger.warning(
+                "kraken_order_rejected",
+                symbol=symbol, side=side, order_type=order_type, size=size,
+                placement_status=placement_status,
             )
-        logger.info(
-            "kraken_order_placed",
-            symbol=symbol,
-            side=side,
-            order_type=order_type,
-            size=size,
-            status=placement_status,
-            order_id=send_status.get("order_id"),
-        )
+        else:
+            logger.info(
+                "kraken_order_placed",
+                symbol=symbol, side=side, order_type=order_type, size=size,
+                status=placement_status, order_id=send_status.get("order_id"),
+            )
         return result
 
     def cancel_order(self, order_id: str) -> dict:

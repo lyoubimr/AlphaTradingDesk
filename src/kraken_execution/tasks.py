@@ -95,12 +95,17 @@ def poll_pending_orders(self: Task) -> dict:
     db = _get_db()
     processed = 0
     try:
-        # Find all open entry orders where the trade is still pending (LIMIT)
+        # Find all open entry orders where the trade is not yet closed.
+        # We intentionally include trades with status="open" (not just "pending") to handle
+        # edge cases where trade.status was manually patched while the LIMIT is still live.
         open_entries: list[KrakenOrder] = (
             db.query(KrakenOrder)
             .filter(KrakenOrder.role == "entry", KrakenOrder.status == "open")
             .join(Trade, Trade.id == KrakenOrder.trade_id)
-            .filter(Trade.status == "pending", Trade.automation_enabled.is_(True))
+            .filter(
+                Trade.status.notin_(["closed", "cancelled"]),
+                Trade.automation_enabled.is_(True),
+            )
             .all()
         )
 
@@ -120,7 +125,34 @@ def poll_pending_orders(self: Task) -> dict:
                         o.get("order_id") for o in client.get_open_orders()
                     }
                     fills = client.get_fills()
-                    fill_by_order_id = {f.get("order_id"): f for f in fills}
+
+                # Aggregate partial fills — Kraken can send N fills for the same order_id
+                # (e.g. two partial fills of 263+792 for the same LIMIT). A plain dict
+                # comprehension would silently discard all but the last one.
+                from collections import defaultdict  # noqa: PLC0415
+                fills_by_order: dict[str, list] = defaultdict(list)
+                for f in fills:
+                    oid = f.get("order_id")
+                    if oid:
+                        fills_by_order[oid].append(f)
+
+                def _aggregate_fills(fill_list: list) -> dict:
+                    """Merge multiple partial fills into a single synthetic fill."""
+                    if len(fill_list) == 1:
+                        return fill_list[0]
+                    total_size = sum(float(f.get("size", 0)) for f in fill_list)
+                    avg_price = (
+                        sum(float(f.get("price", 0)) * float(f.get("size", 0)) for f in fill_list)
+                        / total_size
+                        if total_size
+                        else 0.0
+                    )
+                    latest = max(fill_list, key=lambda f: f.get("fillTime", ""))
+                    return {**latest, "size": total_size, "price": avg_price}
+
+                fill_by_order_id = {
+                    oid: _aggregate_fills(fl) for oid, fl in fills_by_order.items()
+                }
 
                 for entry in entries:
                     if entry.kraken_order_id in kraken_open_ids:
@@ -157,32 +189,55 @@ def poll_pending_orders(self: Task) -> dict:
                     if entry.kraken_fill_id == fill_id:
                         continue  # already processed (idempotence guard)
 
-                    # Mark entry as filled
+                    # ── Phase 1: commit fill data atomically ───────────────────
+                    # We commit HERE before attempting SL/TP so that a downstream
+                    # Kraken rejection will never roll back the fill record.
+                    from decimal import Decimal  # noqa: PLC0415
                     entry.status = "filled"
                     entry.filled_price = float(fill.get("price", 0))
                     entry.filled_size = float(fill.get("size", 0))
                     entry.filled_at = datetime.now(UTC)
                     entry.kraken_fill_id = fill_id
 
-                    # Update trade: open, update entry_price to filled price
                     trade = db.query(Trade).filter(Trade.id == entry.trade_id).first()
-                    if trade:
+                    if trade and trade.status != "open":
                         trade.status = "open"
-                        filled_price = entry.filled_price
-                        if filled_price:
-                            from decimal import Decimal  # noqa: PLC0415
-                            trade.entry_price = Decimal(str(filled_price))
+                    filled_price = entry.filled_price
+                    if trade and filled_price:
+                        trade.entry_price = Decimal(str(filled_price))
 
-                        # Place SL + TP orders
-                        with _make_client(settings_row) as sl_client:
-                            place_sl_tp_orders(
-                                trade=trade,
-                                entry_size=Decimal(str(entry.filled_size or entry.size)),
-                                client=sl_client,
-                                db=db,
+                    db.commit()  # ← commit fill first — SL/TP failure must NOT undo this
+
+                    # ── Phase 2: place SL/TP (best-effort) ────────────────────
+                    # send_order is called with raise_on_rejection=False inside
+                    # place_sl_tp_orders, so individual rejections are logged as
+                    # "error" rows instead of crashing the whole task.
+                    if trade:
+                        try:
+                            with _make_client(settings_row) as sl_client:
+                                place_sl_tp_orders(
+                                    trade=trade,
+                                    entry_size=Decimal(str(entry.filled_size or entry.size)),
+                                    client=sl_client,
+                                    db=db,
+                                )
+                            db.commit()
+                        except Exception as sl_exc:
+                            logger.error(
+                                "sl_tp_placement_failed_after_fill",
+                                trade_id=trade.id,
+                                error=str(sl_exc),
+                            )
+                            _notify_event(
+                                profile_id,
+                                "ORDER_FAILED",
+                                db,
+                                trade_id=trade.id,
+                                pair=trade.pair,
+                                direction=trade.direction,
+                                error_message=f"SL/TP placement failed after fill: {sl_exc}",
                             )
 
-                    db.commit()
                     processed += 1
                     logger.info(
                         "limit_entry_filled",

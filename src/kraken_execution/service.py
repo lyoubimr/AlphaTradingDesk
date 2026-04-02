@@ -346,6 +346,7 @@ def place_sl_tp_orders(
         size=str(entry_size),
         stop_price=str(trade.stop_loss),
         reduce_only=True,
+        raise_on_rejection=False,
     )
     sl_send_status = sl_result.get("sendStatus", {})
     sl_order_id = sl_send_status.get("order_id", "") or ""
@@ -402,6 +403,7 @@ def place_sl_tp_orders(
             size=str(tp_size),
             limit_price=str(pos.take_profit_price),
             reduce_only=True,
+            raise_on_rejection=False,
         )
         tp_send_status = tp_result.get("sendStatus", {})
         tp_order_id = tp_send_status.get("order_id", "") or ""
