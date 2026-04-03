@@ -139,11 +139,13 @@ def read_account_status(
 # Human-readable hints for known Kraken sendStatus rejection codes.
 _KRAKEN_REJECTION_HINTS: dict[str, str] = {
     "wouldCauseLiquidation": (
-        "Kraken rejected: your available margin barely covers the initial margin requirement. "
-        "Even after opening this position, a single tick of adverse price movement would trigger "
-        "immediate liquidation. Add more funds to your Kraken account or reduce position size. "
-        "ATD pre-flight normally catches this — if you see this error, your Kraken balance "
-        "changed between the check and the order submission."
+        "Kraken rejected: wouldCauseLiquidation. "
+        "Most likely cause: the leverage for this instrument is NOT configured on your Kraken account. "
+        "For PF_ (Portfolio Margin) instruments, 'maxLeverage' in the order is only an upper cap — "
+        "Kraken uses your account's configured leverage for the instrument, which defaults to ×1 (full collateral). "
+        "Fix: go to Kraken Futures → Account settings → Leverage, and set the desired leverage "
+        "(e.g. ×10) for this instrument (e.g. PF_ETHUSD). "
+        "Secondary cause: insufficient balance — add funds or reduce position size/risk%."
     ),
     "insufficientFunds": (
         "Insufficient margin in your Kraken account. "
