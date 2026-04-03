@@ -272,6 +272,9 @@ function EditTradeModal({ trade, onClose, onSuccess }: {
   const [sl, setSl]           = useState(trade.stop_loss?.toString() ?? '')
   const [tf, setTf]           = useState(trade.analyzed_timeframe ?? '')
   const [conf, setConf]       = useState(trade.confidence_score?.toString() ?? '')
+  // CFD/Crypto leverage + margin
+  const [leverage, setLeverage]     = useState(trade.leverage ? String(Math.round(Number(trade.leverage))) : '')
+  const [marginUsed, setMarginUsed] = useState(trade.margin_used ?? '')
   // Pending-only amend
   const [entryAmend, setEntryAmend] = useState(trade.entry_price?.toString() ?? '')
   const [tpAmend, setTpAmend]       = useState<{ price: string; pct: string }[]>(
@@ -309,6 +312,8 @@ function EditTradeModal({ trade, onClose, onSuccess }: {
         stop_loss:          sl || undefined,
         analyzed_timeframe: tf || undefined,
         confidence_score:   conf !== '' ? parseInt(conf) : undefined,
+        leverage:           leverage !== '' ? Number(leverage) : undefined,
+        margin_used:        marginUsed !== '' ? Number(marginUsed) : undefined,
       }
       // Pending-only: amend entry + positions
       if (isPending) {
@@ -480,6 +485,49 @@ function EditTradeModal({ trade, onClose, onSuccess }: {
             <span>10 — Max conviction</span>
           </div>
         </div>
+
+        {/* ── Leverage & Margin (Crypto, non-pending) ─────────────────── */}
+        {!isPending && trade.asset_class?.toLowerCase() === 'crypto' && (
+          <div className="rounded-lg bg-surface-700/40 border border-surface-600/50 p-3 space-y-3">
+            <p className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold">
+              Leverage &amp; Margin — correct recorded values
+            </p>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <label className="text-xs font-medium text-slate-400 flex items-center justify-between">
+                  <span>Leverage</span>
+                  <span className="font-mono font-bold text-brand-400">
+                    {leverage !== '' ? `×${leverage}` : '—'}
+                  </span>
+                </label>
+                <input
+                  type="number" step="1" min="1" max="1000"
+                  value={leverage}
+                  onChange={(e) => setLeverage(e.target.value)}
+                  className={cn(inputCls, 'text-xs')}
+                  placeholder={trade.leverage ? String(Math.round(Number(trade.leverage))) : '×'}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-xs font-medium text-slate-400">
+                  Margin (USD)
+                </label>
+                <div className="flex">
+                  <input
+                    type="number" step="0.01" min="0"
+                    value={marginUsed}
+                    onChange={(e) => setMarginUsed(e.target.value)}
+                    className={cn(inputCls, 'rounded-r-none border-r-0 text-xs')}
+                    placeholder={trade.margin_used ?? '0.00'}
+                  />
+                  <span className="shrink-0 px-2 py-2 rounded-r-lg border border-surface-600 bg-surface-700/60 text-xs text-slate-500">
+                    $
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
 
         {err && <p className="text-[11px] text-red-400 flex items-center gap-1"><AlertTriangle size={11} />{err}</p>}
 
