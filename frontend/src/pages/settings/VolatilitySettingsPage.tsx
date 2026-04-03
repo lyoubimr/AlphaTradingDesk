@@ -1129,10 +1129,16 @@ export function VolatilitySettingsPage() {
                           )
                         }
                         return (
-                          <p className="text-[10px] text-slate-700">
+                          <p className="text-[10px] text-slate-500">
                             {curHours.length === 0
                               ? `All hours · fires ${getBeatLocalLabel(tf)}`
-                              : `${curHours.length} UTC hour${curHours.length > 1 ? 's' : ''} selected`}
+                              : (() => {
+                                  const utcMin = Math.min(...curHours)
+                                  const utcMax = Math.max(...curHours)
+                                  const locMin = (utcMin + LOCAL_OFFSET_H + 24) % 24
+                                  const locMax = (utcMax + LOCAL_OFFSET_H + 24) % 24
+                                  return `${locMin}h–${locMax}h local · UTC ${utcMin}h–${utcMax}h · ${curHours.length}h selected`
+                                })()}
                           </p>
                         )
                       })()}
