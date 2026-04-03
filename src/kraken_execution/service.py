@@ -29,6 +29,7 @@ from src.core.models.broker import Instrument
 from src.core.models.trade import Position, Trade
 from src.kraken_execution import (
     AutomationNotEnabledError,
+    KrakenAPIError,
     MissingAPIKeysError,
     MissingPrecisionError,
 )
@@ -254,6 +255,36 @@ def open_automated_trade(trade_id: int, db: Session) -> KrakenOrder:
     with _make_client(settings_row) as client:
         kraken_type = _kraken_order_type(trade.order_type)
         limit_price = str(trade.entry_price) if trade.order_type == "LIMIT" else None
+
+        # ─ Pre-flight: check available Kraken margin before placing the order ─
+        # Required margin = notional / leverage (leverage stored on the trade, default 10).
+        # This guards against invisible mismatches between ATD’s leverage and the
+        # account-level max-leverage Kraken has configured for this market.
+        leverage = Decimal(str(trade.leverage or 10))
+        entry_price = trade.entry_price or Decimal(limit_price or "0")
+        required_margin = (lot_size * entry_price / leverage).quantize(Decimal("0.01"))
+        try:
+            acct = client.get_accounts_summary()
+            available = Decimal(
+                str(acct.get("accounts", {}).get("flex", {}).get("availableMargin", -1))
+            )
+            if available >= 0 and available < required_margin:
+                raise KrakenAPIError(
+                    0,
+                    f"Insufficient Kraken margin: {float(available):.2f} USD available, "
+                    f"{float(required_margin):.2f} USD required "
+                    f"({float(lot_size):.4f} units × {float(entry_price):.2f} ÷ ×{int(leverage)} leverage). "
+                    f"Add funds to your Kraken account, reduce leverage, or reduce position size.",
+                )
+        except KrakenAPIError:
+            raise  # re-raise preflight failures directly
+        except Exception as preflight_err:  # noqa: BLE001
+            # If the accounts endpoint is unavailable, log a warning but don’t block.
+            logger.warning(
+                "kraken_preflight_check_failed",
+                trade_id=trade_id,
+                error=str(preflight_err),
+            )
 
         result = client.send_order(
             order_type=kraken_type,

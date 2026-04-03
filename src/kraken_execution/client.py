@@ -137,7 +137,15 @@ class KrakenExecutionClient:
         return resp.json()  # type: ignore[no-any-return]
 
     # ── Public API methods ────────────────────────────────────────────────────
+    def get_accounts_summary(self) -> dict:
+        """Fetch portfolio margin summary from Kraken Futures.
 
+        Returns the full accounts payload. Key fields:
+          accounts["flex"]["availableMargin"] — free margin ready for new positions
+          accounts["flex"]["initialMargin"]   — margin locked by open positions
+          accounts["flex"]["portfolioValue"]  — total account equity
+        """
+        return self._get("/derivatives/api/v3/accounts")
     def send_order(
         self,
         order_type: str,
