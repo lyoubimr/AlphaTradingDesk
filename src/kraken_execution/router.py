@@ -40,6 +40,7 @@ from src.kraken_execution.schemas import (
 from src.kraken_execution.service import (
     cancel_entry,
     close_automated_trade,
+    get_account_status,
     get_automation_settings,
     has_api_keys,
     list_kraken_orders,
@@ -114,6 +115,23 @@ def read_kraken_orders(
 ) -> list[KrakenOrderOut]:
     orders = list_kraken_orders(trade_id, db)
     return [KrakenOrderOut.model_validate(o) for o in orders]
+
+
+@router.get("/account/{profile_id}")
+def read_account_status(
+    profile_id: int,
+    db: Session = Depends(get_db),
+) -> dict:
+    """Diagnostic: return real-time Kraken account margin + open positions.
+
+    Useful to diagnose wouldCauseLiquidation rejections:
+    check available_margin, existing initial_margin locked by open positions,
+    and any ghost positions that may be consuming margin.
+    """
+    try:
+        return get_account_status(profile_id, db)
+    except Exception as exc:
+        raise _map_exc(exc) from exc
 
 
 # ── Trade automation triggers ─────────────────────────────────────────────────

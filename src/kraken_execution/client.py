@@ -146,6 +146,7 @@ class KrakenExecutionClient:
           accounts["flex"]["portfolioValue"]  — total account equity
         """
         return self._get("/derivatives/api/v3/accounts")
+
     def send_order(
         self,
         order_type: str,
@@ -197,7 +198,7 @@ class KrakenExecutionClient:
             payload["maxLeverage"] = max_leverage
 
         result = self._post("/derivatives/api/v3/sendorder", payload)
-        logger.debug("kraken_sendorder_raw", raw=result)
+        logger.info("kraken_sendorder_raw", payload=payload, raw=result)
         if result.get("result") != "success":
             raise KrakenAPIError(0, str(result))
         # Guard against Kraken returning result="success" with a rejected sendStatus
