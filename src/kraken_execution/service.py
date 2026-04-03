@@ -29,6 +29,7 @@ from src.core.models.broker import Instrument
 from src.core.models.trade import Position, Trade
 from src.kraken_execution import (
     AutomationNotEnabledError,
+    KrakenAPIError,
     MissingAPIKeysError,
     MissingPrecisionError,
 )
@@ -255,12 +256,51 @@ def open_automated_trade(trade_id: int, db: Session) -> KrakenOrder:
         kraken_type = _kraken_order_type(trade.order_type)
         limit_price = str(trade.entry_price) if trade.order_type == "LIMIT" else None
 
+        # ─ Pre-flight: check available Kraken margin before placing the order ─
+        # Kraken Portfolio Margin (PF_) requires initial margin + maintenance margin.
+        # Maintenance margin ≈ 50% of initial margin for crypto perpetuals.
+        # Without this buffer, Kraken rejects with wouldCauseLiquidation even when
+        # availableMargin >= initial_margin, because any adverse tick would liquidate.
+        leverage = Decimal(str(trade.leverage or 10))
+        entry_price = trade.entry_price or Decimal(limit_price or "0")
+        initial_margin = (lot_size * entry_price / leverage).quantize(Decimal("0.01"))
+        # Kraken PF maintenance margin ≈ 50% of initial margin for crypto perpetuals
+        maintenance_margin = (initial_margin * Decimal("0.50")).quantize(Decimal("0.01"))
+        required_margin = initial_margin + maintenance_margin
+        try:
+            acct = client.get_accounts_summary()
+            available = Decimal(
+                str(acct.get("accounts", {}).get("flex", {}).get("availableMargin", -1))
+            )
+            if available >= 0 and available < required_margin:
+                shortfall = (required_margin - available).quantize(Decimal("0.01"))
+                raise KrakenAPIError(
+                    0,
+                    f"Insufficient Kraken margin for this trade: "
+                    f"you have {float(available):.2f} USD available, "
+                    f"but {float(required_margin):.2f} USD are required "
+                    f"({float(initial_margin):.2f} initial + {float(maintenance_margin):.2f} maintenance — "
+                    f"×{int(leverage)} leverage, {float(lot_size):.4f} units at {float(entry_price):.2f}). "
+                    f"Add at least {float(shortfall):.2f} USD to your Kraken account, "
+                    f"or reduce risk % to lower position size.",
+                )
+        except KrakenAPIError:
+            raise  # re-raise preflight failures directly
+        except Exception as preflight_err:  # noqa: BLE001
+            # If the accounts endpoint is unavailable, log a warning but don’t block.
+            logger.warning(
+                "kraken_preflight_check_failed",
+                trade_id=trade_id,
+                error=str(preflight_err),
+            )
+
         result = client.send_order(
             order_type=kraken_type,
             symbol=instrument.symbol,
             side=_entry_side(trade),
             size=str(lot_size),
             limit_price=limit_price,
+            max_leverage=int(trade.leverage or 10),
         )
 
     send_status = result.get("sendStatus", {})
