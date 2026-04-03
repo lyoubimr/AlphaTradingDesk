@@ -65,6 +65,20 @@ function deriveKPIs(trades: TradeListItem[]) {
   }, 0)
   const hasPnl = closed.length > 0 || trades.some((t) => t.booked_pnl)
   const sign = totalPnl >= 0 ? '+' : ''
+
+  // Avg R:R = mean of (realized_pnl / risk_amount) across closed trades with valid risk
+  const rrs = closed
+    .map(t => {
+      const pnl  = parseFloat(t.realized_pnl ?? '0')
+      const risk = parseFloat(t.risk_amount  ?? '0')
+      return risk > 0 ? pnl / risk : null
+    })
+    .filter((r): r is number => r !== null)
+  const avgRR     = rrs.length > 0 ? rrs.reduce((a, b) => a + b, 0) / rrs.length : null
+  const avgRRStr  = avgRR != null ? `${avgRR >= 0 ? '+' : ''}${avgRR.toFixed(2)}R` : '—'
+  const avgRRPos  = avgRR != null ? avgRR >= 0 : null
+  const avgRRSub  = rrs.length > 0 ? `${rrs.length} closed trade${rrs.length > 1 ? 's' : ''}` : 'No closed trades'
+
   return {
     total:       trades.length,
     openCount:   openList.length,
@@ -72,6 +86,7 @@ function deriveKPIs(trades: TradeListItem[]) {
     winRateSub:  closed.length < 5 ? 'Min 5 closed trades' : `${wins.length}/${closed.length} wins`,
     totalPnl:    hasPnl ? `${sign}$${totalPnl.toFixed(2)}` : '—',
     totalPnlPos: totalPnl >= 0,
+    avgRR, avgRRStr, avgRRPos, avgRRSub,
   }
 }
 
@@ -195,10 +210,14 @@ export function TradesPage() {
         />
         <StatCard
           label="Avg R:R"
-          value="—"
-          sub="Coming soon"
-          accent="neutral"
-          info="Average realised risk-to-reward ratio across all closed trades."
+          value={
+            loading ? '…' : kpis.avgRR != null
+              ? <span className={kpis.avgRRPos ? 'text-emerald-400' : 'text-red-400'}>{kpis.avgRRStr}</span>
+              : '—'
+          }
+          sub={loading ? '' : kpis.avgRRSub}
+          accent={kpis.avgRRPos === true ? 'bull' : kpis.avgRRPos === false ? 'bear' : 'neutral'}
+          info="Average realised R:R across closed trades. Computed as realized P&L ÷ initial risk per trade."
         />
         <StatCard
           label="Total P&L"
