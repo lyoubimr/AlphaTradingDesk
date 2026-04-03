@@ -406,8 +406,11 @@ def orchestrate_risk_advisor(
     # ── 4. Market VI regime — always aggregated (cross-TF macro view) ────────
     # TF is irrelevant for market context; use the weighted cross-TF aggregate.
     market_vi_cached = get_cached_market_vi("aggregated")
+    market_vi_score: float | None = None
     if market_vi_cached:
         market_vi_regime: str | None = market_vi_cached.get("regime")
+        raw_mvi = market_vi_cached.get("vi_score")
+        market_vi_score = float(raw_mvi) if raw_mvi is not None else None
     else:
         # Redis cold → fall back to latest aggregated DB snapshot
         row = (
@@ -417,12 +420,19 @@ def orchestrate_risk_advisor(
             .first()
         )
         market_vi_regime = row.regime if row else None
+        market_vi_score = float(row.vi_score) if row and row.vi_score is not None else None
 
-    # ── 5. Pair VI regime (cache → live, graceful degradation) ───────────────
+    # ── 5. Pair VI regime + scores (cache → live, graceful degradation) ──────
     pair_vi_regime: str | None = None
+    pair_vi_score: float | None = None
+    pair_vi_ema_score: float | None = None
+    pair_vi_ema_signal: str | None = None
     try:
         pair_vi_data = get_live_pair_vi(pair, timeframe, db)
         pair_vi_regime = pair_vi_data.get("regime")
+        pair_vi_score = pair_vi_data.get("vi_score")
+        pair_vi_ema_score = pair_vi_data.get("ema_score")
+        pair_vi_ema_signal = pair_vi_data.get("ema_signal")
     except HTTPException:
         logger.warning(
             "orchestrate_risk_advisor: pair VI unavailable for %s/%s — neutral",
@@ -479,4 +489,9 @@ def orchestrate_risk_advisor(
         "budget_remaining_if_pending_fill_amount": result.budget_remaining_if_pending_fill_amount,
         "pending_budget_warning": result.pending_budget_warning,
         "force_allowed": force_allowed,
+        # VI + EMA snapshot — stored for trade history analysis
+        "pair_vi_score": pair_vi_score,
+        "pair_vi_ema_score": pair_vi_ema_score,
+        "pair_vi_ema_signal": pair_vi_ema_signal,
+        "market_vi_score": market_vi_score,
     }

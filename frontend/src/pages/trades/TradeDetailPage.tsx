@@ -1475,6 +1475,20 @@ export function TradeDetailPage() {
             adjusted_risk_amount?: number
             budget_remaining_pct?: number
             criteria?: { name: string; enabled: boolean; value_label: string; factor?: number }[]
+            pair_vi_score?: number | null
+            pair_vi_ema_score?: number | null
+            pair_vi_ema_signal?: string | null
+            market_vi_score?: number | null
+          }
+
+          const EMA_SIGNAL_DISPLAY: Record<string, { label: string; color: string; symbol: string }> = {
+            above_all:      { label: 'Above All',   color: '#10b981', symbol: '▲' },
+            below_all:      { label: 'Below All',   color: '#ef4444', symbol: '▼' },
+            breakout_up:    { label: 'Breakout ↑',  color: '#0ea5e9', symbol: '🚀' },
+            breakdown_down: { label: 'Breakdown ↓', color: '#f97316', symbol: '💥' },
+            retest_up:      { label: 'Retest ↑',    color: '#a855f7', symbol: '🔄' },
+            retest_down:    { label: 'Retest ↓',    color: '#c084fc', symbol: '🔁' },
+            mixed:          { label: 'Mixed',       color: '#71717a', symbol: '∿' },
           }
           const criteria = (snap.criteria ?? []).filter(c => c.enabled)
 
@@ -1539,7 +1553,37 @@ export function TradeDetailPage() {
                           <span className={cn('text-[12px] font-mono font-semibold truncate', accentClass(accent))}>
                             {c.value_label}
                           </span>
+                          {/* VI numeric score — pair_vi */}
+                          {c.name === 'pair_vi' && snap.pair_vi_score != null && (
+                            <span className="text-[10px] font-mono text-slate-400 ml-auto shrink-0">
+                              {Math.round(snap.pair_vi_score)}
+                            </span>
+                          )}
+                          {/* VI numeric score — market_vi */}
+                          {c.name === 'market_vi' && snap.market_vi_score != null && (
+                            <span className="text-[10px] font-mono text-slate-400 ml-auto shrink-0">
+                              {Math.round(snap.market_vi_score)}
+                            </span>
+                          )}
                         </div>
+                        {/* EMA signal badge — pair_vi only */}
+                        {c.name === 'pair_vi' && snap.pair_vi_ema_signal && (() => {
+                          const sig = snap.pair_vi_ema_signal as string
+                          const ema = EMA_SIGNAL_DISPLAY[sig] ?? EMA_SIGNAL_DISPLAY.mixed
+                          const emaPct = snap.pair_vi_ema_score != null
+                            ? Math.round(snap.pair_vi_ema_score * 100)
+                            : null
+                          return (
+                            <div className="flex items-center gap-1 mt-0.5">
+                              <span style={{ color: ema.color }} className="text-[10px] font-semibold leading-none">
+                                {ema.symbol} {ema.label}
+                              </span>
+                              {emaPct != null && (
+                                <span className="text-[9px] font-mono text-slate-500">{emaPct}%</span>
+                              )}
+                            </div>
+                          )
+                        })()}
                       </div>
                     )
                   })}
