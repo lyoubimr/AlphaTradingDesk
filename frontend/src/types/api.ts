@@ -213,6 +213,10 @@ export interface TradeOut extends TradeListItem {
   updated_at: string
   positions: TradePosition_Out[]
   size_info: TradeSizeResult | null
+  /** Actual leverage used (Crypto only) */
+  leverage: string | null
+  /** Actual margin deposited (Crypto only) */
+  margin_used: string | null
 
   // Snapshots + post-trade review
   entry_screenshot_urls: string[] | null
@@ -248,6 +252,9 @@ export interface TradeUpdate {
   session_tag?: string | null
   analyzed_timeframe?: string | null
   entry_screenshot_urls?: string[] | null
+  // CFD/Crypto — editable on open/partial (corrects stored values)
+  leverage?: number | null
+  margin_used?: number | null
   // Always editable (including closed — post-trade review)
   close_notes?: string | null
   close_screenshot_urls?: string[] | null

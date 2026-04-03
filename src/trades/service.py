@@ -862,6 +862,8 @@ def update_trade(db: Session, trade_id: int, data: TradeUpdate) -> TradeOut:
         "session_tag",
         "analyzed_timeframe",
         "entry_screenshot_urls",
+        "leverage",
+        "margin_used",
     }
     for field in simple_fields:
         if field in data.model_fields_set:

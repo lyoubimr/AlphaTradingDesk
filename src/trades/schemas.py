@@ -159,7 +159,8 @@ class TradeUpdate(BaseModel):
 
     Fields available for all non-closed statuses:
         stop_loss, strategy_id, notes, confidence_score, session_tag,
-        analyzed_timeframe, entry_screenshot_urls
+        analyzed_timeframe, entry_screenshot_urls,
+        leverage, margin_used (CFD/Crypto — corrects stored values)
 
     Fields available for ALL statuses (including closed!):
         close_notes, close_screenshot_urls
@@ -187,6 +188,10 @@ class TradeUpdate(BaseModel):
     # Post-trade review — editable on closed trades too
     close_notes: str | None = None
     close_screenshot_urls: list[str] | None = None
+
+    # ── CFD/Crypto fields — editable on open/partial trades ──────────────
+    leverage: Decimal | None = Field(default=None, gt=0)
+    margin_used: Decimal | None = Field(default=None, gt=0)
 
     # ── pending-only amendments ───────────────────────────────────────────
     entry_price: Decimal | None = Field(default=None, gt=0)
@@ -299,6 +304,10 @@ class TradeOut(BaseModel):
     close_screenshot_urls: list[str] | None = None
 
     positions: list[PositionOut] = []
+
+    # CFD/Crypto specifics — stored, exposed for display and edit
+    leverage: Decimal | None = None
+    margin_used: Decimal | None = None
 
     # Computed on open — not stored, re-attached by the service
     size_info: TradeSizeResult | None = None
