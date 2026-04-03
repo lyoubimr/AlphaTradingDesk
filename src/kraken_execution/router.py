@@ -121,12 +121,11 @@ def read_kraken_orders(
 # Human-readable hints for known Kraken sendStatus rejection codes.
 _KRAKEN_REJECTION_HINTS: dict[str, str] = {
     "wouldCauseLiquidation": (
-        "Kraken rejected this order because it would immediately trigger liquidation. "
-        "Most likely cause: the leverage configured on your Kraken account for this market "
-        "does not match ATD’s leverage setting (e.g. ATD says ×10 but Kraken uses ×1). "
-        "Go to Kraken Futures → Settings → set max leverage to ×10 for this instrument. "
-        "If you already have the right leverage, your available margin may be too low — "
-        "add funds to your Kraken wallet."
+        "Kraken rejected: your available margin barely covers the initial margin requirement. "
+        "Even after opening this position, a single tick of adverse price movement would trigger "
+        "immediate liquidation. Add more funds to your Kraken account or reduce position size. "
+        "ATD pre-flight normally catches this — if you see this error, your Kraken balance "
+        "changed between the check and the order submission."
     ),
     "insufficientFunds": (
         "Insufficient margin in your Kraken account. "

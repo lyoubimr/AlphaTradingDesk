@@ -257,24 +257,31 @@ def open_automated_trade(trade_id: int, db: Session) -> KrakenOrder:
         limit_price = str(trade.entry_price) if trade.order_type == "LIMIT" else None
 
         # ─ Pre-flight: check available Kraken margin before placing the order ─
-        # Required margin = notional / leverage (leverage stored on the trade, default 10).
-        # This guards against invisible mismatches between ATD’s leverage and the
-        # account-level max-leverage Kraken has configured for this market.
+        # Kraken Portfolio Margin (PF_) requires BOTH initial margin AND a maintenance
+        # margin buffer. Even if available > initial_margin, if available ≈ initial_margin
+        # Kraken will reject with wouldCauseLiquidation (any tick would liquidate).
+        # We apply a 20% buffer on top of initial margin (maintenance ≈ 50% of initial,
+        # but 20% is a safe conservative ceiling that avoids false positives).
+        MAINTENANCE_MARGIN_FACTOR = Decimal("1.20")
         leverage = Decimal(str(trade.leverage or 10))
         entry_price = trade.entry_price or Decimal(limit_price or "0")
-        required_margin = (lot_size * entry_price / leverage).quantize(Decimal("0.01"))
+        initial_margin = (lot_size * entry_price / leverage).quantize(Decimal("0.01"))
+        required_margin = (initial_margin * MAINTENANCE_MARGIN_FACTOR).quantize(Decimal("0.01"))
         try:
             acct = client.get_accounts_summary()
             available = Decimal(
                 str(acct.get("accounts", {}).get("flex", {}).get("availableMargin", -1))
             )
             if available >= 0 and available < required_margin:
+                buffer_usd = float(required_margin - initial_margin)
                 raise KrakenAPIError(
                     0,
                     f"Insufficient Kraken margin: {float(available):.2f} USD available, "
-                    f"{float(required_margin):.2f} USD required "
-                    f"({float(lot_size):.4f} units × {float(entry_price):.2f} ÷ ×{int(leverage)} leverage). "
-                    f"Add funds to your Kraken account, reduce leverage, or reduce position size.",
+                    f"but {float(required_margin):.2f} USD needed "
+                    f"({float(initial_margin):.2f} USD initial margin + "
+                    f"{buffer_usd:.2f} USD maintenance buffer). "
+                    f"Add at least {max(0.0, float(required_margin - available)):.2f} USD "
+                    f"to your Kraken account, or reduce position size / risk %.",
                 )
         except KrakenAPIError:
             raise  # re-raise preflight failures directly
