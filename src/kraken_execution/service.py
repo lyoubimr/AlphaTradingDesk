@@ -160,6 +160,29 @@ def verify_connection(profile_id: int, db: Session) -> dict:
     return result
 
 
+def get_account_status(profile_id: int, db: Session) -> dict:
+    """Return real-time Kraken account margin status + open positions.
+
+    Used for diagnosing margin issues. Returns:
+      available_margin, initial_margin, portfolio_value, balance_value,
+      open_positions (list of {symbol, side, size, price})
+    """
+    row = get_automation_settings(profile_id, db)
+    with _make_client(row) as client:
+        acct = client.get_accounts_summary()
+        open_positions = client.get_open_positions()
+    flex = acct.get("accounts", {}).get("flex", {})
+    return {
+        "available_margin": flex.get("availableMargin"),
+        "initial_margin": flex.get("initialMargin"),
+        "maintenance_margin": flex.get("maintenanceMargin"),
+        "portfolio_value": flex.get("portfolioValue"),
+        "balance_value": flex.get("balanceValue"),
+        "pnl": flex.get("pnl"),
+        "open_positions": open_positions,
+    }
+
+
 # ── Internal helpers ──────────────────────────────────────────────────────────
 
 def _get_trade_or_404(trade_id: int, db: Session) -> Trade:
@@ -269,8 +292,23 @@ def open_automated_trade(trade_id: int, db: Session) -> KrakenOrder:
         required_margin = initial_margin + maintenance_margin
         try:
             acct = client.get_accounts_summary()
-            available = Decimal(
-                str(acct.get("accounts", {}).get("flex", {}).get("availableMargin", -1))
+            flex = acct.get("accounts", {}).get("flex", {})
+            available = Decimal(str(flex.get("availableMargin", -1)))
+            logger.info(
+                "kraken_preflight",
+                trade_id=trade_id,
+                symbol=instrument.symbol,
+                side=_entry_side(trade),
+                lot_size=float(lot_size),
+                entry_price=float(entry_price),
+                leverage=int(leverage),
+                notional=float(lot_size * entry_price),
+                atd_initial_margin=float(initial_margin),
+                atd_maintenance_margin=float(maintenance_margin),
+                atd_required_margin=float(required_margin),
+                kraken_available_margin=float(available) if available >= 0 else "N/A",
+                kraken_portfolio_value=flex.get("portfolioValue", "N/A"),
+                kraken_existing_initial_margin=flex.get("initialMargin", "N/A"),
             )
             if available >= 0 and available < required_margin:
                 shortfall = (required_margin - available).quantize(Decimal("0.01"))
