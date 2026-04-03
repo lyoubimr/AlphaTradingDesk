@@ -535,9 +535,9 @@ def compute_pair_vi(self, timeframe: str, force: bool = False) -> dict:  # type:
             union_hours: set[int] = set()
             unrestricted = False  # True if any profile has empty hours (= all hours OK)
 
-            all_rows = db.query(VolatilitySettings).all()
-            for row in all_rows:
-                pp_col: dict = getattr(row, "per_pair", {}) or {}
+            all_rows: list[VolatilitySettings] = db.query(VolatilitySettings).all()
+            for vs_row in all_rows:
+                pp_col: dict = getattr(vs_row, "per_pair", {}) or {}
                 if not pp_col.get("enabled", True):
                     continue
                 tf_sched_row: dict = (pp_col.get("schedules") or {}).get(timeframe, {})
@@ -691,7 +691,7 @@ def compute_pair_vi(self, timeframe: str, force: bool = False) -> dict:  # type:
                     .group_by(VolatilitySnapshot.pair)
                     .subquery()
                 )
-                sup_rows = (
+                sup_rows: list[VolatilitySnapshot] = (
                     db.query(VolatilitySnapshot)
                     .join(
                         subq,
