@@ -310,6 +310,27 @@ def open_automated_trade(trade_id: int, db: Session) -> KrakenOrder:
                 kraken_portfolio_value=flex.get("portfolioValue", "N/A"),
                 kraken_existing_initial_margin=flex.get("initialMargin", "N/A"),
             )
+            # Warn if there are open orders for the same symbol — they lock margin
+            # and can cause wouldCauseLiquidation even with sufficient balance.
+            open_orders = client.get_open_orders()
+            conflicting = [
+                o for o in open_orders
+                if o.get("symbol") == instrument.symbol
+            ]
+            if conflicting:
+                logger.warning(
+                    "kraken_preflight_open_orders_exist",
+                    trade_id=trade_id,
+                    symbol=instrument.symbol,
+                    open_orders_count=len(conflicting),
+                    open_orders=[{"order_id": o.get("order_id"), "side": o.get("side"), "size": o.get("size")} for o in conflicting],
+                )
+                raise KrakenAPIError(
+                    0,
+                    f"You already have {len(conflicting)} open order(s) for {instrument.symbol} on Kraken "
+                    f"that are locking margin. Cancel them first before placing a new automated order, "
+                    f"or close them from the Kraken UI.",
+                )
             if available >= 0 and available < required_margin:
                 shortfall = (required_margin - available).quantize(Decimal("0.01"))
                 raise KrakenAPIError(

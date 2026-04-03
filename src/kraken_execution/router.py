@@ -140,12 +140,11 @@ def read_account_status(
 _KRAKEN_REJECTION_HINTS: dict[str, str] = {
     "wouldCauseLiquidation": (
         "Kraken rejected: wouldCauseLiquidation. "
-        "Most likely cause: the leverage for this instrument is NOT configured on your Kraken account. "
-        "For PF_ (Portfolio Margin) instruments, 'maxLeverage' in the order is only an upper cap — "
-        "Kraken uses your account's configured leverage for the instrument, which defaults to ×1 (full collateral). "
-        "Fix: go to Kraken Futures → Account settings → Leverage, and set the desired leverage "
-        "(e.g. ×10) for this instrument (e.g. PF_ETHUSD). "
-        "Secondary cause: insufficient balance — add funds or reduce position size/risk%."
+        "Most likely cause: you have a pending open order for this instrument on Kraken "
+        "that is already locking margin — a second order tips the portfolio over the maintenance threshold. "
+        "Go to Kraken and cancel any open orders for this symbol, then retry. "
+        "Secondary cause: the leverage configured on your Kraken account for this instrument "
+        "is lower than expected (check Kraken → Settings → Leverage Preferences)."
     ),
     "insufficientFunds": (
         "Insufficient margin in your Kraken account. "
