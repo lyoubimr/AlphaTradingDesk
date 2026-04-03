@@ -155,6 +155,7 @@ class KrakenExecutionClient:
         limit_price: str | None = None,
         stop_price: str | None = None,
         reduce_only: bool = False,
+        max_leverage: int | None = None,
         raise_on_rejection: bool = True,
     ) -> dict:
         """Place an order on Kraken Futures.
@@ -167,6 +168,11 @@ class KrakenExecutionClient:
             limit_price:       required for "lmt" and "take_profit" orders
             stop_price:        required for "stp" orders
             reduce_only:       True for all SL/TP orders (close-only protection)
+            max_leverage:      leverage multiplier for PF_ (Portfolio Margin) instruments.
+                               If None, Kraken uses the account default (typically ×1).
+                               Always pass this for entry orders to ensure the correct
+                               margin is used — otherwise Kraken may reject with
+                               wouldCauseLiquidation.
             raise_on_rejection: True (default) for entry orders — raises KrakenAPIError if
                                Kraken rejects. Pass False for SL/TP orders so that
                                place_sl_tp_orders can handle failures gracefully.
@@ -187,6 +193,8 @@ class KrakenExecutionClient:
             payload["stopPrice"] = stop_price
         if reduce_only:
             payload["reduceOnly"] = "true"
+        if max_leverage is not None:
+            payload["maxLeverage"] = max_leverage
 
         result = self._post("/derivatives/api/v3/sendorder", payload)
         logger.debug("kraken_sendorder_raw", raw=result)

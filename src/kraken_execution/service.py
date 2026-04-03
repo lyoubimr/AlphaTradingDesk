@@ -300,6 +300,7 @@ def open_automated_trade(trade_id: int, db: Session) -> KrakenOrder:
             side=_entry_side(trade),
             size=str(lot_size),
             limit_price=limit_price,
+            max_leverage=int(trade.leverage or 10),
         )
 
     send_status = result.get("sendStatus", {})
