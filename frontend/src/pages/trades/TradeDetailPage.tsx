@@ -1493,18 +1493,27 @@ export function TradeDetailPage() {
           const criteria = (snap.criteria ?? []).filter(c => c.enabled)
 
           const CRITERION_LABELS: Record<string, string> = {
-            market_vi:   'Market VI',
-            pair_vi:     'Asset VI',
+            market_vi:    'Market VI',
+            pair_vi:      'Asset VI',
             ma_direction: 'MA Direction',
-            strategy_wr: 'Strategy WR',
-            confidence:  'Confidence',
+            strategy_wr:  'Strategy WR',
+            confidence:   'Confidence',
+          }
+
+          const CRITERION_ICONS: Record<string, string> = {
+            market_vi:    '🌍',
+            pair_vi:      '📊',
+            ma_direction: '🧭',
+            strategy_wr:  '🎯',
+            confidence:   '💪',
           }
 
           function criterionAccent(name: string, label: string): 'green' | 'red' | 'amber' | undefined {
             if (name === 'ma_direction') {
               const v = label.toLowerCase()
-              if (v === 'aligned') return 'green'
-              if (v === 'opposed') return 'red'
+              if (v.startsWith('aligned')) return 'green'
+              if (v.startsWith('partial')) return 'amber'
+              if (v.startsWith('opposed') || v.startsWith('against')) return 'red'
               return undefined
             }
             if (name === 'market_vi' || name === 'pair_vi') {
@@ -1513,14 +1522,22 @@ export function TradeDetailPage() {
               if (v === 'ACTIVE' || v === 'MODERATE') return 'amber'
               if (v === 'VOLATILE' || v === 'HIGH' || v === 'EXTREME') return 'red'
             }
+            if (name === 'strategy_wr') {
+              const num = parseFloat(label)
+              if (!isNaN(num)) return num >= 60 ? 'green' : num >= 45 ? 'amber' : 'red'
+            }
+            if (name === 'confidence') {
+              const num = parseFloat(label)
+              if (!isNaN(num)) return num >= 7 ? 'green' : num >= 5 ? 'amber' : 'red'
+            }
             return undefined
           }
 
-          const accentClass = (accent?: 'green' | 'red' | 'amber') =>
-            accent === 'green' ? 'text-emerald-400'
-            : accent === 'red' ? 'text-red-400'
-            : accent === 'amber' ? 'text-amber-400'
-            : 'text-slate-200'
+          const pillClass = (accent?: 'green' | 'red' | 'amber') =>
+            accent === 'green' ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-300' :
+            accent === 'red'   ? 'bg-red-500/15 border-red-500/30 text-red-300' :
+            accent === 'amber' ? 'bg-amber-500/15 border-amber-500/30 text-amber-300' :
+            'bg-surface-600/40 border-surface-500/40 text-slate-300'
 
           const multNum = snap.multiplier ?? 1
           const multAccent = multNum > 1 ? 'text-emerald-400' : multNum < 1 ? 'text-amber-400' : 'text-slate-200'
@@ -1529,8 +1546,14 @@ export function TradeDetailPage() {
 
           return (
             <div className="bg-surface-800 rounded-xl border border-surface-700 overflow-hidden">
-              <div className="px-5 py-3.5 border-b border-surface-700/50">
-                <span className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold">📊 Entry Context</span>
+              <div className="px-5 py-3.5 border-b border-surface-700/50 flex items-center gap-2">
+                <span className="text-base leading-none">📊</span>
+                <span className="text-[11px] uppercase tracking-wider text-slate-400 font-semibold">Entry Context</span>
+                {criteria.length > 0 && (
+                  <span className="ml-auto text-[9px] font-mono bg-surface-600/50 text-slate-500 px-1.5 py-0.5 rounded-full border border-surface-600/70">
+                    {criteria.length} signals
+                  </span>
+                )}
               </div>
 
               {/* ── Criteria chips ── */}
@@ -1538,35 +1561,43 @@ export function TradeDetailPage() {
                 <div className="px-4 pt-3 pb-2 grid grid-cols-2 sm:grid-cols-3 gap-2">
                   {criteria.map(c => {
                     const accent = criterionAccent(c.name, c.value_label)
-                    const dotColor =
-                      accent === 'green' ? 'bg-emerald-400' :
-                      accent === 'red'   ? 'bg-red-400' :
-                      accent === 'amber' ? 'bg-amber-400' :
-                      'bg-slate-500'
                     return (
-                      <div key={c.name} className="flex flex-col gap-0.5 rounded-lg bg-surface-700/50 border border-surface-700 px-3 py-2">
-                        <span className="text-[10px] text-slate-500 font-medium truncate">
-                          {CRITERION_LABELS[c.name] ?? c.name}
-                        </span>
+                      <div key={c.name} className="flex flex-col gap-2 rounded-xl bg-surface-700/30 border border-surface-600/40 px-3 py-2.5">
+                        {/* Header: icon + label + optional factor */}
                         <div className="flex items-center gap-1.5">
-                          <span className={cn('shrink-0 w-1.5 h-1.5 rounded-full', dotColor)} />
-                          <span className={cn('text-[12px] font-mono font-semibold truncate', accentClass(accent))}>
-                            {c.value_label}
+                          <span className="text-sm leading-none">{CRITERION_ICONS[c.name] ?? '•'}</span>
+                          <span className="text-[10px] text-slate-400 font-semibold uppercase tracking-widest truncate">
+                            {CRITERION_LABELS[c.name] ?? c.name}
                           </span>
-                          {/* VI numeric score — pair_vi */}
-                          {c.name === 'pair_vi' && snap.pair_vi_score != null && (
-                            <span className="text-[10px] font-mono text-slate-400 ml-auto shrink-0">
-                              {Math.round(snap.pair_vi_score)}
-                            </span>
-                          )}
-                          {/* VI numeric score — market_vi */}
-                          {c.name === 'market_vi' && snap.market_vi_score != null && (
-                            <span className="text-[10px] font-mono text-slate-400 ml-auto shrink-0">
-                              {Math.round(snap.market_vi_score)}
+                          {c.factor != null && c.factor !== 1 && (
+                            <span className={cn(
+                              'ml-auto text-[9px] font-mono font-bold px-1.5 py-0.5 rounded-full',
+                              c.factor > 1 ? 'bg-emerald-500/15 text-emerald-400' : 'bg-amber-500/15 text-amber-400'
+                            )}>
+                              ×{c.factor.toFixed(1)}
                             </span>
                           )}
                         </div>
-                        {/* EMA signal badge — pair_vi only */}
+                        {/* Value pill + optional VI score */}
+                        <div className="flex items-center gap-1.5 flex-wrap min-w-0">
+                          <span className={cn(
+                            'text-[11px] font-semibold px-2 py-0.5 rounded-full border leading-snug',
+                            pillClass(accent)
+                          )}>
+                            {c.value_label}
+                          </span>
+                          {c.name === 'pair_vi' && snap.pair_vi_score != null && (
+                            <span className="text-[10px] font-mono text-slate-500">
+                              {Math.round(snap.pair_vi_score)}/100
+                            </span>
+                          )}
+                          {c.name === 'market_vi' && snap.market_vi_score != null && (
+                            <span className="text-[10px] font-mono text-slate-500">
+                              {Math.round(snap.market_vi_score)}/100
+                            </span>
+                          )}
+                        </div>
+                        {/* EMA signal pill — pair_vi only */}
                         {c.name === 'pair_vi' && snap.pair_vi_ema_signal && (() => {
                           const sig = snap.pair_vi_ema_signal as string
                           const ema = EMA_SIGNAL_DISPLAY[sig] ?? EMA_SIGNAL_DISPLAY.mixed
@@ -1574,14 +1605,19 @@ export function TradeDetailPage() {
                             ? Math.round(snap.pair_vi_ema_score * 100)
                             : null
                           return (
-                            <div className="flex items-center gap-1 mt-0.5">
-                              <span style={{ color: ema.color }} className="text-[10px] font-semibold leading-none">
-                                {ema.symbol} {ema.label}
-                              </span>
+                            <span
+                              className="text-[10px] font-semibold px-2 py-0.5 rounded-full border leading-snug w-fit"
+                              style={{
+                                color: ema.color,
+                                borderColor: `${ema.color}40`,
+                                backgroundColor: `${ema.color}18`,
+                              }}
+                            >
+                              {ema.symbol} {ema.label}
                               {emaPct != null && (
-                                <span className="text-[9px] font-mono text-slate-500">{emaPct}%</span>
+                                <span className="font-mono font-normal ml-1 opacity-70">{emaPct}%</span>
                               )}
-                            </div>
+                            </span>
                           )
                         })()}
                       </div>
