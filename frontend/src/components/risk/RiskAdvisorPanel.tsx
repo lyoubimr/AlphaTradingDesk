@@ -235,12 +235,17 @@ export function RiskAdvisorPanel({
   // ── Action buttons ────────────────────────────────────────────────────────
   const buildSnapshot = (): Record<string, unknown> => ({
     pair, timeframe, direction,
-    multiplier:          advisor.multiplier,
-    base_risk_pct:       advisor.base_risk_pct,
-    adjusted_risk_pct:   advisor.adjusted_risk_pct,
+    multiplier:           advisor.multiplier,
+    base_risk_pct:        advisor.base_risk_pct,
+    adjusted_risk_pct:    advisor.adjusted_risk_pct,
     adjusted_risk_amount: advisor.adjusted_risk_amount,
     budget_remaining_pct: advisor.budget_remaining_pct,
-    criteria: advisor.criteria,
+    criteria:             advisor.criteria,
+    // VI + EMA at entry — for trade history analysis
+    pair_vi_score:        advisor.pair_vi_score ?? null,
+    pair_vi_ema_score:    advisor.pair_vi_ema_score ?? null,
+    pair_vi_ema_signal:   advisor.pair_vi_ema_signal ?? null,
+    market_vi_score:      advisor.market_vi_score ?? null,
     captured_at: new Date().toISOString(),
   })
 

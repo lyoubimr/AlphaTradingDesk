@@ -760,6 +760,11 @@ export interface RiskAdvisorOut {
   budget_remaining_if_pending_fill_amount: number
   pending_budget_warning: boolean
   force_allowed: boolean
+  // VI + EMA snapshot — stored at trade open for history analysis
+  pair_vi_score: number | null
+  pair_vi_ema_score: number | null
+  pair_vi_ema_signal: string | null
+  market_vi_score: number | null
 }
 
 export interface RiskSettingsOut {
