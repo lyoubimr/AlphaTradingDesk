@@ -34,6 +34,7 @@ from src.volatility.indicators import compute_vi_score
 from src.volatility.models import (
     MarketVIPair,
     MarketVISnapshot,
+    VolatilitySettings,
     VolatilitySnapshot,
     WatchlistSnapshot,
 )
@@ -521,32 +522,44 @@ def compute_pair_vi(self, timeframe: str, force: bool = False) -> dict:  # type:
         # execution_hours         → allowed UTC hours on weekdays (Mon–Fri)
         # weekend_execution_hours → allowed UTC hours on Sat–Sun
         # Empty list = no restriction for that day type (run at every natural cycle).
+        #
+        # IMPORTANT: compute_pair_vi is a GLOBAL task (no profile_id).
+        # We gate using the UNION of all enabled profiles' execution_hours:
+        # if ANY profile wants to run in the current hour, the task runs.
+        # If ANY profile has no restriction (empty list), the gate always passes.
         if not force:
-            tf_sched: dict = (pp_cfg.get("schedules") or {}).get(timeframe, {})
             now_utc_dt = datetime.now(UTC)
             is_weekend_day = now_utc_dt.weekday() >= 5
-            if is_weekend_day:
-                # Weekend: use weekend_execution_hours if key exists,
-                # otherwise fall back to execution_hours.
-                # None = key absent (never configured) → inherit weekday hours.
-                # []   = key present but empty → no restriction on weekends.
-                we_hours = tf_sched.get("weekend_execution_hours", None)
-                exec_hours: list = (
-                    we_hours if we_hours is not None
-                    else tf_sched.get("execution_hours", [])
-                )
-            else:
-                exec_hours = tf_sched.get("execution_hours", [])
-            if exec_hours:
-                current_hour = now_utc_dt.hour
-                if current_hour not in exec_hours:
-                    logger.debug(
-                        "compute_pair_vi(%s): skipped (hour %dh outside %s execution_hours %s)",
-                        timeframe, current_hour,
-                        "weekend" if is_weekend_day else "weekday",
-                        exec_hours,
+            current_hour = now_utc_dt.hour
+
+            union_hours: set[int] = set()
+            unrestricted = False  # True if any profile has empty hours (= all hours OK)
+
+            all_rows: list[VolatilitySettings] = db.query(VolatilitySettings).all()
+            for vs_row in all_rows:
+                pp_col: dict = getattr(vs_row, "per_pair", {}) or {}
+                if not pp_col.get("enabled", True):
+                    continue
+                tf_sched_row: dict = (pp_col.get("schedules") or {}).get(timeframe, {})
+                if is_weekend_day:
+                    we_h = tf_sched_row.get("weekend_execution_hours", None)
+                    row_hours: list = (
+                        we_h if we_h is not None
+                        else tf_sched_row.get("execution_hours", [])
                     )
-                    return {"status": "skipped", "reason": "outside_execution_hours", "timeframe": timeframe}
+                else:
+                    row_hours = tf_sched_row.get("execution_hours", [])
+                if not row_hours:
+                    unrestricted = True
+                    break
+                union_hours.update(row_hours)
+
+            if not unrestricted and union_hours and current_hour not in union_hours:
+                logger.debug(
+                    "compute_pair_vi(%s): skipped (hour %dh UTC outside union execution_hours %s)",
+                    timeframe, current_hour, sorted(union_hours),
+                )
+                return {"status": "skipped", "reason": "outside_execution_hours", "timeframe": timeframe}
 
             # Sub-hour interval gate (15m TF only: 15min native, or every 30min)
             # 5min grace window to absorb Celery dispatch + execution delay:
@@ -554,7 +567,9 @@ def compute_pair_vi(self, timeframe: str, force: bool = False) -> dict:  # type:
             #   beat fires at :15 → task executes at :18 → 18 % 30 = 18 >= 5 → SKIP ✓
             #   beat fires at :30 → task executes at :34 → 4 % 30 = 4 < 5 → RUN ✓
             #   beat fires at :45 → task executes at :48 → 18 % 30 = 18 >= 5 → SKIP ✓
-            interval_min: int | None = tf_sched.get("execution_interval_minutes")
+            # Use pp_cfg (first profile) for the interval setting — it's a task-level knob.
+            tf_sched_interval: dict = (pp_cfg.get("schedules") or {}).get(timeframe, {})
+            interval_min: int | None = tf_sched_interval.get("execution_interval_minutes")
             if interval_min and timeframe == "15m":
                 if now_utc_dt.minute % interval_min >= _INTERVAL_GRACE_MIN:
                     logger.debug(
@@ -676,7 +691,7 @@ def compute_pair_vi(self, timeframe: str, force: bool = False) -> dict:  # type:
                     .group_by(VolatilitySnapshot.pair)
                     .subquery()
                 )
-                sup_rows = (
+                sup_rows: list[VolatilitySnapshot] = (
                     db.query(VolatilitySnapshot)
                     .join(
                         subq,
