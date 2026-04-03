@@ -118,6 +118,42 @@ def read_kraken_orders(
 
 # ── Trade automation triggers ─────────────────────────────────────────────────
 
+# Human-readable hints for known Kraken sendStatus rejection codes.
+_KRAKEN_REJECTION_HINTS: dict[str, str] = {
+    "wouldCauseLiquidation": (
+        "Kraken rejected this order because it would immediately liquidate your account. "
+        "Your current margin is too thin relative to existing open positions. "
+        "Reduce leverage, reduce position size, or close other Kraken positions first."
+    ),
+    "insufficientFunds": (
+        "Insufficient margin in your Kraken account. "
+        "Add funds or reduce the position size / leverage."
+    ),
+    "wouldNotReducePosition": (
+        "Kraken rejected the order because it would not reduce your existing position "
+        "(reduce-only enforcement)."
+    ),
+    "marketSuspended": (
+        "This market is currently suspended on Kraken. Try again later."
+    ),
+    "tooManyOpenOrders": (
+        "You have too many open orders on Kraken. Cancel some orders first."
+    ),
+    "invalidArgument": (
+        "Kraken rejected the order due to invalid parameters "
+        "(size or price precision may be out of spec)."
+    ),
+}
+
+
+def _friendly_kraken_error(body: str) -> str:
+    """Extract a sendStatus rejection code from an error body and return a friendly message."""
+    for code, hint in _KRAKEN_REJECTION_HINTS.items():
+        if code in body:
+            return hint
+    return body
+
+
 def _map_exc(exc: Exception) -> HTTPException:
     """Map domain exceptions to HTTP error responses."""
     if isinstance(exc, AutomationNotEnabledError):
@@ -129,7 +165,7 @@ def _map_exc(exc: Exception) -> HTTPException:
     if isinstance(exc, KrakenAPIError):
         return HTTPException(
             status.HTTP_502_BAD_GATEWAY,
-            detail=f"Kraken API error {exc.status_code}: {exc.body}",
+            detail=_friendly_kraken_error(exc.body),
         )
     if isinstance(exc, ValueError):
         return HTTPException(status.HTTP_404_NOT_FOUND, detail=str(exc))
