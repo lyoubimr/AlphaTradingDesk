@@ -251,3 +251,6 @@ custom/
 # Keep the directory structure via uploads/.gitkeep only
 uploads/*
 !uploads/.gitkeep
+
+# Postgres bind-mount data — local dev only, never committed
+data/
