@@ -38,10 +38,23 @@ logger = structlog.get_logger()
 # ── PnL helper ────────────────────────────────────────────────────────────────
 
 def _compute_pnl_pct(direction: str, fill_price, entry_price) -> str | None:
-    """Return formatted PnL % string (e.g. '+7.82') for a fill vs entry, or None."""
+    """Return P&L % string adjusted for direction (used for TP/SL fill events).
+    Positive = profit regardless of direction.
+    """
     try:
         sign = 1 if direction == "long" else -1
         pct = sign * (float(fill_price) - float(entry_price)) / float(entry_price) * 100
+        return f"{pct:+.2f}"
+    except (TypeError, ValueError, ZeroDivisionError):
+        return None
+
+
+def _compute_price_change_pct(current_price, entry_price) -> str | None:
+    """Return raw price change % from entry (positive = price rose, negative = dropped).
+    Used for PNL_STATUS to show where current price sits relative to entry.
+    """
+    try:
+        pct = (float(current_price) - float(entry_price)) / float(entry_price) * 100
         return f"{pct:+.2f}"
     except (TypeError, ValueError, ZeroDivisionError):
         return None
@@ -201,7 +214,12 @@ def poll_pending_orders(self: Task) -> dict:
 
                     trade = db.query(Trade).filter(Trade.id == entry.trade_id).first()
                     if trade and trade.status != "open":
+                        prev_status = trade.status
                         trade.status = "open"
+                        # Activate risk budget: pending→open means the LIMIT filled and
+                        # capital is now at risk. current_risk was 0 while pending.
+                        if prev_status == "pending" and trade.risk_amount:
+                            trade.current_risk = trade.risk_amount
                     filled_price = entry.filled_price
                     if trade and filled_price:
                         trade.entry_price = Decimal(str(filled_price))
@@ -575,7 +593,7 @@ def send_pnl_status(self: Task) -> dict:  # noqa: ARG001
                         except (TypeError, ValueError):
                             pass
 
-                    pnl_pct = _compute_pnl_pct(trade.direction, current_price, trade.entry_price)
+                    pnl_pct = _compute_price_change_pct(current_price, trade.entry_price)
 
                     # TPs from the positions relationship (sorted by position_number)
                     tp_ctx: dict[str, str | None] = {}

@@ -719,37 +719,40 @@ def format_execution_event_message(event: str, **ctx) -> str:
         entry   = ctx.get("entry_price")
         current = ctx.get("current_price")
         pnl_pct = ctx.get("pnl_pct")
-        # Current price + pnl% on one line
+        # Current price + % change from entry on one line
         if current is not None:
             price_line = f"📍 Current: <code>{_fmt_price(current)}</code>"
             if pnl_pct is not None:
-                price_line += f"  ·  <code>{pnl_pct}%</code>"
+                price_line += f"  ·  <code>{pnl_pct}%</code> <i>vs entry</i>"
             lines.append(price_line)
         if entry is not None:
             lines.append(f"🏷 Entry: <code>{_fmt_price(entry)}</code>")
-        # Unrealized PnL in quote currency (if available from position size)
+        # Unrealized PnL with direction emoji
         if ctx.get("unrealized_pnl") is not None:
             pnl = float(ctx["unrealized_pnl"])
             pnl_str = f"+{pnl:.2f}" if pnl >= 0 else f"{pnl:.2f}"
-            lines.append(f"💵 Unrealized: <code>{pnl_str}</code>")
+            pnl_emoji = "📈" if pnl > 0 else "📉" if pnl < 0 else "➡️"
+            lines.append(f"💰 Unrealized: <code>{pnl_str}</code> {pnl_emoji}")
         # TPs compact (TP1 · TP2 · TP3) — only non-None, open TPs
         tp_parts = []
         for n in (1, 2, 3):
             v = ctx.get(f"tp{n}_price")
             if v is not None:
-                tp_parts.append(f"TP{n} {_fmt_price(v)}")
+                tp_parts.append(f"TP{n} <code>{_fmt_price(v)}</code>")
         if tp_parts:
             lines.append(f"🎯 {' · '.join(tp_parts)}")
-        # SL + distance from current price
+        # SL + direction-aware distance:
+        #   negative = SL is below current (LONG normal)
+        #   positive = SL is above current (SHORT normal)
         if ctx.get("sl_price") is not None:
             sl_line = f"🛑 SL: <code>{_fmt_price(ctx['sl_price'])}</code>"
             if current is not None:
                 try:
                     cp = float(current)
                     sl = float(ctx["sl_price"])
-                    d = ctx.get("direction", "").upper()
-                    dist_pct = (cp - sl) / cp * 100 if d == "LONG" else (sl - cp) / cp * 100
-                    sl_line += f"  ·  <code>−{dist_pct:.1f}% away</code>"
+                    dist_pct = (sl - cp) / cp * 100
+                    sign_char = "+" if dist_pct >= 0 else "−"
+                    sl_line += f"  ·  <code>{sign_char}{abs(dist_pct):.1f}%</code> away"
                 except (TypeError, ValueError, ZeroDivisionError):
                     pass
             lines.append(sl_line)
