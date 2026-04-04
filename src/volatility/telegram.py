@@ -226,26 +226,37 @@ def format_market_vi_message(
     now_str = _now_local().strftime("%d/%m %H:%M")
     score_100 = vi_score * 100
     if prev_score is not None:
-        arrow = "\u2191" if vi_score > prev_score else ("\u2193" if vi_score < prev_score else "\u2192")
+        diff = vi_score - prev_score
+        if diff > 0.001:
+            arrow = "🔺"
+        elif diff < -0.001:
+            arrow = "🔻"
+        else:
+            arrow = "➡️"
     else:
         arrow = ""
     dev_prefix = "[DEV] " if _APP_ENV != "prod" else ""
     r_emoji = _REGIME_EMOJI.get(regime, "📊")
     r_summary = _REGIME_SUMMARY.get(regime, "")
+
+    # Mini bar 0–10 blocks (each block = 10 pts)
+    filled = round(score_100 / 10)
+    bar = "█" * filled + "░" * (10 - filled)
+
     if is_trigger:
-        header = f"{dev_prefix}\U0001f3af <b>VI Trigger</b> \u00b7 {timeframe.upper()}"
+        header = f"{dev_prefix}🎯 <b>VI Trigger</b> · {timeframe.upper()}"
     else:
-        header = f"{dev_prefix}\U0001f4e1 <b>VI Status</b> \u00b7 {timeframe.upper()}"
-    score_line = f"\U0001f4ca Score: <b>{score_100:.1f}</b>" + (f" {arrow}" if arrow else "")
+        header = f"{dev_prefix}📡 <b>VI Status</b> · {timeframe.upper()}"
+    score_line = f"📊 Score: <b>{score_100:.1f}</b>" + (f" {arrow}" if arrow else "")
     lines = [
         header,
         "",
-        score_line,
-        f"{r_emoji} Regime: <b>{regime}</b> \u2014 {r_summary}",
+        f"<code>{bar}</code> {score_line}",
+        f"{r_emoji} Regime: <b>{regime}</b> — {r_summary}",
     ]
     if comp_parts:
         lines.append("")
-        lines.append(f"<code>Components: {comp_str}</code>")
+        lines.append(f"<code>◦ {comp_str}</code>")
     lines.append("")
     lines.append(f"<i>{now_str}</i>")
     return "\n".join(lines)
@@ -538,7 +549,10 @@ def send_vi_level_alerts(
                     triggered = up
                 else:
                     triggered = down
-                direction_arrow = "↑" if (prev_score_100 is not None and curr > prev_score_100) else "↓"
+                if prev_score_100 is not None:
+                    direction_arrow = "🔺" if curr > prev_score_100 else ("🔻" if curr < prev_score_100 else "➡️")
+                else:
+                    direction_arrow = ""
         elif ltype == "range":
             rmin = float(lv.get("min", 0))
             rmax = float(lv.get("max", 100))
@@ -561,29 +575,34 @@ def send_vi_level_alerts(
         r_emoji = _REGIME_EMOJI.get(regime, "📊")
         r_summary = _REGIME_SUMMARY.get(regime, "")
         dev_prefix = "[DEV] " if _APP_ENV != "prod" else ""
+        # Mini bar for alerts too
+        filled = round(curr / 10)
+        bar = "█" * filled + "░" * (10 - filled)
+        arrow_part = f" {direction_arrow}" if direction_arrow else ""
+        score_line = f"📊 Score: <b>{score_str}</b>{arrow_part}"
         if ltype == "crossing":
             tval = float(lv.get("value", 0))
             tol  = max(0.0, float(lv.get("tolerance", 0.5)))
             msg = (
                 f"{dev_prefix}🔔 <b>VI Level Alert</b> · {tf_label}\n\n"
-                f"📊 Score: <b>{score_str}</b> {direction_arrow}\n"
+                f"<code>{bar}</code> {score_line}\n"
                 f"{r_emoji} Regime: <b>{regime}</b> — {r_summary}\n\n"
-                f"🎯 Target: <b>{tval:.0f}</b> (±{tol:.1f})"
+                f"🎯 Target: <b>{tval:.0f}</b> <i>(±{tol:.1f})</i>"
             )
             if label:
-                msg += f"\n🏷 {_he(label)}"
+                msg += f"\n🏷 <i>{_he(label)}</i>"
             msg += f"\n\n<i>{now_str}</i>"
         else:
             rmin = float(lv.get("min", 0))
             rmax = float(lv.get("max", 100))
             msg = (
-                f"{dev_prefix}🔔 <b>VI Range Alert</b> · {tf_label}\n\n"
-                f"📊 Score: <b>{score_str}</b> {direction_arrow}\n"
+                f"{dev_prefix}📏 <b>VI Range Alert</b> · {tf_label}\n\n"
+                f"<code>{bar}</code> {score_line}\n"
                 f"{r_emoji} Regime: <b>{regime}</b> — {r_summary}\n\n"
-                f"📏 Range: [<b>{rmin:.0f} – {rmax:.0f}</b>]"
+                f"📐 Range: [<b>{rmin:.0f} – {rmax:.0f}</b>]"
             )
             if label:
-                msg += f"\n🏷 {_he(label)}"
+                msg += f"\n🏷 <i>{_he(label)}</i>"
             msg += f"\n\n<i>{now_str}</i>"
 
         _send(bot_token, chat_id, msg)
@@ -667,10 +686,11 @@ def format_execution_event_message(event: str, **ctx) -> str:
     pair       = ctx.get("pair") or ctx.get("symbol") or "—"
     direction  = (ctx.get("direction") or "").upper()
     dir_emoji  = "📈" if direction == "LONG" else "📉" if direction == "SHORT" else ""
+    dir_label  = f" <b>{direction}</b>" if direction else ""
 
     lines = [f"{dev_prefix}{emoji} <b>{label}</b>"]
     if pair != "—":
-        lines.append(f"🪙 Pair: <b>{_he(str(pair))}</b> {dir_emoji}")
+        lines.append(f"🪙 Pair: <b>{_he(str(pair))}</b>{dir_label} {dir_emoji}")
 
     # Event-specific fields
     if event == "LIMIT_PLACED":
@@ -719,37 +739,40 @@ def format_execution_event_message(event: str, **ctx) -> str:
         entry   = ctx.get("entry_price")
         current = ctx.get("current_price")
         pnl_pct = ctx.get("pnl_pct")
-        # Current price + pnl% on one line
+        # Current price + % change from entry on one line
         if current is not None:
             price_line = f"📍 Current: <code>{_fmt_price(current)}</code>"
             if pnl_pct is not None:
-                price_line += f"  ·  <code>{pnl_pct}%</code>"
+                price_line += f"  ·  <code>{pnl_pct}%</code> <i>vs entry</i>"
             lines.append(price_line)
         if entry is not None:
             lines.append(f"🏷 Entry: <code>{_fmt_price(entry)}</code>")
-        # Unrealized PnL in quote currency (if available from position size)
+        # Unrealized PnL with direction emoji
         if ctx.get("unrealized_pnl") is not None:
             pnl = float(ctx["unrealized_pnl"])
             pnl_str = f"+{pnl:.2f}" if pnl >= 0 else f"{pnl:.2f}"
-            lines.append(f"💵 Unrealized: <code>{pnl_str}</code>")
+            pnl_emoji = "📈" if pnl > 0 else "📉" if pnl < 0 else "➡️"
+            lines.append(f"💰 Unrealized: <code>{pnl_str}</code> {pnl_emoji}")
         # TPs compact (TP1 · TP2 · TP3) — only non-None, open TPs
         tp_parts = []
         for n in (1, 2, 3):
             v = ctx.get(f"tp{n}_price")
             if v is not None:
-                tp_parts.append(f"TP{n} {_fmt_price(v)}")
+                tp_parts.append(f"TP{n} <code>{_fmt_price(v)}</code>")
         if tp_parts:
             lines.append(f"🎯 {' · '.join(tp_parts)}")
-        # SL + distance from current price
+        # SL + direction-aware distance:
+        #   negative = SL is below current (LONG normal)
+        #   positive = SL is above current (SHORT normal)
         if ctx.get("sl_price") is not None:
             sl_line = f"🛑 SL: <code>{_fmt_price(ctx['sl_price'])}</code>"
             if current is not None:
                 try:
                     cp = float(current)
                     sl = float(ctx["sl_price"])
-                    d = ctx.get("direction", "").upper()
-                    dist_pct = (cp - sl) / cp * 100 if d == "LONG" else (sl - cp) / cp * 100
-                    sl_line += f"  ·  <code>−{dist_pct:.1f}% away</code>"
+                    dist_pct = (sl - cp) / cp * 100
+                    sign_char = "+" if dist_pct >= 0 else "−"
+                    sl_line += f"  ·  <code>{sign_char}{abs(dist_pct):.1f}%</code> away"
                 except (TypeError, ValueError, ZeroDivisionError):
                     pass
             lines.append(sl_line)

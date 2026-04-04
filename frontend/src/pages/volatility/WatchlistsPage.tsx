@@ -68,16 +68,9 @@ const EMA_TOOLTIP: Record<string, string> = {
   mixed:          'Price position mixed relative to EMAs 20 / 50 / 200',
 }
 
-type SortKey = 'vi_score' | 'change_24h' | 'pair' | 'ema_score'
+type SortKey = 'vi_score' | 'change_24h' | 'pair' | 'ema_score' | 'tf_sup_vi'
 
 // ── Helpers ───────────────────────────────────────────────────────────────
-
-function alertIcon(p: WatchlistPairOut): string {
-  if (p.regime === 'EXTREME') return '⚠️'
-  if (p.regime === 'DEAD')    return '⛔'
-  if (p.alert)                return '🔔'
-  return ''
-}
 
 function formatPair(symbol: string): { base: string; quote: string } {
   // Kraken Futures: PF_XBTUSD, PI_ETHUSD, FF_SOLUSD, etc.
@@ -186,7 +179,7 @@ export function WatchlistsPage() {
   const [modalRegimes, setModalRegimes]   = useState<Set<string>>(new Set(['ALL']))
   const [viRange, setViRange]         = useState<[number, number]>([0, 100])
   const [showLegend, setShowLegend]   = useState(false)
-  const [regimeSameAsTFSup, setRegimeSameAsTFSup] = useState(false)
+  const [supRegimeFilters, setSupRegimeFilters]     = useState<Set<string>>(new Set(['ALL']))
   // Track whether the initial auto-selection has already been done.
   // Manual refreshes should NOT override the user's current selection.
   const initialLoadedRef = useRef(false)
@@ -199,7 +192,7 @@ export function WatchlistsPage() {
     if (!keepFilters) {
       setRegimeFilters(new Set(['ALL']))
       setEmaFilters(new Set(['ALL']))
-      setRegimeSameAsTFSup(false)
+      setSupRegimeFilters(new Set(['ALL']))
     }
     setLoadingDetail(true)
     setMobileView('detail')  // auto-switch to detail panel on mobile after selecting
@@ -335,7 +328,9 @@ export function WatchlistsPage() {
     let rows = [...selectedData.pairs]
     if (!regimeFilters.has('ALL')) rows = rows.filter((p) => regimeFilters.has(p.regime))
     if (!emaFilters.has('ALL')) rows = rows.filter((p) => emaFilters.has(p.ema_signal ?? 'mixed'))
-    if (regimeSameAsTFSup) rows = rows.filter((p) => p.tf_sup_regime != null && p.regime === p.tf_sup_regime)
+    if (!supRegimeFilters.has('ALL')) {
+      rows = rows.filter((p) => p.tf_sup_regime != null && supRegimeFilters.has(p.tf_sup_regime))
+    }
     const [viMin, viMax] = viRange
     if (viMin > 0 || viMax < 100) {
       rows = rows.filter((p) => {
@@ -347,12 +342,17 @@ export function WatchlistsPage() {
       if (sortKey === 'pair') {
         return sortDesc ? b.pair.localeCompare(a.pair) : a.pair.localeCompare(b.pair)
       }
+      if (sortKey === 'tf_sup_vi') {
+        const av = a.tf_sup_vi ?? -Infinity
+        const bv = b.tf_sup_vi ?? -Infinity
+        return sortDesc ? bv - av : av - bv
+      }
       const av = (a[sortKey] ?? -Infinity) as number
       const bv = (b[sortKey] ?? -Infinity) as number
       return sortDesc ? bv - av : av - bv
     })
     return rows
-  }, [selectedData, regimeFilters, emaFilters, regimeSameAsTFSup, viRange, sortKey, sortDesc])
+  }, [selectedData, regimeFilters, emaFilters, supRegimeFilters, viRange, sortKey, sortDesc])
 
   const regimeCounts = useMemo(() => {
     if (!selectedData) return {}
@@ -367,6 +367,14 @@ export function WatchlistsPage() {
     return selectedData.pairs.reduce<Record<string, number>>((acc, p) => {
       const sig = p.ema_signal ?? 'mixed'
       acc[sig] = (acc[sig] ?? 0) + 1
+      return acc
+    }, {})
+  }, [selectedData])
+
+  const supRegimeCounts = useMemo(() => {
+    if (!selectedData) return {}
+    return selectedData.pairs.reduce<Record<string, number>>((acc, p) => {
+      if (p.tf_sup_regime) acc[p.tf_sup_regime] = (acc[p.tf_sup_regime] ?? 0) + 1
       return acc
     }, {})
   }, [selectedData])
@@ -818,25 +826,49 @@ export function WatchlistsPage() {
                       </button>
                     )
                   })}
-                  {/* Same-regime filter — immediately after ALL EMA, separated by a divider */}
-                  <span className="text-zinc-800 select-none mx-0.5">|</span>
-                  <button
-                    onClick={() => setRegimeSameAsTFSup(p => !p)}
-                    title="Only pairs where regime at this TF = regime at TF+1 (strong confluence)"
-                    className={`px-2 py-0.5 rounded text-xs font-mono border transition-colors ${
-                      regimeSameAsTFSup
-                        ? 'bg-zinc-700 border-zinc-500 text-zinc-100'
-                        : 'border-zinc-700 text-zinc-600 hover:text-zinc-400'
-                    }`}
-                  >
-                    = TF+1
-                  </button>
+
+                </div>
+
+                {/* Row 4: TF+1 regime filter */}
+                <div className="flex gap-1 flex-wrap items-center">
+                  <span className="text-xs text-zinc-600 font-mono mr-1 shrink-0">
+                    TF+1{selectedData && TF_NEXT[selectedData.timeframe] ? ` (${TF_NEXT[selectedData.timeframe]}):` : ':'}
+                  </span>
+                  {REGIMES.map((r) => {
+                    const count   = r === 'ALL' ? Object.values(supRegimeCounts).reduce((s, n) => s + n, 0) : (supRegimeCounts[r] ?? 0)
+                    const rColor  = r !== 'ALL' ? REGIME_COLOR_HEX[r] : undefined
+                    const isActive = supRegimeFilters.has('ALL') ? r === 'ALL' : supRegimeFilters.has(r)
+                    if (r !== 'ALL' && count === 0) return null
+                    return (
+                      <button
+                        key={r}
+                        onClick={() => setSupRegimeFilters((prev) => {
+                          if (r === 'ALL') return new Set(['ALL'])
+                          const next = new Set(prev)
+                          next.delete('ALL')
+                          if (next.has(r)) { next.delete(r); if (next.size === 0) return new Set(['ALL']) }
+                          else next.add(r)
+                          return next
+                        })}
+                        title={r === 'ALL' ? 'Show all TF+1 regimes' : (REGIME_DESCRIPTION[r] ?? r)}
+                        className={`px-2 py-0.5 rounded text-xs font-mono transition-colors border ${
+                          isActive
+                            ? 'bg-zinc-800 border-zinc-600 text-zinc-100'
+                            : 'border-transparent text-zinc-600 hover:text-zinc-400'
+                        }`}
+                        style={isActive && rColor ? { color: rColor, borderColor: `${rColor}50` } : {}}
+                      >
+                        {r !== 'ALL' && REGIME_EMOJI[r]} {r}
+                        {r !== 'ALL' && count > 0 && <span className="ml-1 opacity-50">{count}</span>}
+                      </button>
+                    )
+                  })}
                 </div>
               </div>
 
               {/* ── Pair table ── */}
               <div className="overflow-x-auto overflow-y-auto flex-1">
-                <table className="w-full text-xs min-w-[680px]">
+                <table className="w-full text-xs min-w-[720px]">
                   <thead className="bg-zinc-900/60 sticky top-0 z-10">
                     <tr className="border-b border-zinc-800">
                       <th className="px-3 py-2.5 text-left text-zinc-600 font-mono w-8">#</th>
@@ -850,26 +882,21 @@ export function WatchlistsPage() {
                           <Tooltip text="DEAD <17 · CALM 17–33 · NORMAL 33–50 · TRENDING 50–67 · ACTIVE 67–83 · EXTREME >83" maxWidth={180} />
                         </span>
                       </th>
-                      <th className="px-3 py-2.5 text-left text-zinc-500 font-mono">
+                      <th className="px-3 py-2.5 text-left text-zinc-500 font-mono hidden sm:table-cell">
                         <span className="flex items-center gap-1">
                           EMA{selectedData ? ` (${TF_EMA_REF[selectedData.timeframe] ?? ''})` : ''}
-                          <Tooltip text="Signal vs the ref EMA per TF (configurable — e.g. EMA 200 on 4h). Breakout/retest = price crossing the ref EMA within 3 candles. ▲ above all · ▼ below all · 🚀 breakout · 💥 breakdown · 🔄🔁 retest · ∿ mixed" maxWidth={300} />
+                          <Tooltip text="Signal vs the ref EMA per TF. ▲ above all · ▼ below all · 🚀 breakout · 💥 breakdown · 🔄🔁 retest · ∿ mixed" maxWidth={260} />
                         </span>
                       </th>
-                      <SortTh label="EMA%" col="ema_score" active={sortKey === 'ema_score'} desc={sortDesc} onClick={() => handleSort('ema_score')} tooltip={<Tooltip text="EMA Alignment Score (0–100). Price position vs the scoring EMAs (weighted average — e.g. above the longest ref EMA = smaller weight). 100 = above all · 0 = below all. Not included in VI — used for ranking only." maxWidth={260} />} />
+                      <SortTh label="EMA%" col="ema_score" active={sortKey === 'ema_score'} desc={sortDesc} onClick={() => handleSort('ema_score')} className="hidden md:table-cell" tooltip={<Tooltip text="EMA Alignment Score (0–100). 100 = above all EMAs · 0 = below all. Not included in VI." maxWidth={220} />} />
                       <SortTh label="24H%" col="change_24h" active={sortKey === 'change_24h'} desc={sortDesc} onClick={() => handleSort('change_24h')} className="w-20" />
                       <th className="px-3 py-2.5 text-left text-zinc-500 font-mono">
                         <span className="flex items-center gap-1">
                           TF+1{selectedData && TF_NEXT[selectedData.timeframe] ? ` (${TF_NEXT[selectedData.timeframe]})` : ''}
-                          <Tooltip text="Regime at the next-higher timeframe. Confirms or contradicts the signal." />
+                          <Tooltip text="Regime at the next-higher timeframe — confirms or contradicts the signal." />
                         </span>
                       </th>
-                      <th className="px-3 py-2.5 text-center text-zinc-500 font-mono w-10">
-                        <span className="flex items-center justify-center gap-1">
-                          ⚠
-                          <Tooltip text="⚠️ EXTREME · ⛔ DEAD · 🔔 alert" />
-                        </span>
-                      </th>
+                      <SortTh label="VI+1" col="tf_sup_vi" active={sortKey === 'tf_sup_vi'} desc={sortDesc} onClick={() => handleSort('tf_sup_vi')} className="w-14" tooltip={<Tooltip text="VI score at TF+1. Sort to find pairs where higher TF is also trending." />} />
                     </tr>
                   </thead>
                   <tbody>
@@ -878,20 +905,24 @@ export function WatchlistsPage() {
                       const rColor     = REGIME_COLOR_HEX[p.regime] ?? '#71717a'
                       const ema        = EMA_DISPLAY[p.ema_signal] ?? EMA_DISPLAY.mixed
                       const tfSupColor = REGIME_COLOR_HEX[p.tf_sup_regime ?? ''] ?? '#71717a'
-                      const alert      = alertIcon(p)
                       const { base, quote } = formatPair(p.pair)
                       const chg = p.change_24h
                       const emaPct     = p.ema_score != null ? Math.round(p.ema_score * 100) : null
                       const emaScoreColor = emaPct != null ? (emaPct >= 67 ? '#10b981' : emaPct >= 34 ? '#f59e0b' : '#ef4444') : '#71717a'
+                      const supViPct   = p.tf_sup_vi != null ? Math.round(p.tf_sup_vi * 100) : null
+                      const alertBadge = p.alert ? <span className="ml-1 text-amber-400 text-xs">🔔</span> : null
                       return (
                         <tr key={p.pair} className="border-b border-zinc-900 hover:bg-zinc-900/50 transition-colors">
                           <td className="px-3 py-2 text-zinc-700 font-mono">{i + 1}</td>
                           <td className="px-3 py-2 font-mono font-bold text-zinc-200">
-                            {base}<span className="text-zinc-600 font-normal">{quote}</span>
+                            <span className="inline-flex items-center gap-0.5">
+                              {base}<span className="text-zinc-600 font-normal">{quote}</span>
+                              {alertBadge}
+                            </span>
                           </td>
                           <td className="px-3 py-2">
                             <div className="flex items-center gap-2">
-                              <div className="w-12 h-1.5 bg-zinc-800 rounded-full overflow-hidden shrink-0">
+                              <div className="w-10 h-1.5 bg-zinc-800 rounded-full overflow-hidden shrink-0 hidden sm:block">
                                 <div className="h-full rounded-full" style={{ width: `${viPct}%`, background: rColor }} />
                               </div>
                               <span className="font-mono font-black text-sm w-7 text-right" style={{ color: rColor }}>{viPct}</span>
@@ -902,10 +933,10 @@ export function WatchlistsPage() {
                               {REGIME_EMOJI[p.regime]} {p.regime}
                             </span>
                           </td>
-                          <td className="px-3 py-2 font-mono cursor-help" style={{ color: ema.color }} title={EMA_TOOLTIP[p.ema_signal] ?? p.ema_signal}>
+                          <td className="px-3 py-2 font-mono cursor-help hidden sm:table-cell" style={{ color: ema.color }} title={EMA_TOOLTIP[p.ema_signal] ?? p.ema_signal}>
                             <span className="mr-1">{ema.symbol}</span>{ema.label}
                           </td>
-                          <td className="px-3 py-2 font-mono text-right tabular-nums">
+                          <td className="px-3 py-2 font-mono text-right tabular-nums hidden md:table-cell">
                             {emaPct != null
                               ? <span className="text-xs font-bold" style={{ color: emaScoreColor }}>{emaPct}</span>
                               : <span className="text-zinc-700">—</span>
@@ -919,16 +950,17 @@ export function WatchlistsPage() {
                           </td>
                           <td className="px-3 py-2">
                             {p.tf_sup_regime ? (
-                              <div className="flex items-center gap-1">
-                                <span className="text-xs">{REGIME_EMOJI[p.tf_sup_regime] ?? ''}</span>
-                                <span className="font-mono text-xs" style={{ color: tfSupColor }}>{p.tf_sup_regime}</span>
-                                {p.tf_sup_vi != null && (
-                                  <span className="font-mono text-xs text-zinc-600">({Math.round(p.tf_sup_vi * 100)})</span>
-                                )}
-                              </div>
+                              <span className="font-mono text-xs font-bold" style={{ color: tfSupColor }}>
+                                {REGIME_EMOJI[p.tf_sup_regime]} {p.tf_sup_regime}
+                              </span>
                             ) : <span className="text-zinc-700">—</span>}
                           </td>
-                          <td className="px-3 py-2 text-center text-base leading-none">{alert}</td>
+                          <td className="px-3 py-2 font-mono text-right tabular-nums">
+                            {supViPct != null
+                              ? <span className="text-xs font-bold" style={{ color: REGIME_COLOR_HEX[p.tf_sup_regime ?? ''] ?? '#71717a' }}>{supViPct}</span>
+                              : <span className="text-zinc-700">—</span>
+                            }
+                          </td>
                         </tr>
                       )
                     })}
