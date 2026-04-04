@@ -667,10 +667,11 @@ def format_execution_event_message(event: str, **ctx) -> str:
     pair       = ctx.get("pair") or ctx.get("symbol") or "—"
     direction  = (ctx.get("direction") or "").upper()
     dir_emoji  = "📈" if direction == "LONG" else "📉" if direction == "SHORT" else ""
+    dir_label  = f" <b>{direction}</b>" if direction else ""
 
     lines = [f"{dev_prefix}{emoji} <b>{label}</b>"]
     if pair != "—":
-        lines.append(f"🪙 Pair: <b>{_he(str(pair))}</b> {dir_emoji}")
+        lines.append(f"🪙 Pair: <b>{_he(str(pair))}</b>{dir_label} {dir_emoji}")
 
     # Event-specific fields
     if event == "LIMIT_PLACED":
