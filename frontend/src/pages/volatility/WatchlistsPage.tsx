@@ -179,7 +179,6 @@ export function WatchlistsPage() {
   const [modalRegimes, setModalRegimes]   = useState<Set<string>>(new Set(['ALL']))
   const [viRange, setViRange]         = useState<[number, number]>([0, 100])
   const [showLegend, setShowLegend]   = useState(false)
-  const [regimeSameAsTFSup, setRegimeSameAsTFSup] = useState(false)
   const [supRegimeFilters, setSupRegimeFilters]     = useState<Set<string>>(new Set(['ALL']))
   // Track whether the initial auto-selection has already been done.
   // Manual refreshes should NOT override the user's current selection.
@@ -193,7 +192,6 @@ export function WatchlistsPage() {
     if (!keepFilters) {
       setRegimeFilters(new Set(['ALL']))
       setEmaFilters(new Set(['ALL']))
-      setRegimeSameAsTFSup(false)
       setSupRegimeFilters(new Set(['ALL']))
     }
     setLoadingDetail(true)
@@ -330,7 +328,6 @@ export function WatchlistsPage() {
     let rows = [...selectedData.pairs]
     if (!regimeFilters.has('ALL')) rows = rows.filter((p) => regimeFilters.has(p.regime))
     if (!emaFilters.has('ALL')) rows = rows.filter((p) => emaFilters.has(p.ema_signal ?? 'mixed'))
-    if (regimeSameAsTFSup) rows = rows.filter((p) => p.tf_sup_regime != null && p.regime === p.tf_sup_regime)
     if (!supRegimeFilters.has('ALL')) {
       rows = rows.filter((p) => p.tf_sup_regime != null && supRegimeFilters.has(p.tf_sup_regime))
     }
@@ -355,7 +352,7 @@ export function WatchlistsPage() {
       return sortDesc ? bv - av : av - bv
     })
     return rows
-  }, [selectedData, regimeFilters, emaFilters, regimeSameAsTFSup, supRegimeFilters, viRange, sortKey, sortDesc])
+  }, [selectedData, regimeFilters, emaFilters, supRegimeFilters, viRange, sortKey, sortDesc])
 
   const regimeCounts = useMemo(() => {
     if (!selectedData) return {}
@@ -829,19 +826,7 @@ export function WatchlistsPage() {
                       </button>
                     )
                   })}
-                  {/* Same-regime shortcut */}
-                  <span className="text-zinc-800 select-none mx-0.5">|</span>
-                  <button
-                    onClick={() => setRegimeSameAsTFSup(p => !p)}
-                    title="Only pairs where regime at this TF = regime at TF+1 (strong confluence)"
-                    className={`px-2 py-0.5 rounded text-xs font-mono border transition-colors ${
-                      regimeSameAsTFSup
-                        ? 'bg-indigo-950 border-indigo-700 text-indigo-300'
-                        : 'border-zinc-700 text-zinc-600 hover:text-zinc-400'
-                    }`}
-                  >
-                    = TF+1
-                  </button>
+
                 </div>
 
                 {/* Row 4: TF+1 regime filter */}
