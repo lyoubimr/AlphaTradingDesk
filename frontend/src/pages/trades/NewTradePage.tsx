@@ -1472,14 +1472,23 @@ export function NewTradePage() {
           // screenshot upload failure is non-fatal — trade is already created
         }
       }
-      // Automation: send to Kraken Futures if requested (non-fatal — trade is already in journal)
+      // Automation: send to Kraken Futures if requested.
+      // If the Kraken order fails we roll back the trade entry so the user can
+      // fix the error and retry cleanly — preventing orphan trade accumulation.
       if (automateOnCreate && profileAutomationEnabled) {
         try {
           await automationApi.openTrade(newTrade.id)
         } catch (autoErr) {
           const autoMsg = autoErr instanceof Error ? autoErr.message : 'Unknown automation error'
-          // Trade is created — stay on page to show warning, user can go to journal manually
-          setAutomationWarning({ msg: autoMsg, tradeId: newTrade.id })
+          try {
+            // Roll back: delete the just-created trade so the form stays usable
+            await tradesApi.delete(newTrade.id)
+            // Trade deleted — show the Kraken error inline so the user can fix it
+            setError(`Kraken order failed — trade not saved. Fix the issue below and resubmit.\n\n${autoMsg}`)
+          } catch {
+            // Delete also failed (e.g. trade already modified) — keep it in journal
+            setAutomationWarning({ msg: autoMsg, tradeId: newTrade.id })
+          }
           setSubmitting(false)
           return
         }
