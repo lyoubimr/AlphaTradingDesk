@@ -274,6 +274,7 @@ def open_automated_trade(trade_id: int, db: Session) -> KrakenOrder:
 
     instrument = _resolve_instrument(trade, db)
     lot_size = _compute_lot_size(trade, instrument)
+    actual_fill_price: Decimal | None = None  # populated for MARKET orders after fill
 
     with _make_client(settings_row) as client:
         kraken_type = _kraken_order_type(trade.order_type)
@@ -402,6 +403,21 @@ def open_automated_trade(trade_id: int, db: Session) -> KrakenOrder:
             limit_price=limit_price,
             max_leverage=int(trade.leverage or 10),
         )
+        # MARKET orders fill almost instantly — capture actual fill price so we can
+        # correct trade.entry_price and recalculate risk with the real execution price.
+        if trade.order_type == "MARKET":
+            try:
+                _oid = result.get("sendStatus", {}).get("order_id", "")
+                if _oid:
+                    _fills = client.get_fills()
+                    _match = [
+                        f for f in _fills
+                        if f.get("order_id") == _oid or f.get("orderId") == _oid
+                    ]
+                    if _match:
+                        actual_fill_price = Decimal(str(_match[0]["price"]))
+            except Exception as _fe:
+                logger.warning("market_fill_fetch_failed", trade_id=trade_id, error=str(_fe))
 
     send_status = result.get("sendStatus", {})
     kraken_order_id = send_status.get("order_id", "")
@@ -422,6 +438,21 @@ def open_automated_trade(trade_id: int, db: Session) -> KrakenOrder:
 
     trade.kraken_entry_order_id = kraken_order_id
     trade.automation_enabled = True
+    # Correct entry price + risk figures using actual MARKET fill price
+    if actual_fill_price is not None and actual_fill_price != trade.entry_price:
+        _declared_entry = trade.entry_price
+        _actual_risk = (lot_size * abs(actual_fill_price - trade.stop_loss)).quantize(Decimal("0.01"))
+        trade.entry_price = actual_fill_price
+        trade.risk_amount = _actual_risk
+        trade.initial_risk = _actual_risk
+        trade.current_risk = _actual_risk
+        logger.info(
+            "market_fill_price_corrected",
+            trade_id=trade_id,
+            declared_entry=float(_declared_entry),
+            fill_price=float(actual_fill_price),
+            actual_risk=float(_actual_risk),
+        )
     db.commit()
     db.refresh(order)
 
