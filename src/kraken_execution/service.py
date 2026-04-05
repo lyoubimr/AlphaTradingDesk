@@ -280,12 +280,10 @@ def open_automated_trade(trade_id: int, db: Session) -> KrakenOrder:
         limit_price = str(trade.entry_price) if trade.order_type == "LIMIT" else None
 
         # ─ Pre-flight: check available Kraken margin before placing the order ─
-        # Kraken Portfolio Margin (PF_) check: after placing the order, the remaining
-        # available margin must still cover the total initial margin of ALL positions
-        # (existing + new). Kraken's wouldCauseLiquidation fires when:
-        #   available_after = availableMargin - new_IM
-        #   available_after < total_IM_after = existing_IM + new_IM
-        # Which simplifies to: availableMargin < 2 * new_IM + existing_IM
+        # ATD places all PF_ orders in isolated margin mode (set via
+        # set_leverage_preferences before send_order). With isolated margin each
+        # position has its own collateral pocket — other positions are unaffected.
+        # Formula: availableMargin >= lot_size × entry_price / leverage
         leverage = Decimal(str(trade.leverage or 10))
         entry_price = trade.entry_price or Decimal(limit_price or "0")
         initial_margin = (lot_size * entry_price / leverage).quantize(Decimal("0.01"))
@@ -293,12 +291,10 @@ def open_automated_trade(trade_id: int, db: Session) -> KrakenOrder:
             acct = client.get_accounts_summary()
             flex = acct.get("accounts", {}).get("flex", {})
             available = Decimal(str(flex.get("availableMargin", -1)))
-            # existing_im = initial margin already consumed by other open positions/orders
             existing_im_raw = flex.get("initialMargin", 0) or 0
             existing_im = Decimal(str(existing_im_raw)).quantize(Decimal("0.01"))
-            # required = 2 × new_IM + existing_IM
-            # (new_IM to open + new_IM as maintenance buffer + existing_IM still locked)
-            required_margin = (Decimal("2") * initial_margin + existing_im).quantize(Decimal("0.01"))
+            # Isolated margin: only the new position's IM is needed
+            required_margin = initial_margin
             logger.info(
                 "kraken_preflight",
                 trade_id=trade_id,
@@ -376,13 +372,12 @@ def open_automated_trade(trade_id: int, db: Session) -> KrakenOrder:
                 shortfall = (required_margin - available).quantize(Decimal("0.01"))
                 raise KrakenAPIError(
                     0,
-                    f"Insufficient Kraken margin for this trade: "
+                    f"Insufficient Kraken margin for this trade (isolated margin): "
                     f"you have {float(available):.2f} USD available, "
                     f"but {float(required_margin):.2f} USD are required "
-                    f"(2 × {float(initial_margin):.2f} new IM + {float(existing_im):.2f} existing locked — "
-                    f"×{int(leverage)} leverage, {float(lot_size):.4f} units at {float(entry_price):.2f}). "
-                    f"Add at least {float(shortfall):.2f} USD to your Kraken account, "
-                    f"reduce risk % to lower position size, or close some existing positions to free margin.",
+                    f"({float(lot_size):.4f} units × {float(entry_price):.2f} / x{int(leverage)} leverage). "
+                    f"Add at least {float(shortfall):.2f} USD to your Kraken account "
+                    f"or reduce risk % to lower position size.",
                 )
         except KrakenAPIError:
             raise  # re-raise preflight failures directly
@@ -394,6 +389,11 @@ def open_automated_trade(trade_id: int, db: Session) -> KrakenOrder:
                 error=str(preflight_err),
             )
 
+        client.set_leverage_preferences(
+            symbol=instrument.symbol,
+            max_leverage=int(trade.leverage or 10),
+            margin_mode="isolated",
+        )
         result = client.send_order(
             order_type=kraken_type,
             symbol=instrument.symbol,

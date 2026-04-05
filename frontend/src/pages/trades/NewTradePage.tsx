@@ -525,6 +525,18 @@ function fmt(n: number | null | undefined, decimals = 2): string {
   return n.toLocaleString('en-US', { minimumFractionDigits: decimals, maximumFractionDigits: decimals })
 }
 
+/** Smart price formatter: adapts decimal places to price magnitude.
+ *  ≥100 → 2 decimals  (BTC $64,250.13 · ETH $2,041.34)
+ *  ≥1   → up to 4 decimals  (NEAR $2.9123 · SOL $145.60)
+ *  <1   → up to 6 decimals  (SHIB $0.000012)
+ */
+function fmtPrice(n: number | null | undefined): string {
+  if (n == null) return '—'
+  if (n >= 100) return n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  if (n >= 1)   return n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 4 })
+  return n.toLocaleString('en-US', { minimumFractionDigits: 4, maximumFractionDigits: 6 })
+}
+
 interface TpRow { price: string; pct: string }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1001,6 +1013,7 @@ export function NewTradePage() {
   const [automateOnCreate,        setAutomateOnCreate]        = useState(false)
   const [profileAutomationEnabled, setProfileAutomationEnabled] = useState(false)
   const [beOnTp1,                 setBeOnTp1]                 = useState(false)
+  const [krakenMargin, setKrakenMargin] = useState<{ available: number | null; loading: boolean }>({ available: null, loading: false })
 
   // Latest Market Analysis session — auto-fetched for ma_direction in Risk Advisor
   // NOTE: not filtered by profile — MA sessions represent global market context
@@ -1056,6 +1069,18 @@ export function NewTradePage() {
         setAutomateOnCreate(false)
       })
   }, [isCrypto, activeProfile?.id])
+
+  // ── Fetch Kraken available margin when automation is ON ───────────────────
+  useEffect(() => {
+    if (!automateOnCreate || !profileAutomationEnabled || !activeProfile?.id) {
+      setKrakenMargin({ available: null, loading: false })
+      return
+    }
+    setKrakenMargin({ available: null, loading: true })
+    automationApi.getAccountStatus(activeProfile.id)
+      .then(s  => setKrakenMargin({ available: s.available_margin, loading: false }))
+      .catch(() => setKrakenMargin({ available: null, loading: false }))
+  }, [automateOnCreate, profileAutomationEnabled, activeProfile?.id])
 
   // ── Prefill entry price from Kraken mark price (MARKET orders, Crypto only) ─
   useEffect(() => {
@@ -1447,14 +1472,23 @@ export function NewTradePage() {
           // screenshot upload failure is non-fatal — trade is already created
         }
       }
-      // Automation: send to Kraken Futures if requested (non-fatal — trade is already in journal)
+      // Automation: send to Kraken Futures if requested.
+      // If the Kraken order fails we roll back the trade entry so the user can
+      // fix the error and retry cleanly — preventing orphan trade accumulation.
       if (automateOnCreate && profileAutomationEnabled) {
         try {
           await automationApi.openTrade(newTrade.id)
         } catch (autoErr) {
           const autoMsg = autoErr instanceof Error ? autoErr.message : 'Unknown automation error'
-          // Trade is created — stay on page to show warning, user can go to journal manually
-          setAutomationWarning({ msg: autoMsg, tradeId: newTrade.id })
+          try {
+            // Roll back: delete the just-created trade so the form stays usable
+            await tradesApi.delete(newTrade.id)
+            // Trade deleted — show the Kraken error inline so the user can fix it
+            setError(`Kraken order failed — trade not saved. Fix the issue below and resubmit.\n\n${autoMsg}`)
+          } catch {
+            // Delete also failed (e.g. trade already modified) — keep it in journal
+            setAutomationWarning({ msg: autoMsg, tradeId: newTrade.id })
+          }
           setSubmitting(false)
           return
         }
@@ -1673,6 +1707,20 @@ export function NewTradePage() {
                     )}
                   />
                 </button>
+              </div>
+            )}
+
+            {/* Kraken available margin — shown when automation is ON */}
+            {automateOnCreate && profileAutomationEnabled && (
+              <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-surface-800/60 border border-surface-700/60 text-xs">
+                <Zap size={10} className="text-brand-400 shrink-0" />
+                <span className="text-slate-500">Kraken available margin:</span>
+                {krakenMargin.loading
+                  ? <Loader2 size={10} className="animate-spin text-slate-500" />
+                  : krakenMargin.available != null
+                    ? <span className="font-mono font-semibold text-slate-200">{fmt(krakenMargin.available)} {ccy}</span>
+                    : <span className="text-slate-600">—</span>
+                }
               </div>
             )}
           </div>
@@ -1905,7 +1953,7 @@ export function NewTradePage() {
                 </div>
               </Field>
               <Field
-                label={<>Margin — collateral ({ccy}) <Tip text={`Your margin = collateral you deposit to open the trade.\n\nThis is YOUR choice — you just need to deposit enough to cover the broker's minimum requirement (Margin Required = notional ÷ leverage).\n\nProposed formula:\nmargin = 2 × risk × (1 + buffer)\nbuffer = ${(safetyBuffer * 100).toFixed(0)}% (covers fees + slippage)\n\nDerived leverage:\nL = risk / (margin × SL%)\n→ if SL is hit, you lose exactly risk_amount\n\nEdit margin → leverage recalculated.\nEdit leverage → margin recalculated.`} /></>}
+                label={<>Margin — collateral ({ccy}) <Tip text={`Your margin = collateral you deposit to open the trade.\n\nThis is YOUR choice — you just need to deposit enough to cover the broker's minimum requirement (Margin Required = notional ÷ leverage).\n\nATD places Kraken orders with isolated margin: each position has its own collateral pocket — losses are capped to this margin and cannot affect other positions.\n\nProposed formula:\nmargin = 2 × risk × (1 + buffer)\nbuffer = ${(safetyBuffer * 100).toFixed(0)}% (covers fees + slippage)\nThe ×2 ensures your liquidation price is ~2× further than your SL.\n\nDerived leverage:\nL = risk / (margin × SL%)\n→ if SL is hit, you lose exactly risk_amount\n\nEdit margin → leverage recalculated.\nEdit leverage → margin recalculated.`} /></>}
                 hint={(() => {
                   if (displayedMargin == null || capital == null) return undefined
                   const pct = (displayedMargin / capital) * 100
@@ -1993,7 +2041,7 @@ export function NewTradePage() {
                     {liqBeforeSl
                       ? <AlertTriangle size={9} className="shrink-0" />
                       : <span className="text-slate-600">⚡</span>}
-                    Liq. est. {fmt(liqPrice, 4)} {ccy}
+                    Liq. est. {fmtPrice(liqPrice)} {ccy}
                     {liqBeforeSl && <span className="text-red-400/80"> — liq before SL! increase leverage (reduce margin)</span>}
                   </p>
                 )}

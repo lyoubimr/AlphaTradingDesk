@@ -617,4 +617,14 @@ export const automationApi = {
   /** GET /api/kraken-execution/mark-price/{symbol} — public, no auth required */
   getMarkPrice: (symbol: string): Promise<{ symbol: string; mark_price: number }> =>
     request(`/kraken-execution/mark-price/${encodeURIComponent(symbol)}`),
+
+  /** GET /api/kraken-execution/account/{profileId} — real-time Kraken margin */
+  getAccountStatus: (profileId: number): Promise<{
+    available_margin: number | null
+    initial_margin:   number | null
+    portfolio_value:  number | null
+    pnl:              number | null
+    open_positions:   { symbol: string; side: string; size: number; price: number }[]
+  }> =>
+    request(`/kraken-execution/account/${profileId}`),
 }
