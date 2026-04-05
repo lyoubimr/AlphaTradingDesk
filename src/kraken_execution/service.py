@@ -331,6 +331,42 @@ def open_automated_trade(trade_id: int, db: Session) -> KrakenOrder:
                     f"that are locking margin. Cancel them first before placing a new automated order, "
                     f"or close them from the Kraken UI.",
                 )
+            # Warn if there is already an open POSITION for this symbol on Kraken.
+            # Adding a new entry order on top of an existing position increases combined
+            # margin exposure and triggers wouldCauseLiquidation in Kraken's risk engine
+            # even when availableMargin looks sufficient for the new order alone.
+            try:
+                open_positions = client.get_open_positions()
+                conflicting_pos = [
+                    p for p in open_positions
+                    if p.get("symbol") == instrument.symbol
+                ]
+                if conflicting_pos:
+                    pos_sides = ", ".join(
+                        f"{p.get('side')} {p.get('size')} @ {p.get('price')}"
+                        for p in conflicting_pos
+                    )
+                    logger.warning(
+                        "kraken_preflight_open_position_exists",
+                        trade_id=trade_id,
+                        symbol=instrument.symbol,
+                        positions=conflicting_pos,
+                    )
+                    raise KrakenAPIError(
+                        0,
+                        f"You already have an open position for {instrument.symbol} on Kraken "
+                        f"({pos_sides}). Placing a new entry order on top of an existing position "
+                        f"increases combined margin exposure and will be rejected by Kraken with "
+                        f"'wouldCauseLiquidation'. Close or reduce the existing position first.",
+                    )
+            except KrakenAPIError:
+                raise
+            except Exception as pos_err:  # noqa: BLE001
+                logger.warning(
+                    "kraken_preflight_position_check_failed",
+                    trade_id=trade_id,
+                    error=str(pos_err),
+                )
             if available >= 0 and available < required_margin:
                 shortfall = (required_margin - available).quantize(Decimal("0.01"))
                 raise KrakenAPIError(
