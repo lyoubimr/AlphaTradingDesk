@@ -576,11 +576,9 @@ function KpiBar({ trades, loading, profile }: {
   const maxRiskPct  = parseFloat(profile.max_concurrent_risk_pct)
   const currency    = profile.currency ?? 'USD'
 
-  // Partial trades: booked_pnl is already locked-in but not yet in capital_current
-  const partialBooked   = trades
-    .filter((t) => t.status === 'partial' && t.booked_pnl != null)
-    .reduce((sum, t) => sum + pct(t.booked_pnl), 0)
-  const capitalAdjusted = capital + partialBooked
+  // capital_current is credited immediately for each partial close in the backend.
+  // No adjustment needed — booked_pnl is already included in capital_current.
+  const capitalAdjusted = capital
 
   const pnlAmount = capitalAdjusted - capitalStart
   const pnlPct    = capitalStart > 0 ? (pnlAmount / capitalStart) * 100 : 0
