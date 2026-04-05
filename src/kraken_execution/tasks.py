@@ -213,12 +213,13 @@ def poll_pending_orders(self: Task) -> dict:
                     entry.kraken_fill_id = fill_id
 
                     trade = db.query(Trade).filter(Trade.id == entry.trade_id).first()
-                    if trade and trade.status != "open":
-                        prev_status = trade.status
-                        trade.status = "open"
-                        # Activate risk budget: pending→open means the LIMIT filled and
-                        # capital is now at risk. current_risk was 0 while pending.
-                        if prev_status == "pending" and trade.risk_amount:
+                    if trade:
+                        if trade.status != "open":
+                            trade.status = "open"
+                        # LIMIT filled → capital is now at risk.
+                        # Always activate current_risk on fill, regardless of whether
+                        # trade.status was already "open" (e.g. manually patched in UI).
+                        if trade.risk_amount:
                             trade.current_risk = trade.risk_amount
                     filled_price = entry.filled_price
                     if trade and filled_price:
