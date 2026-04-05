@@ -296,9 +296,12 @@ def open_automated_trade(trade_id: int, db: Session) -> KrakenOrder:
             # existing_im = initial margin already consumed by other open positions/orders
             existing_im_raw = flex.get("initialMargin", 0) or 0
             existing_im = Decimal(str(existing_im_raw)).quantize(Decimal("0.01"))
-            # required = 2 × new_IM + existing_IM
-            # (new_IM to open + new_IM as maintenance buffer + existing_IM still locked)
-            required_margin = (Decimal("2") * initial_margin + existing_im).quantize(Decimal("0.01"))
+            # required = 2 × (existing_IM + new_IM)
+            # Derivation: availableMargin = portfolioValue - existing_IM
+            # Kraken requires: availableMargin >= 2 × total_IM_after
+            #   where total_IM_after = existing_IM + new_IM
+            # Therefore: required = 2 × (existing_IM + new_IM)
+            required_margin = (Decimal("2") * (existing_im + initial_margin)).quantize(Decimal("0.01"))
             logger.info(
                 "kraken_preflight",
                 trade_id=trade_id,
