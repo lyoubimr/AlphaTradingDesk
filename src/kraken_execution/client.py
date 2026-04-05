@@ -136,7 +136,53 @@ class KrakenExecutionClient:
             raise KrakenAPIError(resp.status_code, resp.text)
         return resp.json()  # type: ignore[no-any-return]
 
+    def _put(self, path: str, data: dict[str, Any] | None = None) -> dict:
+        encoded = urlencode(data or {})
+        start = time.monotonic()
+        resp = self._http.put(
+            path,
+            content=encoded,
+            headers={
+                "Content-Type": "application/x-www-form-urlencoded",
+                **self._auth_headers(path, encoded),
+            },
+        )
+        latency_ms = int((time.monotonic() - start) * 1000)
+        logger.debug(
+            "kraken_exec_put",
+            path=path,
+            status=resp.status_code,
+            latency_ms=latency_ms,
+        )
+        if not resp.is_success:
+            raise KrakenAPIError(resp.status_code, resp.text)
+        return resp.json()  # type: ignore[no-any-return]
+
     # ── Public API methods ────────────────────────────────────────────────────
+    def set_leverage_preferences(
+        self,
+        symbol: str,
+        max_leverage: int,
+        margin_mode: str = "isolated",
+    ) -> dict:
+        """Configure margin mode and max leverage for a PF_ perpetual contract.
+
+        Must be called BEFORE send_order to ensure the order uses isolated margin.
+        With isolated margin each position has its own collateral pocket — other
+        positions do not affect the margin check for this order.
+
+        API: PUT /derivatives/api/v3/leveragepreferences
+        Args:
+            symbol:       e.g. "PF_NEARUSD"
+            max_leverage: integer leverage multiplier (e.g. 10)
+            margin_mode:  "isolated" (default) or "cross"
+        """
+        return self._put("/derivatives/api/v3/leveragepreferences", {
+            "symbol": symbol,
+            "maxLeverage": max_leverage,
+            "marginMode": margin_mode,
+        })
+
     def get_accounts_summary(self) -> dict:
         """Fetch portfolio margin summary from Kraken Futures.
 
