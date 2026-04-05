@@ -280,20 +280,25 @@ def open_automated_trade(trade_id: int, db: Session) -> KrakenOrder:
         limit_price = str(trade.entry_price) if trade.order_type == "LIMIT" else None
 
         # ─ Pre-flight: check available Kraken margin before placing the order ─
-        # Kraken Portfolio Margin (PF_) requires initial margin + maintenance margin.
-        # Maintenance margin ≈ 50% of initial margin for crypto perpetuals.
-        # Without this buffer, Kraken rejects with wouldCauseLiquidation even when
-        # availableMargin >= initial_margin, because any adverse tick would liquidate.
+        # Kraken Portfolio Margin (PF_) check: after placing the order, the remaining
+        # available margin must still cover the total initial margin of ALL positions
+        # (existing + new). Kraken's wouldCauseLiquidation fires when:
+        #   available_after = availableMargin - new_IM
+        #   available_after < total_IM_after = existing_IM + new_IM
+        # Which simplifies to: availableMargin < 2 * new_IM + existing_IM
         leverage = Decimal(str(trade.leverage or 10))
         entry_price = trade.entry_price or Decimal(limit_price or "0")
         initial_margin = (lot_size * entry_price / leverage).quantize(Decimal("0.01"))
-        # Kraken PF maintenance margin ≈ 50% of initial margin for crypto perpetuals
-        maintenance_margin = (initial_margin * Decimal("0.50")).quantize(Decimal("0.01"))
-        required_margin = initial_margin + maintenance_margin
         try:
             acct = client.get_accounts_summary()
             flex = acct.get("accounts", {}).get("flex", {})
             available = Decimal(str(flex.get("availableMargin", -1)))
+            # existing_im = initial margin already consumed by other open positions/orders
+            existing_im_raw = flex.get("initialMargin", 0) or 0
+            existing_im = Decimal(str(existing_im_raw)).quantize(Decimal("0.01"))
+            # required = 2 × new_IM + existing_IM
+            # (new_IM to open + new_IM as maintenance buffer + existing_IM still locked)
+            required_margin = (Decimal("2") * initial_margin + existing_im).quantize(Decimal("0.01"))
             logger.info(
                 "kraken_preflight",
                 trade_id=trade_id,
@@ -304,11 +309,11 @@ def open_automated_trade(trade_id: int, db: Session) -> KrakenOrder:
                 leverage=int(leverage),
                 notional=float(lot_size * entry_price),
                 atd_initial_margin=float(initial_margin),
-                atd_maintenance_margin=float(maintenance_margin),
+                atd_existing_im=float(existing_im),
                 atd_required_margin=float(required_margin),
                 kraken_available_margin=float(available) if available >= 0 else "N/A",
                 kraken_portfolio_value=flex.get("portfolioValue", "N/A"),
-                kraken_existing_initial_margin=flex.get("initialMargin", "N/A"),
+                kraken_existing_initial_margin=float(existing_im),
             )
             # Warn if there are open orders for the same symbol — they lock margin
             # and can cause wouldCauseLiquidation even with sufficient balance.
@@ -331,6 +336,42 @@ def open_automated_trade(trade_id: int, db: Session) -> KrakenOrder:
                     f"that are locking margin. Cancel them first before placing a new automated order, "
                     f"or close them from the Kraken UI.",
                 )
+            # Warn if there is already an open POSITION for this symbol on Kraken.
+            # Adding a new entry order on top of an existing position increases combined
+            # margin exposure and triggers wouldCauseLiquidation in Kraken's risk engine
+            # even when availableMargin looks sufficient for the new order alone.
+            try:
+                open_positions = client.get_open_positions()
+                conflicting_pos = [
+                    p for p in open_positions
+                    if p.get("symbol") == instrument.symbol
+                ]
+                if conflicting_pos:
+                    pos_sides = ", ".join(
+                        f"{p.get('side')} {p.get('size')} @ {p.get('price')}"
+                        for p in conflicting_pos
+                    )
+                    logger.warning(
+                        "kraken_preflight_open_position_exists",
+                        trade_id=trade_id,
+                        symbol=instrument.symbol,
+                        positions=conflicting_pos,
+                    )
+                    raise KrakenAPIError(
+                        0,
+                        f"You already have an open position for {instrument.symbol} on Kraken "
+                        f"({pos_sides}). Placing a new entry order on top of an existing position "
+                        f"increases combined margin exposure and will be rejected by Kraken with "
+                        f"'wouldCauseLiquidation'. Close or reduce the existing position first.",
+                    )
+            except KrakenAPIError:
+                raise
+            except Exception as pos_err:  # noqa: BLE001
+                logger.warning(
+                    "kraken_preflight_position_check_failed",
+                    trade_id=trade_id,
+                    error=str(pos_err),
+                )
             if available >= 0 and available < required_margin:
                 shortfall = (required_margin - available).quantize(Decimal("0.01"))
                 raise KrakenAPIError(
@@ -338,10 +379,10 @@ def open_automated_trade(trade_id: int, db: Session) -> KrakenOrder:
                     f"Insufficient Kraken margin for this trade: "
                     f"you have {float(available):.2f} USD available, "
                     f"but {float(required_margin):.2f} USD are required "
-                    f"({float(initial_margin):.2f} initial + {float(maintenance_margin):.2f} maintenance — "
+                    f"(2 × {float(initial_margin):.2f} new IM + {float(existing_im):.2f} existing locked — "
                     f"×{int(leverage)} leverage, {float(lot_size):.4f} units at {float(entry_price):.2f}). "
                     f"Add at least {float(shortfall):.2f} USD to your Kraken account, "
-                    f"or reduce risk % to lower position size.",
+                    f"reduce risk % to lower position size, or close some existing positions to free margin.",
                 )
         except KrakenAPIError:
             raise  # re-raise preflight failures directly
