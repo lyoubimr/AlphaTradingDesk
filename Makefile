@@ -6,6 +6,7 @@
         backend-dev backend-test backend-lint backend-fmt backend-typecheck \
         frontend-install frontend-dev frontend-test frontend-lint frontend-build \
         db-upgrade db-downgrade db-current db-history db-revision db-reset db-seed db-seed-ma db-seed-test db-refresh db-recover \
+        db-recover-full db-force-migrate \
         hmr clean
 
 COMPOSE      := docker compose -f docker-compose.dev.yml
@@ -31,7 +32,9 @@ dev-up: ## Start stack detached + auto-migrate + auto-seed (safe to re-run)
 	$(COMPOSE) up -d
 	@echo "⏳ Waiting for DB to be healthy…"
 	@until $(COMPOSE) exec -T db pg_isready -U atd -d atd_dev > /dev/null 2>&1; do sleep 1; done
-	@echo "✅ DB ready — running migrations…"
+	@echo "✅ DB ready — creating test DB if missing…"
+	$(COMPOSE) exec -T db psql -U atd -d atd_dev -c "CREATE DATABASE atd_test;" 2>/dev/null || true
+	@echo "✅ Running migrations…"
 	$(MAKE) db-upgrade
 	@echo "✅ Migrations done — seeding reference data…"
 	$(MAKE) db-seed
@@ -148,6 +151,15 @@ db-recover-full: ## Full recovery: smart migrate + seed ref data + seed test dat
 	@echo "→ Seeding test profiles + trades…"
 	$(MAKE) db-seed-test
 	@echo "✅ DB fully recovered and seeded."
+
+db-force-migrate: ## ⚠️  DESTRUCTIVE — force schema replay when DB state is inconsistent
+	@echo "⚠️  Forcing schema replay — ALL remaining data will be destroyed."
+	@echo "   Use only when sync-db-prod-to-dev.sh failed mid-restore."
+	@read -p "Type YES to confirm: " confirm && [ "$$confirm" = "YES" ]
+	$(COMPOSE) exec -T db psql -U atd atd_dev -c "DELETE FROM alembic_version;" 2>/dev/null || true
+	$(COMPOSE) restart backend
+	@echo "✅ Migration replay started — watch logs: make logs-backend"
+	@echo "   Then sync prod data: bash scripts/sync-db-prod-to-dev.sh"
 
 ## ── CI checks (run same checks as GitHub Actions) ────────────────
 ci-backend: backend-lint backend-typecheck backend-test ## Run all backend CI checks locally

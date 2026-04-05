@@ -521,35 +521,46 @@ def compute_pair_vi(self, timeframe: str, force: bool = False) -> dict:  # type:
         # ── 2b. Gate by execution_hours for this TF — weekday vs weekend split ──
         # execution_hours         → allowed UTC hours on weekdays (Mon–Fri)
         # weekend_execution_hours → allowed UTC hours on Sat–Sun
-        # Empty list = no restriction for that day type (run at every natural cycle).
+        # Empty list (explicit) = no restriction for that profile (run at every natural cycle).
         #
         # IMPORTANT: compute_pair_vi is a GLOBAL task (no profile_id).
         # We gate using the UNION of all enabled profiles' execution_hours:
-        # if ANY profile wants to run in the current hour, the task runs.
-        # If ANY profile has no restriction (empty list), the gate always passes.
+        # - Profile with no `schedules` key or no entry for this TF → "no opinion",
+        #   skipped in the gate (does NOT force unrestricted for other profiles).
+        # - Profile with schedules[tf]["execution_hours"] = [] → explicitly unrestricted
+        #   (all hours OK for this profile → task must run 24/7 to serve it).
+        # - Profile with schedules[tf]["execution_hours"] = [h, ...] → contributes to union.
+        # Final gate: skip if union_hours is non-empty AND current_hour not in it.
         if not force:
             now_utc_dt = datetime.now(UTC)
             is_weekend_day = now_utc_dt.weekday() >= 5
             current_hour = now_utc_dt.hour
 
             union_hours: set[int] = set()
-            unrestricted = False  # True if any profile has empty hours (= all hours OK)
+            unrestricted = False  # True only when a profile explicitly says "all hours OK"
 
             all_rows: list[VolatilitySettings] = db.query(VolatilitySettings).all()
             for vs_row in all_rows:
                 pp_col: dict = getattr(vs_row, "per_pair", {}) or {}
                 if not pp_col.get("enabled", True):
                     continue
-                tf_sched_row: dict = (pp_col.get("schedules") or {}).get(timeframe, {})
+                schedules_cfg: dict = pp_col.get("schedules") or {}
+                if timeframe not in schedules_cfg:
+                    # TF not configured for this profile → no opinion, skip
+                    continue
+                tf_sched_row: dict = schedules_cfg[timeframe] or {}
                 if is_weekend_day:
-                    we_h = tf_sched_row.get("weekend_execution_hours", None)
-                    row_hours: list = (
-                        we_h if we_h is not None
-                        else tf_sched_row.get("execution_hours", [])
-                    )
+                    we_h = tf_sched_row.get("weekend_execution_hours")
+                    # we_h=None (key absent) → fall back to weekday hours
+                    # we_h=[]   (explicit empty) → all hours OK for weekends
+                    if we_h is None:
+                        row_hours: list = tf_sched_row.get("execution_hours", [])
+                    else:
+                        row_hours = we_h
                 else:
                     row_hours = tf_sched_row.get("execution_hours", [])
                 if not row_hours:
+                    # Explicit empty list → this profile wants no restriction → task must run
                     unrestricted = True
                     break
                 union_hours.update(row_hours)

@@ -78,10 +78,13 @@ with psycopg.connect(raw) as conn:
         # Tables exist but stamp missing → stamp to head, no DDL needed
         print('MODE=stamp_head')
     elif not has_tables and has_stamp:
-        # Stamp says we are at head but tables are truly gone (volume reset)
-        # → clear the false stamp so alembic will replay all migrations
-        conn.execute('DELETE FROM alembic_version')
-        conn.commit()
+        # Stamp present but core tables missing → inconsistent DB state.
+        # This can happen when:
+        #   • sync-db-prod-to-dev.sh fails midway (alembic_version written, tables not yet)
+        #   • a partial pg_restore leaves the schema in a half-created state
+        # AUTO-REPLAY IS DISABLED — replaying migrations here would silently
+        # destroy any surviving data in other tables.
+        # Set ATD_FORCE_MIGRATE=1 to explicitly opt-in to a full schema replay.
         print('MODE=clear_stamp')
     else:
         # Normal: either fresh DB (upgrade creates everything) or already migrated (no-op)
@@ -93,9 +96,36 @@ if grep -q "MODE=stamp_head" /tmp/atd_dbcheck.txt 2>/dev/null; then
   echo "⚠️  Tables present but stamp missing — stamping to head (no DDL)…"
   alembic stamp head
 elif grep -q "MODE=clear_stamp" /tmp/atd_dbcheck.txt 2>/dev/null; then
-  echo "⚠️  Stamp present but tables missing — clearing stamp and running full upgrade…"
-  alembic upgrade head
-  echo "✅ Migrations done."
+  if [ "${ATD_FORCE_MIGRATE:-0}" = "1" ]; then
+    echo "⚠️  ATD_FORCE_MIGRATE=1 — clearing stamp and replaying all migrations…"
+    python -c "
+import os, psycopg
+raw = os.environ.get('DATABASE_URL','').replace('postgresql+psycopg://','postgresql://')
+with psycopg.connect(raw) as conn:
+    conn.execute('DELETE FROM alembic_version')
+    conn.commit()
+"
+    alembic upgrade head
+    echo "✅ Migrations done."
+  else
+    echo ""
+    echo "❌ FATAL — Inconsistent DB state detected:"
+    echo "   alembic_version exists BUT core tables (trades, profiles, profile_goals) are missing."
+    echo ""
+    echo "   This usually means sync-db-prod-to-dev.sh was interrupted mid-restore,"
+    echo "   leaving the schema in a half-created state."
+    echo ""
+    echo "   ⛔ AUTO-REPAIR DISABLED to protect any surviving data."
+    echo ""
+    echo "   Choose one of:"
+    echo "   1. Restore from prod:  bash scripts/sync-db-prod-to-dev.sh"
+    echo "   2. Fresh start:        make db-reset db-seed"
+    echo "   3. Force schema replay (DESTROYS remaining data):"
+    echo "        ATD_FORCE_MIGRATE=1 docker compose -f docker-compose.dev.yml up -d backend"
+    echo "        (or: make db-force-migrate)"
+    echo ""
+    exit 1
+  fi
 else
   echo "🔄 Running Alembic migrations…"
   alembic upgrade head

@@ -12,7 +12,8 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      # Bind-mount: data survives 'docker compose down -v' and is directly accessible
+      - ./data/postgres:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U atd -d atd_dev"]
       interval: 5s
@@ -127,5 +128,5 @@ services:
     depends_on:
       - db
 
-volumes:
-  postgres_data:
+# postgres_data named volume removed — DB data is now a local bind-mount (./data/postgres)
+# This survives 'docker compose down -v' and makes accidental data loss impossible.
