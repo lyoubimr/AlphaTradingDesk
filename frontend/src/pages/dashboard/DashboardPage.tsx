@@ -595,8 +595,10 @@ function KpiBar({ trades, loading, profile }: {
   // Pending LIMITs are not yet filled — shown in parentheses as "if filled" preview.
   const liveTrades    = openTrades.filter((t) => t.status !== 'pending')
   const pendingTrades = openTrades.filter((t) => t.status === 'pending')
-  // current_risk handles: open trades (actual risk), BE moves (0), etc.
-  const liveRisk      = liveTrades.reduce((sum, t) => sum + pct(t.current_risk ?? t.risk_amount), 0)
+  // current_risk=0 means either BE (SL at entry) or a LIMIT that filled but was never activated.
+  // Use risk_amount as fallback for non-BE trades so a corrupt current_risk=0 doesn't hide risk.
+  const tradeRisk     = (t: typeof liveTrades[0]) => t.is_be ? 0 : (pct(t.current_risk) || pct(t.risk_amount))
+  const liveRisk      = liveTrades.reduce((sum, t) => sum + tradeRisk(t), 0)
   const pendingRisk   = pendingTrades.reduce((sum, t) => sum + pct(t.risk_amount), 0)
   const liveRiskPct    = capital > 0 ? (liveRisk    / capital) * 100 : 0
   const pendingRiskPct = capital > 0 ? (pendingRisk / capital) * 100 : 0
@@ -768,9 +770,10 @@ export function DashboardPage() {
   const openTrades    = trades.filter((t) => t.status === 'open' || t.status === 'partial')
   const capital       = activeProfile ? parseFloat(activeProfile.capital_current) : 0
   const maxRiskPct    = activeProfile ? parseFloat(activeProfile.max_concurrent_risk_pct) : 0
-  const currentRiskPct = capital > 0
-    ? (openTrades.reduce((sum, t) => sum + pct(t.current_risk ?? t.risk_amount), 0) / capital) * 100
-    : 0
+  // Same fallback logic: non-BE trade with current_risk=0 → use risk_amount
+  const bannerRisk    = openTrades.reduce((sum, t) =>
+    sum + (t.is_be ? 0 : (pct(t.current_risk) || pct(t.risk_amount))), 0)
+  const currentRiskPct = capital > 0 ? (bannerRisk / capital) * 100 : 0
 
   return (
     <div>
