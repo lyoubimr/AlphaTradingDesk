@@ -576,11 +576,9 @@ function KpiBar({ trades, loading, profile }: {
   const maxRiskPct  = parseFloat(profile.max_concurrent_risk_pct)
   const currency    = profile.currency ?? 'USD'
 
-  // Partial trades: booked_pnl is already locked-in but not yet in capital_current
-  const partialBooked   = trades
-    .filter((t) => t.status === 'partial' && t.booked_pnl != null)
-    .reduce((sum, t) => sum + pct(t.booked_pnl), 0)
-  const capitalAdjusted = capital + partialBooked
+  // capital_current is credited immediately for each partial close in the backend.
+  // No adjustment needed — booked_pnl is already included in capital_current.
+  const capitalAdjusted = capital
 
   const pnlAmount = capitalAdjusted - capitalStart
   const pnlPct    = capitalStart > 0 ? (pnlAmount / capitalStart) * 100 : 0
@@ -593,18 +591,16 @@ function KpiBar({ trades, loading, profile }: {
   })
   const todayPnl = closedToday.reduce((sum, t) => sum + pct(t.realized_pnl), 0)
 
-  // Committed risk = live (open/partial) + pending (LIMIT not yet filled).
-  // Pending LIMITs reserve budget the moment they are placed — showing 0% live
-  // while a LIMIT is waiting is misleading. Both count against the max.
+  // Live risk = open/partial trades only (capital actively at risk).
+  // Pending LIMITs are not yet filled — shown in parentheses as "if filled" preview.
   const liveTrades    = openTrades.filter((t) => t.status !== 'pending')
   const pendingTrades = openTrades.filter((t) => t.status === 'pending')
-  // current_risk handles: open trades (actual risk), BE moves (returns 0), etc.
+  // current_risk handles: open trades (actual risk), BE moves (0), etc.
   const liveRisk      = liveTrades.reduce((sum, t) => sum + pct(t.current_risk ?? t.risk_amount), 0)
   const pendingRisk   = pendingTrades.reduce((sum, t) => sum + pct(t.risk_amount), 0)
-  const totalRisk     = liveRisk + pendingRisk   // committed = live + pending
   const liveRiskPct    = capital > 0 ? (liveRisk    / capital) * 100 : 0
   const pendingRiskPct = capital > 0 ? (pendingRisk / capital) * 100 : 0
-  const riskPct        = capital > 0 ? (totalRisk   / capital) * 100 : 0
+  const riskPct        = liveRiskPct   // committed = live only
   const maxRiskAmt     = capital * (maxRiskPct / 100)
   const availRiskPct   = Math.max(0, maxRiskPct - riskPct)
 
@@ -664,7 +660,7 @@ function KpiBar({ trades, loading, profile }: {
         value={loading
           ? <Loader2 size={18} className="animate-spin text-slate-500" />
           : <span className="tabular-nums font-mono">
-              <span className={riskColor}>-{fmtCurrency(totalRisk, currency)}</span>
+              <span className={riskColor}>-{fmtCurrency(liveRisk, currency)}</span>
               <span className="text-slate-600">&nbsp;/&nbsp;-{fmtCurrency(maxRiskAmt, currency)}</span>
             </span>
         }
@@ -680,24 +676,17 @@ function KpiBar({ trades, loading, profile }: {
                     <span className="text-slate-300 font-mono">{fmt(availRiskPct)}%</span>
                   </span>
                 )}
-                {liveRiskPct > 0 && pendingRiskPct > 0 && (
+                {pendingRiskPct > 0 && (
                   <span className="text-slate-500">
-                    {' ('}
-                    <span className="text-slate-400">{fmt(liveRiskPct)}%</span>
-                    {' live · '}
-                    <span className="text-amber-500/70">⏳ {fmt(pendingRiskPct)}%</span>
-                    {' pending)'}
-                  </span>
-                )}
-                {liveRiskPct === 0 && pendingRiskPct > 0 && (
-                  <span className="text-amber-500/80">
-                    {' ⏳ '}{fmt(pendingRiskPct)}{'% pending LIMIT'}
+                    {' (⏳ '}
+                    <span className="text-amber-500/70">{fmt(pendingRiskPct)}%</span>
+                    {' if filled)'}
                   </span>
                 )}
               </span> as unknown as string
         }
         accent="neutral"
-        info={`Committed risk = live (open/partial) + pending LIMIT orders. Pending LIMITs reserve budget the moment they are placed. BE trades count as 0. Avail = max − committed.`}
+        info={`Live risk = open/partial trades (using current_risk; 0 at BE). Pending LIMITs shown in parentheses as potential risk if filled. Avail = max − live risk.`}
       />
 
       {/* Win Rate — shown from 1 trade */}
@@ -775,13 +764,13 @@ export function DashboardPage() {
   useEffect(() => { void loadBudget() }, [loadBudget])
 
   // Compute risk for the hard-limit banner (local, no API roundtrip needed)
-  // Include pending LIMITs — same semantics as KpiBar: committed = live + pending
-  const openTrades    = trades.filter((t) => t.status === 'open' || t.status === 'partial' || t.status === 'pending')
+  // Only live (open/partial) trades count — pending LIMITs are not yet capital-at-risk
+  const openTrades    = trades.filter((t) => t.status === 'open' || t.status === 'partial')
   const capital       = activeProfile ? parseFloat(activeProfile.capital_current) : 0
   const maxRiskPct    = activeProfile ? parseFloat(activeProfile.max_concurrent_risk_pct) : 0
-  const liveRisk0     = openTrades.filter((t) => t.status !== 'pending').reduce((sum, t) => sum + pct(t.current_risk ?? t.risk_amount), 0)
-  const pendRisk0     = openTrades.filter((t) => t.status === 'pending').reduce((sum, t) => sum + pct(t.risk_amount), 0)
-  const currentRiskPct = capital > 0 ? ((liveRisk0 + pendRisk0) / capital) * 100 : 0
+  const currentRiskPct = capital > 0
+    ? (openTrades.reduce((sum, t) => sum + pct(t.current_risk ?? t.risk_amount), 0) / capital) * 100
+    : 0
 
   return (
     <div>
