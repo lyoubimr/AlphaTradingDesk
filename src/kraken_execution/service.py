@@ -444,7 +444,6 @@ def open_automated_trade(trade_id: int, db: Session) -> KrakenOrder:
         _actual_risk = (lot_size * abs(actual_fill_price - trade.stop_loss)).quantize(Decimal("0.01"))
         trade.entry_price = actual_fill_price
         trade.risk_amount = _actual_risk
-        trade.initial_risk = _actual_risk
         trade.current_risk = _actual_risk
         logger.info(
             "market_fill_price_corrected",
