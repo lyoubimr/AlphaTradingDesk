@@ -40,7 +40,7 @@ const REGIME_MAP: Record<string, RegimeConfig> = {
     tooltip: 'Active market — Frequent breakouts · Tight risk management',
   },
   EXTREME: {
-    label: 'EXTREME',  emoji: '�',
+    label: 'EXTREME',  emoji: '🚨',
     border: 'border border-red-500',   bg: 'bg-red-950/80',   text: 'text-red-300',
     tooltip: 'Extreme volatility — Reduce positions · Gaps and false breakouts likely',
   },

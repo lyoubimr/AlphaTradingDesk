@@ -976,9 +976,11 @@ export function NewTradePage() {
   const [leverage, setLeverage]             = useState('1')
   const [marginInput, setMarginInput]       = useState<string>('')    // raw user margin input
   const [lastEdit, setLastEdit]             = useState<'leverage' | 'margin'>('margin')
-  // Safety buffer sur la marge proposée (fees + slippage). Configurable par l'user.
-  // Valeurs typiques : 10% (tight), 20% (standard), 30% (conservative)
-  const [safetyBuffer, setSafetyBuffer]     = useState(0.20)
+  // Margin = marginMultiplier × risk (rounded to nearest $1). Default ×2.5.
+  const [marginMultiplier, setMarginMultiplier] = useState(2.5)
+  // Mark price cache for MARKET order deviation warning
+  const [markPriceCached,       setMarkPriceCached]       = useState<number | null>(null)
+  const [marketPriceWarnShown,  setMarketPriceWarnShown]  = useState(false)
 
   const [timeframe, setTimeframe]   = useState('')
   const [confidence, setConfidence] = useState('')
@@ -1084,11 +1086,22 @@ export function NewTradePage() {
 
   // ── Prefill entry price from Kraken mark price (MARKET orders, Crypto only) ─
   useEffect(() => {
-    if (!isCrypto || !instrument?.symbol || orderType !== 'MARKET') return
+    if (!isCrypto || !instrument?.symbol || orderType !== 'MARKET') {
+      setMarkPriceCached(null)
+      setMarketPriceWarnShown(false)
+      return
+    }
     automationApi.getMarkPrice(instrument.symbol)
-      .then(({ mark_price }) => setEntry(String(mark_price)))
-      .catch(() => { /* silent — user can type manually */ })
+      .then(({ mark_price }) => {
+        setEntry(String(mark_price))
+        setMarkPriceCached(mark_price)
+        setMarketPriceWarnShown(false)
+      })
+      .catch(() => setMarkPriceCached(null))
   }, [isCrypto, instrument?.symbol, orderType])
+
+  // Reset market price warning whenever user manually changes entry or switches order type
+  useEffect(() => { setMarketPriceWarnShown(false) }, [entry])
 
   // ── Load instruments when profile broker changes ──────────────────────────
   useEffect(() => {
@@ -1237,7 +1250,7 @@ export function NewTradePage() {
   // └────────────────────────────────────────────────────────────────────────┘
 
   const CRYPTO_MMR = 0.005  // 0.5% — maintenance margin rate tier-1 standard
-  // MARGIN_SAFETY_BUFFER is controlled by the `safetyBuffer` state (configurable in the UI)
+  // Margin = marginMultiplier × risk. Multiplier controlled by the slider in the UI (default ×2.5)
 
   // ── Notional value ────────────────────────────────────────────────────────
   // = lot_size × entry_price  (contract_size = 1 for all crypto instruments)
@@ -1252,8 +1265,8 @@ export function NewTradePage() {
   //   → ×1.20 : buffer fees/slippage
   const proposedMargin = useMemo((): number | null => {
     if (!isCrypto || calc.risk_amount == null) return null
-    return calc.risk_amount * 2 * (1 + safetyBuffer)
-  }, [isCrypto, calc.risk_amount, safetyBuffer])
+    return Math.round(calc.risk_amount * marginMultiplier)
+  }, [isCrypto, calc.risk_amount, marginMultiplier])
 
   // ── Proposed leverage (déduit de la marge proposée) ──────────────────────
   //   L = risk / (margin × SL_pct)
@@ -1435,6 +1448,21 @@ export function NewTradePage() {
     e.preventDefault()
     if (!activeProfile || !instrument || slSideError) return
     setError(null); setSubmitting(true)
+    // ⚠️ Market order deviation warning: if declared entry is >1% off mark price, warn before executing
+    if (orderType === 'MARKET' && automateOnCreate && markPriceCached != null && entryNum != null) {
+      const dev = Math.abs(entryNum - markPriceCached) / markPriceCached
+      if (dev > 0.01 && !marketPriceWarnShown) {
+        setMarketPriceWarnShown(true)
+        setError(
+          `⚠️ Entry ${entryNum} is ${(dev * 100).toFixed(1)}% away from current mark price ` +
+          `${fmtPrice(markPriceCached)}. This is a MARKET order — it will execute at current ` +
+          `market price, not ${entryNum}. If you meant to place a limit order at ${entryNum}, ` +
+          `switch order type to LIMIT. Otherwise click Submit again to confirm.`
+        )
+        setSubmitting(false)
+        return
+      }
+    }
     try {
       const newTrade = await tradesApi.open({
         profile_id:         activeProfile.id,
@@ -1953,7 +1981,7 @@ export function NewTradePage() {
                 </div>
               </Field>
               <Field
-                label={<>Margin — collateral ({ccy}) <Tip text={`Your margin = collateral you deposit to open the trade.\n\nThis is YOUR choice — you just need to deposit enough to cover the broker's minimum requirement (Margin Required = notional ÷ leverage).\n\nATD places Kraken orders with isolated margin: each position has its own collateral pocket — losses are capped to this margin and cannot affect other positions.\n\nProposed formula:\nmargin = 2 × risk × (1 + buffer)\nbuffer = ${(safetyBuffer * 100).toFixed(0)}% (covers fees + slippage)\nThe ×2 ensures your liquidation price is ~2× further than your SL.\n\nDerived leverage:\nL = risk / (margin × SL%)\n→ if SL is hit, you lose exactly risk_amount\n\nEdit margin → leverage recalculated.\nEdit leverage → margin recalculated.`} /></>}
+                label={<>Margin — collateral ({ccy}) <Tip text={`Your margin = collateral you deposit to open the trade.\n\nThis is YOUR choice — you just need to deposit enough to cover the broker's minimum requirement (Margin Required = notional ÷ leverage).\n\nATD places Kraken orders with isolated margin: each position has its own collateral pocket — losses are capped to this margin and cannot affect other positions.\n\nProposed formula:\nmargin = ×${marginMultiplier.toFixed(1)} × risk (rounded to nearest $1)\n→ liq is ~${marginMultiplier.toFixed(1)}× further than your SL\n\nDerived leverage:\nL = risk / (margin × SL%)\n→ if SL is hit, you lose exactly risk_amount\n\nEdit margin → leverage recalculated.\nEdit leverage → margin recalculated.`} /></>}
                 hint={(() => {
                   if (displayedMargin == null || capital == null) return undefined
                   const pct = (displayedMargin / capital) * 100
@@ -1966,6 +1994,36 @@ export function NewTradePage() {
                   : marginVsCapital === 'high'  ? 'text-amber-400'
                   : 'text-slate-500'
                 }>
+                {/* ── Margin multiplier slider — crypto only ───────────────────────────── */}
+                {isCrypto && calc.risk_amount != null && (
+                  <div className="space-y-1.5 mb-2">
+                    <div className="flex items-center gap-3">
+                      <span className="text-brand-300 text-sm font-mono font-bold w-12 shrink-0 text-right">
+                        ×{marginMultiplier.toFixed(1)}
+                      </span>
+                      <input type="range" min="1.5" max="5" step="0.5" value={marginMultiplier}
+                        onChange={(e) => {
+                          setMarginMultiplier(Number(e.target.value))
+                          setMarginInput('')
+                          setLastEdit('margin')
+                        }}
+                        className="flex-1 accent-brand-500 cursor-pointer" />
+                      <span className="text-[10px] text-slate-600 w-8 shrink-0">×5</span>
+                    </div>
+                    <div className="flex gap-1 flex-wrap">
+                      {([1.5, 2, 2.5, 3, 4, 5] as const).map((v) => (
+                        <button key={v} type="button"
+                          onClick={() => { setMarginMultiplier(v); setMarginInput(''); setLastEdit('margin') }}
+                          className={cn('px-2 py-0.5 rounded text-[10px] font-mono border transition-all',
+                            marginMultiplier === v
+                              ? 'bg-brand-600/20 border-brand-500/50 text-brand-300'
+                              : 'bg-surface-700 border-surface-600 text-slate-500 hover:text-slate-300')}>
+                          ×{v}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
                 <PriceInput
                   value={marginInput !== ''
                     ? marginInput
@@ -1997,33 +2055,15 @@ export function NewTradePage() {
                       : '—'
                   }
                 />
-                {/* Formule + sélecteur de buffer — visible quand l'user n'a pas touché le champ */}
+                {/* Formula display — simplified, no buffer presets */}
                 {marginInput === '' && proposedMargin != null && calc.risk_amount != null && (
-                  <div className="mt-1.5 space-y-1">
-                    <p className="text-[10px] text-slate-500 font-mono">
-                      2 × {fmt(calc.risk_amount, 2)} × {(1 + safetyBuffer).toFixed(2)} ={' '}
-                      <span className="text-brand-400">{fmt(proposedMargin, 2)} {ccy}</span>
-                      {proposedLeverage != null && slDistancePct != null && (
-                        <span className="text-slate-600 ml-1">→ ×{proposedLeverage}</span>
-                      )}
-                    </p>
-                    {/* Buffer configurable — fees/slippage cushion */}
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-[9px] text-slate-600 uppercase tracking-wider">Buffer fees/slippage :</span>
-                      {([0.10, 0.20, 0.30, 0.40] as const).map((b) => (
-                        <button key={b} type="button"
-                          onClick={() => setSafetyBuffer(b)}
-                          className={cn(
-                            'px-1.5 py-0.5 rounded text-[10px] font-mono border transition-all',
-                            safetyBuffer === b
-                              ? 'bg-brand-600/20 border-brand-500/50 text-brand-300'
-                              : 'bg-surface-700 border-surface-600 text-slate-500 hover:text-slate-300',
-                          )}>
-                          +{(b * 100).toFixed(0)}%
-                        </button>
-                      ))}
-                    </div>
-                  </div>
+                  <p className="text-[10px] text-slate-500 font-mono mt-1">
+                    ×{marginMultiplier.toFixed(1)} × {fmt(calc.risk_amount, 2)} ={' '}
+                    <span className="text-brand-400">{fmt(proposedMargin, 2)} {ccy}</span>
+                    {proposedLeverage != null && slDistancePct != null && (
+                      <span className="text-slate-600 ml-1">→ ×{proposedLeverage}</span>
+                    )}
+                  </p>
                 )}
                 {/* Warning: margin > capital */}
                 {marginVsCapital === 'exceeds' && displayedMargin != null && capital != null && (
