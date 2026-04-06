@@ -187,14 +187,14 @@ def format_market_vi_message(
     """Format a Market VI alert message.
 
     Example output (default HTML):
-        [DEV] 📡 VI Status · 1H
+        📡 VI Status · 1H
 
-        📊 Score: 57.2 ↑
-        📈 Regime: TRENDING — Sweet spot for trend-following setups
+        📈 TRENDING ↑
+        <i>Sweet spot for trend-following setups</i>
 
-        <code>Components: RVOL 0.82 | MFI 0.61 | ATR 0.74 | BB 0.67</code>
+        <code>◦ VI 57.2 | RVOL 0.82 | MFI 0.61 | ATR 0.74 | BB 0.67</code>
 
-        <i>23/03 18:23</i>
+        <i>06/04 11:15</i>
     """
     # Build component string
     comp_parts: list[str] = []
@@ -228,35 +228,40 @@ def format_market_vi_message(
     if prev_score is not None:
         diff = vi_score - prev_score
         if diff > 0.001:
-            arrow = "🔺"
+            arrow = "↑"
         elif diff < -0.001:
-            arrow = "🔻"
+            arrow = "↓"
         else:
-            arrow = "➡️"
+            arrow = "→"
     else:
         arrow = ""
     dev_prefix = "[DEV] " if _APP_ENV != "prod" else ""
     r_emoji = _REGIME_EMOJI.get(regime, "📊")
     r_summary = _REGIME_SUMMARY.get(regime, "")
 
-    # Mini bar 0–10 blocks (each block = 10 pts)
-    filled = round(score_100 / 10)
-    bar = "█" * filled + "░" * (10 - filled)
-
     if is_trigger:
         header = f"{dev_prefix}🎯 <b>VI Trigger</b> · {timeframe.upper()}"
     else:
         header = f"{dev_prefix}📡 <b>VI Status</b> · {timeframe.upper()}"
-    score_line = f"📊 Score: <b>{score_100:.1f}</b>" + (f" {arrow}" if arrow else "")
+
+    # Regime is the primary information — bold and prominent
+    arrow_str = f" {arrow}" if arrow else ""
+    regime_line = f"{r_emoji} <b>{regime}</b>{arrow_str}"
+
+    # Score + components on one code line (VI is secondary context)
+    vi_str = f"VI {score_100:.1f}"
+    code_parts = [vi_str] + comp_parts
+    code_line = f"<code>◦ {' | '.join(code_parts)}</code>"
+
     lines = [
         header,
         "",
-        f"<code>{bar}</code> {score_line}",
-        f"{r_emoji} Regime: <b>{regime}</b> — {r_summary}",
+        regime_line,
+        f"<i>{r_summary}</i>",
     ]
     if comp_parts:
         lines.append("")
-        lines.append(f"<code>◦ {comp_str}</code>")
+        lines.append(code_line)
     lines.append("")
     lines.append(f"<i>{now_str}</i>")
     return "\n".join(lines)
