@@ -60,14 +60,14 @@ _REGIME_SUMMARY: dict[str, str] = {
     "DEAD":     "No liquidity — avoid new entries",
 }
 
-# Regime → emoji
+# Regime → emoji — must stay in sync with RegimeBadge.tsx REGIME_MAP
 _REGIME_EMOJI: dict[str, str] = {
-    "EXTREME":  "🔥",
-    "ACTIVE":   "⚡",
-    "TRENDING": "📈",
-    "NORMAL":   "⚖️",
-    "CALM":     "😴",
-    "DEAD":     "💀",
+    "EXTREME":  "🚨",
+    "ACTIVE":   "⚠️",
+    "TRENDING": "💎",
+    "NORMAL":   "✅",
+    "CALM":     "💧",
+    "DEAD":     "⬜",
 }
 
 
