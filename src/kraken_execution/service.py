@@ -438,20 +438,34 @@ def open_automated_trade(trade_id: int, db: Session) -> KrakenOrder:
 
     trade.kraken_entry_order_id = kraken_order_id
     trade.automation_enabled = True
-    # Correct entry price + risk figures using actual MARKET fill price
+
+    # ── Step 1: Correct entry_price using actual MARKET fill price ──────────
     if actual_fill_price is not None and actual_fill_price != trade.entry_price:
         _declared_entry = trade.entry_price
-        _actual_risk = (lot_size * abs(actual_fill_price - trade.stop_loss)).quantize(Decimal("0.01"))
         trade.entry_price = actual_fill_price
-        trade.risk_amount = _actual_risk
-        trade.current_risk = _actual_risk
         logger.info(
             "market_fill_price_corrected",
             trade_id=trade_id,
             declared_entry=float(_declared_entry),
             fill_price=float(actual_fill_price),
-            actual_risk=float(_actual_risk),
         )
+
+    # ── Step 2: Sync risk_amount to actual lot_size × updated price distance ─
+    # lot_size (sent to Kraken) is the ground truth for position size.
+    # Without this sync, any discrepancy between lot_size and risk_amount / price_dist
+    # (due to rounding or fill price correction) causes wrong PnL at close.
+    _synced_risk = (lot_size * abs(trade.entry_price - trade.stop_loss)).quantize(Decimal("0.01"))
+    if _synced_risk != trade.risk_amount:
+        logger.info(
+            "risk_synced_to_lot_size",
+            trade_id=trade_id,
+            lot_size=float(lot_size),
+            old_risk=float(trade.risk_amount),
+            new_risk=float(_synced_risk),
+        )
+        trade.risk_amount = _synced_risk
+        trade.current_risk = _synced_risk
+
     db.commit()
     db.refresh(order)
 
