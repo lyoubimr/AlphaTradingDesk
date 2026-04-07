@@ -677,11 +677,15 @@ def close_automated_trade(trade_id: int, db: Session) -> KrakenOrder:
                     )
 
         # Place market close order
-        entry_order = next(
-            (o for o in open_orders if o.role == "entry" and o.status == "open"),
-            None,
+        # Entry order is 'filled' (not 'open') for trades that were activated — query
+        # separately so close_size is never "0" due to the status filter above.
+        _entry_for_size = (
+            db.query(KrakenOrder)
+            .filter(KrakenOrder.trade_id == trade_id, KrakenOrder.role == "entry")
+            .order_by(KrakenOrder.sent_at.asc())
+            .first()
         )
-        close_size = str(entry_order.size) if entry_order else "0"
+        close_size = str(_entry_for_size.size) if _entry_for_size else "0"
 
         close_result = client.send_order(
             order_type="mkt",
@@ -1070,11 +1074,26 @@ def sync_pending_fill(trade_id: int, db: Session) -> dict:
             logger.warning("sync_fill_activate_skipped", trade_id=trade_id, error=str(exc))
 
         # Step 4b — place SL/TP
-        instrument = _resolve_instrument(trade, db)
-        entry_size = Decimal(str(entry_order.size))
-        # Reload trade to get fresh relationships after activate
-        db.refresh(trade)
-        place_sl_tp_orders(trade, entry_size, client, db)
+        # Guard: MARKET trades call place_sl_tp_orders inside open_automated_trade
+        # (before fill confirmation). If sync_pending_fill runs 15 s later it would
+        # place a second identical batch. Skip if an open SL already exists.
+        _existing_sl = (
+            db.query(KrakenOrder)
+            .filter(
+                KrakenOrder.trade_id == trade_id,
+                KrakenOrder.role == "sl",
+                KrakenOrder.status == "open",
+            )
+            .first()
+        )
+        if _existing_sl is not None:
+            logger.info("sync_fill_sl_tp_already_placed_skipping", trade_id=trade_id)
+        else:
+            instrument = _resolve_instrument(trade, db)
+            entry_size = Decimal(str(entry_order.size))
+            # Reload trade to get fresh relationships after activate
+            db.refresh(trade)
+            place_sl_tp_orders(trade, entry_size, client, db)
 
     logger.info(
         "sync_fill_detected",
