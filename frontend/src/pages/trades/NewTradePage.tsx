@@ -820,11 +820,13 @@ function ExpectancyPanel({ calc, totalProfit, pctValid, selectedStrategy, active
   // ── Grade ─────────────────────────────────────────────────────────────
   const grade = expectancyR < 0
     ? { label: 'Negative',   emoji: '🔴', bg: 'bg-red-500/10',     border: 'border-red-500/30',     text: 'text-red-300',     sub: 'Expected value is negative — review setup.' }
-    : expectancyR < 0.5
-      ? { label: 'Marginal', emoji: '🟡', bg: 'bg-amber-500/10',   border: 'border-amber-500/30',   text: 'text-amber-300',   sub: 'Borderline. Improve R:R or confidence before taking.' }
-      : expectancyR < 1
+    : expectancyR < 0.2
+      ? { label: 'Marginal', emoji: '🟡', bg: 'bg-amber-500/10',   border: 'border-amber-500/30',   text: 'text-amber-300',   sub: 'Very small edge. Improve R:R or confidence before taking.' }
+      : expectancyR < 0.5
         ? { label: 'Good',     emoji: '🟢', bg: 'bg-emerald-500/10', border: 'border-emerald-500/30', text: 'text-emerald-300', sub: 'Solid positive expectancy. Good setup.' }
-        : { label: 'Excellent', emoji: '💎', bg: 'bg-brand-500/10',   border: 'border-brand-500/30',   text: 'text-brand-300',   sub: 'Exceptional edge. High-conviction setup.' }
+        : expectancyR < 1
+          ? { label: 'Strong',   emoji: '💪', bg: 'bg-emerald-600/10', border: 'border-emerald-600/30', text: 'text-emerald-300', sub: 'Strong edge. High-quality setup.' }
+          : { label: 'Excellent', emoji: '💎', bg: 'bg-brand-500/10',   border: 'border-brand-500/30',   text: 'text-brand-300',   sub: 'Exceptional edge. High-conviction setup.' }
 
   // Badge color per WR source level
   const wrBadgeCls = wrSource === 'strategy' ? 'text-emerald-400'

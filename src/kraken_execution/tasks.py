@@ -228,10 +228,23 @@ def poll_pending_orders(self: Task) -> dict:
                     db.commit()  # ← commit fill first — SL/TP failure must NOT undo this
 
                     # ── Phase 2: place SL/TP (best-effort) ────────────────────
-                    # send_order is called with raise_on_rejection=False inside
-                    # place_sl_tp_orders, so individual rejections are logged as
-                    # "error" rows instead of crashing the whole task.
-                    if trade:
+                    # Guard: MARKET trades already have SL/TP placed by open_automated_trade.
+                    # Skip if an open SL already exists to prevent duplicate placement.
+                    _existing_sl = (
+                        db.query(KrakenOrder)
+                        .filter(
+                            KrakenOrder.trade_id == entry.trade_id,
+                            KrakenOrder.role == "sl",
+                            KrakenOrder.status == "open",
+                        )
+                        .first()
+                    )
+                    if _existing_sl is not None:
+                        logger.info(
+                            "poll_pending_sl_tp_already_placed_skipping",
+                            trade_id=entry.trade_id,
+                        )
+                    elif trade:
                         try:
                             with _make_client(settings_row) as sl_client:
                                 place_sl_tp_orders(

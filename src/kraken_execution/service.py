@@ -497,6 +497,17 @@ def open_automated_trade(trade_id: int, db: Session) -> KrakenOrder:
         with _make_client(settings_row) as sl_tp_client:
             place_sl_tp_orders(trade, lot_size, sl_tp_client, db)
 
+        # Mark the entry as filled so Celery's poll_pending_orders skips it.
+        # Without this, the Celery task sees status='open' (no fill_id set),
+        # thinks it's an unfilled LIMIT, and places a second SL/TP batch.
+        if actual_fill_price is not None:
+            order.status = "filled"
+            order.filled_price = float(actual_fill_price)
+            order.filled_size = float(lot_size)
+            from datetime import datetime as _dt  # noqa: PLC0415
+            order.filled_at = _dt.utcnow()
+            db.commit()
+
     return order
 
 
