@@ -231,6 +231,8 @@ function SnapshotGallery({
   kind,
   onUpdated,
   readOnly = false,
+  onCompare,
+  hasOtherSide = false,
 }: {
   tradeId: number
   urls: string[] | null
