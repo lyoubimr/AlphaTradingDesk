@@ -535,7 +535,7 @@ def send_pnl_status(self: Task) -> dict:  # noqa: ARG001
     try:
         open_trades: list[Trade] = (
             db.query(Trade)
-            .filter(Trade.status == "open", Trade.automation_enabled.is_(True))
+            .filter(Trade.status.in_(["open", "partial"]), Trade.automation_enabled.is_(True))
             .all()
         )
         if not open_trades:
