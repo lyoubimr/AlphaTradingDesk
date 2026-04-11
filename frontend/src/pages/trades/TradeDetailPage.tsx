@@ -14,7 +14,7 @@ import {
   ArrowLeft, Loader2, AlertTriangle, CheckCircle2, X,
   TrendingUp, TrendingDown, Clock, ChevronDown, ChevronUp,
   Trash2, Edit3, Save, SlidersHorizontal, ShieldCheck, ShieldOff,
-  ImagePlus, Maximize2,
+  ImagePlus, Maximize2, Columns2,
 } from 'lucide-react'
 import { PageHeader } from '../../components/ui/PageHeader'
 import { tradesApi, strategiesApi, automationApi } from '../../lib/api'
@@ -115,6 +115,113 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// SplitLightbox — side-by-side entry vs close comparison
+// ─────────────────────────────────────────────────────────────────────────────
+
+function SplitLightbox({
+  entryUrls,
+  closeUrls,
+  initialSide,
+  onClose,
+}: {
+  entryUrls: string[]
+  closeUrls: string[]
+  initialSide: 'entry' | 'close'
+  onClose: () => void
+}) {
+  const [entryIdx, setEntryIdx] = useState(0)
+  const [closeIdx, setCloseIdx] = useState(0)
+
+  const entryUrl = entryUrls[entryIdx] ?? null
+  const closeUrl = closeUrls[closeIdx] ?? null
+
+  const hasBoth = entryUrls.length > 0 && closeUrls.length > 0
+
+  return (
+    <div
+      className="fixed inset-0 z-[70] flex flex-col bg-black/95 backdrop-blur-sm"
+      onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
+    >
+      {/* Header */}
+      <div className="flex items-center justify-between px-5 py-3 border-b border-white/10 shrink-0">
+        <div className="flex items-center gap-2 text-slate-300">
+          <Columns2 size={15} />
+          <span className="text-xs font-semibold uppercase tracking-wider">Before / After comparison</span>
+        </div>
+        <button type="button" onClick={onClose}
+          className="text-slate-400 hover:text-white bg-white/10 hover:bg-white/20 rounded-full p-1.5 transition-colors">
+          <X size={16} />
+        </button>
+      </div>
+
+      {/* Split panels */}
+      <div className="flex flex-1 min-h-0 divide-x divide-white/10">
+        {/* Entry side */}
+        <div className="flex flex-col flex-1 min-w-0">
+          <div className="flex items-center justify-between px-3 py-2 shrink-0">
+            <span className="text-[10px] uppercase tracking-widest text-slate-500 font-semibold">📸 Entry</span>
+            {entryUrls.length > 1 && (
+              <div className="flex items-center gap-1">
+                <button type="button" onClick={() => setEntryIdx((i) => Math.max(0, i - 1))}
+                  disabled={entryIdx === 0}
+                  className="text-[10px] px-2 py-0.5 rounded bg-white/10 hover:bg-white/20 disabled:opacity-30 text-slate-300">
+                  ‹
+                </button>
+                <span className="text-[10px] text-slate-500">{entryIdx + 1}/{entryUrls.length}</span>
+                <button type="button" onClick={() => setEntryIdx((i) => Math.min(entryUrls.length - 1, i + 1))}
+                  disabled={entryIdx === entryUrls.length - 1}
+                  className="text-[10px] px-2 py-0.5 rounded bg-white/10 hover:bg-white/20 disabled:opacity-30 text-slate-300">
+                  ›
+                </button>
+              </div>
+            )}
+          </div>
+          <div className="flex-1 flex items-center justify-center p-4 min-h-0">
+            {entryUrl
+              ? <img src={entryUrl} alt="entry" className="max-w-full max-h-full object-contain rounded-lg" />
+              : <span className="text-slate-600 text-xs italic">No entry screenshot</span>}
+          </div>
+        </div>
+
+        {/* Close side */}
+        <div className="flex flex-col flex-1 min-w-0">
+          <div className="flex items-center justify-between px-3 py-2 shrink-0">
+            <span className="text-[10px] uppercase tracking-widest text-slate-500 font-semibold">📸 Close</span>
+            {closeUrls.length > 1 && (
+              <div className="flex items-center gap-1">
+                <button type="button" onClick={() => setCloseIdx((i) => Math.max(0, i - 1))}
+                  disabled={closeIdx === 0}
+                  className="text-[10px] px-2 py-0.5 rounded bg-white/10 hover:bg-white/20 disabled:opacity-30 text-slate-300">
+                  ‹
+                </button>
+                <span className="text-[10px] text-slate-500">{closeIdx + 1}/{closeUrls.length}</span>
+                <button type="button" onClick={() => setCloseIdx((i) => Math.min(closeUrls.length - 1, i + 1))}
+                  disabled={closeIdx === closeUrls.length - 1}
+                  className="text-[10px] px-2 py-0.5 rounded bg-white/10 hover:bg-white/20 disabled:opacity-30 text-slate-300">
+                  ›
+                </button>
+              </div>
+            )}
+          </div>
+          <div className="flex-1 flex items-center justify-center p-4 min-h-0">
+            {closeUrl
+              ? <img src={closeUrl} alt="close" className="max-w-full max-h-full object-contain rounded-lg" />
+              : <span className="text-slate-600 text-xs italic">No close screenshot</span>}
+          </div>
+        </div>
+      </div>
+
+      {/* Footer hint */}
+      {hasBoth && (
+        <div className="text-center py-2 shrink-0">
+          <span className="text-[10px] text-slate-600">Click outside to close · Use ‹ › to navigate multiple screenshots</span>
+        </div>
+      )}
+    </div>
+  )
+}
+
 // SnapshotGallery — upload + display trade screenshots (entry or close)
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -130,6 +237,8 @@ function SnapshotGallery({
   kind: 'entry' | 'close'
   onUpdated: (updated: TradeOut) => void
   readOnly?: boolean
+  onCompare?: (url: string) => void
+  hasOtherSide?: boolean
 }) {
   const [uploading, setUploading] = useState(false)
   const [deleting, setDeleting]   = useState<string | null>(null)
@@ -208,6 +317,17 @@ function SnapshotGallery({
             >
               <Maximize2 size={11} />
             </button>
+            {/* Compare button — only when the other side has screenshots */}
+            {onCompare && hasOtherSide && (
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); onCompare(url) }}
+                title="Compare entry vs close"
+                className="absolute bottom-1 left-1 opacity-0 group-hover:opacity-100 bg-brand-600/80 text-white rounded p-0.5 transition-opacity"
+              >
+                <Columns2 size={11} />
+              </button>
+            )}
             {/* Delete button */}
             {!readOnly && (
               <button
@@ -1011,6 +1131,9 @@ export function TradeDetailPage() {
   const [closeNotesValue, setCloseNotesValue]     = useState('')
   const [savingCloseNotes, setSavingCloseNotes]   = useState(false)
 
+  // Split comparison lightbox (entry vs close)
+  const [splitLightbox, setSplitLightbox] = useState<{ side: 'entry' | 'close'; url: string } | null>(null)
+
   // Action states
   const [activating, setActivating]             = useState(false)
   const [cancelling, setCancelling]             = useState(false)
@@ -1230,6 +1353,14 @@ export function TradeDetailPage() {
   return (
     <div>
       {/* Modals */}
+      {splitLightbox && (
+        <SplitLightbox
+          entryUrls={trade.entry_screenshot_urls ?? []}
+          closeUrls={trade.close_screenshot_urls ?? []}
+          initialSide={splitLightbox.side}
+          onClose={() => setSplitLightbox(null)}
+        />
+      )}
       {showCloseAll && (
         <CloseAllModal
           trade={trade}
@@ -1851,6 +1982,8 @@ export function TradeDetailPage() {
               kind="entry"
               onUpdated={setTrade}
               readOnly={isReadOnly}
+              hasOtherSide={(trade.close_screenshot_urls?.length ?? 0) > 0}
+              onCompare={(url) => setSplitLightbox({ side: 'entry', url })}
             />
           </div>
         </div>
@@ -1912,6 +2045,8 @@ export function TradeDetailPage() {
               kind="close"
               onUpdated={(updated) => { setTrade(updated); setCloseNotesValue(updated.close_notes ?? '') }}
               readOnly={isReadOnly}
+              hasOtherSide={(trade.entry_screenshot_urls?.length ?? 0) > 0}
+              onCompare={(url) => setSplitLightbox({ side: 'close', url })}
             />
           </div>
         </div>
