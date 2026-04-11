@@ -344,7 +344,7 @@ def sync_open_positions(self: Task) -> dict:
                 KrakenOrder.status == "open",
             )
             .join(Trade, Trade.id == KrakenOrder.trade_id)
-            .filter(Trade.status == "open", Trade.automation_enabled.is_(True))
+            .filter(Trade.status.in_(["open", "partial"]), Trade.automation_enabled.is_(True))
             .all()
         )
 
