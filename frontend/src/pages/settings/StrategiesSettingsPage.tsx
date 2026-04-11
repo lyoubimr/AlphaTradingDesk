@@ -682,7 +682,7 @@ export function StrategiesSettingsPage() {
               <span className="text-slate-400 font-medium">
                 ±{parseFloat(activeProfile.min_pnl_pct_for_stats).toFixed(2)}R
               </span>{' '}of initial risk are excluded from WR stats.{' '}
-              e.g. risked $12 → filtered if |P&amp;L| &lt; ${(parseFloat(activeProfile.capital_current) * parseFloat(activeProfile.risk_per_trade_pct ?? '4') / 100 * parseFloat(activeProfile.min_pnl_pct_for_stats)).toFixed(2)}.
+              e.g. 0.20R on a $12 trade → filtered if |P&amp;L| &lt; $2.40.
             </p>
             <Link
               to="/settings/profiles"

@@ -500,17 +500,7 @@ function ProfileModal({ profile, brokers, onClose, onSaved }: ProfileModalProps)
                 placeholder="0.20"
               />
               <span className="text-xs text-slate-500 shrink-0">R</span>
-              {isEdit && profile && (() => {
-                const r = parseFloat(form.min_pnl_pct_for_stats)
-                const capital = parseFloat(profile.capital_current)
-                const riskPct = parseFloat(profile.risk_per_trade_pct ?? '4')
-                const typicalRisk = capital * riskPct / 100
-                if (!isNaN(r) && !isNaN(typicalRisk) && r > 0 && typicalRisk > 0) {
-                  const amt = (typicalRisk * r).toFixed(2)
-                  return <span className="text-[11px] text-slate-500 shrink-0">(≈ ±${amt} on typical trade)</span>
-                }
-                return null
-              })()}
+
             </div>
             <p className="text-[10px] text-slate-600 mt-1">
               e.g. 0.20R → trade #44 closed at −0.13R (risked $12.75, lost $1.69) is excluded. Trade #41 at −0.50R is still counted as loss.
