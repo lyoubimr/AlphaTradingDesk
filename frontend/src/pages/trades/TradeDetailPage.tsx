@@ -122,12 +122,10 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 function SplitLightbox({
   entryUrls,
   closeUrls,
-  initialSide,
   onClose,
 }: {
   entryUrls: string[]
   closeUrls: string[]
-  initialSide: 'entry' | 'close'
   onClose: () => void
 }) {
   const [entryIdx, setEntryIdx] = useState(0)
@@ -1359,7 +1357,6 @@ export function TradeDetailPage() {
         <SplitLightbox
           entryUrls={trade.entry_screenshot_urls ?? []}
           closeUrls={trade.close_screenshot_urls ?? []}
-          initialSide={splitLightbox.side}
           onClose={() => setSplitLightbox(null)}
         />
       )}
