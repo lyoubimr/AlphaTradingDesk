@@ -500,6 +500,15 @@ function ProfileModal({ profile, brokers, onClose, onSaved }: ProfileModalProps)
                 placeholder="0.1"
               />
               <span className="text-xs text-slate-500 shrink-0">%</span>
+              {isEdit && profile && (() => {
+                const capital = parseFloat(profile.capital_current)
+                const pct = parseFloat(form.min_pnl_pct_for_stats)
+                if (!isNaN(capital) && !isNaN(pct) && capital > 0 && pct > 0) {
+                  const amt = (capital * pct / 100).toFixed(2)
+                  return <span className="text-[11px] text-slate-500 shrink-0">(±${amt})</span>
+                }
+                return null
+              })()}
             </div>
             <p className="text-[10px] text-slate-600 mt-1">
               e.g. 0.1% means trades closing within ±0.1% of entry are excluded from WR stats (treated as break-even).
