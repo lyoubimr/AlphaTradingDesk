@@ -194,16 +194,18 @@ function Stat({
   )
 }
 
-// BE filter stat — shows % + currency amount on a second line
+// BE filter stat — shows R-multiple + example $ amount on a second line
 function StatBE({ profile }: { profile: Profile }) {
-  const pct = parseFloat(profile.min_pnl_pct_for_stats)
-  const amount = parseFloat(profile.capital_current) * (pct / 100)
+  const r = parseFloat(profile.min_pnl_pct_for_stats)
+  // Example: capital × risk_pct% × R threshold
+  const riskAmt = parseFloat(profile.capital_current) * (parseFloat(profile.risk_percentage_default) / 100)
+  const amount  = riskAmt * r
   const currency = profile.currency ?? 'USD'
   const fmt = new Intl.NumberFormat(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
   return (
     <div>
       <p className="text-[10px] text-slate-600 uppercase tracking-wider">BE filter</p>
-      <p className="text-xs font-mono font-medium mt-0.5 text-slate-400">{pct.toFixed(3)}%</p>
+      <p className="text-xs font-mono font-medium mt-0.5 text-slate-400">{r.toFixed(2)}R</p>
       <p className="text-[10px] font-mono text-slate-600 leading-none mt-0.5">±{fmt.format(amount)} {currency}</p>
     </div>
   )
