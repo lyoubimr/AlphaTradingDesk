@@ -578,7 +578,7 @@ function PerformanceWidget({ trades, loading, error, beThreshold }: {
 function KpiBar({ trades, loading, profile }: {
   trades: TradeListItem[]
   loading: boolean
-  profile: { capital_current: string; capital_start: string; currency: string | null; max_concurrent_risk_pct: string }
+  profile: { capital_current: string; capital_start: string; currency: string | null; max_concurrent_risk_pct: string; min_pnl_pct_for_stats: string }
 }) {
   const capital     = parseFloat(profile.capital_current)
   const capitalStart = parseFloat(profile.capital_start)
