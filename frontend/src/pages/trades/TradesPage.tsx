@@ -50,12 +50,20 @@ function StatusBadge({
 }
 
 // ── Derived KPIs ──────────────────────────────────────────────────────────
-function deriveKPIs(trades: TradeListItem[]) {
+function deriveKPIs(trades: TradeListItem[], beThreshold: number) {
   const closed   = trades.filter((t) => t.status === 'closed')
   const openList = trades.filter((t) => t.status === 'open' || t.status === 'partial')
-  const wins     = closed.filter((t) => t.realized_pnl && parseFloat(t.realized_pnl) > 0)
-  const winRate  = closed.length >= 5
-    ? `${((wins.length / closed.length) * 100).toFixed(1)}%`
+
+  // Apply BE filter: exclude trades where |realized_pnl / risk_amount| < beThreshold
+  const scoredClosed = closed.filter((t) => {
+    const risk = parseFloat(t.risk_amount ?? '0')
+    if (risk <= 0) return true  // no risk_amount → always count
+    return Math.abs(parseFloat(t.realized_pnl ?? '0') / risk) >= beThreshold
+  })
+
+  const wins     = scoredClosed.filter((t) => t.realized_pnl && parseFloat(t.realized_pnl) > 0)
+  const winRate  = scoredClosed.length >= 5
+    ? `${((wins.length / scoredClosed.length) * 100).toFixed(1)}%`
     : '—'
   // Total P&L = sum of realized_pnl (closed) + booked_pnl (partial positions already taken)
   const totalPnl = trades.reduce((acc, t) => {
@@ -66,8 +74,8 @@ function deriveKPIs(trades: TradeListItem[]) {
   const hasPnl = closed.length > 0 || trades.some((t) => t.booked_pnl)
   const sign = totalPnl >= 0 ? '+' : ''
 
-  // Avg R:R = mean of (realized_pnl / risk_amount) across closed trades with valid risk
-  const rrs = closed
+  // Avg R:R — uses scored trades (BE trades excluded)
+  const rrs = scoredClosed
     .map(t => {
       const pnl  = parseFloat(t.realized_pnl ?? '0')
       const risk = parseFloat(t.risk_amount  ?? '0')
@@ -77,13 +85,18 @@ function deriveKPIs(trades: TradeListItem[]) {
   const avgRR     = rrs.length > 0 ? rrs.reduce((a, b) => a + b, 0) / rrs.length : null
   const avgRRStr  = avgRR != null ? `${avgRR >= 0 ? '+' : ''}${avgRR.toFixed(2)}R` : '—'
   const avgRRPos  = avgRR != null ? avgRR >= 0 : null
-  const avgRRSub  = rrs.length > 0 ? `${rrs.length} closed trade${rrs.length > 1 ? 's' : ''}` : 'No closed trades'
+  const beCount   = closed.length - scoredClosed.length
+  const avgRRSub  = rrs.length > 0
+    ? `${scoredClosed.length} closed trade${scoredClosed.length > 1 ? 's' : ''}${beCount > 0 ? ` (${beCount} BE excluded)` : ''}`
+    : 'No closed trades'
 
   return {
     total:       trades.length,
     openCount:   openList.length,
     winRate,
-    winRateSub:  closed.length < 5 ? 'Min 5 closed trades' : `${wins.length}/${closed.length} wins`,
+    winRateSub:  scoredClosed.length < 5
+      ? 'Min 5 closed trades'
+      : `${wins.length}/${scoredClosed.length} wins${beCount > 0 ? ` (${beCount} BE excl.)` : ''}`,
     totalPnl:    hasPnl ? `${sign}$${totalPnl.toFixed(2)}` : '—',
     totalPnlPos: totalPnl >= 0,
     avgRR, avgRRStr, avgRRPos, avgRRSub,
@@ -155,7 +168,8 @@ export function TradesPage() {
     }
   }
 
-  const kpis = deriveKPIs(trades)
+  const beThreshold = parseFloat(activeProfile?.min_pnl_pct_for_stats ?? '0')
+  const kpis = deriveKPIs(trades, beThreshold)
 
   return (
     <div>

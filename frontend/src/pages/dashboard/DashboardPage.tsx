@@ -384,8 +384,16 @@ interface PerfStats {
   equity:         number[]
 }
 
-function computePerf(trades: TradeListItem[]): PerfStats | null {
-  const closed = trades.filter((t) => t.status === 'closed' && t.realized_pnl !== null)
+function computePerf(trades: TradeListItem[], beThreshold: number): PerfStats | null {
+  const allClosed = trades.filter((t) => t.status === 'closed' && t.realized_pnl !== null)
+  if (allClosed.length === 0) return null
+
+  // Apply BE filter: exclude trades where |realized_pnl / risk_amount| < beThreshold
+  const closed = allClosed.filter((t) => {
+    const risk = parseFloat(t.risk_amount ?? '0')
+    if (risk <= 0) return true
+    return Math.abs(pct(t.realized_pnl) / risk) >= beThreshold
+  })
   if (closed.length === 0) return null
 
   const pnls   = closed.map((t) => pct(t.realized_pnl))
@@ -451,12 +459,13 @@ function MiniEquityCurve({ equity }: { equity: number[] }) {
   )
 }
 
-function PerformanceWidget({ trades, loading, error }: {
+function PerformanceWidget({ trades, loading, error, beThreshold }: {
   trades: TradeListItem[]
   loading: boolean
   error: string | null
+  beThreshold: number
 }) {
-  const perf        = useMemo(() => computePerf(trades), [trades])
+  const perf        = useMemo(() => computePerf(trades, beThreshold), [trades, beThreshold])
   const closedCount = trades.filter((t) => t.status === 'closed').length
   const lowSample   = perf !== null && perf.winRateCount < 5
 
@@ -569,7 +578,7 @@ function PerformanceWidget({ trades, loading, error }: {
 function KpiBar({ trades, loading, profile }: {
   trades: TradeListItem[]
   loading: boolean
-  profile: { capital_current: string; capital_start: string; currency: string | null; max_concurrent_risk_pct: string }
+  profile: { capital_current: string; capital_start: string; currency: string | null; max_concurrent_risk_pct: string; min_pnl_pct_for_stats: string }
 }) {
   const capital     = parseFloat(profile.capital_current)
   const capitalStart = parseFloat(profile.capital_start)
@@ -612,9 +621,16 @@ function KpiBar({ trades, loading, profile }: {
   const riskEmoji     = riskExceeded ? '🛑' : riskWarning ? '⚠️' : riskPct > 0 ? '🟡' : '🟢'
   const riskColor     = riskExceeded ? 'text-red-400' : riskWarning ? 'text-amber-400' : 'text-slate-100'
 
+  const beThreshold = parseFloat(profile.min_pnl_pct_for_stats ?? '0')
   const closedAll = trades.filter((t) => t.status === 'closed' && t.realized_pnl !== null)
-  const wins      = closedAll.filter((t) => pct(t.realized_pnl) > 0)
-  const winRate   = closedAll.length > 0 ? (wins.length / closedAll.length) * 100 : null
+  // Apply BE filter
+  const scoredAll = closedAll.filter((t) => {
+    const risk = parseFloat(t.risk_amount ?? '0')
+    if (risk <= 0) return true
+    return Math.abs(pct(t.realized_pnl) / risk) >= beThreshold
+  })
+  const wins      = scoredAll.filter((t) => pct(t.realized_pnl) > 0)
+  const winRate   = scoredAll.length > 0 ? (wins.length / scoredAll.length) * 100 : null
 
   return (
     <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
@@ -807,7 +823,7 @@ export function DashboardPage() {
             <MarketVIWidget profileId={activeProfile.id} />
             <GoalsWidget    profileId={activeProfile.id} />
             <PositionsWidget  trades={trades} loading={tLoading} error={tError} />
-            <PerformanceWidget trades={trades} loading={tLoading} error={tError} />
+            <PerformanceWidget trades={trades} loading={tLoading} error={tError} beThreshold={parseFloat(activeProfile.min_pnl_pct_for_stats ?? '0')} />
           </div>
         </>
       )}
