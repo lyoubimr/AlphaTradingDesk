@@ -674,28 +674,15 @@ export function StrategiesSettingsPage() {
             <p className="text-[10px] text-slate-500 uppercase tracking-wide mb-1">Break-even filter (profile-level)</p>
             <div className="flex items-end gap-3 mt-0.5">
               <p className="text-lg font-bold text-slate-200 tabular-nums">
-                {parseFloat(activeProfile.min_pnl_pct_for_stats).toFixed(3)}%
-              </p>
-              <p className="text-sm font-semibold text-slate-400 tabular-nums mb-0.5">
-                {(() => {
-                  const capital = parseFloat(activeProfile.capital_current)
-                  const threshold = parseFloat(activeProfile.min_pnl_pct_for_stats)
-                  const amount = capital * (threshold / 100)
-                  const currency = activeProfile.currency ?? 'USD'
-                  const fmt = new Intl.NumberFormat(undefined, {
-                    minimumFractionDigits: 2,
-                    maximumFractionDigits: 2,
-                  })
-                  return `≈ ±${fmt.format(amount)} ${currency}`
-                })()}
+                {parseFloat(activeProfile.min_pnl_pct_for_stats).toFixed(2)}R
               </p>
             </div>
             <p className="text-[10px] text-slate-500 mt-1.5 leading-relaxed">
               Trades closing within{' '}
               <span className="text-slate-400 font-medium">
-                −{parseFloat(activeProfile.min_pnl_pct_for_stats).toFixed(3)}%&nbsp;↔&nbsp;+{parseFloat(activeProfile.min_pnl_pct_for_stats).toFixed(3)}%
-              </span>{' '}
-              of entry are treated as break-even and excluded from WR stats on all strategies.
+                ±{parseFloat(activeProfile.min_pnl_pct_for_stats).toFixed(2)}R
+              </span>{' '}of initial risk are excluded from WR stats.{' '}
+              e.g. 0.20R on a $12 trade → filtered if |P&amp;L| &lt; $2.40.
             </p>
             <Link
               to="/settings/profiles"

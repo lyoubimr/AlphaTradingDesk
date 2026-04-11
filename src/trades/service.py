@@ -409,38 +409,39 @@ def _update_wr_stats(db: Session, trade: Trade, profile: Profile) -> None:
     Update win-rate stats on the profile + ALL linked strategies atomically.
 
     BE filter (profile-level):
-      - Compute pnl_pct = realized_pnl / risk_amount * 100
+      - Compute pnl_r = realized_pnl / risk_amount  (R-multiple, e.g. -0.13R)
         (risk_amount is the capital at risk for this trade — always > 0 for real trades)
-      - If abs(pnl_pct) < profile.min_pnl_pct_for_stats → BREAK-EVEN trade
+      - If abs(pnl_r) < profile.min_pnl_pct_for_stats → BREAK-EVEN trade
         → excluded from BOTH trades_count AND win_count on all targets (profile + strategies).
+        Example: threshold=0.2, risked $10 → any close within ±$2 is treated as BE.
       - Otherwise → trades_count += 1 everywhere.
-        win_count += 1 only where pnl_pct > 0 (pure win, not BE).
+        win_count += 1 only where pnl_r > 0 (pure win, not BE).
 
     Strategy scope:
       - We update ALL strategies linked via trade_strategies junction table,
         NOT just the legacy single-FK trade.strategy_id.
     """
-    # Compute pnl%: realized_pnl expressed as a % of risk_amount.
-    # risk_amount is the capital-at-risk for the trade (always > 0 for valid trades).
+    # Compute R-multiple: realized_pnl expressed as a fraction of risk_amount.
+    # e.g. -$1.69 on $12.75 risk = -0.133R
     # realized_pnl is set by the close flow before this helper is called — never None here.
     realized_pnl: Decimal = trade.realized_pnl or Decimal("0")
 
     if trade.risk_amount and trade.risk_amount > 0:
-        pnl_pct = (realized_pnl / trade.risk_amount * 100).quantize(Decimal("0.001"))
+        pnl_r = (realized_pnl / trade.risk_amount).quantize(Decimal("0.001"))
     else:
         # Edge case: risk_amount is 0 (should not happen for real trades).
         # Fall back to raw PnL sign — at least profile WR won't be wrong.
-        pnl_pct = Decimal("100") if realized_pnl > 0 else (
-            Decimal("-100") if realized_pnl < 0 else Decimal("0")
+        pnl_r = Decimal("1") if realized_pnl > 0 else (
+            Decimal("-1") if realized_pnl < 0 else Decimal("0")
         )
 
-    be_threshold = profile.min_pnl_pct_for_stats  # e.g. 0.100
+    be_threshold = profile.min_pnl_pct_for_stats  # stored as R, e.g. 0.200
 
     # BE trade — skip entirely, zero impact on WR
-    if abs(pnl_pct) < be_threshold:
+    if abs(pnl_r) < be_threshold:
         return
 
-    is_win = pnl_pct > 0
+    is_win = pnl_r > 0
 
     # ── Profile stats ────────────────────────────────────────────────────
     profile.trades_count += 1

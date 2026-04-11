@@ -487,22 +487,23 @@ function ProfileModal({ profile, brokers, onClose, onSaved }: ProfileModalProps)
           </div>
 
           {/* Break-even filter */}
-          <Field label={<>Break-even filter % <Tooltip text="Trades with abs(PnL%) below this threshold are excluded from win-rate stats on all strategies. Default: 0.1%. Helps filter out scratch/break-even trades that distort your edge stats." /></>}>
+          <Field label={<>Break-even filter (R) <Tooltip text="Trades closing within ±NR of your initial risk are treated as break-even and excluded from Win Rate stats. Expressed in R-multiples: 0.20R means the trade returned less than 20% of your risk amount (win or loss). Example: risked $12 → filtered if |P&L| < $2.40. Recommended: 0.15–0.25R." /></>}>
             <div className="flex items-center gap-2">
               <input
                 type="number"
-                step="0.001"
+                step="0.01"
                 min="0"
-                max="5"
+                max="1"
                 value={form.min_pnl_pct_for_stats}
                 onChange={(e) => set('min_pnl_pct_for_stats', e.target.value)}
                 className={inputCls}
-                placeholder="0.1"
+                placeholder="0.20"
               />
-              <span className="text-xs text-slate-500 shrink-0">%</span>
+              <span className="text-xs text-slate-500 shrink-0">R</span>
+
             </div>
             <p className="text-[10px] text-slate-600 mt-1">
-              e.g. 0.1% means trades closing within ±0.1% of entry are excluded from WR stats (treated as break-even).
+              e.g. 0.20R → trade #44 closed at −0.13R (risked $12.75, lost $1.69) is excluded. Trade #41 at −0.50R is still counted as loss.
             </p>
           </Field>
 

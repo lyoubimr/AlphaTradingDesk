@@ -226,9 +226,9 @@ export function TradesPage() {
               {kpis.totalPnl}
             </span>
           )}
-          sub="Closed trades only"
+          sub={trades.some((t) => t.booked_pnl) ? 'Closed + partial profits' : 'Closed trades only'}
           accent={kpis.totalPnl.startsWith('-') ? 'bear' : kpis.totalPnl === '—' ? 'neutral' : 'bull'}
-          info="Sum of P&L for all closed trades. Does not include open positions."
+          info="Sum of P&L for all closed trades + booked profits from partially closed trades (TP1 hit). Win Rate and Avg R:R update only on full close."
         />
       </div>
 
