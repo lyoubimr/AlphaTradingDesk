@@ -398,7 +398,7 @@ function EditTradeModal({ trade, onClose, onSuccess }: {
   // Pending-only amend
   const [entryAmend, setEntryAmend] = useState(trade.entry_price?.toString() ?? '')
   const [tpAmend, setTpAmend]       = useState<{ price: string; pct: string }[]>(
-    trade.positions.map((p) => ({ price: p.take_profit_price, pct: String(p.lot_percentage) }))
+    trade.positions.map((p) => ({ price: p.take_profit_price ?? '', pct: String(p.lot_percentage) }))
   )
   const [saving, setSaving]   = useState(false)
   const [err, setErr]         = useState<string | null>(null)
@@ -1859,7 +1859,7 @@ export function TradeDetailPage() {
             <div className="divide-y divide-surface-700/50">
               {trade.positions.map((pos) => {
                 const posNum    = pos.position_number
-                const tpNum     = parseFloat(pos.take_profit_price)
+                const tpNum     = parseFloat(pos.take_profit_price ?? '0')
                 const entryP    = parseFloat(trade.entry_price)
                 const slP       = parseFloat(trade.initial_stop_loss ?? trade.stop_loss)
                 const slDistP   = Math.abs(entryP - slP)
