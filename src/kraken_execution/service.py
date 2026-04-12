@@ -671,7 +671,7 @@ def place_sl_tp_orders(
             symbol=instrument.symbol,
             side=exit_side,
             size=float(tp_size),
-            limit_price=float(pos.take_profit_price),
+            limit_price=float(pos.take_profit_price) if pos.take_profit_price is not None else None,
             error_message=None if tp_order_db_status == "open" else f"Kraken rejected: {tp_placement_status}",
         )
         db.add(tp_order)

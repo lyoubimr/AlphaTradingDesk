@@ -255,6 +255,7 @@ def _compute_potential_profit(
     if not fixed_positions:
         return Decimal("0.00")
     best_tp = max(fixed_positions, key=lambda p: (p.position_number or 0))
+    assert best_tp.take_profit_price is not None  # fixed positions always have a price
     distance = abs(best_tp.take_profit_price - data.entry_price)
     return (size_info.units_or_lots * distance).quantize(Decimal("0.01"))
 
@@ -977,7 +978,7 @@ def update_trade(db: Session, trade_id: int, data: TradeUpdate) -> TradeOut:
         fixed_new = [p for p in new_positions if not p.is_runner]
         best_tp = max(fixed_new, key=lambda p: (p.position_number or 0)) if fixed_new else None
         price_dist = abs(trade.entry_price - trade.stop_loss)
-        if best_tp is not None and price_dist > 0:
+        if best_tp is not None and best_tp.take_profit_price is not None and price_dist > 0:
             total_units = trade.risk_amount / price_dist
             tp_dist = abs(best_tp.take_profit_price - entry)
             trade.potential_profit = (total_units * tp_dist).quantize(Decimal("0.01"))
