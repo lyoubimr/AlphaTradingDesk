@@ -22,7 +22,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 Direction = Literal["long", "short", "LONG", "SHORT"]
 OrderType = Literal["MARKET", "LIMIT"]
-TradeStatus = Literal["pending", "open", "partial", "closed", "cancelled"]
+TradeStatus = Literal["pending", "open", "partial", "runner", "closed", "cancelled"]
 Period = Literal["daily", "weekly", "monthly"]
 
 
@@ -35,11 +35,17 @@ class PositionIn(BaseModel):
     position_number is optional: if omitted the backend auto-assigns
     based on list order (1-based).  Kept for backward-compat if a
     caller supplies it explicitly.
+
+    For runner positions (is_runner=True):
+      - take_profit_price is None (trailing stop — no fixed exit price)
+      - Must be the last position in the list (highest position_number)
     """
 
     position_number: int | None = Field(default=None, ge=1, le=4)
-    take_profit_price: Decimal = Field(..., gt=0)
+    # None when is_runner=True (trailing stop — Kraken handles the exit price)
+    take_profit_price: Decimal | None = Field(default=None, gt=0)
     lot_percentage: Decimal = Field(..., gt=0, le=100)
+    is_runner: bool = False
 
 
 class PositionOut(BaseModel):
@@ -48,8 +54,9 @@ class PositionOut(BaseModel):
     id: int
     trade_id: int
     position_number: int
-    take_profit_price: Decimal
+    take_profit_price: Decimal | None
     lot_percentage: Decimal
+    is_runner: bool
     status: str
     exit_price: Decimal | None
     exit_date: datetime | None
@@ -107,6 +114,10 @@ class TradeOpen(BaseModel):
     entry_screenshot_urls: list[str] | None = None
     # When True and automation_enabled, ATD automatically moves SL to break-even on TP1 fill.
     be_on_tp1: bool = False
+    # Runner (trailing stop as last TP) — if set, the last position must have is_runner=True.
+    # This value is stored on the trade and used when placing the trailing stop order.
+    # If None, the profile's runner_trailing_pct_default (from automation_settings) is used.
+    runner_trailing_pct: Decimal | None = Field(default=None, gt=0, le=50)
 
     @model_validator(mode="after")
     def normalise_and_validate(self) -> TradeOpen:
@@ -140,6 +151,24 @@ class TradeOpen(BaseModel):
             raise ValueError("For a long trade, stop_loss must be below entry_price.")
         if self.direction == "short" and self.stop_loss <= self.entry_price:
             raise ValueError("For a short trade, stop_loss must be above entry_price.")
+
+        # 6. Runner validation
+        runner_positions = [p for p in self.positions if p.is_runner]
+        if len(runner_positions) > 1:
+            raise ValueError("Only one runner position is allowed per trade.")
+        if runner_positions:
+            runner = runner_positions[0]
+            # Runner must be the last position (highest position_number)
+            max_pos_num = max(p.position_number for p in self.positions)  # type: ignore[type-var]
+            if runner.position_number != max_pos_num:
+                raise ValueError("The runner position must be the last position (highest position_number).")
+            if runner.take_profit_price is not None:
+                raise ValueError("Runner position must not have a take_profit_price (it uses a trailing stop).")
+        else:
+            # Non-runner positions must all have a take_profit_price
+            for p in self.positions:
+                if p.take_profit_price is None:
+                    raise ValueError("take_profit_price is required for non-runner positions.")
 
         # 6. Normalise strategy_ids — if only strategy_id set, promote it
         if not self.strategy_ids and self.strategy_id is not None:
@@ -316,6 +345,9 @@ class TradeOut(BaseModel):
     automation_enabled: bool = False
     # Auto move SL to BE on TP1 fill
     be_on_tp1: bool = False
+    # Runner trailing stop — set when a runner position exists
+    runner_trailing_pct: Decimal | None = None
+    runner_activated_at: datetime | None = None
 
     @model_validator(mode="after")
     def normalise_direction_out(self) -> TradeOut:

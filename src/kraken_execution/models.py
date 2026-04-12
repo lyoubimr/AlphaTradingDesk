@@ -97,7 +97,7 @@ class KrakenOrder(Base):
 
     __table_args__ = (
         CheckConstraint(
-            "role IN ('entry','sl','tp1','tp2','tp3')",
+            "role IN ('entry','sl','tp1','tp2','tp3','runner')",
             name="ck_kraken_orders_role",
         ),
         CheckConstraint(
@@ -105,7 +105,7 @@ class KrakenOrder(Base):
             name="ck_kraken_orders_status",
         ),
         CheckConstraint(
-            "order_type IN ('market','limit','stop','take_profit')",
+            "order_type IN ('market','limit','stop','take_profit','trailing_stop')",
             name="ck_kraken_orders_order_type",
         ),
         CheckConstraint(

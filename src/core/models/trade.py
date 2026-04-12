@@ -125,7 +125,7 @@ class Trade(Base):
     __table_args__ = (
         CheckConstraint("direction IN ('long', 'short')", name="ck_trades_direction"),
         CheckConstraint(
-            "status IN ('pending', 'open', 'partial', 'closed', 'cancelled')",
+            "status IN ('pending', 'open', 'partial', 'runner', 'closed', 'cancelled')",
             name="ck_trades_status",
         ),
         CheckConstraint("order_type IN ('MARKET', 'LIMIT')", name="ck_trades_order_type"),
@@ -214,6 +214,11 @@ class Trade(Base):
     kraken_entry_order_id: Mapped[str | None] = mapped_column(String(100))
     # be_on_tp1: when True, ATD automatically moves SL to break-even when TP1 is filled.
     be_on_tp1: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # Runner (trailing stop as last TP) — Phase 5 runner feature
+    # runner_trailing_pct: trailing deviation % — overrides profile default if set
+    # runner_activated_at: timestamp when the trailing stop order was placed on Kraken
+    runner_trailing_pct: Mapped[Decimal | None] = mapped_column(Numeric(5, 2))
+    runner_activated_at: Mapped[datetime | None] = mapped_column(DateTime)
 
     # Auto-trading (Phase 4+)
     auto_generated: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -284,7 +289,7 @@ class Position(Base):
             "lot_percentage > 0 AND lot_percentage <= 100",
             name="ck_positions_lot_pct_range",
         ),
-        CheckConstraint("status IN ('open', 'closed', 'cancelled')", name="ck_positions_status"),
+        CheckConstraint("status IN ('open', 'runner', 'closed', 'cancelled')", name="ck_positions_status"),
         CheckConstraint(
             "(status = 'closed' AND exit_price IS NOT NULL) OR "
             "(status != 'closed' AND exit_price IS NULL)",
@@ -299,8 +304,11 @@ class Position(Base):
         BigInteger, ForeignKey("trades.id", ondelete="CASCADE"), nullable=False
     )
     position_number: Mapped[int] = mapped_column(Integer, nullable=False)
-    take_profit_price: Mapped[Decimal] = mapped_column(Numeric(20, 8), nullable=False)
+    # take_profit_price is NULL for runner positions (trailing stop — no fixed price)
+    take_profit_price: Mapped[Decimal | None] = mapped_column(Numeric(20, 8), nullable=True)
     lot_percentage: Mapped[Decimal] = mapped_column(Numeric(5, 2), nullable=False)
+    # is_runner=True → this position is managed as a Kraken trailing stop, not a fixed TP
+    is_runner: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     status: Mapped[str] = mapped_column(String(50), nullable=False, default="open")
     exit_price: Mapped[Decimal | None] = mapped_column(Numeric(20, 8))
     exit_date: Mapped[datetime | None] = mapped_column(DateTime)

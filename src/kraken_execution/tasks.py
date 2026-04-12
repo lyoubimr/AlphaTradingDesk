@@ -23,7 +23,7 @@ from celery.exceptions import MaxRetriesExceededError
 from sqlalchemy.orm import Session
 
 from src.core.celery_app import celery_app
-from src.core.models.trade import Trade
+from src.core.models.trade import Position, Trade
 from src.kraken_execution import KrakenAPIError, MissingAPIKeysError
 from src.kraken_execution.models import KrakenOrder
 from src.kraken_execution.service import (
@@ -340,11 +340,11 @@ def sync_open_positions(self: Task) -> dict:
         open_orders: list[KrakenOrder] = (
             db.query(KrakenOrder)
             .filter(
-                KrakenOrder.role.in_(["sl", "tp1", "tp2", "tp3"]),
+                KrakenOrder.role.in_(["sl", "tp1", "tp2", "tp3", "runner"]),
                 KrakenOrder.status == "open",
             )
             .join(Trade, Trade.id == KrakenOrder.trade_id)
-            .filter(Trade.status.in_(["open", "partial"]), Trade.automation_enabled.is_(True))
+            .filter(Trade.status.in_(["open", "partial", "runner"]), Trade.automation_enabled.is_(True))
             .all()
         )
 
@@ -511,7 +511,36 @@ def _handle_fill(order: KrakenOrder, db: Session) -> None:
                     logger.info("be_on_tp1_triggered", trade_id=trade.id)
             except Exception:  # noqa: BLE001
                 logger.exception("be_on_tp1_auto_failed", trade_id=trade.id)
-
+    elif order.role == "runner":
+        # Trailing stop filled — close the runner position
+        runner_pos = (
+            db.query(Position)
+            .filter(Position.trade_id == trade.id, Position.is_runner.is_(True))
+            .first()
+        )
+        if runner_pos:
+            try:
+                partial_close(
+                    db=db,
+                    trade_id=trade.id,
+                    data=TradePartialClose(
+                        position_number=runner_pos.position_number,
+                        exit_price=fill_price,
+                    ),
+                )
+            except HTTPException as exc:
+                if exc.status_code in (409, 422):
+                    logger.warning("runner_fill_already_closed", trade_id=trade.id)
+                else:
+                    raise
+        _notify_event(
+            trade.profile_id, "RUNNER_TAKEN", db,
+            trade_id=trade.id, pair=trade.pair, direction=trade.direction,
+            filled_price=str(order.filled_price or ""),
+            size=str(order.filled_size or order.size),
+            pnl_pct=_compute_pnl_pct(trade.direction, fill_price, trade.entry_price),
+            trade_pnl=str(trade.realized_pnl) if trade.realized_pnl is not None else None,
+        )
 
 # ── send_pnl_status ───────────────────────────────────────────────────────────────
 
@@ -535,7 +564,7 @@ def send_pnl_status(self: Task) -> dict:  # noqa: ARG001
     try:
         open_trades: list[Trade] = (
             db.query(Trade)
-            .filter(Trade.status.in_(["open", "partial"]), Trade.automation_enabled.is_(True))
+            .filter(Trade.status.in_(["open", "partial", "runner"]), Trade.automation_enabled.is_(True))
             .all()
         )
         if not open_trades:
