@@ -1017,6 +1017,8 @@ export function NewTradePage() {
   const [automateOnCreate,        setAutomateOnCreate]        = useState(false)
   const [profileAutomationEnabled, setProfileAutomationEnabled] = useState(false)
   const [beOnTp1,                 setBeOnTp1]                 = useState(false)
+  const [runnerEnabled,           setRunnerEnabled]           = useState(false)
+  const [runnerTrailingPct,       setRunnerTrailingPct]       = useState('5')
   const [krakenMargin, setKrakenMargin] = useState<{ available: number | null; loading: boolean }>({ available: null, loading: false })
 
   // Latest Market Analysis session — auto-fetched for ma_direction in Risk Advisor
@@ -1152,6 +1154,8 @@ export function NewTradePage() {
     setTpCount(1)
     setActivePreset('Smart Scale')
     setTps([{ price: '', pct: '100' }])
+    setRunnerEnabled(false)
+    setRunnerTrailingPct('5')
     setConfidence('')
     setTradeTags([])
     setNotes('')
@@ -1419,13 +1423,19 @@ export function NewTradePage() {
   }), [calc, tps, entryNum, slDistancePts, direction])
 
   // Any TP on the wrong side → totalProfit is null (block expectancy + submit)
-  const tpSideErrors = tpMetrics.some((m) => !m.tpSideOk)
+  // Runner row (last row when runnerEnabled) has no price — skip its side check
+  const tpSideErrors = tpMetrics.some((m, i) => {
+    if (runnerEnabled && i === tps.length - 1) return false
+    return !m.tpSideOk
+  })
 
   const totalProfit = useMemo(() => {
-    if (tpMetrics.length === 0 || tpMetrics.some((t) => t.profit == null)) return null
+    // Exclude runner row from total profit (exit price is unknown — trailing stop)
+    const relevantMetrics = runnerEnabled ? tpMetrics.slice(0, -1) : tpMetrics
+    if (relevantMetrics.length === 0 || relevantMetrics.some((t) => t.profit == null)) return null
     if (tpSideErrors) return null
-    return tpMetrics.reduce((s, t) => s + (t.profit ?? 0), 0)
-  }, [tpMetrics, tpSideErrors])
+    return relevantMetrics.reduce((s, t) => s + (t.profit ?? 0), 0)
+  }, [tpMetrics, tpSideErrors, runnerEnabled])
 
   // ── TP helpers ────────────────────────────────────────────────────────────
   const applyPreset = useCallback((label: string, count: number) => {
@@ -1477,11 +1487,15 @@ export function NewTradePage() {
         entry_price:        entry,
         entry_date:         null,       // backend defaults to utcnow()
         stop_loss:          sl,
-        positions:          tps.map((t, i) => ({
-          position_number:    i + 1,
-          take_profit_price:  t.price,
-          lot_percentage:     Number(t.pct),
-        })),
+        positions:          tps.map((t, i) => {
+          const isRunnerPos = runnerEnabled && i === tps.length - 1
+          return {
+            position_number:    i + 1,
+            take_profit_price:  isRunnerPos ? null : (t.price || undefined),
+            lot_percentage:     Number(t.pct),
+            ...(isRunnerPos && { is_runner: true }),
+          }
+        }),
         risk_pct_override:    riskPct || null,
         ...(isCrypto && leverage && Number(leverage) > 1 && { leverage: Number(leverage) }),
         ...(isCrypto && effectiveMargin != null && effectiveMargin > 0 && { margin_used: effectiveMargin }),
@@ -1493,6 +1507,7 @@ export function NewTradePage() {
         force:                forceOpen || undefined,
         dynamic_risk_snapshot: advisorSnapshot ?? undefined,
         be_on_tp1:            automateOnCreate && beOnTp1 ? true : undefined,
+        runner_trailing_pct:  runnerEnabled ? (Number(runnerTrailingPct) || 5) : undefined,
       })
       // Upload entry screenshots sequentially (fire-and-forget errors — non-blocking)
       for (const file of entryScreenshots) {
@@ -2213,6 +2228,40 @@ export function NewTradePage() {
             </div>
           </div>
 
+          {/* Runner / Let it Moon */}
+          <div className="flex items-center justify-between gap-3 p-3 rounded-xl bg-surface-700/50 border border-surface-600">
+            <div>
+              <p className="text-xs font-semibold text-slate-300">🚀 Runner — Let it Moon</p>
+              <p className="text-[10px] text-slate-500">Last TP becomes a trailing stop — let your winner ride.</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setRunnerEnabled((v) => !v)}
+              className={cn(
+                'relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors',
+                runnerEnabled ? 'bg-brand-600' : 'bg-surface-500',
+              )}
+            >
+              <span className={cn(
+                'inline-block h-3 w-3 transform rounded-full bg-white transition-transform',
+                runnerEnabled ? 'translate-x-5' : 'translate-x-1',
+              )} />
+            </button>
+          </div>
+          {runnerEnabled && (
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-slate-500 shrink-0">Trailing stop:</span>
+              <input
+                type="number" step="0.1" min="0.5" max="50"
+                value={runnerTrailingPct}
+                onChange={(e) => setRunnerTrailingPct(e.target.value)}
+                className={cn(inputCls, 'w-20')}
+              />
+              <span className="text-xs text-slate-500">%</span>
+              <span className="text-[10px] text-slate-600">(trails from the peak after last fixed TP fills)</span>
+            </div>
+          )}
+
           {/* TP rows */}
           <div className="space-y-2">
             {/* Column headers */}
@@ -2228,30 +2277,40 @@ export function NewTradePage() {
             </div>
 
             {tps.map((tp, i) => {
-              const m     = tpMetrics[i]
+              const m           = tpMetrics[i]
+              const isRunnerRow = runnerEnabled && i === tps.length - 1
               const rrCls = m?.rr == null ? 'text-slate-600'
                 : m.rr >= 3 ? 'text-emerald-400'
                 : m.rr >= 2 ? 'text-emerald-500/80'
                 : m.rr >= 1 ? 'text-amber-400'
                 :              'text-red-400'
 
-              // TP side error: value entered but on wrong side of entry
+              // TP side error: value entered but on wrong side of entry (skip for runner)
               const tpNum = tp.price ? Number(tp.price) : null
-              const showTpSideErr = tpNum != null && entryNum != null && !m.tpSideOk
+              const showTpSideErr = !isRunnerRow && tpNum != null && entryNum != null && !m.tpSideOk
 
               return (
                 <div key={i} className="space-y-0.5">
                   <div className="grid items-center gap-2"
                     style={{ gridTemplateColumns: '2.5rem 1fr 5rem 1.5rem 6rem 5rem 8rem' }}>
-                    <span className="text-[11px] text-slate-400 font-bold">TP{i + 1}</span>
-                    <input required type="number" step="any" min="0" value={tp.price}
-                      onChange={(e) => setTpPrice(i, e.target.value)} placeholder="Price"
-                      className={cn(
-                        inputCls,
-                        showTpSideErr
-                          ? 'border-red-500/60 bg-red-500/5'
-                          : tp.price && m?.rr != null && m.rr >= 2 ? 'border-emerald-500/30' : ''
-                      )} />
+                    <span className={cn('text-[11px] font-bold', isRunnerRow ? 'text-brand-400' : 'text-slate-400')}>
+                      {isRunnerRow ? '🚀' : `TP${i + 1}`}
+                    </span>
+                    {isRunnerRow ? (
+                      <div className={cn(inputCls, 'flex items-center gap-1 text-[10px] text-brand-300/80 bg-brand-500/5 border-brand-500/30 cursor-default select-none')}>
+                        <span>Trailing</span>
+                        <span className="text-brand-400/60">{runnerTrailingPct}%</span>
+                      </div>
+                    ) : (
+                      <input required type="number" step="any" min="0" value={tp.price}
+                        onChange={(e) => setTpPrice(i, e.target.value)} placeholder="Price"
+                        className={cn(
+                          inputCls,
+                          showTpSideErr
+                            ? 'border-red-500/60 bg-red-500/5'
+                            : tp.price && m?.rr != null && m.rr >= 2 ? 'border-emerald-500/30' : ''
+                        )} />
+                    )}
                     <input required type="number" step="1" min="1" max="100"
                       value={tp.pct} onChange={(e) => setTpPct(i, e.target.value)}
                       placeholder="%" className={inputCls} />
@@ -2260,11 +2319,11 @@ export function NewTradePage() {
                     <span className="text-[11px] font-mono text-slate-400 truncate">
                       {m.qty != null ? fmt(m.qty, isCFD ? 2 : 4) : '—'}
                     </span>
-                    <span className={cn('text-xs font-mono font-bold text-center', rrCls)}>
-                      {m?.rr != null ? `${m.rr.toFixed(2)}R` : '—'}
+                    <span className={cn('text-xs font-mono font-bold text-center', isRunnerRow ? 'text-brand-400/60' : rrCls)}>
+                      {isRunnerRow ? '∞' : m?.rr != null ? `${m.rr.toFixed(2)}R` : '—'}
                     </span>
-                    <span className={cn('text-xs font-mono font-bold text-right', m?.profit != null ? 'text-emerald-400' : 'text-slate-600')}>
-                      {m?.profit != null ? `+${fmt(m.profit)} ${ccy}` : '—'}
+                    <span className={cn('text-xs font-mono font-bold text-right', isRunnerRow ? 'text-brand-400/60' : m?.profit != null ? 'text-emerald-400' : 'text-slate-600')}>
+                      {isRunnerRow ? 'trail 🚀' : m?.profit != null ? `+${fmt(m.profit)} ${ccy}` : '—'}
                     </span>
                   </div>
                   {/* TP direction error */}

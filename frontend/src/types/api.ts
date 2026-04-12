@@ -103,8 +103,10 @@ export interface InstrumentCreate {
 /** One TP target sent to POST /api/trades */
 export interface TradePosition {
   position_number: number         // 1-based index
-  take_profit_price: string       // Decimal as string
+  take_profit_price?: string | null  // Decimal as string — null/omit for runner (trailing stop)
   lot_percentage: number          // e.g. 50 means 50% of position
+  /** When true, this position uses a trailing stop instead of a fixed TP price */
+  is_runner?: boolean
 }
 
 export interface TradeOpen {
@@ -136,6 +138,8 @@ export interface TradeOpen {
   dynamic_risk_snapshot?: Record<string, unknown> | null
   /** Auto move SL to break-even when TP1 is filled (requires automation_enabled) */
   be_on_tp1?: boolean
+  /** Trailing stop % for the runner position (last TP). If null, profile default is used. */
+  runner_trailing_pct?: number | null
 }
 
 export interface TradeSizeResult {
@@ -169,7 +173,7 @@ export interface TradeListItem {
   risk_amount: string
   potential_profit: string | null
   current_risk: string | null       // 0.00 after BE move, null for pending LIMIT orders
-  status: 'pending' | 'open' | 'partial' | 'closed' | 'cancelled'
+  status: 'pending' | 'open' | 'partial' | 'runner' | 'closed' | 'cancelled'
   realized_pnl: string | null       // non-null only when fully closed
   booked_pnl: string | null         // sum of closed-position PnLs (partial trades)
   exit_price: string | null         // weighted-avg exit price of closed positions
@@ -186,14 +190,17 @@ export interface TradeListItem {
   automation_enabled: boolean
   /** Auto move SL to break-even when TP1 is filled */
   be_on_tp1: boolean
+  /** Trailing stop % if a runner position is configured */
+  runner_trailing_pct: string | null
 }
 
 export interface TradePosition_Out {
   id: number
   trade_id: number
   position_number: number
-  take_profit_price: string   // Decimal serialised as string
-  lot_percentage: string      // Decimal serialised as string
+  take_profit_price: string | null  // null for runner positions (trailing stop)
+  lot_percentage: string            // Decimal serialised as string
+  is_runner: boolean
   status: string
   exit_price: string | null
   exit_date: string | null
@@ -224,6 +231,10 @@ export interface TradeOut extends TradeListItem {
   close_screenshot_urls: string[] | null
   /** Full risk advisor output at trade open — persisted for analysis */
   dynamic_risk_snapshot: Record<string, unknown> | null
+  /** Trailing stop % for the runner position */
+  runner_trailing_pct: string | null
+  /** When the trailing stop was activated (runner status entered) */
+  runner_activated_at: string | null
 }
 
 export interface TradeClose {
@@ -823,7 +834,7 @@ export interface ConnectionTestOut {
   error?: string | null
 }
 
-export type KrakenOrderRole   = 'entry' | 'sl' | 'tp1' | 'tp2' | 'tp3'
+export type KrakenOrderRole   = 'entry' | 'sl' | 'tp1' | 'tp2' | 'tp3' | 'runner'
 export type KrakenOrderStatus = 'open' | 'filled' | 'cancelled' | 'error'
 
 export interface KrakenOrderOut {

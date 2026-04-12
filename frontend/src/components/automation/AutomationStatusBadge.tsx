@@ -6,11 +6,12 @@ import { cn } from '../../lib/cn'
 import type { KrakenOrderRole, KrakenOrderStatus } from '../../types/api'
 
 const ROLE_LABELS: Record<KrakenOrderRole, string> = {
-  entry: 'Entry',
-  sl:    'SL',
-  tp1:   'TP1',
-  tp2:   'TP2',
-  tp3:   'TP3',
+  entry:  'Entry',
+  sl:     'SL',
+  tp1:    'TP1',
+  tp2:    'TP2',
+  tp3:    'TP3',
+  runner: '🚀 Runner',
 }
 
 const STATUS_STYLES: Record<KrakenOrderStatus, string> = {

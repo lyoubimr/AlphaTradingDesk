@@ -204,11 +204,13 @@ class KrakenExecutionClient:
         reduce_only: bool = False,
         max_leverage: int | None = None,
         raise_on_rejection: bool = True,
+        trailing_stop_deviation_unit: str | None = None,
+        trailing_stop_max_deviation: str | None = None,
     ) -> dict:
         """Place an order on Kraken Futures.
 
         Args:
-            order_type:        "mkt" | "lmt" | "stp" | "take_profit"
+            order_type:        "mkt" | "lmt" | "stp" | "take_profit" | "trailing_stop"
             symbol:            instrument symbol (e.g. "PF_XBTUSD")
             side:              "buy" | "sell"
             size:              lot size as decimal string — never float repr
@@ -223,6 +225,10 @@ class KrakenExecutionClient:
             raise_on_rejection: True (default) for entry orders — raises KrakenAPIError if
                                Kraken rejects. Pass False for SL/TP orders so that
                                place_sl_tp_orders can handle failures gracefully.
+            trailing_stop_deviation_unit: "PERCENT" for trailing_stop orders — controls how
+                               the trailing deviation is interpreted.
+            trailing_stop_max_deviation: deviation magnitude as a string (e.g. "5" = 5 %).
+                               Required when order_type="trailing_stop".
 
         Returns:
             Kraken API response dict. The "sendStatus.orderId" field holds the
@@ -242,6 +248,10 @@ class KrakenExecutionClient:
             payload["reduceOnly"] = "true"
         if max_leverage is not None:
             payload["maxLeverage"] = max_leverage
+        if trailing_stop_deviation_unit is not None:
+            payload["trailingStopDeviationUnit"] = trailing_stop_deviation_unit
+        if trailing_stop_max_deviation is not None:
+            payload["trailingStopMaxDeviation"] = trailing_stop_max_deviation
 
         result = self._post("/derivatives/api/v3/sendorder", payload)
         logger.info("kraken_sendorder_raw", payload=payload, raw=result)
