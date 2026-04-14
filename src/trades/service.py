@@ -1207,6 +1207,7 @@ def cancel_trade(db: Session, trade_id: int) -> TradeOut:
     - Sets status = 'cancelled', current_risk = 0.
     - Does NOT update profile.capital_current or any WR counters.
     - Trade is kept as a journal record (not deleted).
+    - If automation is enabled, also cancels the entry order on Kraken.
     """
     trade = _get_trade_or_404(db, trade_id)
 
@@ -1220,6 +1221,23 @@ def cancel_trade(db: Session, trade_id: int) -> TradeOut:
             ),
         )
 
+    # If automation is enabled, cancel the pending entry order on Kraken first.
+    # We log and continue even if the Kraken call fails (order may already be
+    # cancelled there), so the DB-side cancel is never blocked.
+    if trade.automation_enabled:
+        from src.kraken_execution.service import cancel_entry  # local import — no circular dep
+
+        try:
+            cancel_entry(trade_id, db)
+        except Exception:
+            logger.warning(
+                "kraken_cancel_entry_failed_during_trade_cancel trade_id=%s",
+                trade_id,
+                exc_info=True,
+            )
+
+    # Reload after potential cancel_entry commit
+    trade = _get_trade_or_404(db, trade_id)
     trade.status = "cancelled"
     trade.current_risk = Decimal("0.00")
 
