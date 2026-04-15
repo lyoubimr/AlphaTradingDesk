@@ -743,6 +743,7 @@ interface ExpectancyPanelProps {
   activeProfile: Profile
   globalWrStats: WinRateStats | null  // from /api/stats/winrate, null = not loaded yet
   ccy: string
+  runnerEnabled: boolean
 }
 
 // ── Expectancy formula ────────────────────────────────────────────────────
@@ -753,7 +754,7 @@ interface ExpectancyPanelProps {
 //   AvgWinR  = 20/10 = 2R
 //   E(R)     = 0.6×2R − 0.4×1R = 1.2 − 0.4 = +0.8R   ✓
 
-function ExpectancyPanel({ calc, totalProfit, pctValid, selectedStrategy, activeProfile, globalWrStats, ccy }: ExpectancyPanelProps) {
+function ExpectancyPanel({ calc, totalProfit, pctValid, selectedStrategy, activeProfile, globalWrStats, ccy, runnerEnabled }: ExpectancyPanelProps) {
   // ⚠️ All hooks BEFORE early returns (rules of hooks)
   // Level 3: global = mean of all profiles that have data
   const globalWr: number | null = useMemo(() => {
@@ -818,7 +819,9 @@ function ExpectancyPanel({ calc, totalProfit, pctValid, selectedStrategy, active
   const expectancyEur = expectancyR * riskAmt
 
   // ── Grade ─────────────────────────────────────────────────────────────
-  const grade = expectancyR < 0
+  // When runner is active, the expectancy is a floor (runner profit unknown).
+  // Override Negative/Marginal grades to avoid misleading red warning.
+  const gradeBase = expectancyR < 0
     ? { label: 'Negative',   emoji: '🔴', bg: 'bg-red-500/10',     border: 'border-red-500/30',     text: 'text-red-300',     sub: 'Expected value is negative — review setup.' }
     : expectancyR < 0.2
       ? { label: 'Marginal', emoji: '🟡', bg: 'bg-amber-500/10',   border: 'border-amber-500/30',   text: 'text-amber-300',   sub: 'Very small edge. Improve R:R or confidence before taking.' }
@@ -827,6 +830,11 @@ function ExpectancyPanel({ calc, totalProfit, pctValid, selectedStrategy, active
         : expectancyR < 1
           ? { label: 'Strong',   emoji: '💪', bg: 'bg-emerald-600/10', border: 'border-emerald-600/30', text: 'text-emerald-300', sub: 'Strong edge. High-quality setup.' }
           : { label: 'Excellent', emoji: '💎', bg: 'bg-brand-500/10',   border: 'border-brand-500/30',   text: 'text-brand-300',   sub: 'Exceptional edge. High-conviction setup.' }
+
+  const runnerFloorGrade = { label: 'Floor 🚀', emoji: '🚀', bg: 'bg-amber-500/10', border: 'border-amber-500/30', text: 'text-amber-300', sub: 'Fixed TPs floor only — runner adds unbounded upside.' }
+  const grade = runnerEnabled && (gradeBase.label === 'Negative' || gradeBase.label === 'Marginal')
+    ? runnerFloorGrade
+    : gradeBase
 
   // Badge color per WR source level
   const wrBadgeCls = wrSource === 'strategy' ? 'text-emerald-400'
@@ -848,10 +856,10 @@ function ExpectancyPanel({ calc, totalProfit, pctValid, selectedStrategy, active
         </div>
         <div className="text-right">
           <p className={cn('text-2xl font-mono font-bold leading-tight', grade.text)}>
-            {expectancyR >= 0 ? '+' : ''}{expectancyR.toFixed(2)}R
+            {runnerEnabled ? '≥ ' : ''}{expectancyR >= 0 ? '+' : ''}{expectancyR.toFixed(2)}R
           </p>
           <p className="text-[10px] text-slate-400 leading-tight font-mono">
-            {expectancyEur >= 0 ? '+' : ''}{fmt(expectancyEur)} {ccy} / trade
+            {runnerEnabled ? '≥ ' : ''}{expectancyEur >= 0 ? '+' : ''}{fmt(expectancyEur)} {ccy} / trade
           </p>
           <p className="text-[9px] text-slate-600 leading-tight mt-0.5">
             1R = {fmt(riskAmt)} {ccy} risked
@@ -876,17 +884,17 @@ function ExpectancyPanel({ calc, totalProfit, pctValid, selectedStrategy, active
         <div className="flex items-center gap-1.5 text-[11px] font-mono flex-wrap">
           <span className="text-slate-500">E(R) =</span>
           <span className="text-emerald-400">{(winRate * 100).toFixed(0)}%</span>
-          <span className="text-slate-600">× {avgWinR.toFixed(2)}R</span>
+          <span className="text-slate-600">× {runnerEnabled ? '≥ ' : ''}{avgWinR.toFixed(2)}R</span>
           <span className="text-slate-600">−</span>
           <span className="text-red-400">{(lossRate * 100).toFixed(0)}%</span>
           <span className="text-slate-600">× 1R</span>
           <span className="text-slate-500">=</span>
           <span className={cn('font-bold', grade.text)}>
-            {expectancyR >= 0 ? '+' : ''}{expectancyR.toFixed(2)}R
+            {runnerEnabled ? '≥ ' : ''}{expectancyR >= 0 ? '+' : ''}{expectancyR.toFixed(2)}R
           </span>
           <span className="text-slate-600">≈</span>
           <span className={cn('font-bold text-[10px]', grade.text)}>
-            {expectancyEur >= 0 ? '+' : ''}{fmt(expectancyEur)} {ccy}
+            {runnerEnabled ? '≥ ' : ''}{expectancyEur >= 0 ? '+' : ''}{fmt(expectancyEur)} {ccy}
           </span>
         </div>
         <div className="grid grid-cols-3 gap-1.5 pt-1">
@@ -899,9 +907,9 @@ function ExpectancyPanel({ calc, totalProfit, pctValid, selectedStrategy, active
           </div>
           <div className="text-[10px]">
             <span className="text-slate-600">Avg win (R)</span>
-            <p className="text-emerald-400 font-semibold">{avgWinR.toFixed(2)}R</p>
+            <p className="text-emerald-400 font-semibold">{runnerEnabled ? '≥ ' : ''}{avgWinR.toFixed(2)}R</p>
             <p className="text-[9px] text-slate-600 leading-tight mt-0.5">
-              +{fmt(totalProfit)} ÷ {fmt(riskAmt)} {ccy}
+              {runnerEnabled ? 'fixed TPs only' : `+${fmt(totalProfit)} ÷ ${fmt(riskAmt)} ${ccy}`}
             </p>
           </div>
           <div className="text-[10px]">
@@ -916,6 +924,13 @@ function ExpectancyPanel({ calc, totalProfit, pctValid, selectedStrategy, active
 
       {/* Verdict */}
       <p className={cn('text-[11px] font-medium', grade.text, 'opacity-90')}>{grade.sub}</p>
+
+      {/* Runner floor notice */}
+      {runnerEnabled && (
+        <p className="text-[10px] text-amber-400/70 border-t border-amber-500/20 pt-2 leading-relaxed">
+          🚀 Runner excluded — expectancy shown is a <strong>floor</strong>. The trailing stop adds unbounded upside on top.
+        </p>
+      )}
 
       {/* WR source notice — only shown when NOT using strategy-level stats */}
       {wrSource !== 'strategy' && (
@@ -2378,6 +2393,7 @@ export function NewTradePage() {
           activeProfile={activeProfile}
           globalWrStats={globalWrStats}
           ccy={ccy}
+          runnerEnabled={runnerEnabled}
         />
 
         <Section icon="📝" title="Setup tags, notes & session">
