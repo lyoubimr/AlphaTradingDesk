@@ -592,48 +592,9 @@ def place_sl_tp_orders(
         tp_size = _qs(tp_size, instrument.contract_value_precision if instrument.contract_value_precision is not None else 2)
 
         if pos.is_runner:
-            # Trailing stop — no fixed price, Kraken trails from market price
-            trailing_pct = str(trade.runner_trailing_pct or Decimal("5"))
-            tp_result = client.send_order(
-                order_type="trailing_stop",
-                symbol=instrument.symbol,
-                side=exit_side,
-                size=str(tp_size),
-                reduce_only=True,
-                raise_on_rejection=False,
-                trailing_stop_deviation_unit="PERCENT",
-                trailing_stop_max_deviation=trailing_pct,
-            )
-            tp_send_status = tp_result.get("sendStatus", {})
-            tp_order_id = tp_send_status.get("order_id", "") or ""
-            tp_placement_status = tp_send_status.get("status", "unknown")
-            tp_order_db_status = "open" if tp_placement_status == "placed" else "error"
-            if tp_order_db_status == "error":
-                logger.error(
-                    "automation_runner_placement_rejected",
-                    trade_id=trade.id,
-                    trailing_pct=trailing_pct,
-                    kraken_status=tp_placement_status,
-                    kraken_order_id=tp_order_id or "(none)",
-                )
-            if not tp_order_id:
-                import uuid as _uuid  # noqa: PLC0415
-                tp_order_id = f"NO-ID-runner-{trade.id}-{_uuid.uuid4().hex[:8]}"
-            runner_order = KrakenOrder(
-                trade_id=trade.id,
-                profile_id=trade.profile_id,
-                kraken_order_id=tp_order_id,
-                role="runner",
-                status=tp_order_db_status,
-                order_type="trailing_stop",
-                symbol=instrument.symbol,
-                side=exit_side,
-                size=float(tp_size),
-                limit_price=None,
-                error_message=None if tp_order_db_status == "open" else f"Kraken rejected: {tp_placement_status}",
-            )
-            db.add(runner_order)
-            orders.append(runner_order)
+            # Runner trailing stop is NOT placed at entry fill — it is placed later,
+            # in sync_sl_tp_fills(), after the last fixed TP order is filled.
+            # Placing it here would let it trigger before TP1/TP2 are hit.
             continue
 
         tp_result = client.send_order(
@@ -1330,6 +1291,104 @@ def sync_sl_tp_fills(trade_id: int, db: Session) -> dict:
             role=order.role,
             fill_price=float(fill_price),
         )
+
+        # ── Place runner trailing stop after last fixed TP fills ──────────────
+        # The runner is intentionally NOT placed at entry — it should only be
+        # placed here, once all fixed limit TP orders are filled.
+        if order.role in ("tp1", "tp2", "tp3") and trade.runner_trailing_pct:
+            remaining_fixed_tps = (
+                db.query(KrakenOrder)
+                .filter(
+                    KrakenOrder.trade_id == trade_id,
+                    KrakenOrder.role.in_(["tp1", "tp2", "tp3"]),
+                    KrakenOrder.status == "open",
+                )
+                .count()
+            )
+            runner_pos = (
+                db.query(Position)
+                .filter(
+                    Position.trade_id == trade_id,
+                    Position.is_runner.is_(True),
+                    Position.status == "open",
+                )
+                .first()
+            )
+            runner_order_exists = (
+                db.query(KrakenOrder)
+                .filter(KrakenOrder.trade_id == trade_id, KrakenOrder.role == "runner")
+                .first()
+            )
+            if remaining_fixed_tps == 0 and runner_pos and not runner_order_exists:
+                instrument = trade.instrument
+                assert instrument is not None
+                exit_side = _exit_side(trade)
+                # Runner size = its lot_percentage × full entry size (from SL order)
+                sl_kr_order = (
+                    db.query(KrakenOrder)
+                    .filter(KrakenOrder.trade_id == trade_id, KrakenOrder.role == "sl")
+                    .first()
+                )
+                sl_full_size = Decimal(str(sl_kr_order.size)) if sl_kr_order else Decimal("0")
+                runner_size = (Decimal(str(runner_pos.lot_percentage)) / Decimal("100")) * sl_full_size
+                from src.kraken_execution.precision import quantize_size as _qs  # noqa: PLC0415
+                runner_size = _qs(
+                    runner_size,
+                    instrument.contract_value_precision if instrument.contract_value_precision is not None else 2,
+                )
+                trailing_pct = str(trade.runner_trailing_pct)
+                ts_result = client.send_order(
+                    order_type="trailing_stop",
+                    symbol=instrument.symbol,
+                    side=exit_side,
+                    size=str(runner_size),
+                    reduce_only=True,
+                    raise_on_rejection=False,
+                    trailing_stop_deviation_unit="PERCENT",
+                    trailing_stop_max_deviation=trailing_pct,
+                )
+                ts_send = ts_result.get("sendStatus", {})
+                ts_order_id = ts_send.get("order_id", "") or ""
+                ts_status = ts_send.get("status", "unknown")
+                ts_db_status = "open" if ts_status == "placed" else "error"
+                if ts_db_status == "error":
+                    logger.error(
+                        "automation_runner_placement_rejected",
+                        trade_id=trade_id,
+                        trailing_pct=trailing_pct,
+                        kraken_status=ts_status,
+                        kraken_order_id=ts_order_id or "(none)",
+                    )
+                if not ts_order_id:
+                    import uuid as _uuid  # noqa: PLC0415
+                    ts_order_id = f"NO-ID-runner-{trade_id}-{_uuid.uuid4().hex[:8]}"
+                runner_kr_order = KrakenOrder(
+                    trade_id=trade.id,
+                    profile_id=trade.profile_id,
+                    kraken_order_id=ts_order_id,
+                    role="runner",
+                    status=ts_db_status,
+                    order_type="trailing_stop",
+                    symbol=instrument.symbol,
+                    side=exit_side,
+                    size=float(runner_size),
+                    limit_price=None,
+                    error_message=None if ts_db_status == "open" else f"Kraken rejected: {ts_status}",
+                )
+                db.add(runner_kr_order)
+                trade.runner_activated_at = _dt.utcnow()
+                # Promote trade status to "runner" so the UI reflects active trailing
+                if trade.status in ("open", "partial"):
+                    trade.status = "runner"
+                db.commit()
+                db.refresh(runner_kr_order)
+                events.append({"role": "runner_placed", "trailing_pct": float(trade.runner_trailing_pct)})
+                logger.info(
+                    "automation_runner_placed_after_last_tp",
+                    trade_id=trade_id,
+                    trailing_pct=trailing_pct,
+                    runner_size=float(runner_size),
+                )
 
     return {"processed": processed, "events": events}
 
