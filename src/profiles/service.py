@@ -131,6 +131,44 @@ def delete(db: Session, profile_id: int) -> None:
     db.commit()
 
 
+def recalculate_capital(db: Session, profile_id: int) -> Profile:
+    """Recompute capital_current from trade history.
+
+    Formula: capital_start + sum of ALL closed positions' realized_pnl.
+
+    This is the single-source-of-truth formula: each closed position
+    (whether closed via partial_close or full_close) contributed one
+    realized_pnl entry. Summing them gives the exact total credited PnL
+    without any double-counting.
+
+    Use this endpoint to fix capital_current after:
+      - The full_close double-credit bug (now fixed going forward)
+      - Any manual DB edits or data migrations
+    """
+    from decimal import Decimal  # noqa: PLC0415
+
+    from sqlalchemy import func  # noqa: PLC0415
+
+    from src.core.models.trade import Position, Trade  # noqa: PLC0415
+
+    profile = _get_or_404(db, profile_id)
+    total_pnl_raw = (
+        db.query(func.sum(Position.realized_pnl))
+        .join(Trade, Position.trade_id == Trade.id)
+        .filter(
+            Trade.profile_id == profile_id,
+            Position.realized_pnl.isnot(None),
+            Position.status == "closed",
+        )
+        .scalar()
+    )
+    total_pnl = Decimal(str(total_pnl_raw)) if total_pnl_raw is not None else Decimal("0.00")
+    profile.capital_current = (profile.capital_start + total_pnl).quantize(Decimal("0.01"))
+    db.commit()
+    db.refresh(profile)
+    return profile
+
+
 # ── Strategy helpers ──────────────────────────────────────────────────────────
 
 

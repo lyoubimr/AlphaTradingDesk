@@ -1210,6 +1210,11 @@ def full_close(db: Session, trade_id: int, data: TradeClose) -> TradeOut:
 
     exit_dt = data.closed_at or datetime.utcnow()
     total_pnl = Decimal("0.00")
+    # Track only the PnL of positions closed in THIS call — these are the ones
+    # not yet credited to capital_current. Already-closed (partial) positions
+    # were already credited one by one in partial_close() and must NOT be
+    # re-credited here to avoid double-counting.
+    newly_closed_pnl = Decimal("0.00")
 
     for position in trade.positions:
         if position.status == "open":
@@ -1219,8 +1224,10 @@ def full_close(db: Session, trade_id: int, data: TradeClose) -> TradeOut:
             position.realized_pnl = pnl
             position.status = "closed"
             total_pnl += pnl
+            newly_closed_pnl += pnl  # credit capital for this position only
         elif position.realized_pnl is not None:
-            # Already closed via partial -- include its PnL in the total
+            # Already closed via partial_close — include in trade.realized_pnl for
+            # accounting completeness, but do NOT re-credit capital_current.
             total_pnl += position.realized_pnl
 
     trade.realized_pnl = total_pnl.quantize(Decimal("0.01"))
@@ -1237,7 +1244,7 @@ def full_close(db: Session, trade_id: int, data: TradeClose) -> TradeOut:
     # -- Atomic capital + WR stats update (profile + all linked strategies) -----
     profile = db.query(Profile).filter(Profile.id == trade.profile_id).first()
     if profile:
-        profile.capital_current = (profile.capital_current + trade.realized_pnl).quantize(
+        profile.capital_current = (profile.capital_current + newly_closed_pnl).quantize(
             Decimal("0.01")
         )
         _update_wr_stats(db, trade, profile)

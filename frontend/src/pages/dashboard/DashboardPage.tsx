@@ -585,11 +585,17 @@ function KpiBar({ trades, loading, profile }: {
   const maxRiskPct  = parseFloat(profile.max_concurrent_risk_pct)
   const currency    = profile.currency ?? 'USD'
 
-  // capital_current is credited immediately for each partial close in the backend.
-  // No adjustment needed — booked_pnl is already included in capital_current.
-  const capitalAdjusted = capital
-
-  const pnlAmount = capitalAdjusted - capitalStart
+  // Single source of truth: sum actual trade PnLs (same formula as TradesPage).
+  // This is independent of any capital_current sync issues and always reflects
+  // real trade outcomes. Run POST /api/profiles/{id}/recalculate-capital to
+  // re-sync capital_current in the DB after a fix.
+  const tradePnl    = trades.reduce((acc, t) => {
+    if (t.status === 'closed') return acc + pct(t.realized_pnl)
+    if (t.booked_pnl) return acc + pct(t.booked_pnl)
+    return acc
+  }, 0)
+  const capitalAdjusted = capitalStart + tradePnl
+  const pnlAmount = tradePnl
   const pnlPct    = capitalStart > 0 ? (pnlAmount / capitalStart) * 100 : 0
 
   // Include pending — their risk_amount is already committed against the budget
@@ -649,7 +655,7 @@ function KpiBar({ trades, loading, profile }: {
           </span>
         ) as unknown as string}
         accent="brand"
-        info="Current capital vs starting capital. P&L % = (current − start) / start."
+        info="Portfolio balance = start + sum of all trade P&Ls (closed + partial booked). Same source of truth as the Trades page."
       />
 
       {/* Today P&L */}

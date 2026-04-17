@@ -66,6 +66,19 @@ def delete_profile(profile_id: int, db: Session = Depends(get_db)) -> Response:
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
+@router.post("/{profile_id}/recalculate-capital", response_model=ProfileOut)
+def recalculate_capital(
+    profile_id: int,
+    db: Session = Depends(get_db),
+) -> object:
+    """Recompute capital_current from trade history (capital_start + Σ closed positions' PnL).
+
+    Use after the full_close double-credit bug fix or any data migration.
+    Safe to run multiple times (idempotent).
+    """
+    return service.recalculate_capital(db, profile_id)
+
+
 # ── Strategies ────────────────────────────────────────────────────────────────
 
 
