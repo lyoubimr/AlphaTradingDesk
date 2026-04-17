@@ -2114,7 +2114,7 @@ export function NewTradePage() {
                       ? <AlertTriangle size={9} className="shrink-0" />
                       : <span className="text-slate-600">⚡</span>}
                     Liq. est. {fmtPrice(liqPrice)} {ccy}
-                    {liqBeforeSl && <span className="text-red-400/80"> — liq before SL! increase leverage (reduce margin)</span>}
+                    {liqBeforeSl && <span className="text-red-400/80"> — liq before SL! Reduce leverage or move SL closer to entry.</span>}
                   </p>
                 )}
               </Field>

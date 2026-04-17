@@ -418,6 +418,21 @@ function EditTradeModal({ trade, onClose, onSuccess }: {
   const slPct     = slDist != null && effectiveEntry > 0 ? (slDist / effectiveEntry * 100) : null
   const slWrong   = slNum != null && ((isLong && slNum >= effectiveEntry) || (!isLong && slNum <= effectiveEntry))
 
+  // Liq price warning (Crypto only — Kraken Futures MMR 0.5%)
+  const isCryptoTrade  = trade.asset_class?.toLowerCase() === 'crypto'
+  const CRYPTO_MMR_EDIT = 0.005
+  const editLevNum     = leverage !== '' && !isNaN(Number(leverage))
+    ? Number(leverage)
+    : trade.leverage ? Number(trade.leverage) : null
+  const editLiqPrice   = isCryptoTrade && editLevNum != null && editLevNum > 1
+    ? isLong
+      ? effectiveEntry * (1 - 1 / editLevNum + CRYPTO_MMR_EDIT)
+      : effectiveEntry * (1 + 1 / editLevNum - CRYPTO_MMR_EDIT)
+    : null
+  const editLiqBeforeSl = editLiqPrice != null && slNum != null && !slWrong
+    ? (isLong ? slNum <= editLiqPrice : slNum >= editLiqPrice)
+    : false
+
   const riskOrig    = parseFloat(trade.risk_amount)
   // Use initial_stop_loss so unit calculation is correct after BE move
   const slDistOrig  = Math.abs(parseFloat(trade.entry_price) - parseFloat(trade.initial_stop_loss ?? trade.stop_loss))
@@ -594,6 +609,20 @@ function EditTradeModal({ trade, onClose, onSuccess }: {
                 </span>
               )}
             </div>
+          )}
+          {editLiqPrice != null && (
+            <p className={cn(
+              'text-[10px] font-mono flex items-center gap-1',
+              editLiqBeforeSl ? 'text-red-400' : 'text-slate-500',
+            )}>
+              {editLiqBeforeSl
+                ? <AlertTriangle size={9} className="shrink-0" />
+                : <span className="text-slate-600">⚡</span>}
+              Liq. est. {editLiqPrice.toFixed(4)}
+              {editLiqBeforeSl && (
+                <span className="text-red-400/80"> — SL hit after liq! Reduce leverage or move SL closer to entry.</span>
+              )}
+            </p>
           )}
         </div>
 

@@ -66,6 +66,11 @@ MARGIN_SAFETY_FACTOR = Decimal("2.5")
 DEFAULT_CFD_CONTRACT_SIZE = Decimal("100000")  # standard lot; overridden by instrument if set
 DEFAULT_CFD_MAX_LEVERAGE = 100  # conservative fallback
 DEFAULT_CRYPTO_MAX_LEVERAGE = 10  # conservative fallback
+# Kraken Futures tier-1 maintenance margin rate.
+# Liq is CLOSER to entry than the "1/lev" formula — missing this MMR causes
+# the backend to display a falsely safe liquidation price.
+# Formula: LONG liq = entry × (1 − 1/lev + MMR)   SHORT liq = entry × (1 + 1/lev − MMR)
+CRYPTO_MMR = Decimal("0.005")
 
 logger = logging.getLogger(__name__)
 
@@ -189,9 +194,9 @@ def _compute_size_info(
             safe_margin = (margin_required * MARGIN_SAFETY_FACTOR).quantize(Decimal("0.01"))
             margin_warning = profile.capital_current < safe_margin
             if direction == "long":
-                liq_price = (data.entry_price * (1 - 1 / lev)).quantize(_price_quant(data.entry_price))
+                liq_price = (data.entry_price * (1 - 1 / lev + CRYPTO_MMR)).quantize(_price_quant(data.entry_price))
             else:
-                liq_price = (data.entry_price * (1 + 1 / lev)).quantize(_price_quant(data.entry_price))
+                liq_price = (data.entry_price * (1 + 1 / lev - CRYPTO_MMR)).quantize(_price_quant(data.entry_price))
         else:
             margin_required = None
             safe_margin = None
@@ -550,6 +555,37 @@ def open_trade(db: Session, data: TradeOpen) -> TradeOut:
     size_info = _compute_size_info(profile, instrument, data, risk_amount)
     potential_profit = _compute_potential_profit(data, size_info)
 
+    # Guard: SL must not cross the estimated liquidation price (Crypto only).
+    # Only applies when profile is Crypto (Kraken Futures isolated margin formula).
+    # Uses data.leverage if specified, otherwise instrument.max_leverage.
+    if profile.market_type == "Crypto" and size_info.liq_price is not None:
+        _lev_open = data.leverage or size_info.leverage
+        if _lev_open and _lev_open > 0:
+            _dir = data.direction.lower()
+            _entry = data.entry_price
+            if _dir == "long":
+                _liq_open = (_entry * (1 - 1 / _lev_open + CRYPTO_MMR)).quantize(_price_quant(_entry))
+                if data.stop_loss <= _liq_open:
+                    raise HTTPException(
+                        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                        detail=(
+                            f"stop_loss {data.stop_loss} is at or below the estimated liquidation price "
+                            f"{_liq_open} (entry={_entry}, leverage={_lev_open}×). "
+                            "Move the SL closer to entry, add more margin, or reduce leverage."
+                        ),
+                    )
+            else:  # short
+                _liq_open = (_entry * (1 + 1 / _lev_open - CRYPTO_MMR)).quantize(_price_quant(_entry))
+                if data.stop_loss >= _liq_open:
+                    raise HTTPException(
+                        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                        detail=(
+                            f"stop_loss {data.stop_loss} is at or above the estimated liquidation price "
+                            f"{_liq_open} (entry={_entry}, leverage={_lev_open}×). "
+                            "Move the SL closer to entry, add more margin, or reduce leverage."
+                        ),
+                    )
+
     trade = Trade(
         profile_id=data.profile_id,
         instrument_id=data.instrument_id,
@@ -738,9 +774,9 @@ def _recompute_size_info_from_trade(trade: Trade, db: Session) -> TradeSizeResul
             margin_warning = profile.capital_current < safe_margin
             if lev and lev > 0:
                 if direction == "long":
-                    liq_price = (trade.entry_price * (1 - 1 / lev)).quantize(_price_quant(trade.entry_price))
+                    liq_price = (trade.entry_price * (1 - 1 / lev + CRYPTO_MMR)).quantize(_price_quant(trade.entry_price))
                 else:
-                    liq_price = (trade.entry_price * (1 + 1 / lev)).quantize(_price_quant(trade.entry_price))
+                    liq_price = (trade.entry_price * (1 + 1 / lev - CRYPTO_MMR)).quantize(_price_quant(trade.entry_price))
             else:
                 liq_price = None
         else:
@@ -893,6 +929,44 @@ def update_trade(db: Session, trade_id: int, data: TradeUpdate) -> TradeOut:
 
     # ── Recalculate risk when SL changed (open/partial) ───────────────────
     if "stop_loss" in data.model_fields_set and not amend_entry:
+        new_sl = data.stop_loss
+        # Guard: for Crypto trades with known leverage, SL must not cross the
+        # estimated liquidation price (would be liquidated before SL triggers).
+        if new_sl is not None and trade.asset_class == "Crypto" and trade.entry_price:
+            _instr_for_liq = (
+                db.query(Instrument).filter(Instrument.id == trade.instrument_id).first()
+                if trade.instrument_id else None
+            )
+            _lev_for_liq: Decimal | None = (
+                trade.leverage
+                or (Decimal(str(_instr_for_liq.max_leverage)) if _instr_for_liq and _instr_for_liq.max_leverage else None)
+            )
+            if _lev_for_liq and _lev_for_liq > 0:
+                _entry = trade.entry_price
+                if trade.direction == "long":
+                    _liq = (_entry * (1 - 1 / _lev_for_liq + CRYPTO_MMR)).quantize(_price_quant(_entry))
+                    if new_sl <= _liq:
+                        raise HTTPException(
+                            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                            detail=(
+                                f"stop_loss {new_sl} is at or below the estimated liquidation price {_liq} "
+                                f"(entry={_entry}, leverage={_lev_for_liq}×). "
+                                "Move the SL closer to entry, add more margin, or reduce leverage "
+                                "to ensure the stop-loss triggers before liquidation."
+                            ),
+                        )
+                else:  # short
+                    _liq = (_entry * (1 + 1 / _lev_for_liq - CRYPTO_MMR)).quantize(_price_quant(_entry))
+                    if new_sl >= _liq:
+                        raise HTTPException(
+                            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                            detail=(
+                                f"stop_loss {new_sl} is at or above the estimated liquidation price {_liq} "
+                                f"(entry={_entry}, leverage={_lev_for_liq}×). "
+                                "Move the SL closer to entry, add more margin, or reduce leverage "
+                                "to ensure the stop-loss triggers before liquidation."
+                            ),
+                        )
         trade.current_risk = _recalculate_current_risk(trade, db)
 
     # ── Amend entry (pending-only) ─────────────────────────────────────────
@@ -1136,6 +1210,11 @@ def full_close(db: Session, trade_id: int, data: TradeClose) -> TradeOut:
 
     exit_dt = data.closed_at or datetime.utcnow()
     total_pnl = Decimal("0.00")
+    # Track only the PnL of positions closed in THIS call — these are the ones
+    # not yet credited to capital_current. Already-closed (partial) positions
+    # were already credited one by one in partial_close() and must NOT be
+    # re-credited here to avoid double-counting.
+    newly_closed_pnl = Decimal("0.00")
 
     for position in trade.positions:
         if position.status == "open":
@@ -1145,8 +1224,10 @@ def full_close(db: Session, trade_id: int, data: TradeClose) -> TradeOut:
             position.realized_pnl = pnl
             position.status = "closed"
             total_pnl += pnl
+            newly_closed_pnl += pnl  # credit capital for this position only
         elif position.realized_pnl is not None:
-            # Already closed via partial -- include its PnL in the total
+            # Already closed via partial_close — include in trade.realized_pnl for
+            # accounting completeness, but do NOT re-credit capital_current.
             total_pnl += position.realized_pnl
 
     trade.realized_pnl = total_pnl.quantize(Decimal("0.01"))
@@ -1163,7 +1244,7 @@ def full_close(db: Session, trade_id: int, data: TradeClose) -> TradeOut:
     # -- Atomic capital + WR stats update (profile + all linked strategies) -----
     profile = db.query(Profile).filter(Profile.id == trade.profile_id).first()
     if profile:
-        profile.capital_current = (profile.capital_current + trade.realized_pnl).quantize(
+        profile.capital_current = (profile.capital_current + newly_closed_pnl).quantize(
             Decimal("0.01")
         )
         _update_wr_stats(db, trade, profile)
