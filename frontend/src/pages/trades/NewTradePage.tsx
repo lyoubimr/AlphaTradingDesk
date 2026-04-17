@@ -1512,7 +1512,7 @@ export function NewTradePage() {
           }
         }),
         risk_pct_override:    riskPct || null,
-        ...(isCrypto && leverage && Number(leverage) > 1 && { leverage: Number(leverage) }),
+        ...(isCrypto && effectiveLeverage > 1 && { leverage: effectiveLeverage }),
         ...(isCrypto && effectiveMargin != null && effectiveMargin > 0 && { margin_used: effectiveMargin }),
         strategy_ids:         strategyIds.length > 0 ? strategyIds : undefined,
         strategy_id:          strategyIds[0] ?? null,
@@ -1976,7 +1976,7 @@ export function NewTradePage() {
           </div>
 
           {/* ── Leverage + Margin — CRYPTO profiles ─────────────────────────── */}
-          {isCrypto && (
+          {isCrypto && (<>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <Field
                 label={<>Leverage <Tip text={`Max: ×${maxLeverage}. ×1 = spot (no leverage). Changing leverage auto-recalculates margin. Changing margin auto-derives leverage.`} /></>}
@@ -2104,22 +2104,47 @@ export function NewTradePage() {
                     Margin {fmt(displayedMargin, 2)} {ccy} &gt; capital — increase leverage or reduce risk %
                   </p>
                 )}
-                {/* Estimated liquidation price */}
-                {liqPrice != null && (
-                  <p className={cn(
-                    'text-[10px] font-mono mt-1 flex items-center gap-1',
-                    liqBeforeSl ? 'text-red-400' : 'text-slate-500',
-                  )}>
-                    {liqBeforeSl
-                      ? <AlertTriangle size={9} className="shrink-0" />
-                      : <span className="text-slate-600">⚡</span>}
-                    Liq. est. {fmtPrice(liqPrice)} {ccy}
-                    {liqBeforeSl && <span className="text-red-400/80"> — liq before SL! Reduce leverage or move SL closer to entry.</span>}
-                  </p>
-                )}
               </Field>
             </div>
-          )}
+
+            {/* ── Liquidation price card — always visible while entry+leverage are set ── */}
+            {liqPrice != null && (
+              <div className={cn(
+                'rounded-lg border px-4 py-3 flex items-center justify-between gap-3',
+                liqBeforeSl
+                  ? 'border-red-500/40 bg-red-500/10'
+                  : 'border-surface-600 bg-surface-700/40',
+              )}>
+                <div className="flex flex-col gap-0.5">
+                  <span className="text-[9px] uppercase tracking-wider text-slate-500 font-medium">
+                    ⚡ Est. liquidation price
+                  </span>
+                  <span className={cn('text-sm font-mono font-bold', liqBeforeSl ? 'text-red-300' : 'text-slate-200')}>
+                    {fmtPrice(liqPrice)} {ccy}
+                  </span>
+                  {entryNum != null && (
+                    <span className="text-[10px] text-slate-500">
+                      {fmt(Math.abs(liqPrice - entryNum) / entryNum * 100, 2)}% from entry
+                      {' · '}×{effectiveLeverage} lev
+                      {displayedMargin != null && ` · margin ${fmt(displayedMargin, 2)} ${ccy}`}
+                    </span>
+                  )}
+                </div>
+                {slNum != null && !slSideError && (
+                  <div className={cn(
+                    'flex items-center gap-1 text-[11px] font-medium shrink-0',
+                    liqBeforeSl ? 'text-red-400' : 'text-emerald-400',
+                  )}>
+                    {liqBeforeSl ? (
+                      <><AlertTriangle size={12} className="shrink-0" /> SL will be hit after liq! Reduce leverage or move SL closer to entry.</>
+                    ) : (
+                      <><span>✓</span> SL safe</>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+          </>)}
 
           {/* ── Margin info — CFD profiles ─────────────────────────────────────────
                In CFD the trader only declares LOTS — the broker locks margin automatically.

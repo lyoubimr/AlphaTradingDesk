@@ -761,15 +761,21 @@ def _recompute_size_info_from_trade(trade: Trade, db: Session) -> TradeSizeResul
     if market_type == "Crypto":
         units = _compute_size_crypto(risk_amount, trade.entry_price, trade.initial_stop_loss or trade.stop_loss)
         notional = (units * trade.entry_price).quantize(Decimal("0.01"))
-        # Prefer stored margin (user-entered, exact) over computing from leverage
         stored_margin = trade.margin_used
         stored_lev = trade.leverage
+        # Priority: stored leverage → max_leverage → derived from margin.
+        # Using stored_lev first keeps liq consistent with the edit modal (which
+        # also uses trade.leverage directly for its live calculation).
         lev_source = stored_lev if stored_lev else (
             Decimal(str(instrument.max_leverage)) if instrument and instrument.max_leverage else None
         )
         if stored_margin or lev_source:
             margin_required = stored_margin.quantize(Decimal("0.01")) if stored_margin else (notional / lev_source).quantize(Decimal("0.01"))  # type: ignore[operator]
-            lev = (notional / stored_margin).quantize(Decimal("0.01")) if stored_margin else lev_source
+            # Use stored leverage as primary source (consistent with edit modal).
+            # Fall back to notional/margin only if no leverage is stored.
+            lev = lev_source if lev_source else (
+                (notional / stored_margin).quantize(Decimal("0.01")) if stored_margin and notional > 0 else None
+            )
             safe_margin = (margin_required * MARGIN_SAFETY_FACTOR).quantize(Decimal("0.01"))
             margin_warning = profile.capital_current < safe_margin
             if lev and lev > 0:
