@@ -222,6 +222,10 @@ class TradeUpdate(BaseModel):
     leverage: Decimal | None = Field(default=None, gt=0)
     margin_used: Decimal | None = Field(default=None, gt=0)
 
+    # ── runner trailing stop — editable while runner not yet activated ─────
+    # Allowed on pending / open / partial as long as runner_activated_at is NULL.
+    runner_trailing_pct: Decimal | None = Field(default=None, gt=0, le=50)
+
     # ── pending-only amendments ───────────────────────────────────────────
     entry_price: Decimal | None = Field(default=None, gt=0)
     amend_positions: list[PositionIn] | None = None  # replaces ALL positions if set

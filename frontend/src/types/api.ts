@@ -269,6 +269,8 @@ export interface TradeUpdate {
   // Always editable (including closed — post-trade review)
   close_notes?: string | null
   close_screenshot_urls?: string[] | null
+  // Runner: editable while trailing stop not yet activated
+  runner_trailing_pct?: number | null
   // Pending-only: amend the LIMIT order before it triggers
   entry_price?: string | null
   amend_positions?: TradePosition[] | null

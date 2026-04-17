@@ -878,6 +878,15 @@ def update_trade(db: Session, trade_id: int, data: TradeUpdate) -> TradeOut:
         if field in data.model_fields_set:
             setattr(trade, field, getattr(data, field))
 
+    # ── Runner trailing pct — editable while runner not yet activated ─────
+    if "runner_trailing_pct" in data.model_fields_set and data.runner_trailing_pct is not None:
+        if trade.runner_activated_at is not None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="runner_trailing_pct cannot be changed after the runner has been activated.",
+            )
+        trade.runner_trailing_pct = data.runner_trailing_pct
+
     # ── Multi-strategy sync ───────────────────────────────────────────────
     if "strategy_ids" in data.model_fields_set and data.strategy_ids is not None:
         _sync_trade_strategies(db, trade, data.strategy_ids)

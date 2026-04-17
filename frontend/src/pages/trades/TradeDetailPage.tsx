@@ -400,6 +400,11 @@ function EditTradeModal({ trade, onClose, onSuccess }: {
   const [tpAmend, setTpAmend]       = useState<{ price: string; pct: string }[]>(
     trade.positions.map((p) => ({ price: p.take_profit_price ?? '', pct: String(p.lot_percentage) }))
   )
+  // Runner trailing % — editable while runner not yet activated
+  const [runnerTrailingPct, setRunnerTrailingPct] = useState(
+    trade.runner_trailing_pct ? parseFloat(trade.runner_trailing_pct).toString() : ''
+  )
+  const runnerActivated = trade.runner_activated_at != null
   const [saving, setSaving]   = useState(false)
   const [err, setErr]         = useState<string | null>(null)
 
@@ -447,6 +452,11 @@ function EditTradeModal({ trade, onClose, onSuccess }: {
             take_profit_price: t.price,
             lot_percentage: Number(t.pct),
           }))
+      }
+      // Runner trailing % — allowed as long as runner not yet activated
+      const runnerPos = trade.positions.find((p) => p.is_runner)
+      if (runnerPos && !runnerActivated && runnerTrailingPct !== '' && runnerTrailingPct !== (trade.runner_trailing_pct ?? '')) {
+        payload.runner_trailing_pct = Number(runnerTrailingPct)
       }
       const updated = await tradesApi.update(trade.id, payload)
       onSuccess(updated)
@@ -502,23 +512,47 @@ function EditTradeModal({ trade, onClose, onSuccess }: {
                   {tpTotal}% {tpValid ? '✓' : '≠ 100'}
                 </span>
               </div>
-              {tpAmend.map((tp, i) => (
-                <div key={i} className="grid grid-cols-[auto_1fr_4rem] items-center gap-2">
-                  <span className="text-[11px] text-slate-500 font-mono w-8">TP{i + 1}</span>
-                  <input type="number" step="any" min="0"
-                    value={tp.price} onChange={(e) => setTpAmend((prev) => prev.map((x, j) => j === i ? { ...x, price: e.target.value } : x))}
-                    className={cn(inputCls, 'text-xs py-1.5')}
-                    placeholder="price"
-                  />
-                  <div className="flex items-center">
-                    <input type="number" step="1" min="1" max="100"
-                      value={tp.pct} onChange={(e) => setTpAmend((prev) => prev.map((x, j) => j === i ? { ...x, pct: e.target.value } : x))}
-                      className={cn(inputCls, 'text-xs py-1.5 rounded-r-none border-r-0 w-full')}
-                    />
-                    <span className="shrink-0 px-1.5 py-1.5 rounded-r-lg border border-surface-600 bg-surface-700/60 text-xs text-slate-500">%</span>
+              {tpAmend.map((tp, i) => {
+                const posData = trade.positions[i]
+                const isRunnerRow = posData?.is_runner === true
+                return (
+                  <div key={i} className="grid grid-cols-[auto_1fr_4rem] items-center gap-2">
+                    <span className="text-[11px] text-slate-500 font-mono w-8">
+                      {isRunnerRow ? '🚀' : `TP${i + 1}`}
+                    </span>
+                    {isRunnerRow ? (
+                      <div className="col-span-2 flex items-center gap-2">
+                        <input type="number" step="0.5" min="0.5" max="50"
+                          value={runnerTrailingPct}
+                          onChange={(e) => setRunnerTrailingPct(e.target.value)}
+                          disabled={runnerActivated}
+                          className={cn(inputCls, 'text-xs py-1.5 w-20', runnerActivated && 'opacity-50 cursor-not-allowed')}
+                          placeholder="5"
+                        />
+                        <span className="text-[10px] text-slate-500">% trailing</span>
+                        {runnerActivated && (
+                          <span className="text-[10px] text-amber-400/70">● active — cannot change</span>
+                        )}
+                      </div>
+                    ) : (
+                      <>
+                        <input type="number" step="any" min="0"
+                          value={tp.price} onChange={(e) => setTpAmend((prev) => prev.map((x, j) => j === i ? { ...x, price: e.target.value } : x))}
+                          className={cn(inputCls, 'text-xs py-1.5')}
+                          placeholder="price"
+                        />
+                        <div className="flex items-center">
+                          <input type="number" step="1" min="1" max="100"
+                            value={tp.pct} onChange={(e) => setTpAmend((prev) => prev.map((x, j) => j === i ? { ...x, pct: e.target.value } : x))}
+                            className={cn(inputCls, 'text-xs py-1.5 rounded-r-none border-r-0 w-full')}
+                          />
+                          <span className="shrink-0 px-1.5 py-1.5 rounded-r-lg border border-surface-600 bg-surface-700/60 text-xs text-slate-500">%</span>
+                        </div>
+                      </>
+                    )}
                   </div>
-                </div>
-              ))}
+                )
+              })}
             </div>
           </div>
         )}
@@ -1858,19 +1892,22 @@ export function TradeDetailPage() {
           {showPositions && (
             <div className="divide-y divide-surface-700/50">
               {trade.positions.map((pos) => {
-                const posNum    = pos.position_number
-                const tpNum     = parseFloat(pos.take_profit_price ?? '0')
-                const entryP    = parseFloat(trade.entry_price)
-                const slP       = parseFloat(trade.initial_stop_loss ?? trade.stop_loss)
-                const slDistP   = Math.abs(entryP - slP)
-                const tpDistP   = Math.abs(tpNum - entryP)
-                const rr        = slDistP > 0 ? tpDistP / slDistP : null
-                const isOpen    = pos.status === 'open'
-                const isHit     = pos.status === 'closed' || pos.status === 'partial'
-                const canClose  = isActive && isOpen
-                const lotPct    = parseFloat(pos.lot_percentage)
+                const posNum     = pos.position_number
+                const isRunner   = pos.is_runner === true
+                const tpNum      = parseFloat(pos.take_profit_price ?? '0')
+                const entryP     = parseFloat(trade.entry_price)
+                const slP        = parseFloat(trade.initial_stop_loss ?? trade.stop_loss)
+                const slDistP    = Math.abs(entryP - slP)
+                const tpDistP    = Math.abs(tpNum - entryP)
+                const rr         = (!isRunner && slDistP > 0) ? tpDistP / slDistP : null
+                const isOpen     = pos.status === 'open'
+                const isHit      = pos.status === 'closed' || pos.status === 'partial'
+                const canClose   = isActive && isOpen && !isRunner  // runner closed by automation only
+                const lotPct     = parseFloat(pos.lot_percentage)
                 const totalUnits = slDistP > 0 ? parseFloat(trade.risk_amount) / slDistP : 0
-                const posUnits  = totalUnits * (lotPct / 100)
+                const posUnits   = totalUnits * (lotPct / 100)
+                const trailingPct = trade.runner_trailing_pct ? parseFloat(trade.runner_trailing_pct) : 5
+                const runnerActive = trade.runner_activated_at != null
 
                 return (
                   <div key={pos.id} className={cn('px-5 py-3', isHit && 'opacity-60')}>
@@ -1878,16 +1915,28 @@ export function TradeDetailPage() {
                       <div className="flex items-center gap-3 min-w-0">
                         <span className={cn(
                           'shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold border',
-                          isHit ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-400'
-                          : isOpen ? 'bg-brand-500/20 border-brand-500/40 text-brand-300'
-                          : 'bg-surface-700 border-surface-600 text-slate-500',
+                          isRunner
+                            ? (runnerActive
+                              ? 'bg-amber-500/20 border-amber-500/40 text-amber-400'
+                              : 'bg-slate-700/40 border-slate-600/40 text-slate-400')
+                            : isHit ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-400'
+                            : isOpen ? 'bg-brand-500/20 border-brand-500/40 text-brand-300'
+                            : 'bg-surface-700 border-surface-600 text-slate-500',
                         )}>
-                          {posNum}
+                          {isRunner ? '🚀' : posNum}
                         </span>
                         <div className="min-w-0">
-                          <p className="text-xs font-mono font-medium text-slate-200">{fmt(pos.take_profit_price, 4)}</p>
+                          {isRunner ? (
+                            <p className="text-xs font-mono font-medium text-amber-300/90">
+                              Trailing {trailingPct}%
+                            </p>
+                          ) : (
+                            <p className="text-xs font-mono font-medium text-slate-200">{fmt(pos.take_profit_price, 4)}</p>
+                          )}
                           <p className="text-[10px] text-slate-500">
-                            {lotPct}% · {rr != null ? `${rr.toFixed(2)}R` : '—'}
+                            {lotPct}% · {isRunner ? '∞R' : rr != null ? `${rr.toFixed(2)}R` : '—'}
+                            {isRunner && !runnerActive && <span className="ml-1.5 text-slate-600">⏳ waiting for previous TPs</span>}
+                            {isRunner && runnerActive && <span className="ml-1.5 text-amber-400/80">● active</span>}
                             {isHit && pos.exit_price && (
                               <span className="text-emerald-400 ml-1.5">✓ {fmt(pos.exit_price, 4)}</span>
                             )}
@@ -1915,6 +1964,11 @@ export function TradeDetailPage() {
                           >
                             Book TP{posNum}
                           </button>
+                        )}
+                        {isRunner && isOpen && !runnerActive && isActive && (
+                          <span className="px-2 py-1 rounded-lg bg-slate-700/40 border border-slate-600/30 text-[10px] text-slate-500 font-medium">
+                            Auto 🚀
+                          </span>
                         )}
                       </div>
                     </div>
