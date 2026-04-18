@@ -49,6 +49,7 @@ from src.risk_management.engine import _deep_merge
 from src.risk_management.service import get_risk_budget, get_risk_settings
 from src.trades.schemas import (
     PositionIn,
+    PostTradeReviewIn,
     TradeClose,
     TradeListItem,
     TradeOpen,
@@ -1385,5 +1386,22 @@ def update_close_screenshots(db: Session, trade_id: int, urls: list[str]) -> Tra
     """
     _get_trade_or_404(db, trade_id)  # 404 guard
     db.execute(sa_update(Trade).where(Trade.id == trade_id).values(close_screenshot_urls=urls))
+    db.commit()
+    return _reload_and_out(db, trade_id)
+
+
+def save_review(db: Session, trade_id: int, data: PostTradeReviewIn) -> TradeOut:
+    """Save (or overwrite) a post-trade review on a closed trade.
+
+    Any trade status is accepted — the review is always optional.
+    """
+    trade = _get_trade_or_404(db, trade_id)
+    trade.post_trade_review = {
+        "reviewed": True,
+        "reviewed_at": datetime.utcnow().isoformat() + "Z",
+        "outcome": data.outcome,
+        "tags": data.tags,
+        "note": data.note,
+    }
     db.commit()
     return _reload_and_out(db, trade_id)

@@ -15,6 +15,7 @@ Endpoints:
   POST /trades/{trade_id}/breakeven            — Trigger: move SL to entry price
   POST /trades/{trade_id}/cancel-entry         — Trigger: cancel pending LIMIT entry
   POST /trades/{trade_id}/sync-fill            — Check if pending LIMIT entry was filled → activate + place SL/TP
+  POST /trades/{trade_id}/activate-runner      — Recovery: manually place trailing stop when auto-placement failed
 """
 
 from __future__ import annotations
@@ -38,6 +39,7 @@ from src.kraken_execution.schemas import (
     KrakenOrderOut,
 )
 from src.kraken_execution.service import (
+    activate_runner_trailing,
     cancel_entry,
     close_automated_trade,
     get_account_status,
@@ -258,6 +260,23 @@ def trigger_sync_fill(
     """
     try:
         return sync_pending_fill(trade_id, db)
+    except Exception as exc:
+        raise _map_exc(exc) from exc
+
+
+@router.post("/trades/{trade_id}/activate-runner")
+def trigger_activate_runner(
+    trade_id: int,
+    db: Session = Depends(get_db),
+) -> dict:
+    """Recovery endpoint: manually place the runner trailing stop on Kraken.
+
+    Use when sync-sl-tp processed all TPs but failed to place the trailing stop
+    (e.g. network error between TP commit and Kraken API call).
+    Idempotent: raises 409 if a runner order is already open.
+    """
+    try:
+        return activate_runner_trailing(trade_id, db)
     except Exception as exc:
         raise _map_exc(exc) from exc
 

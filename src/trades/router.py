@@ -15,6 +15,7 @@ Routes:
   POST   /api/trades/{id}/snapshots/close     ← upload close snapshot image → returns updated TradeOut
   DELETE /api/trades/{id}/snapshots/entry/{url} ← remove one entry snapshot URL
   DELETE /api/trades/{id}/snapshots/close/{url} ← remove one close snapshot URL
+  PUT    /api/trades/{id}/review               ← save post-trade review (tags, outcome, note)
   DELETE /api/trades/{id}                     ← physical delete (pending/open/partial/cancelled only)
 """
 
@@ -25,13 +26,20 @@ import uuid
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from fastapi.responses import Response
+from pydantic import BaseModel as _BaseModel
 from sqlalchemy.orm import Session
 
 from src.core.config import settings
 from src.core.deps import get_db
 from src.core.models.trade import Trade
 from src.trades import service
+from src.trades.review_settings import (
+    _validate_profile_exists,
+    get_review_tags_settings,
+    update_review_tags_settings,
+)
 from src.trades.schemas import (
+    PostTradeReviewIn,
     TradeClose,
     TradeListItem,
     TradeOpen,
@@ -283,3 +291,50 @@ def delete_close_snapshot(
     trade = service.get_trade_raw(db, trade_id)
     existing = [u for u in (trade.close_screenshot_urls or []) if u != url]
     return service.update_close_screenshots(db, trade_id, existing)
+
+
+@router.put("/{trade_id}/review", response_model=TradeOut)
+def save_review(
+    trade_id: int,
+    data: PostTradeReviewIn,
+    db: Session = Depends(get_db),
+) -> object:
+    """Save (or overwrite) a post-trade review — outcome, badge tags, and note."""
+    return service.save_review(db, trade_id, data)
+
+
+# ── Review Tags Settings ──────────────────────────────────────────────────────
+# GET /api/trades/review-tags/settings/{profile_id}
+# PUT /api/trades/review-tags/settings/{profile_id}
+
+
+class _ReviewTagsOut(_BaseModel):
+    profile_id: int
+    config: dict
+
+
+class _ReviewTagsPatchIn(_BaseModel):
+    config: dict
+
+
+@router.get("/review-tags/settings/{profile_id}", response_model=_ReviewTagsOut)
+def read_review_tags_settings(
+    profile_id: int,
+    db: Session = Depends(get_db),
+) -> _ReviewTagsOut:
+    """Return custom review tags config for a profile (auto-created on first access)."""
+    _validate_profile_exists(profile_id, db)
+    row = get_review_tags_settings(profile_id, db)
+    return _ReviewTagsOut(profile_id=row.profile_id, config=row.config)
+
+
+@router.put("/review-tags/settings/{profile_id}", response_model=_ReviewTagsOut)
+def write_review_tags_settings(
+    profile_id: int,
+    body: _ReviewTagsPatchIn,
+    db: Session = Depends(get_db),
+) -> _ReviewTagsOut:
+    """Replace the custom_tags list for a profile (full list replacement, not append)."""
+    _validate_profile_exists(profile_id, db)
+    row = update_review_tags_settings(profile_id, body.config, db)
+    return _ReviewTagsOut(profile_id=row.profile_id, config=row.config)

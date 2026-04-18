@@ -255,6 +255,19 @@ class TradePartialClose(BaseModel):
     move_to_be: bool = False  # if True → SL moves to entry_price
 
 
+# ── Post-trade review ────────────────────────────────────────────────────────
+
+Outcome = Literal["poor", "could_do_better", "well_executed", "excellent"]
+
+
+class PostTradeReviewIn(BaseModel):
+    """PUT /api/trades/{id}/review — save (or clear) a post-trade review."""
+
+    outcome: Outcome | None = None
+    tags: list[str] = Field(default_factory=list)
+    note: str | None = None
+
+
 # ── Computed size helper (embedded in TradeOut) ───────────────────────────────
 
 
@@ -335,6 +348,7 @@ class TradeOut(BaseModel):
     entry_screenshot_urls: list[str] | None = None
     close_notes: str | None = None
     close_screenshot_urls: list[str] | None = None
+    post_trade_review: dict | None = None
 
     positions: list[PositionOut] = []
 

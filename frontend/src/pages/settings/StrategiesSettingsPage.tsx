@@ -25,8 +25,9 @@ import {
 } from 'lucide-react'
 import { PageHeader } from '../../components/ui/PageHeader'
 import { useProfile } from '../../context/ProfileContext'
-import { strategiesApi } from '../../lib/api'
+import { strategiesApi, reviewTagsApi } from '../../lib/api'
 import type { Strategy, StrategyCreate, StrategyUpdate } from '../../types/api'
+import type { CustomTagDef, ReviewTagsConfig } from '../../lib/api'
 import { cn } from '../../lib/cn'
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -42,6 +43,14 @@ const inputCls = [
 function winRate(s: Strategy): string {
   if (s.trades_count < s.min_trades_for_stats) return 'N/A'
   return `${Math.round((s.win_count / s.trades_count) * 100)}%`
+}
+
+/** Disciplined WR: excludes reviewed trades where strategy_respected was unchecked. */
+function disciplinedWR(s: Strategy): string | null {
+  // Only show if there's a difference (some reviewed trades)
+  if (s.disciplined_trades_count < s.min_trades_for_stats) return null
+  const pct = Math.round((s.disciplined_win_count / s.disciplined_trades_count) * 100)
+  return `${pct}%`
 }
 
 function wrColor(s: Strategy): string {
@@ -351,6 +360,11 @@ function StrategyRow({
           <div className="text-right">
             <p className={cn('text-sm font-bold tabular-nums', wrColor(strategy))}>{winRate(strategy)}</p>
             <p className="text-[10px] text-slate-600">WR</p>
+            {disciplinedWR(strategy) !== null && disciplinedWR(strategy) !== winRate(strategy) && (
+              <p className="text-[9px] text-emerald-400/70 tabular-nums" title="Disciplined WR (excl. reviewed trades where strategy_respected was unchecked)">
+                {disciplinedWR(strategy)} ✓
+              </p>
+            )}
           </div>
           <div className="text-right">
             <p className="text-sm font-bold text-slate-300 tabular-nums">{strategy.trades_count}</p>
@@ -618,6 +632,191 @@ function AddStrategyForm({
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// ReviewTagsSection — custom review tag CRUD
+// ─────────────────────────────────────────────────────────────────────────────
+
+const CATEGORIES = ['execution', 'psychology', 'market'] as const
+type Category = typeof CATEGORIES[number]
+
+const BLANK_TAG: Omit<CustomTagDef, 'key'> & { key: string } = {
+  key: '', label: '', category: 'execution', positive: true,
+}
+
+function ReviewTagsSection({ profileId }: { profileId: number }) {
+  const [config, setConfig]   = useState<ReviewTagsConfig | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [saving, setSaving]   = useState(false)
+  const [error, setError]     = useState<string | null>(null)
+  const [showAdd, setShowAdd] = useState(false)
+  const [newTag, setNewTag]   = useState({ ...BLANK_TAG })
+
+  useEffect(() => {
+    setLoading(true)
+    reviewTagsApi.get(profileId)
+      .then((r) => setConfig(r.config))
+      .catch((e) => setError(e instanceof Error ? e.message : 'Load failed.'))
+      .finally(() => setLoading(false))
+  }, [profileId])
+
+  const save = async (next: ReviewTagsConfig) => {
+    setSaving(true); setError(null)
+    try {
+      const r = await reviewTagsApi.save(profileId, next)
+      setConfig(r.config)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Save failed.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleDelete = (key: string) => {
+    if (!config) return
+    void save({ custom_tags: config.custom_tags.filter((t) => t.key !== key) })
+  }
+
+  const handleAdd = () => {
+    if (!newTag.key.trim() || !newTag.label.trim()) {
+      setError('Key and label are required.'); return
+    }
+    if (config?.custom_tags.some((t) => t.key === newTag.key.trim())) {
+      setError('Tag key must be unique.'); return
+    }
+    void save({
+      custom_tags: [...(config?.custom_tags ?? []), { ...newTag, key: newTag.key.trim() }],
+    })
+    setNewTag({ ...BLANK_TAG })
+    setShowAdd(false)
+  }
+
+  if (loading) return (
+    <div className="flex items-center gap-2 text-xs text-slate-500 py-4">
+      <Loader2 size={12} className="animate-spin" /> Loading review tags…
+    </div>
+  )
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide">📋 Review tags</p>
+          <p className="text-[11px] text-slate-600 mt-0.5">
+            Custom tags appear in the post-trade review badge grid alongside the defaults.
+          </p>
+        </div>
+        {!showAdd && (
+          <button type="button" onClick={() => setShowAdd(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-surface-700 border border-surface-600 text-xs text-slate-400 hover:text-slate-200 hover:border-surface-500 transition-colors">
+            <Plus size={11} /> Add tag
+          </button>
+        )}
+      </div>
+
+      {error && (
+        <p className="text-xs text-red-400 rounded-lg bg-red-500/10 border border-red-500/20 px-3 py-2">{error}</p>
+      )}
+
+      {/* Existing custom tags */}
+      {(config?.custom_tags.length ?? 0) === 0 && !showAdd && (
+        <p className="text-xs text-slate-600 italic">No custom tags yet. Click "Add tag" to create one.</p>
+      )}
+      <div className="space-y-1.5">
+        {config?.custom_tags.map((tag) => (
+          <div key={tag.key} className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg bg-surface-700 border border-surface-600">
+            <div className="flex items-center gap-2 min-w-0">
+              <span className={cn(
+                'rounded-full px-2 py-0.5 text-[10px] font-medium border',
+                tag.positive
+                  ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400'
+                  : 'border-red-500/40 bg-red-500/10 text-red-400',
+              )}>
+                {tag.label}
+              </span>
+              <span className="text-[9px] text-slate-600 font-mono">{tag.key}</span>
+              <span className="text-[9px] text-slate-600">{tag.category}</span>
+            </div>
+            <button type="button" onClick={() => handleDelete(tag.key)} disabled={saving}
+              className="text-slate-600 hover:text-red-400 transition-colors disabled:opacity-40 shrink-0">
+              <Trash2 size={11} />
+            </button>
+          </div>
+        ))}
+      </div>
+
+      {/* Add new tag form */}
+      {showAdd && (
+        <div className="rounded-lg border border-surface-600 bg-surface-800 p-4 space-y-3">
+          <p className="text-[10px] uppercase tracking-wide text-slate-500 font-semibold">New custom tag</p>
+          <div className="grid grid-cols-2 gap-2">
+            <div className="space-y-1">
+              <label className="text-[10px] text-slate-500 uppercase tracking-wide">Key (no spaces)</label>
+              <input
+                value={newTag.key}
+                onChange={(e) => setNewTag((p) => ({ ...p, key: e.target.value.replace(/\s/g, '_').toLowerCase() }))}
+                placeholder="e.g. fib_entry"
+                className="w-full px-2 py-1.5 rounded-lg bg-surface-700 border border-surface-600 text-xs text-slate-300 placeholder-slate-600 focus:outline-none focus:border-brand-500/60"
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-[10px] text-slate-500 uppercase tracking-wide">Label (display)</label>
+              <input
+                value={newTag.label}
+                onChange={(e) => setNewTag((p) => ({ ...p, label: e.target.value }))}
+                placeholder="e.g. Fib entry"
+                className="w-full px-2 py-1.5 rounded-lg bg-surface-700 border border-surface-600 text-xs text-slate-300 placeholder-slate-600 focus:outline-none focus:border-brand-500/60"
+              />
+            </div>
+          </div>
+          <div className="flex gap-3">
+            <div className="space-y-1 flex-1">
+              <label className="text-[10px] text-slate-500 uppercase tracking-wide">Category</label>
+              <select
+                value={newTag.category}
+                onChange={(e) => setNewTag((p) => ({ ...p, category: e.target.value as Category }))}
+                className="w-full px-2 py-1.5 rounded-lg bg-surface-700 border border-surface-600 text-xs text-slate-300 focus:outline-none focus:border-brand-500/60">
+                {CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </div>
+            <div className="space-y-1">
+              <label className="text-[10px] text-slate-500 uppercase tracking-wide">Tone</label>
+              <div className="flex gap-1.5 pt-0.5">
+                <button type="button"
+                  onClick={() => setNewTag((p) => ({ ...p, positive: true }))}
+                  className={cn('px-2.5 py-1 rounded-lg border text-[10px] font-medium transition-colors',
+                    newTag.positive
+                      ? 'border-emerald-500/50 bg-emerald-500/15 text-emerald-400'
+                      : 'border-surface-600 bg-surface-700 text-slate-500 hover:text-slate-300')}>
+                  ✅ Good
+                </button>
+                <button type="button"
+                  onClick={() => setNewTag((p) => ({ ...p, positive: false }))}
+                  className={cn('px-2.5 py-1 rounded-lg border text-[10px] font-medium transition-colors',
+                    !newTag.positive
+                      ? 'border-red-500/50 bg-red-500/15 text-red-400'
+                      : 'border-surface-600 bg-surface-700 text-slate-500 hover:text-slate-300')}>
+                  ❌ Bad
+                </button>
+              </div>
+            </div>
+          </div>
+          <div className="flex gap-2 pt-1">
+            <button type="button" onClick={handleAdd} disabled={saving}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-brand-600/20 border border-brand-500/40 text-xs text-brand-300 font-medium hover:bg-brand-600/30 transition-colors disabled:opacity-40">
+              {saving ? <Loader2 size={10} className="animate-spin" /> : <Check size={10} />}
+              Add tag
+            </button>
+            <button type="button" onClick={() => { setShowAdd(false); setNewTag({ ...BLANK_TAG }); setError(null) }}
+              className="px-3 py-1.5 rounded-lg border border-surface-600 text-xs text-slate-400 hover:text-slate-200 transition-colors">
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Page
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -870,6 +1069,13 @@ export function StrategiesSettingsPage() {
               Default: <strong className="text-slate-500">5 trades</strong>.
             </p>
           </div>
+        </div>
+      )}
+
+      {/* ── Review Tags Settings ──────────────────────────────────────── */}
+      {activeProfile && (
+        <div className="mt-4 rounded-xl border border-surface-700 bg-surface-800 px-5 py-4">
+          <ReviewTagsSection profileId={activeProfile.id} />
         </div>
       )}
     </div>

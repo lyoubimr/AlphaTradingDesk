@@ -1393,6 +1393,162 @@ def sync_sl_tp_fills(trade_id: int, db: Session) -> dict:
     return {"processed": processed, "events": events}
 
 
+# ── Manual runner activation (recovery endpoint) ──────────────────────────────
+
+def activate_runner_trailing(trade_id: int, db: Session) -> dict:
+    """Manually place the runner trailing stop on Kraken.
+
+    Used as a recovery endpoint when the automatic placement in sync_sl_tp
+    failed silently (e.g. network error after TP2 was committed as filled
+    but before the KrakenOrder row was persisted).
+
+    Pre-conditions (raises HTTPException if violated):
+    - trade exists, automation_enabled, not closed/cancelled
+    - trade.runner_trailing_pct is set
+    - all fixed TPs (tp1/tp2/tp3) are no longer open (filled or no record)
+    - runner position exists and is open
+    - no existing runner KrakenOrder with status "open" (prevents duplicates)
+    """
+    from datetime import datetime as _dt  # noqa: PLC0415
+    from decimal import Decimal  # noqa: PLC0415
+    from uuid import uuid4 as _uuid4  # noqa: PLC0415
+
+    from fastapi import HTTPException  # noqa: PLC0415
+
+    from src.kraken_execution.precision import quantize_size as _qs  # noqa: PLC0415
+
+    trade = _get_trade_or_404(trade_id, db)
+
+    if trade.status in ("closed", "cancelled", "pending"):
+        raise HTTPException(400, detail=f"Trade {trade_id} is {trade.status} — cannot activate runner.")
+
+    if not trade.automation_enabled:
+        raise HTTPException(400, detail=f"Trade {trade_id} does not have automation enabled.")
+
+    if not trade.runner_trailing_pct:
+        raise HTTPException(400, detail=f"Trade {trade_id} has no runner_trailing_pct set.")
+
+    remaining_fixed_tps = (
+        db.query(KrakenOrder)
+        .filter(
+            KrakenOrder.trade_id == trade_id,
+            KrakenOrder.role.in_(["tp1", "tp2", "tp3"]),
+            KrakenOrder.status == "open",
+        )
+        .count()
+    )
+    if remaining_fixed_tps > 0:
+        raise HTTPException(400, detail=f"Trade {trade_id} still has {remaining_fixed_tps} open TP order(s) — wait for them to fill first.")
+
+    runner_pos = (
+        db.query(Position)
+        .filter(Position.trade_id == trade_id, Position.is_runner.is_(True), Position.status == "open")
+        .first()
+    )
+    if not runner_pos:
+        raise HTTPException(400, detail=f"Trade {trade_id} has no open runner position.")
+
+    existing_active_runner = (
+        db.query(KrakenOrder)
+        .filter(KrakenOrder.trade_id == trade_id, KrakenOrder.role == "runner", KrakenOrder.status == "open")
+        .first()
+    )
+    if existing_active_runner:
+        raise HTTPException(409, detail=f"Trade {trade_id} already has an open runner order: {existing_active_runner.kraken_order_id}.")
+
+    instrument = trade.instrument
+    if instrument is None:
+        raise HTTPException(500, detail=f"Trade {trade_id} has no instrument resolved.")
+
+    exit_side = _exit_side(trade)
+
+    sl_kr_order = (
+        db.query(KrakenOrder)
+        .filter(KrakenOrder.trade_id == trade_id, KrakenOrder.role == "sl")
+        .order_by(KrakenOrder.id.asc())
+        .first()
+    )
+    sl_full_size = Decimal(str(sl_kr_order.size)) if sl_kr_order else Decimal("0")
+    if sl_full_size == 0:
+        raise HTTPException(500, detail=f"Cannot determine position size for trade {trade_id} — no SL order found.")
+
+    runner_size = (Decimal(str(runner_pos.lot_percentage)) / Decimal("100")) * sl_full_size
+    runner_size = _qs(
+        runner_size,
+        instrument.contract_value_precision if instrument.contract_value_precision is not None else 2,
+    )
+
+    trailing_pct = str(trade.runner_trailing_pct)
+
+    settings_row = get_automation_settings(trade.profile_id, db)
+    with _make_client(settings_row) as client:
+        ts_result = client.send_order(
+            order_type="trailing_stop",
+            symbol=instrument.symbol,
+            side=exit_side,
+            size=str(runner_size),
+            reduce_only=True,
+            raise_on_rejection=False,
+            trailing_stop_deviation_unit="PERCENT",
+            trailing_stop_max_deviation=trailing_pct,
+        )
+
+    ts_send = ts_result.get("sendStatus", {})
+    ts_order_id = ts_send.get("order_id", "") or ""
+    ts_status = ts_send.get("status", "unknown")
+    ts_db_status = "open" if ts_status == "placed" else "error"
+
+    if ts_db_status == "error":
+        logger.error(
+            "activate_runner_placement_rejected",
+            trade_id=trade_id,
+            trailing_pct=trailing_pct,
+            kraken_status=ts_status,
+            kraken_order_id=ts_order_id or "(none)",
+        )
+
+    if not ts_order_id:
+        ts_order_id = f"NO-ID-runner-{trade_id}-{_uuid4().hex[:8]}"
+
+    runner_kr_order = KrakenOrder(
+        trade_id=trade.id,
+        profile_id=trade.profile_id,
+        kraken_order_id=ts_order_id,
+        role="runner",
+        status=ts_db_status,
+        order_type="trailing_stop",
+        symbol=instrument.symbol,
+        side=exit_side,
+        size=float(runner_size),
+        limit_price=None,
+        error_message=None if ts_db_status == "open" else f"Kraken rejected: {ts_status}",
+    )
+    db.add(runner_kr_order)
+    trade.runner_activated_at = _dt.utcnow()
+    if trade.status in ("open", "partial"):
+        trade.status = "runner"
+    db.commit()
+    db.refresh(runner_kr_order)
+
+    logger.info(
+        "activate_runner_trailing_placed",
+        trade_id=trade_id,
+        trailing_pct=trailing_pct,
+        runner_size=float(runner_size),
+        kraken_order_id=ts_order_id,
+        kraken_status=ts_status,
+    )
+
+    return {
+        "kraken_order_id": ts_order_id,
+        "status": ts_db_status,
+        "symbol": instrument.symbol,
+        "side": exit_side,
+        "size": float(runner_size),
+        "trailing_pct": float(trade.runner_trailing_pct),
+    }
+
+
 # ── Notification dispatch ─────────────────────────────────────────────────────
 
 def _notify_execution_event(

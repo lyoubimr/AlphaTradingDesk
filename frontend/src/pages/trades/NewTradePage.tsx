@@ -1474,6 +1474,10 @@ export function NewTradePage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!activeProfile || !instrument || slSideError) return
+    if (strategyIds.length === 0) {
+      setError('Please select at least one strategy before opening a trade.')
+      return
+    }
     setError(null); setSubmitting(true)
     // ⚠️ Market order deviation warning: if declared entry is >1% off mark price, warn before executing
     if (orderType === 'MARKET' && automateOnCreate && markPriceCached != null && entryNum != null) {
@@ -1819,7 +1823,7 @@ export function NewTradePage() {
         {/* in future phases (market analysis will also feed into this).           */}
         <Section icon="🧠" title="Strategy & setup intent">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <Field label={<>Strategy <Tip text="Your trading methods for this trade — select one or more. Win rate stats accumulate per strategy after 5+ trades. Different from setup tags." /></>}>
+            <Field label={<>Strategy <span className="text-red-400">*</span> <Tip text="Your trading methods for this trade — select one or more. Win rate stats accumulate per strategy after 5+ trades. Different from setup tags." /></>}>
               <MultiStrategySelect
                 strategies={strategies} loading={stratLoading}
                 value={strategyIds} onChange={setStrategyIds}

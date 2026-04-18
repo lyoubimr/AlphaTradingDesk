@@ -229,6 +229,7 @@ export interface TradeOut extends TradeListItem {
   entry_screenshot_urls: string[] | null
   close_notes: string | null
   close_screenshot_urls: string[] | null
+  post_trade_review: PostTradeReview | null
   /** Full risk advisor output at trade open — persisted for analysis */
   dynamic_risk_snapshot: Record<string, unknown> | null
   /** Trailing stop % for the runner position */
@@ -276,7 +277,23 @@ export interface TradeUpdate {
   amend_positions?: TradePosition[] | null
 }
 
-// ── Strategies ────────────────────────────────────────────────────────────
+export type ReviewOutcome = 'poor' | 'could_do_better' | 'well_executed' | 'excellent'
+
+export interface PostTradeReview {
+  reviewed: boolean
+  reviewed_at: string | null
+  outcome: ReviewOutcome | null
+  tags: string[]
+  note: string | null
+}
+
+export interface PostTradeReviewIn {
+  outcome?: ReviewOutcome | null
+  tags: string[]
+  note?: string | null
+}
+
+// ── Strategies ───────────────────────────────────────────
 
 export interface Strategy {
   id: number
@@ -293,6 +310,9 @@ export interface Strategy {
   trades_count: number
   win_count: number
   min_trades_for_stats: number
+  /** Disciplined WR: excludes reviewed trades where strategy_respected was unchecked */
+  disciplined_trades_count: number
+  disciplined_win_count: number
 }
 
 export interface StrategyCreate {

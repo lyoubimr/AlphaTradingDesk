@@ -85,7 +85,8 @@ def recalculate_capital(
 @router.get("/{profile_id}/strategies", response_model=list[StrategyOut])
 def list_strategies(profile_id: int, db: Session = Depends(get_db)) -> list:
     """List all active strategies for a profile."""
-    return service.list_strategies(db, profile_id)
+    strategies = service.list_strategies(db, profile_id)
+    return service.enrich_strategies_disciplined(db, strategies)
 
 
 @router.post(

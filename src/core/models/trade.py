@@ -247,6 +247,11 @@ class Trade(Base):
     close_notes: Mapped[str | None] = mapped_column(Text)
     close_screenshot_urls: Mapped[list | None] = mapped_column(ARRAY(Text))
 
+    # Post-trade review (Phase 4C)
+    # JSONB: {"reviewed": bool, "reviewed_at": ISO str, "outcome": str|null,
+    #         "tags": [str], "note": str|null}
+    post_trade_review: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, server_default=func.now()
