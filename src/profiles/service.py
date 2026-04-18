@@ -199,10 +199,10 @@ def list_strategies(db: Session, profile_id: int) -> list[Strategy]:
 def enrich_strategies_disciplined(db: Session, strategies: list[Strategy]) -> list[Strategy]:
     """Attach disciplined_win_count and disciplined_trades_count to each Strategy object.
 
-    Disciplined WR logic:
+    Disciplined WR logic (new tag scheme — absence of strategy_broken_<id> = respected):
     - Trade NOT reviewed (post_trade_review IS NULL or reviewed != true) → INCLUDED
-    - Trade reviewed AND strategy_respected in tags → INCLUDED
-    - Trade reviewed AND strategy_respected NOT in tags → EXCLUDED
+    - Trade reviewed AND strategy_broken_<id> NOT in tags → INCLUDED (respected by default)
+    - Trade reviewed AND strategy_broken_<id> in tags → EXCLUDED
 
     Attaches Python attributes directly onto the ORM objects so Pydantic
     StrategyOut (from_attributes=True) picks them up seamlessly.
@@ -213,6 +213,7 @@ def enrich_strategies_disciplined(db: Session, strategies: list[Strategy]) -> li
     ids = [s.id for s in strategies]
 
     # One query for all strategies — avoids N+1
+    # Uses 'strategy_broken_' || strategy_id to check per-strategy key dynamically
     rows = db.execute(
         text("""
             SELECT
@@ -226,7 +227,7 @@ def enrich_strategies_disciplined(db: Session, strategies: list[Strategy]) -> li
               AND (
                   t.post_trade_review IS NULL
                   OR (t.post_trade_review->>'reviewed')::boolean IS NOT TRUE
-                  OR (t.post_trade_review->'tags' ? 'strategy_respected')
+                  OR NOT (t.post_trade_review->'tags' ? ('strategy_broken_' || ts.strategy_id::text))
               )
             GROUP BY ts.strategy_id
         """),
