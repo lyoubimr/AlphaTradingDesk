@@ -13,7 +13,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { Loader2, CheckCircle2 } from 'lucide-react'
 import { tradesApi } from '../../lib/api'
 import { cn } from '../../lib/cn'
-import type { TradeOut, PostTradeReview, ReviewOutcome } from '../../types/api'
+import type { TradeOut, ReviewOutcome } from '../../types/api'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Static tag definitions
