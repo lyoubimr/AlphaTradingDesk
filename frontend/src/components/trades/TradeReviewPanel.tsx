@@ -148,13 +148,12 @@ export function TradeReviewPanel({
     setTags((prev) => prev.includes(key) ? prev.filter((t) => t !== key) : [...prev, key])
   }
 
-  // Per-strategy compliance: 3 states — unset / respected / broken
-  // Stored in tags array as `strategy_respected_<id>` or `strategy_broken_<id>`
-  type StrategyCompliance = 'unset' | 'respected' | 'broken'
+  // Per-strategy compliance: 2 states — respected (default) / broken
+  // Only `strategy_broken_<id>` is stored; absent = respected
+  type StrategyCompliance = 'respected' | 'broken'
   function getStrategyState(sid: number): StrategyCompliance {
-    if (tags.includes(`strategy_respected_${sid}`)) return 'respected'
     if (tags.includes(`strategy_broken_${sid}`)) return 'broken'
-    return 'unset'
+    return 'respected'
   }
   function cycleStrategyState(sid: number) {
     const current = getStrategyState(sid)
@@ -162,9 +161,8 @@ export function TradeReviewPanel({
       const without = prev.filter(
         (t) => t !== `strategy_respected_${sid}` && t !== `strategy_broken_${sid}`,
       )
-      if (current === 'unset') return [...without, `strategy_respected_${sid}`]
       if (current === 'respected') return [...without, `strategy_broken_${sid}`]
-      return without // broken → unset
+      return without // broken → respected (implicit)
     })
   }
 
@@ -258,19 +256,15 @@ export function TradeReviewPanel({
                   type="button"
                   onClick={() => cycleStrategyState(s.id)}
                   title={
-                    state === 'unset'
-                      ? 'Non évalué — cliquer pour marquer comme respectée'
-                      : state === 'respected'
-                        ? 'Respectée ✓ — cliquer pour marquer comme non respectée'
-                        : 'Non respectée ✗ — cliquer pour réinitialiser'
+                    state === 'respected'
+                      ? 'Respectée ✓ — cliquer pour marquer comme non respectée'
+                      : 'Non respectée ✗ — cliquer pour marquer comme respectée'
                   }
                   className={cn(
                     'flex items-center gap-2 rounded-lg border px-3 py-2 text-xs font-medium transition-all duration-150',
                     state === 'respected'
                       ? 'border-emerald-500/50 bg-emerald-500/10 text-emerald-400'
-                      : state === 'broken'
-                        ? 'border-red-500/50 bg-red-500/10 text-red-400'
-                        : 'border-surface-600 bg-surface-800/60 text-slate-500 hover:border-surface-500 hover:text-slate-400',
+                      : 'border-red-500/50 bg-red-500/10 text-red-400',
                   )}
                 >
                   <span>{s.emoji ?? '📌'}</span>
@@ -279,11 +273,9 @@ export function TradeReviewPanel({
                     'ml-1 rounded-full w-5 h-5 flex items-center justify-center text-[10px] font-bold border',
                     state === 'respected'
                       ? 'border-emerald-500/50 bg-emerald-500/20 text-emerald-300'
-                      : state === 'broken'
-                        ? 'border-red-500/50 bg-red-500/20 text-red-300'
-                        : 'border-surface-600 bg-surface-700 text-slate-600',
+                      : 'border-red-500/50 bg-red-500/20 text-red-300',
                   )}>
-                    {state === 'respected' ? '✓' : state === 'broken' ? '✗' : '?'}
+                    state === 'respected' ? '✓' : '✗'
                   </span>
                 </button>
               )
