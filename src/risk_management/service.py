@@ -16,7 +16,7 @@ from decimal import Decimal
 
 import httpx
 from fastapi import HTTPException
-from sqlalchemy import func as sa_func
+from sqlalchemy import func as sa_func, text
 from sqlalchemy.orm import Session
 
 from src.core.models.broker import Profile
@@ -344,12 +344,47 @@ def _resolve_strategy_stats(
     strategy_id: int | None,
     db: Session,
 ) -> tuple[float | None, bool]:
-    """Return (win_rate, has_stats) for a strategy, or (None, False) if absent."""
+    """Return (win_rate, has_stats) for a strategy, or (None, False) if absent.
+
+    Uses disciplined WR (excludes strategy_broken trades + BE trades) when
+    enough reviewed trades exist.  Falls back to regular WR otherwise.
+    """
     if strategy_id is None:
         return None, False
     strategy = db.query(Strategy).filter(Strategy.id == strategy_id).first()
     if strategy is None:
         return None, False
+
+    # Compute disciplined counts (same logic as enrich_strategies_disciplined)
+    row = db.execute(
+        text("""
+            SELECT
+                COUNT(t.id)                                           AS d_trades,
+                SUM(CASE WHEN t.realized_pnl > 0 THEN 1 ELSE 0 END) AS d_wins
+            FROM trade_strategies ts
+            JOIN trades t ON t.id = ts.trade_id
+            JOIN profiles p ON p.id = t.profile_id
+            WHERE ts.strategy_id = :sid
+              AND t.status = 'closed'
+              AND t.risk_amount IS NOT NULL
+              AND t.risk_amount > 0
+              AND ABS(t.realized_pnl / t.risk_amount) >= p.min_pnl_pct_for_stats
+              AND (
+                  t.post_trade_review IS NULL
+                  OR (t.post_trade_review->>'reviewed')::boolean IS NOT TRUE
+                  OR NOT (t.post_trade_review->'tags' ? ('strategy_broken_' || :sid_str))
+              )
+        """),
+        {"sid": strategy_id, "sid_str": str(strategy_id)},
+    ).fetchone()
+
+    d_trades = int(row.d_trades) if row and row.d_trades else 0
+    d_wins   = int(row.d_wins)   if row and row.d_wins   else 0
+
+    # Use disciplined WR if enough disciplined trades; otherwise fall back to regular
+    if d_trades >= strategy.min_trades_for_stats and d_trades > 0:
+        return d_wins / d_trades, True
+
     has_stats = strategy.trades_count >= strategy.min_trades_for_stats
     wr = (
         strategy.win_count / strategy.trades_count
