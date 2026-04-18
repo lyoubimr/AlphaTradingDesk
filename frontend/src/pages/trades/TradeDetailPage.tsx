@@ -17,7 +17,7 @@ import {
   ImagePlus, Maximize2, Columns2,
 } from 'lucide-react'
 import { PageHeader } from '../../components/ui/PageHeader'
-import { TradeReviewPanel } from '../../components/trades/TradeReviewPanel'
+import { TradeReviewPanel, type StrategyRef } from '../../components/trades/TradeReviewPanel'
 import { tradesApi, strategiesApi, automationApi } from '../../lib/api'
 import { KrakenOrdersPanel } from '../../components/automation/KrakenOrdersPanel'
 import { cn } from '../../lib/cn'
@@ -1194,7 +1194,6 @@ export function TradeDetailPage() {
   const [savingNotes, setSavingNotes]           = useState(false)
 
   // Close notes editing (post-trade review — always editable, including closed)
-  const [editingCloseNotes, setEditingCloseNotes] = useState(false)
   const [closeNotesValue, setCloseNotesValue]     = useState('')
   const [savingCloseNotes, setSavingCloseNotes]   = useState(false)
 
@@ -1366,7 +1365,6 @@ export function TradeDetailPage() {
     try {
       const updated = await tradesApi.update(trade.id, { close_notes: closeNotesValue })
       setTrade(updated)
-      setEditingCloseNotes(false)
     } catch (e: unknown) {
       setActionError(`Failed to save close notes: ${(e as Error).message}`)
     } finally {
@@ -2092,80 +2090,37 @@ export function TradeDetailPage() {
           </div>
         </div>
 
-        {/* ── Post-trade review (badge grid + outcome selector) */}
-        {(isClosed || trade.status === 'runner') && (
-          <div id="trade-review" className="bg-surface-800 rounded-xl border border-surface-700 p-5">
-            <TradeReviewPanel
-              trade={trade}
-              onUpdated={(updated) => {
-                setTrade(updated)
-                setCloseNotesValue(updated.close_notes ?? '')
-              }}
-            />
-          </div>
-        )}
-
-        {/* ── Close notes + screenshots (always editable — post-trade review) */}
-        <div className="bg-surface-800 rounded-xl border border-surface-700 p-5 space-y-3">
-          <div className="flex items-center justify-between">
-            <p className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold">
-              📝 Notes &amp; screenshots
-            </p>
-            {!editingCloseNotes && !isReadOnly && (
-              <button type="button" onClick={() => setEditingCloseNotes(true)}
-                className="flex items-center gap-1 text-[10px] text-slate-500 hover:text-brand-400 transition-colors">
-                <Edit3 size={10} /> Edit
-              </button>
-            )}
-            {isClosed && !editingCloseNotes && (
-              <span className="text-[9px] text-emerald-400/60">always editable</span>
-            )}
-          </div>
-
-          {editingCloseNotes ? (
-            <div className="space-y-2">
-              <textarea
-                value={closeNotesValue}
-                onChange={(e) => setCloseNotesValue(e.target.value)}
-                rows={4}
-                className={cn(inputCls, 'resize-none text-xs')}
-                placeholder="What happened? Key lessons? Would you take this again?"
+        {/* ── Post-Trade Review (merged: outcome + tags + review note + close notes + close screenshots) */}
+        <div id="trade-review" className="bg-surface-800 rounded-xl border border-surface-700 p-5">
+          <TradeReviewPanel
+            trade={trade}
+            strategies={
+              (trade.strategy_ids ?? []).reduce<StrategyRef[]>((acc, sid) => {
+                const s = strategyMap.get(sid)
+                if (s) acc.push({ id: s.id, name: s.name, emoji: s.emoji ?? null })
+                return acc
+              }, [])
+            }
+            onUpdated={(updated) => {
+              setTrade(updated)
+              setCloseNotesValue(updated.close_notes ?? '')
+            }}
+            closeNotes={closeNotesValue}
+            onCloseNotesChange={setCloseNotesValue}
+            onCloseNotesSave={handleSaveCloseNotes}
+            savingCloseNotes={savingCloseNotes}
+            renderCloseScreenshots={() => (
+              <SnapshotGallery
+                tradeId={trade.id}
+                urls={trade.close_screenshot_urls}
+                kind="close"
+                onUpdated={(updated) => { setTrade(updated); setCloseNotesValue(updated.close_notes ?? '') }}
+                readOnly={isReadOnly}
+                hasOtherSide={(trade.entry_screenshot_urls?.length ?? 0) > 0}
+                onCompare={(url) => setSplitLightbox({ side: 'close', url })}
               />
-              <div className="flex gap-2">
-                <button type="button" onClick={() => { setEditingCloseNotes(false); setCloseNotesValue(trade.close_notes ?? '') }}
-                  className="flex-1 py-1.5 rounded-lg border border-surface-600 text-xs text-slate-400 hover:text-slate-200 hover:bg-surface-700 transition-colors">
-                  Discard
-                </button>
-                <button type="button" onClick={() => void handleSaveCloseNotes()} disabled={savingCloseNotes}
-                  className="flex-1 py-1.5 rounded-lg bg-brand-600/20 border border-brand-500/40 text-xs text-brand-300 font-medium hover:bg-brand-600/30 transition-colors disabled:opacity-40 flex items-center justify-center gap-1.5">
-                  {savingCloseNotes ? <Loader2 size={11} className="animate-spin" /> : <Save size={11} />}
-                  Save
-                </button>
-              </div>
-            </div>
-          ) : (
-            <p className="text-xs text-slate-400 leading-relaxed whitespace-pre-wrap">
-              {trade.close_notes || (
-                <span className="text-slate-600 italic">
-                  {isClosed ? 'No post-trade notes. Click edit to add.' : 'Will be available after closing the trade.'}
-                </span>
-              )}
-            </p>
-          )}
-
-          {/* Close screenshots */}
-          <div className="space-y-1.5 pt-1 border-t border-surface-700/40">
-            <p className="text-[10px] uppercase tracking-wider text-slate-600 font-semibold">📸 Close screenshots</p>
-            <SnapshotGallery
-              tradeId={trade.id}
-              urls={trade.close_screenshot_urls}
-              kind="close"
-              onUpdated={(updated) => { setTrade(updated); setCloseNotesValue(updated.close_notes ?? '') }}
-              readOnly={isReadOnly}
-              hasOtherSide={(trade.entry_screenshot_urls?.length ?? 0) > 0}
-              onCompare={(url) => setSplitLightbox({ side: 'close', url })}
-            />
-          </div>
+            )}
+          />
         </div>
 
         {/* ── Kraken Execution ─────────────────────────────────────────── */}
