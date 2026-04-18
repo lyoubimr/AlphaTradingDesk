@@ -308,6 +308,10 @@ export interface CustomTagDef {
   label: string
   category: 'execution' | 'psychology' | 'market'
   positive: boolean
+  /** 'tri-state': null → good (key) → bad (badKey) → null. Default: 'flag'. */
+  mode?: 'flag' | 'tri-state'
+  /** Key stored when state is bad (tri-state only). */
+  badKey?: string
 }
 
 export interface ReviewTagsConfig {

@@ -22,7 +22,7 @@ const REVIEW_TAG_CATEGORIES = ['execution', 'psychology', 'market'] as const
 type ReviewTagCategory = typeof REVIEW_TAG_CATEGORIES[number]
 
 const BLANK_TAG: Omit<CustomTagDef, 'key'> & { key: string } = {
-  key: '', label: '', category: 'execution', positive: true,
+  key: '', label: '', category: 'execution', positive: true, mode: 'flag', badKey: '',
 }
 const BUILTIN_BY_CATEGORY: Record<ReviewTagCategory, TagDef[]> = {
   execution: EXECUTION_TAGS,
@@ -42,6 +42,8 @@ function ReviewTagsSection({ profileId }: { profileId: number }) {
   const [error, setError]     = useState<string | null>(null)
   const [showAdd, setShowAdd] = useState(false)
   const [newTag, setNewTag]   = useState({ ...BLANK_TAG })
+  const [editingKey, setEditingKey] = useState<string | null>(null)
+  const [editTag, setEditTag]       = useState({ ...BLANK_TAG })
 
   useEffect(() => {
     setLoading(true)
@@ -68,16 +70,47 @@ function ReviewTagsSection({ profileId }: { profileId: number }) {
     void save({ custom_tags: config.custom_tags.filter((t) => t.key !== key) })
   }
 
+  const handleStartEdit = (tag: CustomTagDef) => {
+    setEditingKey(tag.key)
+    setEditTag({ key: tag.key, label: tag.label, category: tag.category, positive: tag.positive, mode: tag.mode ?? 'flag', badKey: tag.badKey ?? '' })
+    setShowAdd(false)
+    setError(null)
+  }
+
+  const handleSaveEdit = () => {
+    if (!editTag.label.trim()) { setError('Label is required.'); return }
+    if (editTag.mode === 'tri-state' && !editTag.badKey?.trim()) { setError('Bad key is required for quality tags.'); return }
+    if (!config) return
+    const updated = config.custom_tags.map((t) =>
+      t.key === editingKey
+        ? { ...t, label: editTag.label.trim(), category: editTag.category, positive: editTag.positive, mode: editTag.mode, badKey: editTag.mode === 'tri-state' ? editTag.badKey?.trim() : undefined }
+        : t
+    )
+    void save({ custom_tags: updated })
+    setEditingKey(null)
+  }
+
   const handleAdd = () => {
     if (!newTag.key.trim() || !newTag.label.trim()) {
       setError('Key and label are required.'); return
     }
+    if (newTag.mode === 'tri-state' && !newTag.badKey?.trim()) {
+      setError('Bad key is required for quality tags.'); return
+    }
     if (config?.custom_tags.some((t) => t.key === newTag.key.trim())) {
       setError('Tag key must be unique.'); return
     }
-    void save({
-      custom_tags: [...(config?.custom_tags ?? []), { ...newTag, key: newTag.key.trim() }],
-    })
+    if (newTag.mode === 'tri-state' && config?.custom_tags.some((t) => t.key === newTag.badKey?.trim())) {
+      setError('Bad key must be unique.'); return
+    }
+    const tagToSave: CustomTagDef = {
+      key: newTag.key.trim(),
+      label: newTag.label,
+      category: newTag.category,
+      positive: newTag.positive,
+      ...(newTag.mode === 'tri-state' ? { mode: 'tri-state', badKey: newTag.badKey?.trim() } : {}),
+    }
+    void save({ custom_tags: [...(config?.custom_tags ?? []), tagToSave] })
     setNewTag({ ...BLANK_TAG })
     setShowAdd(false)
   }
@@ -118,11 +151,13 @@ function ReviewTagsSection({ profileId }: { profileId: number }) {
               {BUILTIN_BY_CATEGORY[cat].map((tag) => (
                 <span key={tag.key} className={cn(
                   'inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[10px] font-medium border select-none',
-                  tag.positive
-                    ? 'border-emerald-500/30 bg-emerald-500/[0.08] text-emerald-400/70'
-                    : 'border-red-500/30 bg-red-500/[0.08] text-red-400/70',
+                  tag.mode === 'tri-state'
+                    ? 'border-amber-500/30 bg-amber-500/[0.08] text-amber-400/70'
+                    : tag.positive
+                      ? 'border-emerald-500/30 bg-emerald-500/[0.08] text-emerald-400/70'
+                      : 'border-red-500/30 bg-red-500/[0.08] text-red-400/70',
                 )}>
-                  {tag.emoji} {tag.label}
+                  {tag.emoji} {tag.label}{tag.mode === 'tri-state' ? ' ⇄' : ''}
                   <span className="ml-0.5 text-[8px] text-slate-600 font-mono">built-in</span>
                 </span>
               ))}
@@ -142,23 +177,126 @@ function ReviewTagsSection({ profileId }: { profileId: number }) {
         )}
         <div className="space-y-1.5">
           {config?.custom_tags.map((tag) => (
-            <div key={tag.key} className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg bg-surface-700 border border-surface-600">
-              <div className="flex items-center gap-2 min-w-0">
-                <span className={cn(
-                  'rounded-full px-2 py-0.5 text-[10px] font-medium border',
-                  tag.positive
-                    ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400'
-                    : 'border-red-500/40 bg-red-500/10 text-red-400',
-                )}>
-                  {tag.label}
-                </span>
-                <span className="text-[9px] text-slate-600 font-mono">{tag.key}</span>
-                <span className="text-[9px] text-slate-500 capitalize">{tag.category}</span>
-              </div>
-              <button type="button" onClick={() => handleDelete(tag.key)} disabled={saving}
-                className="text-slate-600 hover:text-red-400 transition-colors disabled:opacity-40 shrink-0">
-                <Trash2 size={11} />
-              </button>
+            <div key={tag.key}>
+              {editingKey === tag.key ? (
+                /* ── Inline edit form ── */
+                <div className="rounded-lg border border-brand-500/30 bg-surface-800 p-3 space-y-3">
+                  <p className="text-[10px] uppercase tracking-wide text-slate-500 font-semibold">Edit tag <span className="font-mono text-slate-600">{tag.key}</span></p>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="space-y-1">
+                      <label className="text-[10px] text-slate-500 uppercase tracking-wide">Label (display)</label>
+                      <input
+                        value={editTag.label}
+                        onChange={(e) => setEditTag((p) => ({ ...p, label: e.target.value }))}
+                        className="w-full px-2 py-1.5 rounded-lg bg-surface-700 border border-surface-600 text-xs text-slate-300 placeholder-slate-600 focus:outline-none focus:border-brand-500/60"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[10px] text-slate-500 uppercase tracking-wide">Category</label>
+                      <select
+                        value={editTag.category}
+                        onChange={(e) => setEditTag((p) => ({ ...p, category: e.target.value as ReviewTagCategory }))}
+                        className="w-full px-2 py-1.5 rounded-lg bg-surface-700 border border-surface-600 text-xs text-slate-300 focus:outline-none focus:border-brand-500/60">
+                        {REVIEW_TAG_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
+                      </select>
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <div className="space-y-1">
+                      <label className="text-[10px] text-slate-500 uppercase tracking-wide">Type</label>
+                      <div className="flex gap-1.5">
+                        <button type="button" onClick={() => setEditTag((p) => ({ ...p, mode: 'flag' }))}
+                          className={cn('px-2.5 py-1 rounded-lg border text-[10px] font-medium transition-colors',
+                            (editTag.mode ?? 'flag') === 'flag'
+                              ? 'border-brand-500/50 bg-brand-500/15 text-brand-300'
+                              : 'border-surface-600 bg-surface-700 text-slate-500 hover:text-slate-300')}>
+                          🏷 Flag
+                        </button>
+                        <button type="button" onClick={() => setEditTag((p) => ({ ...p, mode: 'tri-state', badKey: p.badKey || `${p.key}_bad` }))}
+                          className={cn('px-2.5 py-1 rounded-lg border text-[10px] font-medium transition-colors',
+                            editTag.mode === 'tri-state'
+                              ? 'border-amber-500/50 bg-amber-500/15 text-amber-300'
+                              : 'border-surface-600 bg-surface-700 text-slate-500 hover:text-slate-300')}>
+                          ⭐ Quality (✓/✗/null)
+                        </button>
+                      </div>
+                    </div>
+                    {(editTag.mode ?? 'flag') === 'flag' && (
+                      <div className="flex gap-1.5">
+                        <button type="button" onClick={() => setEditTag((p) => ({ ...p, positive: true }))}
+                          className={cn('px-2.5 py-1 rounded-lg border text-[10px] font-medium transition-colors',
+                            editTag.positive
+                              ? 'border-emerald-500/50 bg-emerald-500/15 text-emerald-400'
+                              : 'border-surface-600 bg-surface-700 text-slate-500 hover:text-slate-300')}>
+                          ✅ Good
+                        </button>
+                        <button type="button" onClick={() => setEditTag((p) => ({ ...p, positive: false }))}
+                          className={cn('px-2.5 py-1 rounded-lg border text-[10px] font-medium transition-colors',
+                            !editTag.positive
+                              ? 'border-red-500/50 bg-red-500/15 text-red-400'
+                              : 'border-surface-600 bg-surface-700 text-slate-500 hover:text-slate-300')}>
+                          ❌ Bad
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                  {editTag.mode === 'tri-state' && (
+                    <div className="space-y-1">
+                      <label className="text-[10px] text-slate-500 uppercase tracking-wide">Bad state key <span className="text-slate-600">(stored when ✗)</span></label>
+                      <input
+                        value={editTag.badKey ?? ''}
+                        onChange={(e) => setEditTag((p) => ({ ...p, badKey: e.target.value.replace(/\s/g, '_').toLowerCase() }))}
+                        placeholder={`${editTag.key}_bad`}
+                        className="w-full px-2 py-1.5 rounded-lg bg-surface-700 border border-surface-600 text-xs text-slate-300 placeholder-slate-600 focus:outline-none focus:border-brand-500/60"
+                      />
+                    </div>
+                  )}
+                    <div className="flex gap-2">
+                      <button type="button" onClick={handleSaveEdit} disabled={saving}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-brand-600/20 border border-brand-500/40 text-xs text-brand-300 font-medium hover:bg-brand-600/30 transition-colors disabled:opacity-40">
+                        {saving ? <Loader2 size={10} className="animate-spin" /> : <Check size={10} />}
+                        Save
+                      </button>
+                      <button type="button" onClick={() => { setEditingKey(null); setError(null) }}
+                        className="px-3 py-1.5 rounded-lg border border-surface-600 text-xs text-slate-400 hover:text-slate-200 transition-colors">
+                        Cancel
+                      </button>
+                    </div>
+                </div>
+              ) : (
+                /* ── Normal row ── */
+                <div className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg bg-surface-700 border border-surface-600">
+                  <div className="flex items-center gap-2 min-w-0">
+                    {tag.mode === 'tri-state' ? (
+                      <>
+                        <span className="rounded-full px-2 py-0.5 text-[10px] font-medium border border-emerald-500/40 bg-emerald-500/10 text-emerald-400">{tag.label} ✓</span>
+                        <span className="rounded-full px-2 py-0.5 text-[10px] font-medium border border-red-500/40 bg-red-500/10 text-red-400">{tag.label} ✗</span>
+                      </>
+                    ) : (
+                      <span className={cn(
+                        'rounded-full px-2 py-0.5 text-[10px] font-medium border',
+                        tag.positive
+                          ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400'
+                          : 'border-red-500/40 bg-red-500/10 text-red-400',
+                      )}>
+                        {tag.label}
+                      </span>
+                    )}
+                    <span className="text-[9px] text-slate-600 font-mono">{tag.key}{tag.mode === 'tri-state' ? ` / ${tag.badKey}` : ''}</span>
+                    <span className="text-[9px] text-slate-500 capitalize">{tag.category}</span>
+                  </div>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <button type="button" onClick={() => handleStartEdit(tag)} disabled={saving}
+                      className="text-slate-600 hover:text-brand-400 transition-colors disabled:opacity-40 p-0.5">
+                      <Edit2 size={11} />
+                    </button>
+                    <button type="button" onClick={() => handleDelete(tag.key)} disabled={saving}
+                      className="text-slate-600 hover:text-red-400 transition-colors disabled:opacity-40 p-0.5">
+                      <Trash2 size={11} />
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           ))}
         </div>
@@ -198,8 +336,31 @@ function ReviewTagsSection({ profileId }: { profileId: number }) {
               </select>
             </div>
             <div className="space-y-1">
-              <label className="text-[10px] text-slate-500 uppercase tracking-wide">Tone</label>
+              <label className="text-[10px] text-slate-500 uppercase tracking-wide">Type</label>
               <div className="flex gap-1.5 pt-0.5">
+                <button type="button"
+                  onClick={() => setNewTag((p) => ({ ...p, mode: 'flag' }))}
+                  className={cn('px-2.5 py-1 rounded-lg border text-[10px] font-medium transition-colors',
+                    (newTag.mode ?? 'flag') === 'flag'
+                      ? 'border-brand-500/50 bg-brand-500/15 text-brand-300'
+                      : 'border-surface-600 bg-surface-700 text-slate-500 hover:text-slate-300')}>
+                  🏷 Flag
+                </button>
+                <button type="button"
+                  onClick={() => setNewTag((p) => ({ ...p, mode: 'tri-state', badKey: p.badKey || `${p.key}_bad` }))}
+                  className={cn('px-2.5 py-1 rounded-lg border text-[10px] font-medium transition-colors',
+                    newTag.mode === 'tri-state'
+                      ? 'border-amber-500/50 bg-amber-500/15 text-amber-300'
+                      : 'border-surface-600 bg-surface-700 text-slate-500 hover:text-slate-300')}>
+                  ⭐ Quality (✓/✗)
+                </button>
+              </div>
+            </div>
+          </div>
+          {(newTag.mode ?? 'flag') === 'flag' && (
+            <div className="space-y-1">
+              <label className="text-[10px] text-slate-500 uppercase tracking-wide">Tone</label>
+              <div className="flex gap-1.5">
                 <button type="button"
                   onClick={() => setNewTag((p) => ({ ...p, positive: true }))}
                   className={cn('px-2.5 py-1 rounded-lg border text-[10px] font-medium transition-colors',
@@ -218,7 +379,19 @@ function ReviewTagsSection({ profileId }: { profileId: number }) {
                 </button>
               </div>
             </div>
-          </div>
+          )}
+          {newTag.mode === 'tri-state' && (
+            <div className="space-y-1">
+              <label className="text-[10px] text-slate-500 uppercase tracking-wide">Bad state key <span className="text-slate-600">(auto-generated, editable)</span></label>
+              <input
+                value={newTag.badKey ?? ''}
+                onChange={(e) => setNewTag((p) => ({ ...p, badKey: e.target.value.replace(/\s/g, '_').toLowerCase() }))}
+                placeholder={`${newTag.key || 'tag'}_bad`}
+                className="w-full px-2 py-1.5 rounded-lg bg-surface-700 border border-surface-600 text-xs text-slate-300 placeholder-slate-600 focus:outline-none focus:border-brand-500/60"
+              />
+              <p className="text-[10px] text-slate-600">Stored in tags when ✗ is selected. Clicking again clears to null (unset).</p>
+            </div>
+          )}
           <div className="flex gap-2 pt-1">
             <button type="button" onClick={handleAdd} disabled={saving}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-brand-600/20 border border-brand-500/40 text-xs text-brand-300 font-medium hover:bg-brand-600/30 transition-colors disabled:opacity-40">

@@ -199,10 +199,11 @@ def list_strategies(db: Session, profile_id: int) -> list[Strategy]:
 def enrich_strategies_disciplined(db: Session, strategies: list[Strategy]) -> list[Strategy]:
     """Attach disciplined_win_count and disciplined_trades_count to each Strategy object.
 
-    Disciplined WR logic:
+    Disciplined WR logic (new tag scheme — absence of strategy_broken_<id> = respected):
+    - BE trades (abs(pnl/risk) < profile.min_pnl_pct_for_stats) → EXCLUDED (same as regular WR)
     - Trade NOT reviewed (post_trade_review IS NULL or reviewed != true) → INCLUDED
-    - Trade reviewed AND strategy_respected in tags → INCLUDED
-    - Trade reviewed AND strategy_respected NOT in tags → EXCLUDED
+    - Trade reviewed AND strategy_broken_<id> NOT in tags → INCLUDED (respected by default)
+    - Trade reviewed AND strategy_broken_<id> in tags → EXCLUDED
 
     Attaches Python attributes directly onto the ORM objects so Pydantic
     StrategyOut (from_attributes=True) picks them up seamlessly.
@@ -213,6 +214,8 @@ def enrich_strategies_disciplined(db: Session, strategies: list[Strategy]) -> li
     ids = [s.id for s in strategies]
 
     # One query for all strategies — avoids N+1
+    # Joins profiles to apply the same BE filter as regular WR (per-trade profile threshold).
+    # Uses 'strategy_broken_' || strategy_id to check per-strategy key dynamically.
     rows = db.execute(
         text("""
             SELECT
@@ -221,12 +224,16 @@ def enrich_strategies_disciplined(db: Session, strategies: list[Strategy]) -> li
                 SUM(CASE WHEN t.realized_pnl > 0 THEN 1 ELSE 0 END)    AS disciplined_win_count
             FROM trade_strategies ts
             JOIN trades t ON t.id = ts.trade_id
+            JOIN profiles p ON p.id = t.profile_id
             WHERE ts.strategy_id = ANY(:ids)
               AND t.status = 'closed'
+              AND t.risk_amount IS NOT NULL
+              AND t.risk_amount > 0
+              AND ABS(t.realized_pnl / t.risk_amount) >= p.min_pnl_pct_for_stats
               AND (
                   t.post_trade_review IS NULL
                   OR (t.post_trade_review->>'reviewed')::boolean IS NOT TRUE
-                  OR (t.post_trade_review->'tags' ? 'strategy_respected')
+                  OR NOT (t.post_trade_review->'tags' ? ('strategy_broken_' || ts.strategy_id::text))
               )
             GROUP BY ts.strategy_id
         """),

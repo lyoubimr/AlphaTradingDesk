@@ -112,6 +112,6 @@ class StrategyOut(BaseModel):
     trades_count: int
     win_count: int
     min_trades_for_stats: int
-    # Disciplined WR: excludes trades where reviewer actively unchecked strategy_respected
+    # Disciplined WR: excludes trades where strategy_broken_<id> tag is present in review tags
     disciplined_trades_count: int = 0
     disciplined_win_count: int = 0

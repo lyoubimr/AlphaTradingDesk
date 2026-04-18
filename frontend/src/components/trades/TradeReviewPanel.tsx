@@ -144,17 +144,27 @@ export function TradeReviewPanel({
     if (isClosed) triggerSaveRef.current(outcome, tags)
   }, [outcome, tags, isClosed])
 
-  function toggleTag(key: string) {
-    setTags((prev) => prev.includes(key) ? prev.filter((t) => t !== key) : [...prev, key])
+  function handleTagToggle(tag: TagDef) {
+    setTags((prev) => {
+      if (tag.mode === 'tri-state') {
+        const hasGood = prev.includes(tag.key)
+        const hasBad  = tag.badKey ? prev.includes(tag.badKey) : false
+        const without = prev.filter((t) => t !== tag.key && t !== (tag.badKey ?? '__never__'))
+        if (!hasGood && !hasBad) return [...without, tag.key]  // null → good
+        if (hasGood) return [...without, tag.badKey!]          // good → bad
+        return without                                          // bad → null
+      }
+      // flag: simple toggle
+      return prev.includes(tag.key) ? prev.filter((t) => t !== tag.key) : [...prev, tag.key]
+    })
   }
 
-  // Per-strategy compliance: 3 states — unset / respected / broken
-  // Stored in tags array as `strategy_respected_<id>` or `strategy_broken_<id>`
-  type StrategyCompliance = 'unset' | 'respected' | 'broken'
+  // Per-strategy compliance: 2 states — respected (default) / broken
+  // Only `strategy_broken_<id>` is stored; absent = respected
+  type StrategyCompliance = 'respected' | 'broken'
   function getStrategyState(sid: number): StrategyCompliance {
-    if (tags.includes(`strategy_respected_${sid}`)) return 'respected'
     if (tags.includes(`strategy_broken_${sid}`)) return 'broken'
-    return 'unset'
+    return 'respected'
   }
   function cycleStrategyState(sid: number) {
     const current = getStrategyState(sid)
@@ -162,9 +172,8 @@ export function TradeReviewPanel({
       const without = prev.filter(
         (t) => t !== `strategy_respected_${sid}` && t !== `strategy_broken_${sid}`,
       )
-      if (current === 'unset') return [...without, `strategy_respected_${sid}`]
       if (current === 'respected') return [...without, `strategy_broken_${sid}`]
-      return without // broken → unset
+      return without // broken → respected (implicit)
     })
   }
 
@@ -258,19 +267,15 @@ export function TradeReviewPanel({
                   type="button"
                   onClick={() => cycleStrategyState(s.id)}
                   title={
-                    state === 'unset'
-                      ? 'Non évalué — cliquer pour marquer comme respectée'
-                      : state === 'respected'
-                        ? 'Respectée ✓ — cliquer pour marquer comme non respectée'
-                        : 'Non respectée ✗ — cliquer pour réinitialiser'
+                    state === 'respected'
+                      ? 'Respectée ✓ — cliquer pour marquer comme non respectée'
+                      : 'Non respectée ✗ — cliquer pour marquer comme respectée'
                   }
                   className={cn(
                     'flex items-center gap-2 rounded-lg border px-3 py-2 text-xs font-medium transition-all duration-150',
                     state === 'respected'
                       ? 'border-emerald-500/50 bg-emerald-500/10 text-emerald-400'
-                      : state === 'broken'
-                        ? 'border-red-500/50 bg-red-500/10 text-red-400'
-                        : 'border-surface-600 bg-surface-800/60 text-slate-500 hover:border-surface-500 hover:text-slate-400',
+                      : 'border-red-500/50 bg-red-500/10 text-red-400',
                   )}
                 >
                   <span>{s.emoji ?? '📌'}</span>
@@ -279,11 +284,9 @@ export function TradeReviewPanel({
                     'ml-1 rounded-full w-5 h-5 flex items-center justify-center text-[10px] font-bold border',
                     state === 'respected'
                       ? 'border-emerald-500/50 bg-emerald-500/20 text-emerald-300'
-                      : state === 'broken'
-                        ? 'border-red-500/50 bg-red-500/20 text-red-300'
-                        : 'border-surface-600 bg-surface-700 text-slate-600',
+                      : 'border-red-500/50 bg-red-500/20 text-red-300',
                   )}>
-                    {state === 'respected' ? '✓' : state === 'broken' ? '✗' : '?'}
+                    {state === 'respected' ? '✓' : '✗'}
                   </span>
                 </button>
               )
@@ -294,9 +297,9 @@ export function TradeReviewPanel({
 
       {/* ── Tags — toujours visibles (FOMO/Rule broken s'appliquent à tout moment) */}
       <div className="space-y-4">
-        <TagSection title="⚙️ Execution"  tags={EXECUTION_TAGS}  active={tags} onToggle={toggleTag} />
-        <TagSection title="🧠 Psychology" tags={PSYCHOLOGY_TAGS} active={tags} onToggle={toggleTag} />
-        <TagSection title="🌍 Market"     tags={MARKET_TAGS}     active={tags} onToggle={toggleTag} />
+        <TagSection title="⚙️ Execution"  tags={EXECUTION_TAGS}  active={tags} onToggle={handleTagToggle} />
+        <TagSection title="🧠 Psychology" tags={PSYCHOLOGY_TAGS} active={tags} onToggle={handleTagToggle} />
+        <TagSection title="🌍 Market"     tags={MARKET_TAGS}     active={tags} onToggle={handleTagToggle} />
       </div>
 
       {/* ── Divider ──────────────────────────────────────────────────── */}
@@ -362,36 +365,88 @@ interface TagSectionProps {
   title: string
   tags: TagDef[]
   active: string[]
-  onToggle: (key: string) => void
+  onToggle: (tag: TagDef) => void
 }
 
 function TagSection({ title, tags, active, onToggle }: TagSectionProps) {
+  const triStateTags = tags.filter((t) => t.mode === 'tri-state')
+  const flagTags     = tags.filter((t) => t.mode !== 'tri-state')
+
+  function getTriState(tag: TagDef): 'null' | 'good' | 'bad' {
+    if (active.includes(tag.key)) return 'good'
+    if (tag.badKey && active.includes(tag.badKey)) return 'bad'
+    return 'null'
+  }
+
   return (
     <div className="space-y-2">
       <p className="text-xs font-bold text-slate-400 tracking-wide">{title}</p>
-      <div className="flex flex-wrap gap-1.5">
-        {tags.map((tag) => {
-          const isActive = active.includes(tag.key)
-          return (
-            <button
-              key={tag.key}
-              type="button"
-              onClick={() => onToggle(tag.key)}
-              className={cn(
-                'flex items-center gap-1.5 rounded-full border px-3 py-1 text-[11px] font-medium transition-all duration-150',
-                isActive
-                  ? tag.positive
-                    ? 'border-emerald-500/60 bg-emerald-500/15 text-emerald-300 shadow-sm shadow-emerald-500/10'
-                    : 'border-red-500/60 bg-red-500/15 text-red-300 shadow-sm shadow-red-500/10'
-                  : 'border-surface-600 bg-surface-800/60 text-slate-500 hover:border-surface-500 hover:text-slate-400',
-              )}
-            >
-              <span className="leading-none">{tag.emoji}</span>
-              <span>{tag.label}</span>
-            </button>
-          )
-        })}
-      </div>
+
+      {/* Tri-state: null ? → good ✓ → bad ✗ → null */}
+      {triStateTags.length > 0 && (
+        <div className="flex flex-wrap gap-2">
+          {triStateTags.map((tag) => {
+            const state = getTriState(tag)
+            return (
+              <button
+                key={tag.key}
+                type="button"
+                onClick={() => onToggle(tag)}
+                title={
+                  state === 'null' ? (tag.nullDesc ?? `${tag.label} — non évalué`) :
+                  state === 'good' ? (tag.goodDesc ?? `${tag.label} ✓`) :
+                                     (tag.badDesc  ?? `${tag.label} ✗`)
+                }
+                className={cn(
+                  'flex items-center gap-2 rounded-lg border px-3 py-2 text-xs font-medium transition-all duration-150',
+                  state === 'good' ? 'border-emerald-500/50 bg-emerald-500/10 text-emerald-400' :
+                  state === 'bad'  ? 'border-red-500/50 bg-red-500/10 text-red-400' :
+                                     'border-surface-600 bg-surface-800/60 text-slate-500 hover:border-surface-500 hover:text-slate-400',
+                )}
+              >
+                <span>{tag.emoji}</span>
+                <span>{tag.label}</span>
+                <span className={cn(
+                  'ml-1 rounded-full w-5 h-5 flex items-center justify-center text-[10px] font-bold border',
+                  state === 'good' ? 'border-emerald-500/50 bg-emerald-500/20 text-emerald-300' :
+                  state === 'bad'  ? 'border-red-500/50 bg-red-500/20 text-red-300' :
+                                     'border-surface-600 bg-surface-700 text-slate-600',
+                )}>
+                  {state === 'good' ? '✓' : state === 'bad' ? '✗' : '?'}
+                </span>
+              </button>
+            )
+          })}
+        </div>
+      )}
+
+      {/* Flag badges: event-based (click to activate) */}
+      {flagTags.length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {flagTags.map((tag) => {
+            const isActive = active.includes(tag.key)
+            return (
+              <button
+                key={tag.key}
+                type="button"
+                onClick={() => onToggle(tag)}
+                title={tag.description}
+                className={cn(
+                  'flex items-center gap-1.5 rounded-full border px-3 py-1 text-[11px] font-medium transition-all duration-150',
+                  isActive
+                    ? tag.positive
+                      ? 'border-emerald-500/60 bg-emerald-500/15 text-emerald-300 shadow-sm shadow-emerald-500/10'
+                      : 'border-red-500/60 bg-red-500/15 text-red-300 shadow-sm shadow-red-500/10'
+                    : 'border-surface-600 bg-surface-800/60 text-slate-500 hover:border-surface-500 hover:text-slate-400',
+                )}
+              >
+                <span className="leading-none">{tag.emoji}</span>
+                <span>{tag.label}</span>
+              </button>
+            )
+          })}
+        </div>
+      )}
     </div>
   )
 }
