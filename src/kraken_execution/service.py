@@ -1367,6 +1367,19 @@ def sync_sl_tp_fills(trade_id: int, db: Session) -> dict:
                     instrument.contract_value_precision if instrument.contract_value_precision is not None else 2,
                 )
                 trailing_pct = str(trade.runner_trailing_pct)
+                # Cancel the open fixed SL — trailing stop replaces it
+                open_sl = (
+                    db.query(KrakenOrder)
+                    .filter(KrakenOrder.trade_id == trade_id, KrakenOrder.role == "sl", KrakenOrder.status == "open")
+                    .first()
+                )
+                if open_sl:
+                    try:
+                        client.cancel_order(open_sl.kraken_order_id)
+                        open_sl.status = "cancelled"
+                        logger.info("sync_runner_sl_cancelled", trade_id=trade_id, sl_order_id=open_sl.kraken_order_id)
+                    except Exception:  # noqa: BLE001
+                        logger.warning("sync_runner_sl_cancel_failed", trade_id=trade_id, sl_order_id=open_sl.kraken_order_id)
                 ts_result = client.send_order(
                     order_type="trailing_stop",
                     symbol=instrument.symbol,
@@ -1432,6 +1445,9 @@ def activate_runner_trailing(trade_id: int, db: Session) -> dict:
     failed silently (e.g. network error after TP2 was committed as filled
     but before the KrakenOrder row was persisted).
 
+    Also cancels the existing open SL order — once the trailing stop is
+    active it IS the stop, the fixed SL is redundant and could conflict.
+
     Pre-conditions (raises HTTPException if violated):
     - trade exists, automation_enabled, not closed/cancelled
     - trade.runner_trailing_pct is set
@@ -1492,6 +1508,7 @@ def activate_runner_trailing(trade_id: int, db: Session) -> dict:
 
     exit_side = _exit_side(trade)
 
+    # Use the most recent open SL for size reference (full original size)
     sl_kr_order = (
         db.query(KrakenOrder)
         .filter(KrakenOrder.trade_id == trade_id, KrakenOrder.role == "sl")
@@ -1510,8 +1527,33 @@ def activate_runner_trailing(trade_id: int, db: Session) -> dict:
 
     trailing_pct = str(trade.runner_trailing_pct)
 
+    # Find open SL order to cancel alongside trailing placement
+    open_sl_order = (
+        db.query(KrakenOrder)
+        .filter(KrakenOrder.trade_id == trade_id, KrakenOrder.role == "sl", KrakenOrder.status == "open")
+        .first()
+    )
+
     settings_row = get_automation_settings(trade.profile_id, db)
     with _make_client(settings_row) as client:
+        # Cancel the fixed SL — trailing stop replaces it
+        if open_sl_order:
+            try:
+                client.cancel_order(open_sl_order.kraken_order_id)
+                open_sl_order.status = "cancelled"
+                logger.info(
+                    "activate_runner_sl_cancelled",
+                    trade_id=trade_id,
+                    sl_order_id=open_sl_order.kraken_order_id,
+                )
+            except Exception:  # noqa: BLE001
+                # Non-fatal: SL might already be gone on Kraken side; log and continue
+                logger.warning(
+                    "activate_runner_sl_cancel_failed",
+                    trade_id=trade_id,
+                    sl_order_id=open_sl_order.kraken_order_id,
+                )
+
         ts_result = client.send_order(
             order_type="trailing_stop",
             symbol=instrument.symbol,
