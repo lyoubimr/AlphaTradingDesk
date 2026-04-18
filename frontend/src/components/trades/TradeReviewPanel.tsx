@@ -275,7 +275,7 @@ export function TradeReviewPanel({
                       ? 'border-emerald-500/50 bg-emerald-500/20 text-emerald-300'
                       : 'border-red-500/50 bg-red-500/20 text-red-300',
                   )}>
-                    state === 'respected' ? '✓' : '✗'
+                    {state === 'respected' ? '✓' : '✗'}
                   </span>
                 </button>
               )
@@ -376,8 +376,8 @@ function TagSection({ title, tags, active, onToggle }: TagSectionProps) {
                 onClick={() => onToggle(tag.badKey!)}
                 title={
                   isBad
-                    ? `${tag.label} ✗ — cliquer pour marquer comme bon`
-                    : `${tag.label} ✓ — cliquer pour marquer comme mauvais`
+                    ? (tag.badDesc  ?? `${tag.label} ✗ — cliquer pour marquer comme bon`)
+                    : (tag.goodDesc ?? `${tag.label} ✓ — cliquer pour marquer comme mauvais`)
                 }
                 className={cn(
                   'flex items-center gap-2 rounded-lg border px-3 py-2 text-xs font-medium transition-all duration-150',
@@ -412,6 +412,7 @@ function TagSection({ title, tags, active, onToggle }: TagSectionProps) {
                 key={tag.key}
                 type="button"
                 onClick={() => onToggle(tag.key)}
+                title={tag.description}
                 className={cn(
                   'flex items-center gap-1.5 rounded-full border px-3 py-1 text-[11px] font-medium transition-all duration-150',
                   isActive
