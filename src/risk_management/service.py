@@ -16,7 +16,8 @@ from decimal import Decimal
 
 import httpx
 from fastapi import HTTPException
-from sqlalchemy import func as sa_func, text
+from sqlalchemy import func as sa_func
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from src.core.models.broker import Profile
