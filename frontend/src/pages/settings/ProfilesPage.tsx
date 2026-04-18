@@ -6,13 +6,235 @@ import { useState, useEffect, useRef } from 'react'
 import type React from 'react'
 import {
   Plus, Edit2, Trash2, TrendingUp, CheckCircle2,
-  AlertCircle, X, Save, Loader2, Info,
+  AlertCircle, X, Save, Loader2, Info, Check,
 } from 'lucide-react'
 import { PageHeader } from '../../components/ui/PageHeader'
 import { useProfile } from '../../context/ProfileContext'
-import { profilesApi, brokersApi } from '../../lib/api'
+import { profilesApi, brokersApi, reviewTagsApi } from '../../lib/api'
+import type { CustomTagDef, ReviewTagsConfig } from '../../lib/api'
+import { EXECUTION_TAGS, PSYCHOLOGY_TAGS, MARKET_TAGS } from '../../components/trades/reviewTagDefs'
+import type { TagDef } from '../../components/trades/reviewTagDefs'
 import { cn } from '../../lib/cn'
 import type { Profile, ProfileCreate, ProfileUpdate, Broker } from '../../types/api'
+
+// ── Review Tags ─────────────────────────────────────────────────────────────
+const REVIEW_TAG_CATEGORIES = ['execution', 'psychology', 'market'] as const
+type ReviewTagCategory = typeof REVIEW_TAG_CATEGORIES[number]
+
+const BLANK_TAG: Omit<CustomTagDef, 'key'> & { key: string } = {
+  key: '', label: '', category: 'execution', positive: true,
+}
+const BUILTIN_BY_CATEGORY: Record<ReviewTagCategory, TagDef[]> = {
+  execution: EXECUTION_TAGS,
+  psychology: PSYCHOLOGY_TAGS,
+  market: MARKET_TAGS,
+}
+
+const CATEGORY_LABELS: Record<ReviewTagCategory, string> = {
+  execution: '⚙️ Execution',
+  psychology: '🧠 Psychology',
+  market: '🌍 Market',
+}
+function ReviewTagsSection({ profileId }: { profileId: number }) {
+  const [config, setConfig]   = useState<ReviewTagsConfig | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [saving, setSaving]   = useState(false)
+  const [error, setError]     = useState<string | null>(null)
+  const [showAdd, setShowAdd] = useState(false)
+  const [newTag, setNewTag]   = useState({ ...BLANK_TAG })
+
+  useEffect(() => {
+    setLoading(true)
+    reviewTagsApi.get(profileId)
+      .then((r) => setConfig(r.config))
+      .catch((e) => setError(e instanceof Error ? e.message : 'Load failed.'))
+      .finally(() => setLoading(false))
+  }, [profileId])
+
+  const save = async (next: ReviewTagsConfig) => {
+    setSaving(true); setError(null)
+    try {
+      const r = await reviewTagsApi.save(profileId, next)
+      setConfig(r.config)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Save failed.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleDelete = (key: string) => {
+    if (!config) return
+    void save({ custom_tags: config.custom_tags.filter((t) => t.key !== key) })
+  }
+
+  const handleAdd = () => {
+    if (!newTag.key.trim() || !newTag.label.trim()) {
+      setError('Key and label are required.'); return
+    }
+    if (config?.custom_tags.some((t) => t.key === newTag.key.trim())) {
+      setError('Tag key must be unique.'); return
+    }
+    void save({
+      custom_tags: [...(config?.custom_tags ?? []), { ...newTag, key: newTag.key.trim() }],
+    })
+    setNewTag({ ...BLANK_TAG })
+    setShowAdd(false)
+  }
+
+  if (loading) return (
+    <div className="flex items-center gap-2 text-xs text-slate-500 py-4">
+      <Loader2 size={12} className="animate-spin" /> Loading review tags…
+    </div>
+  )
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide">📋 Review tags — post-trade badges</p>
+          <p className="text-[11px] text-slate-600 mt-0.5">
+            Tags used in the post-trade review. Built-in tags are fixed; add custom tags below.
+          </p>
+        </div>
+        {!showAdd && (
+          <button type="button" onClick={() => setShowAdd(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-surface-700 border border-surface-600 text-xs text-slate-400 hover:text-slate-200 hover:border-surface-500 transition-colors">
+            <Plus size={11} /> Add custom tag
+          </button>
+        )}
+      </div>
+
+      {error && (
+        <p className="text-xs text-red-400 rounded-lg bg-red-500/10 border border-red-500/20 px-3 py-2">{error}</p>
+      )}
+
+      {/* ── Built-in tags (read-only) ── */}
+      <div className="space-y-3">
+        {REVIEW_TAG_CATEGORIES.map((cat) => (
+          <div key={cat}>
+            <p className="text-[10px] text-slate-600 uppercase tracking-wide mb-1.5">{CATEGORY_LABELS[cat]}</p>
+            <div className="flex flex-wrap gap-1.5">
+              {BUILTIN_BY_CATEGORY[cat].map((tag) => (
+                <span key={tag.key} className={cn(
+                  'inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[10px] font-medium border select-none',
+                  tag.positive
+                    ? 'border-emerald-500/30 bg-emerald-500/[0.08] text-emerald-400/70'
+                    : 'border-red-500/30 bg-red-500/[0.08] text-red-400/70',
+                )}>
+                  {tag.emoji} {tag.label}
+                  <span className="ml-0.5 text-[8px] text-slate-600 font-mono">built-in</span>
+                </span>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* ── Custom tags ── */}
+      <div className="space-y-2">
+        <div className="flex items-center gap-2">
+          <p className="text-[10px] text-slate-500 uppercase tracking-wide">Custom tags</p>
+          <div className="flex-1 h-px bg-surface-700" />
+        </div>
+        {(config?.custom_tags.length ?? 0) === 0 && !showAdd && (
+          <p className="text-xs text-slate-600 italic">No custom tags yet — click “Add custom tag” to create one.</p>
+        )}
+        <div className="space-y-1.5">
+          {config?.custom_tags.map((tag) => (
+            <div key={tag.key} className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg bg-surface-700 border border-surface-600">
+              <div className="flex items-center gap-2 min-w-0">
+                <span className={cn(
+                  'rounded-full px-2 py-0.5 text-[10px] font-medium border',
+                  tag.positive
+                    ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400'
+                    : 'border-red-500/40 bg-red-500/10 text-red-400',
+                )}>
+                  {tag.label}
+                </span>
+                <span className="text-[9px] text-slate-600 font-mono">{tag.key}</span>
+                <span className="text-[9px] text-slate-500 capitalize">{tag.category}</span>
+              </div>
+              <button type="button" onClick={() => handleDelete(tag.key)} disabled={saving}
+                className="text-slate-600 hover:text-red-400 transition-colors disabled:opacity-40 shrink-0">
+                <Trash2 size={11} />
+              </button>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {showAdd && (
+        <div className="rounded-lg border border-surface-600 bg-surface-800 p-4 space-y-3">
+          <p className="text-[10px] uppercase tracking-wide text-slate-500 font-semibold">New custom tag</p>
+          <div className="grid grid-cols-2 gap-2">
+            <div className="space-y-1">
+              <label className="text-[10px] text-slate-500 uppercase tracking-wide">Key (no spaces)</label>
+              <input
+                value={newTag.key}
+                onChange={(e) => setNewTag((p) => ({ ...p, key: e.target.value.replace(/\s/g, '_').toLowerCase() }))}
+                placeholder="e.g. fib_entry"
+                className="w-full px-2 py-1.5 rounded-lg bg-surface-700 border border-surface-600 text-xs text-slate-300 placeholder-slate-600 focus:outline-none focus:border-brand-500/60"
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-[10px] text-slate-500 uppercase tracking-wide">Label (display)</label>
+              <input
+                value={newTag.label}
+                onChange={(e) => setNewTag((p) => ({ ...p, label: e.target.value }))}
+                placeholder="e.g. Fib entry"
+                className="w-full px-2 py-1.5 rounded-lg bg-surface-700 border border-surface-600 text-xs text-slate-300 placeholder-slate-600 focus:outline-none focus:border-brand-500/60"
+              />
+            </div>
+          </div>
+          <div className="flex gap-3">
+            <div className="space-y-1 flex-1">
+              <label className="text-[10px] text-slate-500 uppercase tracking-wide">Category</label>
+              <select
+                value={newTag.category}
+                onChange={(e) => setNewTag((p) => ({ ...p, category: e.target.value as ReviewTagCategory }))}
+                className="w-full px-2 py-1.5 rounded-lg bg-surface-700 border border-surface-600 text-xs text-slate-300 focus:outline-none focus:border-brand-500/60">
+                {REVIEW_TAG_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </div>
+            <div className="space-y-1">
+              <label className="text-[10px] text-slate-500 uppercase tracking-wide">Tone</label>
+              <div className="flex gap-1.5 pt-0.5">
+                <button type="button"
+                  onClick={() => setNewTag((p) => ({ ...p, positive: true }))}
+                  className={cn('px-2.5 py-1 rounded-lg border text-[10px] font-medium transition-colors',
+                    newTag.positive
+                      ? 'border-emerald-500/50 bg-emerald-500/15 text-emerald-400'
+                      : 'border-surface-600 bg-surface-700 text-slate-500 hover:text-slate-300')}>
+                  ✅ Good
+                </button>
+                <button type="button"
+                  onClick={() => setNewTag((p) => ({ ...p, positive: false }))}
+                  className={cn('px-2.5 py-1 rounded-lg border text-[10px] font-medium transition-colors',
+                    !newTag.positive
+                      ? 'border-red-500/50 bg-red-500/15 text-red-400'
+                      : 'border-surface-600 bg-surface-700 text-slate-500 hover:text-slate-300')}>
+                  ❌ Bad
+                </button>
+              </div>
+            </div>
+          </div>
+          <div className="flex gap-2 pt-1">
+            <button type="button" onClick={handleAdd} disabled={saving}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-brand-600/20 border border-brand-500/40 text-xs text-brand-300 font-medium hover:bg-brand-600/30 transition-colors disabled:opacity-40">
+              {saving ? <Loader2 size={10} className="animate-spin" /> : <Check size={10} />}
+              Add tag
+            </button>
+            <button type="button" onClick={() => { setShowAdd(false); setNewTag({ ...BLANK_TAG }); setError(null) }}
+              className="px-3 py-1.5 rounded-lg border border-surface-600 text-xs text-slate-400 hover:text-slate-200 transition-colors">
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
 
 // ── Market type colours ───────────────────────────────────────────────────
 const MARKET_COLORS: Record<string, string> = {
@@ -699,6 +921,13 @@ export function ProfilesPage() {
               onDelete={() => setDeleteTarget(p)}
             />
           ))}
+        </div>
+      )}
+
+      {/* ── Review Tags (active profile) ────────────────────────────── */}
+      {!loading && activeProfileId !== null && (
+        <div className="mt-8 rounded-xl border border-surface-700 bg-surface-800 px-5 py-4">
+          <ReviewTagsSection profileId={activeProfileId} />
         </div>
       )}
 
