@@ -130,6 +130,15 @@ export function TradeReviewPanel({
     existing?.reviewed_at ? new Date(existing.reviewed_at) : null,
   )
 
+  // Dirty = review fields differ from last-persisted values
+  const savedOutcome = useRef<ReviewOutcome | null>(existing?.outcome ?? null)
+  const savedTags    = useRef<string[]>(existing?.tags ?? [])
+  const savedNotes   = useRef<string>(trade.close_notes ?? '')
+  const isDirty =
+    outcome !== savedOutcome.current ||
+    JSON.stringify([...tags].sort()) !== JSON.stringify([...savedTags.current].sort()) ||
+    closeNotes !== savedNotes.current
+
   const initialised = useRef(false)
   const saveTimer   = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -146,6 +155,8 @@ export function TradeReviewPanel({
             note: null,
           })
           onUpdated(updated)
+          savedOutcome.current = nextOutcome
+          savedTags.current = nextTags
           setSavedAt(new Date())
         } catch { /* silent — explicit Save button as fallback */ }
         finally { setSaving(false) }
@@ -182,6 +193,9 @@ export function TradeReviewPanel({
         onCloseNotesSave(),
       ])
       onUpdated(updated)
+      savedOutcome.current = outcome
+      savedTags.current = tags
+      savedNotes.current = closeNotes
       setSavedAt(new Date())
     } catch { /* silent */ }
     finally { setSaving(false) }
@@ -198,14 +212,16 @@ export function TradeReviewPanel({
         </div>
         <div className="flex items-center gap-2">
           {saving && <Loader2 size={11} className="animate-spin text-slate-500" />}
-          {!saving && savedAt && (
-            <span className="flex items-center gap-1 text-[10px] text-emerald-400/70">
+          {!saving && savedAt && !isDirty && (
+            <span className="flex items-center gap-1 text-[10px] text-emerald-400/60">
               <CheckCircle2 size={10} /> Saved
             </span>
           )}
-          {!saving && !savedAt && isClosed && (
-            <span className="text-[9px] text-slate-600 italic">auto-saves on change</span>
-          )}
+          <SaveButton
+            dirty={isDirty}
+            busy={saving || savingCloseNotes}
+            onClick={() => void handleSaveAll()}
+          />
         </div>
       </div>
 
@@ -310,16 +326,7 @@ export function TradeReviewPanel({
         {renderCloseScreenshots()}
       </div>
 
-      {/* ── Save button ──────────────────────────────────────────────── */}
-      <button
-        type="button"
-        onClick={() => void handleSaveAll()}
-        disabled={saving || savingCloseNotes}
-        className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-brand-600/25 border border-brand-500/40 text-sm font-semibold text-brand-300 hover:bg-brand-600/35 hover:border-brand-500/60 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
-      >
-        {(saving || savingCloseNotes) ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
-        Save Review
-      </button>
+
 
     </div>
   )
@@ -329,7 +336,28 @@ export function TradeReviewPanel({
 // Helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Category headline — clearly bigger than tag pills */
+/** Compact inline save button — lights up amber when dirty, muted when clean */
+function SaveButton({ dirty, busy, onClick }: { dirty: boolean; busy: boolean; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={busy || !dirty}
+      className={cn(
+        'flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold transition-all duration-200',
+        dirty && !busy
+          ? 'border-amber-500/60 bg-amber-500/15 text-amber-300 hover:bg-amber-500/25 hover:border-amber-500/80 shadow-sm shadow-amber-500/20'
+          : 'border-surface-600 bg-surface-800 text-slate-600 cursor-default',
+      )}
+    >
+      {busy
+        ? <Loader2 size={11} className="animate-spin" />
+        : <Save size={11} className={dirty ? 'text-amber-400' : 'text-slate-600'} />
+      }
+      Save
+    </button>
+  )
+}
 function CatLabel({ children }: { children: React.ReactNode }) {
   return (
     <p className="text-xs font-bold text-slate-400 tracking-wide">{children}</p>
