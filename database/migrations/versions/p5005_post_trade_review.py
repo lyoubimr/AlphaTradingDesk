@@ -22,27 +22,37 @@ depends_on = None
 
 
 def upgrade() -> None:
-    # ── trades table ───────────────────────────────────────────────────────────
-    op.add_column("trades", sa.Column("post_trade_review", JSONB, nullable=True))
+    # ── trades table — IF NOT EXISTS avoids crash if column already present ───
+    op.execute(
+        "ALTER TABLE trades ADD COLUMN IF NOT EXISTS post_trade_review JSONB"
+    )
 
     # ── review_tags_settings table ────────────────────────────────────────────
-    op.create_table(
-        "review_tags_settings",
-        sa.Column(
-            "profile_id",
-            sa.BigInteger,
-            sa.ForeignKey("profiles.id", ondelete="CASCADE"),
-            primary_key=True,
-            nullable=False,
-        ),
-        sa.Column("config", JSONB, nullable=False, server_default="{}"),
-        sa.Column(
-            "updated_at",
-            sa.DateTime(timezone=False),
-            nullable=False,
-            server_default=sa.text("NOW()"),
-        ),
-    )
+    conn = op.get_bind()
+    table_exists = conn.execute(
+        sa.text(
+            "SELECT 1 FROM information_schema.tables "
+            "WHERE table_schema = 'public' AND table_name = 'review_tags_settings'"
+        )
+    ).fetchone()
+    if not table_exists:
+        op.create_table(
+            "review_tags_settings",
+            sa.Column(
+                "profile_id",
+                sa.BigInteger,
+                sa.ForeignKey("profiles.id", ondelete="CASCADE"),
+                primary_key=True,
+                nullable=False,
+            ),
+            sa.Column("config", JSONB, nullable=False, server_default="{}"),
+            sa.Column(
+                "updated_at",
+                sa.DateTime(timezone=False),
+                nullable=False,
+                server_default=sa.text("NOW()"),
+            ),
+        )
 
 
 def downgrade() -> None:
