@@ -775,10 +775,15 @@ function ExpectancyPanel({ calc, totalProfit, pctValid, selectedStrategy, active
   const avgLossR = 1.0
 
   // ── Win-rate priority ─────────────────────────────────────────────────
-  // Level 1: selected strategy (if enough trades)
+  // Level 1: selected strategy — prefer disciplined WR (excludes strategy_broken trades)
+  // Falls back to regular WR if not enough disciplined-reviewed trades.
   const hasStratStats = selectedStrategy != null
     && selectedStrategy.trades_count >= selectedStrategy.min_trades_for_stats
     && selectedStrategy.trades_count > 0
+
+  const hasDisciplinedStats = selectedStrategy != null
+    && (selectedStrategy.disciplined_trades_count ?? 0) >= selectedStrategy.min_trades_for_stats
+    && (selectedStrategy.disciplined_trades_count ?? 0) > 0
 
   // Level 2: active profile (from profiles.win_count / trades_count)
   const profileTrades = activeProfile.trades_count
@@ -797,7 +802,9 @@ function ExpectancyPanel({ calc, totalProfit, pctValid, selectedStrategy, active
     : 'fallback'
 
   const winRate: number = wrSource === 'strategy'
-    ? selectedStrategy!.win_count / selectedStrategy!.trades_count
+    ? hasDisciplinedStats
+      ? selectedStrategy!.disciplined_win_count / selectedStrategy!.disciplined_trades_count
+      : selectedStrategy!.win_count / selectedStrategy!.trades_count
     : wrSource === 'profile'
       ? profileWins / profileTrades
       : wrSource === 'global'
@@ -805,7 +812,9 @@ function ExpectancyPanel({ calc, totalProfit, pctValid, selectedStrategy, active
         : DEFAULT_WIN_RATE
 
   const winRateSourceLabel: string = wrSource === 'strategy'
-    ? `${selectedStrategy!.name} (${selectedStrategy!.trades_count} trades)`
+    ? hasDisciplinedStats
+      ? `${selectedStrategy!.name} — disciplined (${selectedStrategy!.disciplined_trades_count} trades ✓)`
+      : `${selectedStrategy!.name} (${selectedStrategy!.trades_count} trades)`
     : wrSource === 'profile'
       ? `${activeProfile.name} profile (${profileTrades} trades)`
       : wrSource === 'global'
