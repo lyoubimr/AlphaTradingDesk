@@ -1,9 +1,10 @@
 // ── TradeReviewPanel ──────────────────────────────────────────────────────
 // Merged post-trade review widget: outcome selector, per-strategy compliance,
-// tag badges (with emojis), review note, close notes, close screenshots.
+// tag badges (with emojis), notes, close screenshots.
 //
-// Saves review (outcome/tags/note) with 800ms auto-save debounce + explicit
-// "Save Review" button that also persists close_notes in one action.
+// Auto-saves outcome+tags on change (debounced 800ms, ref-stable to avoid
+// flickering caused by parent inline function references).
+// "Save Review" button persists close_notes + review in one action.
 
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { Loader2, CheckCircle2, Save } from 'lucide-react'
@@ -91,14 +92,14 @@ export interface StrategyRef {
 
 interface Props {
   trade: TradeOut
-  strategies: StrategyRef[]                // strategies linked to this trade (resolved)
+  strategies: StrategyRef[]
   onUpdated: (updated: TradeOut) => void
-  // ── Merged close notes ─────────────────────────────────────────────────
+  // ── Notes (close_notes column) ─────────────────────────────────────────
   closeNotes: string
   onCloseNotesChange: (v: string) => void
   onCloseNotesSave: () => Promise<void>
   savingCloseNotes: boolean
-  // ── Close screenshots rendered by parent (SnapshotGallery) ────────────
+  // ── Close screenshots rendered by parent ──────────────────────────────
   renderCloseScreenshots: () => React.ReactNode
 }
 
@@ -124,17 +125,17 @@ export function TradeReviewPanel({
     existing?.outcome ?? (isClosed ? (suggested ?? null) : null),
   )
   const [tags, setTags] = useState<string[]>(existing?.tags ?? [])
-  const [note, setNote] = useState<string>(existing?.note ?? '')
   const [saving, setSaving] = useState(false)
   const [savedAt, setSavedAt] = useState<Date | null>(
     existing?.reviewed_at ? new Date(existing.reviewed_at) : null,
   )
 
   const initialised = useRef(false)
-  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const saveTimer   = useRef<ReturnType<typeof setTimeout> | null>(null)
 
+  // ── Stable save fn — ref pattern prevents parent re-render flickering ──
   const triggerSave = useCallback(
-    (nextOutcome: ReviewOutcome | null, nextTags: string[], nextNote: string) => {
+    (nextOutcome: ReviewOutcome | null, nextTags: string[]) => {
       if (saveTimer.current) clearTimeout(saveTimer.current)
       saveTimer.current = setTimeout(async () => {
         setSaving(true)
@@ -142,35 +143,32 @@ export function TradeReviewPanel({
           const updated = await tradesApi.saveReview(trade.id, {
             outcome: nextOutcome,
             tags: nextTags,
-            note: nextNote || null,
+            note: null,
           })
           onUpdated(updated)
           setSavedAt(new Date())
-        } catch {
-          // Silently ignore — user can retry via explicit save button
-        } finally {
-          setSaving(false)
-        }
+        } catch { /* silent — explicit Save button as fallback */ }
+        finally { setSaving(false) }
       }, 800)
     },
     [trade.id, onUpdated],
   )
+  // Keep the ref always fresh without making it a dep in the data-change effect
+  const triggerSaveRef = useRef(triggerSave)
+  useEffect(() => { triggerSaveRef.current = triggerSave }, [triggerSave])
 
   useEffect(() => {
     if (!initialised.current) { initialised.current = true; return }
-    if (isClosed) triggerSave(outcome, tags, note)
-  }, [outcome, tags, note, triggerSave, isClosed])
+    if (isClosed) triggerSaveRef.current(outcome, tags)
+  }, [outcome, tags, isClosed])
 
   function toggleTag(key: string) {
     setTags((prev) => prev.includes(key) ? prev.filter((t) => t !== key) : [...prev, key])
   }
 
-  // Tag key for per-strategy compliance: strategy_respected_<id>
+  // Per-strategy compliance stored as `strategy_respected_<id>` in tags array
   function strategyTagKey(sid: number) { return `strategy_respected_${sid}` }
-  // Backward compat: also check legacy generic tag
-  function isStrategyRespected(sid: number) {
-    return tags.includes(strategyTagKey(sid))
-  }
+  function isStrategyRespected(sid: number) { return tags.includes(strategyTagKey(sid)) }
   function toggleStrategyRespected(sid: number) {
     const key = strategyTagKey(sid)
     setTags((prev) => prev.includes(key) ? prev.filter((t) => t !== key) : [...prev, key])
@@ -180,16 +178,13 @@ export function TradeReviewPanel({
     setSaving(true)
     try {
       const [updated] = await Promise.all([
-        tradesApi.saveReview(trade.id, { outcome, tags, note: note || null }),
+        tradesApi.saveReview(trade.id, { outcome, tags, note: null }),
         onCloseNotesSave(),
       ])
       onUpdated(updated)
       setSavedAt(new Date())
-    } catch {
-      // ignore — user can see the auto-save fallback
-    } finally {
-      setSaving(false)
-    }
+    } catch { /* silent */ }
+    finally { setSaving(false) }
   }
 
   return (
@@ -218,7 +213,7 @@ export function TradeReviewPanel({
         <>
           {/* ── Outcome selector ──────────────────────────────────────── */}
           <div className="space-y-2">
-            <SectionLabel>🏆 Outcome</SectionLabel>
+            <CatLabel>🏆 Outcome</CatLabel>
             <div className="grid grid-cols-4 gap-1.5">
               {OUTCOMES.map((o) => {
                 const active = outcome === o.key
@@ -247,83 +242,71 @@ export function TradeReviewPanel({
             </div>
           </div>
 
-          {/* ── Strategy compliance ───────────────────────────────────── */}
-          {strategies.length > 0 && (
-            <div className="space-y-2">
-              <SectionLabel>📊 Strategy compliance</SectionLabel>
-              <div className="flex flex-wrap gap-2">
-                {strategies.map((s) => {
-                  const respected = isStrategyRespected(s.id)
-                  return (
-                    <button
-                      key={s.id}
-                      type="button"
-                      onClick={() => toggleStrategyRespected(s.id)}
-                      className={cn(
-                        'flex items-center gap-2 rounded-lg border px-3 py-2 text-xs font-medium transition-all duration-150',
-                        respected
-                          ? 'border-emerald-500/50 bg-emerald-500/10 text-emerald-400'
-                          : 'border-surface-600 bg-surface-800/60 text-slate-500 hover:border-surface-500 hover:text-slate-400',
-                      )}
-                    >
-                      <span>{s.emoji ?? '📌'}</span>
-                      <span>{s.name}</span>
-                      <span className={cn(
-                        'ml-1 rounded-full px-1.5 py-0 text-[9px] font-bold border',
-                        respected
-                          ? 'border-emerald-500/50 bg-emerald-500/20 text-emerald-300'
-                          : 'border-surface-600 bg-surface-700 text-slate-600',
-                      )}>
-                        {respected ? '✓' : '✗'}
-                      </span>
-                    </button>
-                  )
-                })}
-              </div>
-            </div>
-          )}
-
-          {/* ── Execution tags ────────────────────────────────────────── */}
-          <div className="space-y-3">
-            <TagSection title="⚙️ Execution" tags={EXECUTION_TAGS} active={tags} onToggle={toggleTag} />
-            <TagSection title="🧠 Psychology" tags={PSYCHOLOGY_TAGS} active={tags} onToggle={toggleTag} />
-            <TagSection title="🌍 Market"    tags={MARKET_TAGS}     active={tags} onToggle={toggleTag} />
-          </div>
-
-          {/* ── Review note ───────────────────────────────────────────── */}
-          <div className="space-y-1.5">
-            <SectionLabel>✏️ Review note</SectionLabel>
-            <textarea
-              value={note}
-              onChange={(e) => setNote(e.target.value)}
-              rows={3}
-              placeholder="Key lesson, what would you change, would you take it again…"
-              className="w-full rounded-lg border border-surface-700 bg-surface-900/60 px-3 py-2 text-xs text-slate-300 placeholder-slate-600 resize-none focus:border-brand-500/60 focus:outline-none focus:ring-1 focus:ring-brand-500/20 transition-colors"
-            />
+          {/* ── Tags (Execution / Psychology / Market) ────────────────── */}
+          <div className="space-y-4">
+            <TagSection title="⚙️ Execution"   tags={EXECUTION_TAGS}  active={tags} onToggle={toggleTag} />
+            <TagSection title="🧠 Psychology"  tags={PSYCHOLOGY_TAGS} active={tags} onToggle={toggleTag} />
+            <TagSection title="🌍 Market"      tags={MARKET_TAGS}     active={tags} onToggle={toggleTag} />
           </div>
         </>
       ) : (
-        <p className="text-[11px] text-slate-600 italic">Review available after closing the trade.</p>
+        <p className="text-[11px] text-slate-600 italic">Outcome &amp; tags available after closing.</p>
+      )}
+
+      {/* ── Strategy compliance (all statuses — as soon as trade has strategies) */}
+      {strategies.length > 0 && (
+        <div className="space-y-2">
+          <CatLabel>📊 Strategy respected</CatLabel>
+          <div className="flex flex-wrap gap-2">
+            {strategies.map((s) => {
+              const respected = isStrategyRespected(s.id)
+              return (
+                <button
+                  key={s.id}
+                  type="button"
+                  onClick={() => toggleStrategyRespected(s.id)}
+                  className={cn(
+                    'flex items-center gap-2 rounded-lg border px-3 py-2 text-xs font-medium transition-all duration-150',
+                    respected
+                      ? 'border-emerald-500/50 bg-emerald-500/10 text-emerald-400'
+                      : 'border-surface-600 bg-surface-800/60 text-slate-500 hover:border-surface-500 hover:text-slate-400',
+                  )}
+                >
+                  <span>{s.emoji ?? '📌'}</span>
+                  <span>{s.name}</span>
+                  <span className={cn(
+                    'ml-1 rounded-full w-5 h-5 flex items-center justify-center text-[10px] font-bold border',
+                    respected
+                      ? 'border-emerald-500/50 bg-emerald-500/20 text-emerald-300'
+                      : 'border-surface-600 bg-surface-700 text-slate-600',
+                  )}>
+                    {respected ? '✓' : '✗'}
+                  </span>
+                </button>
+              )
+            })}
+          </div>
+        </div>
       )}
 
       {/* ── Divider ──────────────────────────────────────────────────── */}
       <div className="border-t border-surface-700/50" />
 
-      {/* ── Close notes ──────────────────────────────────────────────── */}
+      {/* ── Notes (close_notes — the one and only post-trade note) ──────── */}
       <div className="space-y-1.5">
-        <SectionLabel>📝 Close notes</SectionLabel>
+        <CatLabel>📝 Notes</CatLabel>
         <textarea
           value={closeNotes}
           onChange={(e) => onCloseNotesChange(e.target.value)}
           rows={4}
-          placeholder="What happened? Key lessons? Would you take this again?"
+          placeholder="What happened? Key lesson, would you take it again…"
           className="w-full rounded-lg border border-surface-700 bg-surface-900/60 px-3 py-2 text-xs text-slate-300 placeholder-slate-600 resize-none focus:border-brand-500/60 focus:outline-none focus:ring-1 focus:ring-brand-500/20 transition-colors"
         />
       </div>
 
-      {/* ── Close screenshots (rendered by parent) ────────────────────── */}
+      {/* ── Close screenshots ────────────────────────────────────────── */}
       <div className="space-y-2">
-        <SectionLabel>📸 Close screenshots</SectionLabel>
+        <CatLabel>📸 Screenshots</CatLabel>
         {renderCloseScreenshots()}
       </div>
 
@@ -334,10 +317,7 @@ export function TradeReviewPanel({
         disabled={saving || savingCloseNotes}
         className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-brand-600/25 border border-brand-500/40 text-sm font-semibold text-brand-300 hover:bg-brand-600/35 hover:border-brand-500/60 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
       >
-        {(saving || savingCloseNotes)
-          ? <Loader2 size={14} className="animate-spin" />
-          : <Save size={14} />
-        }
+        {(saving || savingCloseNotes) ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
         Save Review
       </button>
 
@@ -349,9 +329,10 @@ export function TradeReviewPanel({
 // Helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
-function SectionLabel({ children }: { children: React.ReactNode }) {
+/** Category headline — clearly bigger than tag pills */
+function CatLabel({ children }: { children: React.ReactNode }) {
   return (
-    <p className="text-[10px] uppercase tracking-widest text-slate-500 font-semibold">{children}</p>
+    <p className="text-xs font-bold text-slate-400 tracking-wide">{children}</p>
   )
 }
 
@@ -364,8 +345,8 @@ interface TagSectionProps {
 
 function TagSection({ title, tags, active, onToggle }: TagSectionProps) {
   return (
-    <div className="space-y-1.5">
-      <p className="text-[9px] uppercase tracking-widest text-slate-600 font-semibold">{title}</p>
+    <div className="space-y-2">
+      <p className="text-xs font-bold text-slate-400 tracking-wide">{title}</p>
       <div className="flex flex-wrap gap-1.5">
         {tags.map((tag) => {
           const isActive = active.includes(tag.key)
