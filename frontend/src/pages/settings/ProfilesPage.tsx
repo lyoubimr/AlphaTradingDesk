@@ -12,6 +12,8 @@ import { PageHeader } from '../../components/ui/PageHeader'
 import { useProfile } from '../../context/ProfileContext'
 import { profilesApi, brokersApi, reviewTagsApi } from '../../lib/api'
 import type { CustomTagDef, ReviewTagsConfig } from '../../lib/api'
+import { EXECUTION_TAGS, PSYCHOLOGY_TAGS, MARKET_TAGS } from '../../components/trades/reviewTagDefs'
+import type { TagDef } from '../../components/trades/reviewTagDefs'
 import { cn } from '../../lib/cn'
 import type { Profile, ProfileCreate, ProfileUpdate, Broker } from '../../types/api'
 
@@ -22,7 +24,17 @@ type ReviewTagCategory = typeof REVIEW_TAG_CATEGORIES[number]
 const BLANK_TAG: Omit<CustomTagDef, 'key'> & { key: string } = {
   key: '', label: '', category: 'execution', positive: true,
 }
+const BUILTIN_BY_CATEGORY: Record<ReviewTagCategory, TagDef[]> = {
+  execution: EXECUTION_TAGS,
+  psychology: PSYCHOLOGY_TAGS,
+  market: MARKET_TAGS,
+}
 
+const CATEGORY_LABELS: Record<ReviewTagCategory, string> = {
+  execution: '⚙️ Execution',
+  psychology: '🧠 Psychology',
+  market: '🌍 Market',
+}
 function ReviewTagsSection({ profileId }: { profileId: number }) {
   const [config, setConfig]   = useState<ReviewTagsConfig | null>(null)
   const [loading, setLoading] = useState(false)
@@ -77,18 +89,18 @@ function ReviewTagsSection({ profileId }: { profileId: number }) {
   )
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div>
           <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide">📋 Review tags — post-trade badges</p>
           <p className="text-[11px] text-slate-600 mt-0.5">
-            Custom tags appear in the post-trade review badge grid alongside the defaults.
+            Tags used in the post-trade review. Built-in tags are fixed; add custom tags below.
           </p>
         </div>
         {!showAdd && (
           <button type="button" onClick={() => setShowAdd(true)}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-surface-700 border border-surface-600 text-xs text-slate-400 hover:text-slate-200 hover:border-surface-500 transition-colors">
-            <Plus size={11} /> Add tag
+            <Plus size={11} /> Add custom tag
           </button>
         )}
       </div>
@@ -97,30 +109,59 @@ function ReviewTagsSection({ profileId }: { profileId: number }) {
         <p className="text-xs text-red-400 rounded-lg bg-red-500/10 border border-red-500/20 px-3 py-2">{error}</p>
       )}
 
-      {(config?.custom_tags.length ?? 0) === 0 && !showAdd && (
-        <p className="text-xs text-slate-600 italic">No custom tags yet. Click “Add tag” to create one.</p>
-      )}
-      <div className="space-y-1.5">
-        {config?.custom_tags.map((tag) => (
-          <div key={tag.key} className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg bg-surface-700 border border-surface-600">
-            <div className="flex items-center gap-2 min-w-0">
-              <span className={cn(
-                'rounded-full px-2 py-0.5 text-[10px] font-medium border',
-                tag.positive
-                  ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400'
-                  : 'border-red-500/40 bg-red-500/10 text-red-400',
-              )}>
-                {tag.label}
-              </span>
-              <span className="text-[9px] text-slate-600 font-mono">{tag.key}</span>
-              <span className="text-[9px] text-slate-600">{tag.category}</span>
+      {/* ── Built-in tags (read-only) ── */}
+      <div className="space-y-3">
+        {REVIEW_TAG_CATEGORIES.map((cat) => (
+          <div key={cat}>
+            <p className="text-[10px] text-slate-600 uppercase tracking-wide mb-1.5">{CATEGORY_LABELS[cat]}</p>
+            <div className="flex flex-wrap gap-1.5">
+              {BUILTIN_BY_CATEGORY[cat].map((tag) => (
+                <span key={tag.key} className={cn(
+                  'inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[10px] font-medium border select-none',
+                  tag.positive
+                    ? 'border-emerald-500/30 bg-emerald-500/[0.08] text-emerald-400/70'
+                    : 'border-red-500/30 bg-red-500/[0.08] text-red-400/70',
+                )}>
+                  {tag.emoji} {tag.label}
+                  <span className="ml-0.5 text-[8px] text-slate-600 font-mono">built-in</span>
+                </span>
+              ))}
             </div>
-            <button type="button" onClick={() => handleDelete(tag.key)} disabled={saving}
-              className="text-slate-600 hover:text-red-400 transition-colors disabled:opacity-40 shrink-0">
-              <Trash2 size={11} />
-            </button>
           </div>
         ))}
+      </div>
+
+      {/* ── Custom tags ── */}
+      <div className="space-y-2">
+        <div className="flex items-center gap-2">
+          <p className="text-[10px] text-slate-500 uppercase tracking-wide">Custom tags</p>
+          <div className="flex-1 h-px bg-surface-700" />
+        </div>
+        {(config?.custom_tags.length ?? 0) === 0 && !showAdd && (
+          <p className="text-xs text-slate-600 italic">No custom tags yet — click “Add custom tag” to create one.</p>
+        )}
+        <div className="space-y-1.5">
+          {config?.custom_tags.map((tag) => (
+            <div key={tag.key} className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg bg-surface-700 border border-surface-600">
+              <div className="flex items-center gap-2 min-w-0">
+                <span className={cn(
+                  'rounded-full px-2 py-0.5 text-[10px] font-medium border',
+                  tag.positive
+                    ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400'
+                    : 'border-red-500/40 bg-red-500/10 text-red-400',
+                )}>
+                  {tag.label}
+                </span>
+                <span className="text-[9px] text-slate-600 font-mono">{tag.key}</span>
+                <span className="text-[9px] text-slate-500 capitalize">{tag.category}</span>
+              </div>
+              <button type="button" onClick={() => handleDelete(tag.key)} disabled={saving}
+                className="text-slate-600 hover:text-red-400 transition-colors disabled:opacity-40 shrink-0">
+                <Trash2 size={11} />
+              </button>
+            </div>
+          ))}
+        </div>
       </div>
 
       {showAdd && (

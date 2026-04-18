@@ -11,37 +11,8 @@ import { Loader2, CheckCircle2, Save } from 'lucide-react'
 import { tradesApi } from '../../lib/api'
 import { cn } from '../../lib/cn'
 import type { TradeOut, ReviewOutcome } from '../../types/api'
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Static tag definitions — with emojis
-// ─────────────────────────────────────────────────────────────────────────────
-
-interface TagDef {
-  key: string
-  emoji: string
-  label: string
-  positive: boolean
-}
-
-// strategy_respected is handled separately via per-strategy compliance section
-const EXECUTION_TAGS: TagDef[] = [
-  { key: 'good_entry',  emoji: '✅', label: 'Good entry',   positive: true  },
-  { key: 'good_sl',     emoji: '🛡️', label: 'Good SL',     positive: true  },
-  { key: 'early_exit',  emoji: '⏩', label: 'Early exit',   positive: false },
-  { key: 'late_exit',   emoji: '⏰', label: 'Late exit',    positive: false },
-  { key: 'sl_be_early', emoji: '⚡', label: 'BE too early', positive: false },
-]
-
-const PSYCHOLOGY_TAGS: TagDef[] = [
-  { key: 'fomo',        emoji: '😱', label: 'FOMO',          positive: false },
-  { key: 'revenge',     emoji: '😤', label: 'Revenge trade', positive: false },
-  { key: 'rule_broken', emoji: '🚫', label: 'Rule broken',   positive: false },
-]
-
-const MARKET_TAGS: TagDef[] = [
-  { key: 'weekend_scam', emoji: '🎰', label: 'Weekend scam', positive: false },
-  { key: 'news_impact',  emoji: '📰', label: 'News impact',  positive: false },
-]
+import { EXECUTION_TAGS, PSYCHOLOGY_TAGS, MARKET_TAGS } from './reviewTagDefs'
+import type { TagDef } from './reviewTagDefs'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Outcome selector
