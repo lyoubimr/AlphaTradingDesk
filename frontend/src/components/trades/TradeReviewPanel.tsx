@@ -144,8 +144,19 @@ export function TradeReviewPanel({
     if (isClosed) triggerSaveRef.current(outcome, tags)
   }, [outcome, tags, isClosed])
 
-  function toggleTag(key: string) {
-    setTags((prev) => prev.includes(key) ? prev.filter((t) => t !== key) : [...prev, key])
+  function handleTagToggle(tag: TagDef) {
+    setTags((prev) => {
+      if (tag.mode === 'tri-state') {
+        const hasGood = prev.includes(tag.key)
+        const hasBad  = tag.badKey ? prev.includes(tag.badKey) : false
+        const without = prev.filter((t) => t !== tag.key && t !== (tag.badKey ?? '__never__'))
+        if (!hasGood && !hasBad) return [...without, tag.key]  // null → good
+        if (hasGood) return [...without, tag.badKey!]          // good → bad
+        return without                                          // bad → null
+      }
+      // flag: simple toggle
+      return prev.includes(tag.key) ? prev.filter((t) => t !== tag.key) : [...prev, tag.key]
+    })
   }
 
   // Per-strategy compliance: 2 states — respected (default) / broken
@@ -286,9 +297,9 @@ export function TradeReviewPanel({
 
       {/* ── Tags — toujours visibles (FOMO/Rule broken s'appliquent à tout moment) */}
       <div className="space-y-4">
-        <TagSection title="⚙️ Execution"  tags={EXECUTION_TAGS}  active={tags} onToggle={toggleTag} />
-        <TagSection title="🧠 Psychology" tags={PSYCHOLOGY_TAGS} active={tags} onToggle={toggleTag} />
-        <TagSection title="🌍 Market"     tags={MARKET_TAGS}     active={tags} onToggle={toggleTag} />
+        <TagSection title="⚙️ Execution"  tags={EXECUTION_TAGS}  active={tags} onToggle={handleTagToggle} />
+        <TagSection title="🧠 Psychology" tags={PSYCHOLOGY_TAGS} active={tags} onToggle={handleTagToggle} />
+        <TagSection title="🌍 Market"     tags={MARKET_TAGS}     active={tags} onToggle={handleTagToggle} />
       </div>
 
       {/* ── Divider ──────────────────────────────────────────────────── */}
@@ -354,47 +365,54 @@ interface TagSectionProps {
   title: string
   tags: TagDef[]
   active: string[]
-  onToggle: (key: string) => void
+  onToggle: (tag: TagDef) => void
 }
 
 function TagSection({ title, tags, active, onToggle }: TagSectionProps) {
-  const goodBadTags = tags.filter((t) => t.mode === 'good-bad')
-  const flagTags    = tags.filter((t) => t.mode !== 'good-bad')
+  const triStateTags = tags.filter((t) => t.mode === 'tri-state')
+  const flagTags     = tags.filter((t) => t.mode !== 'tri-state')
+
+  function getTriState(tag: TagDef): 'null' | 'good' | 'bad' {
+    if (active.includes(tag.key)) return 'good'
+    if (tag.badKey && active.includes(tag.badKey)) return 'bad'
+    return 'null'
+  }
+
   return (
     <div className="space-y-2">
       <p className="text-xs font-bold text-slate-400 tracking-wide">{title}</p>
 
-      {/* Good-bad: always-ON toggles (default = good ✓) */}
-      {goodBadTags.length > 0 && (
+      {/* Tri-state: null ? → good ✓ → bad ✗ → null */}
+      {triStateTags.length > 0 && (
         <div className="flex flex-wrap gap-2">
-          {goodBadTags.map((tag) => {
-            const isBad = active.includes(tag.badKey!)
+          {triStateTags.map((tag) => {
+            const state = getTriState(tag)
             return (
               <button
                 key={tag.key}
                 type="button"
-                onClick={() => onToggle(tag.badKey!)}
+                onClick={() => onToggle(tag)}
                 title={
-                  isBad
-                    ? (tag.badDesc  ?? `${tag.label} ✗ — cliquer pour marquer comme bon`)
-                    : (tag.goodDesc ?? `${tag.label} ✓ — cliquer pour marquer comme mauvais`)
+                  state === 'null' ? (tag.nullDesc ?? `${tag.label} — non évalué`) :
+                  state === 'good' ? (tag.goodDesc ?? `${tag.label} ✓`) :
+                                     (tag.badDesc  ?? `${tag.label} ✗`)
                 }
                 className={cn(
                   'flex items-center gap-2 rounded-lg border px-3 py-2 text-xs font-medium transition-all duration-150',
-                  isBad
-                    ? 'border-red-500/50 bg-red-500/10 text-red-400'
-                    : 'border-emerald-500/50 bg-emerald-500/10 text-emerald-400',
+                  state === 'good' ? 'border-emerald-500/50 bg-emerald-500/10 text-emerald-400' :
+                  state === 'bad'  ? 'border-red-500/50 bg-red-500/10 text-red-400' :
+                                     'border-surface-600 bg-surface-800/60 text-slate-500 hover:border-surface-500 hover:text-slate-400',
                 )}
               >
                 <span>{tag.emoji}</span>
                 <span>{tag.label}</span>
                 <span className={cn(
                   'ml-1 rounded-full w-5 h-5 flex items-center justify-center text-[10px] font-bold border',
-                  isBad
-                    ? 'border-red-500/50 bg-red-500/20 text-red-300'
-                    : 'border-emerald-500/50 bg-emerald-500/20 text-emerald-300',
+                  state === 'good' ? 'border-emerald-500/50 bg-emerald-500/20 text-emerald-300' :
+                  state === 'bad'  ? 'border-red-500/50 bg-red-500/20 text-red-300' :
+                                     'border-surface-600 bg-surface-700 text-slate-600',
                 )}>
-                  {isBad ? '✗' : '✓'}
+                  {state === 'good' ? '✓' : state === 'bad' ? '✗' : '?'}
                 </span>
               </button>
             )
@@ -411,7 +429,7 @@ function TagSection({ title, tags, active, onToggle }: TagSectionProps) {
               <button
                 key={tag.key}
                 type="button"
-                onClick={() => onToggle(tag.key)}
+                onClick={() => onToggle(tag)}
                 title={tag.description}
                 className={cn(
                   'flex items-center gap-1.5 rounded-full border px-3 py-1 text-[11px] font-medium transition-all duration-150',

@@ -6,13 +6,19 @@ export interface TagDef {
   emoji: string
   label: string
   positive: boolean
-  /** 'good-bad': always-ON toggle (default = good). Only `badKey` stored when bad. */
-  mode?: 'flag' | 'good-bad'
-  /** Stored tag when quality is BAD (only for mode='good-bad') */
+  /**
+   * 'tri-state': null → good (key stored) → bad (badKey stored) → null
+   * 'flag': binary, off → on (key stored) — for events that either happened or didn't
+   * default: 'flag'
+   */
+  mode?: 'flag' | 'tri-state'
+  /** Stored tag when quality is BAD (tri-state only) */
   badKey?: string
-  /** Tooltip shown when state is GOOD (mode='good-bad') */
+  /** Tooltip when tri-state is null (not yet evaluated) */
+  nullDesc?: string
+  /** Tooltip when tri-state is good */
   goodDesc?: string
-  /** Tooltip shown when state is BAD (mode='good-bad') */
+  /** Tooltip when tri-state is bad */
   badDesc?: string
   /** Tooltip for flag tags */
   description?: string
@@ -20,19 +26,22 @@ export interface TagDef {
 
 export const EXECUTION_TAGS: TagDef[] = [
   {
-    key: 'good_entry', emoji: '✅', label: 'Entry', positive: true, mode: 'good-bad', badKey: 'bad_entry',
+    key: 'good_entry', emoji: '✅', label: 'Entry', positive: true, mode: 'tri-state', badKey: 'bad_entry',
+    nullDesc: 'Entry non évalué — cliquer pour marquer',
     goodDesc: 'Good entry — precise timing, clean execution at the right level',
     badDesc:  'Bad entry — rushed, late, or at wrong price level',
   },
   {
-    key: 'good_sl', emoji: '🛡️', label: 'Stop Loss', positive: true, mode: 'good-bad', badKey: 'bad_sl',
+    key: 'good_sl', emoji: '🛡️', label: 'Stop Loss', positive: true, mode: 'tri-state', badKey: 'bad_sl',
+    nullDesc: 'SL non évalué — cliquer pour marquer',
     goodDesc: 'Good SL — logical, well-placed stop loss below/above key level',
     badDesc:  'Bad SL — too tight, too wide, or poorly placed',
   },
   {
-    key: 'smart_exit', emoji: '⏩', label: 'Early exit', positive: true, mode: 'good-bad', badKey: 'early_exit',
-    goodDesc: 'Smart early exit — intentional (cut loss, closed at logical level)',
-    badDesc:  'Bad early exit — undisciplined, FOMO or panic exit',
+    key: 'smart_exit', emoji: '⏩', label: 'Early exit', positive: true, mode: 'tri-state', badKey: 'early_exit',
+    nullDesc: 'Exit timing N/A — cliquer si applicable (laisser vide si full TP atteint)',
+    goodDesc: 'Smart early exit — intentional cut of loss or logical level close',
+    badDesc:  'Bad early exit — undisciplined, panic or FOMO exit',
   },
   { key: 'late_exit',   emoji: '⏰', label: 'Late exit',    positive: false, description: 'Closed too late — missed the optimal exit window' },
   { key: 'sl_be_early', emoji: '⚡', label: 'BE too early', positive: false, description: 'Moved stop to break-even too soon and got stopped out prematurely' },
