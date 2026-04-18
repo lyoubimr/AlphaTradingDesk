@@ -63,7 +63,8 @@ def list_strategies(
     else:
         q = q.filter(Strategy.profile_id.is_(None))
 
-    return q.order_by(Strategy.profile_id.is_(None).desc(), Strategy.name).all()
+    strategies = q.order_by(Strategy.profile_id.is_(None).desc(), Strategy.name).all()
+    return profile_service.enrich_strategies_disciplined(db, strategies)
 
 
 @router.post("", response_model=StrategyOut, status_code=status.HTTP_201_CREATED)

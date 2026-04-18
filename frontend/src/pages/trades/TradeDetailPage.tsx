@@ -17,6 +17,7 @@ import {
   ImagePlus, Maximize2, Columns2,
 } from 'lucide-react'
 import { PageHeader } from '../../components/ui/PageHeader'
+import { TradeReviewPanel } from '../../components/trades/TradeReviewPanel'
 import { tradesApi, strategiesApi, automationApi } from '../../lib/api'
 import { KrakenOrdersPanel } from '../../components/automation/KrakenOrdersPanel'
 import { cn } from '../../lib/cn'
@@ -1179,6 +1180,9 @@ export function TradeDetailPage() {
   const [strategies, setStrategies] = useState<Strategy[]>([])
   const strategyMap = useMemo(() => new Map(strategies.map((s) => [s.id, s])), [strategies])
 
+  // Post-close review banner (dismissed per session via local state)
+  const [bannerDismissed, setBannerDismissed]   = useState(false)
+
   // Modal state
   const [showCloseAll, setShowCloseAll]         = useState(false)
   const [showEditTrade, setShowEditTrade]        = useState(false)
@@ -1467,6 +1471,24 @@ export function TradeDetailPage() {
               <span className="font-semibold">Waiting for LIMIT fill on Kraken.</span>{' '}
               Checking every 15 s — SL/TP will be placed automatically once the entry is filled.
               Do not manually activate this trade.
+            </div>
+          </div>
+        )}
+
+        {/* ── Post-close review nudge banner ──────────────────────────── */}
+        {isClosed && !trade.post_trade_review?.reviewed && !bannerDismissed && (
+          <div className="flex items-center justify-between gap-3 px-4 py-2.5 rounded-xl bg-brand-500/10 border border-brand-500/30">
+            <span className="text-xs text-brand-300">
+              📋 Trade closed — take 30 seconds to review it?
+            </span>
+            <div className="flex items-center gap-2 flex-shrink-0">
+              <a href="#trade-review" className="text-xs font-medium text-brand-400 hover:text-brand-300 transition-colors">
+                Review ↓
+              </a>
+              <button type="button" onClick={() => setBannerDismissed(true)}
+                className="text-[10px] text-slate-500 hover:text-slate-400 transition-colors">
+                Later
+              </button>
             </div>
           </div>
         )}
@@ -2070,11 +2092,24 @@ export function TradeDetailPage() {
           </div>
         </div>
 
+        {/* ── Post-trade review (badge grid + outcome selector) */}
+        {(isClosed || trade.status === 'runner') && (
+          <div id="trade-review" className="bg-surface-800 rounded-xl border border-surface-700 p-5">
+            <TradeReviewPanel
+              trade={trade}
+              onUpdated={(updated) => {
+                setTrade(updated)
+                setCloseNotesValue(updated.close_notes ?? '')
+              }}
+            />
+          </div>
+        )}
+
         {/* ── Close notes + screenshots (always editable — post-trade review) */}
         <div className="bg-surface-800 rounded-xl border border-surface-700 p-5 space-y-3">
           <div className="flex items-center justify-between">
             <p className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold">
-              🔍 Post-trade review
+              📝 Notes &amp; screenshots
             </p>
             {!editingCloseNotes && !isReadOnly && (
               <button type="button" onClick={() => setEditingCloseNotes(true)}

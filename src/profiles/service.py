@@ -10,6 +10,7 @@ import os
 import uuid
 
 from fastapi import HTTPException, UploadFile, status
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from src.core.config import settings
@@ -193,6 +194,56 @@ def list_strategies(db: Session, profile_id: int) -> list[Strategy]:
         .order_by(Strategy.name)
         .all()
     )
+
+
+def enrich_strategies_disciplined(db: Session, strategies: list[Strategy]) -> list[Strategy]:
+    """Attach disciplined_win_count and disciplined_trades_count to each Strategy object.
+
+    Disciplined WR logic:
+    - Trade NOT reviewed (post_trade_review IS NULL or reviewed != true) → INCLUDED
+    - Trade reviewed AND strategy_respected in tags → INCLUDED
+    - Trade reviewed AND strategy_respected NOT in tags → EXCLUDED
+
+    Attaches Python attributes directly onto the ORM objects so Pydantic
+    StrategyOut (from_attributes=True) picks them up seamlessly.
+    """
+    if not strategies:
+        return strategies
+
+    ids = [s.id for s in strategies]
+
+    # One query for all strategies — avoids N+1
+    rows = db.execute(
+        text("""
+            SELECT
+                ts.strategy_id,
+                COUNT(t.id)                                              AS disciplined_trades_count,
+                SUM(CASE WHEN t.realized_pnl > 0 THEN 1 ELSE 0 END)    AS disciplined_win_count
+            FROM trade_strategies ts
+            JOIN trades t ON t.id = ts.trade_id
+            WHERE ts.strategy_id = ANY(:ids)
+              AND t.status = 'closed'
+              AND (
+                  t.post_trade_review IS NULL
+                  OR (t.post_trade_review->>'reviewed')::boolean IS NOT TRUE
+                  OR (t.post_trade_review->'tags' ? 'strategy_respected')
+              )
+            GROUP BY ts.strategy_id
+        """),
+        {"ids": ids},
+    ).fetchall()
+
+    counts: dict[int, tuple[int, int]] = {
+        row.strategy_id: (int(row.disciplined_trades_count), int(row.disciplined_win_count))
+        for row in rows
+    }
+
+    for s in strategies:
+        dtc, dwc = counts.get(s.id, (0, 0))
+        s.disciplined_trades_count = dtc  # type: ignore[attr-defined]
+        s.disciplined_win_count = dwc  # type: ignore[attr-defined]
+
+    return strategies
 
 
 def create_strategy(db: Session, profile_id: int, data: StrategyCreate) -> Strategy:

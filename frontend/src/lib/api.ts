@@ -7,6 +7,7 @@ import type {
   Profile, ProfileCreate, ProfileUpdate,
   Broker, Instrument, InstrumentCreate,
   TradeOpen, TradeClose, TradePartialClose, TradeUpdate, TradeListItem, TradeOut,
+  PostTradeReviewIn,
   Strategy, StrategyCreate, StrategyUpdate,
   WinRateStats,
   TradingStyle,
@@ -291,6 +292,40 @@ export const tradesApi = {
     const b64 = btoa(url).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '')
     return request(`/trades/${tradeId}/snapshots/close/${b64}`, { method: 'DELETE' })
   },
+
+  /** Save (or overwrite) a post-trade review — outcome, badge tags, and note. */
+  saveReview: (tradeId: number, data: PostTradeReviewIn): Promise<TradeOut> =>
+    request(`/trades/${tradeId}/review`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+}
+
+// ── Review Tags Settings ──────────────────────────────────────────────────
+
+export interface CustomTagDef {
+  key: string
+  label: string
+  category: 'execution' | 'psychology' | 'market'
+  positive: boolean
+}
+
+export interface ReviewTagsConfig {
+  custom_tags: CustomTagDef[]
+}
+
+export const reviewTagsApi = {
+  get: (profileId: number): Promise<{ profile_id: number; config: ReviewTagsConfig }> =>
+    request(`/trades/review-tags/settings/${profileId}`),
+
+  save: (
+    profileId: number,
+    config: ReviewTagsConfig,
+  ): Promise<{ profile_id: number; config: ReviewTagsConfig }> =>
+    request(`/trades/review-tags/settings/${profileId}`, {
+      method: 'PUT',
+      body: JSON.stringify({ config }),
+    }),
 }
 
 // ── Stats ─────────────────────────────────────────────────────────────────
