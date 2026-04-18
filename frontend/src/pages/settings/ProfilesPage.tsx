@@ -148,30 +148,19 @@ function ReviewTagsSection({ profileId }: { profileId: number }) {
           <div key={cat}>
             <p className="text-[10px] text-slate-600 uppercase tracking-wide mb-1.5">{CATEGORY_LABELS[cat]}</p>
             <div className="flex flex-wrap gap-1.5">
-              {BUILTIN_BY_CATEGORY[cat].flatMap((tag) =>
-                tag.mode === 'tri-state'
-                  ? [
-                      <span key={`${tag.key}-good`} className="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[10px] font-medium border select-none border-emerald-500/30 bg-emerald-500/[0.08] text-emerald-400/70">
-                        {tag.emoji} {tag.label} ✓
-                        <span className="ml-0.5 text-[8px] text-slate-600 font-mono">built-in</span>
-                      </span>,
-                      <span key={`${tag.key}-bad`} className="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[10px] font-medium border select-none border-red-500/30 bg-red-500/[0.08] text-red-400/70">
-                        {tag.emoji} {tag.label} ✗
-                        <span className="ml-0.5 text-[8px] text-slate-600 font-mono">built-in</span>
-                      </span>,
-                    ]
-                  : [
-                      <span key={tag.key} className={cn(
-                        'inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[10px] font-medium border select-none',
-                        tag.positive
-                          ? 'border-emerald-500/30 bg-emerald-500/[0.08] text-emerald-400/70'
-                          : 'border-red-500/30 bg-red-500/[0.08] text-red-400/70',
-                      )}>
-                        {tag.emoji} {tag.label}
-                        <span className="ml-0.5 text-[8px] text-slate-600 font-mono">built-in</span>
-                      </span>,
-                    ]
-              )}
+              {BUILTIN_BY_CATEGORY[cat].map((tag) => (
+                <span key={tag.key} className={cn(
+                  'inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[10px] font-medium border select-none',
+                  tag.mode === 'tri-state'
+                    ? 'border-amber-500/30 bg-amber-500/[0.08] text-amber-400/70'
+                    : tag.positive
+                      ? 'border-emerald-500/30 bg-emerald-500/[0.08] text-emerald-400/70'
+                      : 'border-red-500/30 bg-red-500/[0.08] text-red-400/70',
+                )}>
+                  {tag.emoji} {tag.label}{tag.mode === 'tri-state' ? ' ⇄' : ''}
+                  <span className="ml-0.5 text-[8px] text-slate-600 font-mono">built-in</span>
+                </span>
+              ))}
             </div>
           </div>
         ))}
@@ -273,7 +262,6 @@ function ReviewTagsSection({ profileId }: { profileId: number }) {
                         Cancel
                       </button>
                     </div>
-                  </div>
                 </div>
               ) : (
                 /* ── Normal row ── */
