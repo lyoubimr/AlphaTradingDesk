@@ -42,6 +42,8 @@ function ReviewTagsSection({ profileId }: { profileId: number }) {
   const [error, setError]     = useState<string | null>(null)
   const [showAdd, setShowAdd] = useState(false)
   const [newTag, setNewTag]   = useState({ ...BLANK_TAG })
+  const [editingKey, setEditingKey] = useState<string | null>(null)
+  const [editTag, setEditTag]       = useState({ ...BLANK_TAG })
 
   useEffect(() => {
     setLoading(true)
@@ -66,6 +68,23 @@ function ReviewTagsSection({ profileId }: { profileId: number }) {
   const handleDelete = (key: string) => {
     if (!config) return
     void save({ custom_tags: config.custom_tags.filter((t) => t.key !== key) })
+  }
+
+  const handleStartEdit = (tag: CustomTagDef) => {
+    setEditingKey(tag.key)
+    setEditTag({ key: tag.key, label: tag.label, category: tag.category, positive: tag.positive })
+    setShowAdd(false)
+    setError(null)
+  }
+
+  const handleSaveEdit = () => {
+    if (!editTag.label.trim()) { setError('Label is required.'); return }
+    if (!config) return
+    const updated = config.custom_tags.map((t) =>
+      t.key === editingKey ? { ...t, label: editTag.label.trim(), category: editTag.category, positive: editTag.positive } : t
+    )
+    void save({ custom_tags: updated })
+    setEditingKey(null)
   }
 
   const handleAdd = () => {
@@ -116,7 +135,7 @@ function ReviewTagsSection({ profileId }: { profileId: number }) {
             <p className="text-[10px] text-slate-600 uppercase tracking-wide mb-1.5">{CATEGORY_LABELS[cat]}</p>
             <div className="flex flex-wrap gap-1.5">
               {BUILTIN_BY_CATEGORY[cat].flatMap((tag) =>
-                tag.mode === 'good-bad'
+                tag.mode === 'tri-state'
                   ? [
                       <span key={`${tag.key}-good`} className="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[10px] font-medium border select-none border-emerald-500/30 bg-emerald-500/[0.08] text-emerald-400/70">
                         {tag.emoji} {tag.label} ✓
@@ -155,23 +174,89 @@ function ReviewTagsSection({ profileId }: { profileId: number }) {
         )}
         <div className="space-y-1.5">
           {config?.custom_tags.map((tag) => (
-            <div key={tag.key} className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg bg-surface-700 border border-surface-600">
-              <div className="flex items-center gap-2 min-w-0">
-                <span className={cn(
-                  'rounded-full px-2 py-0.5 text-[10px] font-medium border',
-                  tag.positive
-                    ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400'
-                    : 'border-red-500/40 bg-red-500/10 text-red-400',
-                )}>
-                  {tag.label}
-                </span>
-                <span className="text-[9px] text-slate-600 font-mono">{tag.key}</span>
-                <span className="text-[9px] text-slate-500 capitalize">{tag.category}</span>
-              </div>
-              <button type="button" onClick={() => handleDelete(tag.key)} disabled={saving}
-                className="text-slate-600 hover:text-red-400 transition-colors disabled:opacity-40 shrink-0">
-                <Trash2 size={11} />
-              </button>
+            <div key={tag.key}>
+              {editingKey === tag.key ? (
+                /* ── Inline edit form ── */
+                <div className="rounded-lg border border-brand-500/30 bg-surface-800 p-3 space-y-3">
+                  <p className="text-[10px] uppercase tracking-wide text-slate-500 font-semibold">Edit tag <span className="font-mono text-slate-600">{tag.key}</span></p>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="space-y-1">
+                      <label className="text-[10px] text-slate-500 uppercase tracking-wide">Label (display)</label>
+                      <input
+                        value={editTag.label}
+                        onChange={(e) => setEditTag((p) => ({ ...p, label: e.target.value }))}
+                        className="w-full px-2 py-1.5 rounded-lg bg-surface-700 border border-surface-600 text-xs text-slate-300 placeholder-slate-600 focus:outline-none focus:border-brand-500/60"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[10px] text-slate-500 uppercase tracking-wide">Category</label>
+                      <select
+                        value={editTag.category}
+                        onChange={(e) => setEditTag((p) => ({ ...p, category: e.target.value as ReviewTagCategory }))}
+                        className="w-full px-2 py-1.5 rounded-lg bg-surface-700 border border-surface-600 text-xs text-slate-300 focus:outline-none focus:border-brand-500/60">
+                        {REVIEW_TAG_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
+                      </select>
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <div className="flex gap-1.5">
+                      <button type="button"
+                        onClick={() => setEditTag((p) => ({ ...p, positive: true }))}
+                        className={cn('px-2.5 py-1 rounded-lg border text-[10px] font-medium transition-colors',
+                          editTag.positive
+                            ? 'border-emerald-500/50 bg-emerald-500/15 text-emerald-400'
+                            : 'border-surface-600 bg-surface-700 text-slate-500 hover:text-slate-300')}>
+                        ✅ Good
+                      </button>
+                      <button type="button"
+                        onClick={() => setEditTag((p) => ({ ...p, positive: false }))}
+                        className={cn('px-2.5 py-1 rounded-lg border text-[10px] font-medium transition-colors',
+                          !editTag.positive
+                            ? 'border-red-500/50 bg-red-500/15 text-red-400'
+                            : 'border-surface-600 bg-surface-700 text-slate-500 hover:text-slate-300')}>
+                        ❌ Bad
+                      </button>
+                    </div>
+                    <div className="flex gap-2">
+                      <button type="button" onClick={handleSaveEdit} disabled={saving}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-brand-600/20 border border-brand-500/40 text-xs text-brand-300 font-medium hover:bg-brand-600/30 transition-colors disabled:opacity-40">
+                        {saving ? <Loader2 size={10} className="animate-spin" /> : <Check size={10} />}
+                        Save
+                      </button>
+                      <button type="button" onClick={() => { setEditingKey(null); setError(null) }}
+                        className="px-3 py-1.5 rounded-lg border border-surface-600 text-xs text-slate-400 hover:text-slate-200 transition-colors">
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                /* ── Normal row ── */
+                <div className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg bg-surface-700 border border-surface-600">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className={cn(
+                      'rounded-full px-2 py-0.5 text-[10px] font-medium border',
+                      tag.positive
+                        ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400'
+                        : 'border-red-500/40 bg-red-500/10 text-red-400',
+                    )}>
+                      {tag.label}
+                    </span>
+                    <span className="text-[9px] text-slate-600 font-mono">{tag.key}</span>
+                    <span className="text-[9px] text-slate-500 capitalize">{tag.category}</span>
+                  </div>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <button type="button" onClick={() => handleStartEdit(tag)} disabled={saving}
+                      className="text-slate-600 hover:text-brand-400 transition-colors disabled:opacity-40 p-0.5">
+                      <Edit2 size={11} />
+                    </button>
+                    <button type="button" onClick={() => handleDelete(tag.key)} disabled={saving}
+                      className="text-slate-600 hover:text-red-400 transition-colors disabled:opacity-40 p-0.5">
+                      <Trash2 size={11} />
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           ))}
         </div>
