@@ -6,11 +6,15 @@ export interface TagDef {
   emoji: string
   label: string
   positive: boolean
+  /** 'good-bad': always-ON toggle (default = good). Only `badKey` stored when bad. */
+  mode?: 'flag' | 'good-bad'
+  /** Stored tag when quality is BAD (only for mode='good-bad') */
+  badKey?: string
 }
 
 export const EXECUTION_TAGS: TagDef[] = [
-  { key: 'good_entry',  emoji: '✅', label: 'Good entry',   positive: true  },
-  { key: 'good_sl',     emoji: '🛡️', label: 'Good SL',     positive: true  },
+  { key: 'good_entry',  emoji: '✅', label: 'Entry',        positive: true,  mode: 'good-bad', badKey: 'bad_entry' },
+  { key: 'good_sl',     emoji: '🛡️', label: 'SL',           positive: true,  mode: 'good-bad', badKey: 'bad_sl'   },
   { key: 'early_exit',  emoji: '⏩', label: 'Early exit',   positive: false },
   { key: 'late_exit',   emoji: '⏰', label: 'Late exit',    positive: false },
   { key: 'sl_be_early', emoji: '⚡', label: 'BE too early', positive: false },

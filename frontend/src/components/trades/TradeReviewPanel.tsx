@@ -358,32 +358,76 @@ interface TagSectionProps {
 }
 
 function TagSection({ title, tags, active, onToggle }: TagSectionProps) {
+  const goodBadTags = tags.filter((t) => t.mode === 'good-bad')
+  const flagTags    = tags.filter((t) => t.mode !== 'good-bad')
   return (
     <div className="space-y-2">
       <p className="text-xs font-bold text-slate-400 tracking-wide">{title}</p>
-      <div className="flex flex-wrap gap-1.5">
-        {tags.map((tag) => {
-          const isActive = active.includes(tag.key)
-          return (
-            <button
-              key={tag.key}
-              type="button"
-              onClick={() => onToggle(tag.key)}
-              className={cn(
-                'flex items-center gap-1.5 rounded-full border px-3 py-1 text-[11px] font-medium transition-all duration-150',
-                isActive
-                  ? tag.positive
-                    ? 'border-emerald-500/60 bg-emerald-500/15 text-emerald-300 shadow-sm shadow-emerald-500/10'
-                    : 'border-red-500/60 bg-red-500/15 text-red-300 shadow-sm shadow-red-500/10'
-                  : 'border-surface-600 bg-surface-800/60 text-slate-500 hover:border-surface-500 hover:text-slate-400',
-              )}
-            >
-              <span className="leading-none">{tag.emoji}</span>
-              <span>{tag.label}</span>
-            </button>
-          )
-        })}
-      </div>
+
+      {/* Good-bad: always-ON toggles (default = good ✓) */}
+      {goodBadTags.length > 0 && (
+        <div className="flex flex-wrap gap-2">
+          {goodBadTags.map((tag) => {
+            const isBad = active.includes(tag.badKey!)
+            return (
+              <button
+                key={tag.key}
+                type="button"
+                onClick={() => onToggle(tag.badKey!)}
+                title={
+                  isBad
+                    ? `${tag.label} ✗ — cliquer pour marquer comme bon`
+                    : `${tag.label} ✓ — cliquer pour marquer comme mauvais`
+                }
+                className={cn(
+                  'flex items-center gap-2 rounded-lg border px-3 py-2 text-xs font-medium transition-all duration-150',
+                  isBad
+                    ? 'border-red-500/50 bg-red-500/10 text-red-400'
+                    : 'border-emerald-500/50 bg-emerald-500/10 text-emerald-400',
+                )}
+              >
+                <span>{tag.emoji}</span>
+                <span>{tag.label}</span>
+                <span className={cn(
+                  'ml-1 rounded-full w-5 h-5 flex items-center justify-center text-[10px] font-bold border',
+                  isBad
+                    ? 'border-red-500/50 bg-red-500/20 text-red-300'
+                    : 'border-emerald-500/50 bg-emerald-500/20 text-emerald-300',
+                )}>
+                  {isBad ? '✗' : '✓'}
+                </span>
+              </button>
+            )
+          })}
+        </div>
+      )}
+
+      {/* Flag badges: event-based (click to activate) */}
+      {flagTags.length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {flagTags.map((tag) => {
+            const isActive = active.includes(tag.key)
+            return (
+              <button
+                key={tag.key}
+                type="button"
+                onClick={() => onToggle(tag.key)}
+                className={cn(
+                  'flex items-center gap-1.5 rounded-full border px-3 py-1 text-[11px] font-medium transition-all duration-150',
+                  isActive
+                    ? tag.positive
+                      ? 'border-emerald-500/60 bg-emerald-500/15 text-emerald-300 shadow-sm shadow-emerald-500/10'
+                      : 'border-red-500/60 bg-red-500/15 text-red-300 shadow-sm shadow-red-500/10'
+                    : 'border-surface-600 bg-surface-800/60 text-slate-500 hover:border-surface-500 hover:text-slate-400',
+                )}
+              >
+                <span className="leading-none">{tag.emoji}</span>
+                <span>{tag.label}</span>
+              </button>
+            )
+          })}
+        </div>
+      )}
     </div>
   )
 }
