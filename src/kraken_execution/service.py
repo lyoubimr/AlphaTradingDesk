@@ -818,9 +818,14 @@ def _journal_automated_close(
 def move_to_breakeven(trade_id: int, db: Session) -> KrakenOrder:
     """Cancel the existing SL order and place a new one at entry_price (breakeven).
 
+    The new SL size is computed from the currently open positions — NOT the
+    original SL size — to avoid oversizing after partial TP fills.
+
     Returns:
         The new SL KrakenOrder row.
     """
+    from decimal import Decimal  # noqa: PLC0415
+
     trade = _get_trade_or_404(trade_id, db)
     if not trade.automation_enabled:
         raise AutomationNotEnabledError(f"Trade {trade_id} does not have automation enabled.")
@@ -839,18 +844,41 @@ def move_to_breakeven(trade_id: int, db: Session) -> KrakenOrder:
         .first()
     )
 
+    # ── Compute remaining position size from open positions ─────────────────
+    # Always derive size from open positions, not from the previous SL order.
+    # This ensures partial TP fills are accounted for.
+    from src.core.models.position import Position  # noqa: PLC0415
+    from src.kraken_execution.precision import quantize_size as _qs  # noqa: PLC0415
+
+    open_positions = (
+        db.query(Position)
+        .filter(Position.trade_id == trade_id, Position.status == "open")
+        .all()
+    )
+    open_lot_pct = sum(Decimal(str(p.lot_percentage)) for p in open_positions)
+
+    # Fallback: use original SL size if we can't derive from positions
+    sl_full_size = Decimal(str(sl_order.size)) if sl_order else Decimal("0")
+    if open_lot_pct > 0 and sl_full_size > 0:
+        remaining_size = _qs(
+            (open_lot_pct / Decimal("100")) * sl_full_size,
+            instrument.contract_value_precision if instrument.contract_value_precision is not None else 2,
+        )
+    else:
+        remaining_size = sl_full_size
+
     with _make_client(settings_row) as client:
         # Cancel old SL
         if sl_order:
             client.cancel_order(sl_order.kraken_order_id)
             sl_order.status = "cancelled"
 
-        # Place new SL at entry_price
+        # Place new SL at entry_price with correct remaining size
         sl_result = client.send_order(
             order_type="stp",
             symbol=instrument.symbol,
             side=_exit_side(trade),
-            size=str(sl_order.size) if sl_order else "0",
+            size=str(remaining_size),
             stop_price=str(trade.entry_price),
             reduce_only=True,
         )
@@ -865,7 +893,7 @@ def move_to_breakeven(trade_id: int, db: Session) -> KrakenOrder:
         order_type="stop",
         symbol=instrument.symbol,
         side=_exit_side(trade),
-        size=sl_order.size if sl_order else 0.0,
+        size=float(remaining_size),
         limit_price=None,
     )
     db.add(new_sl)
@@ -877,6 +905,8 @@ def move_to_breakeven(trade_id: int, db: Session) -> KrakenOrder:
         trade_id=trade_id,
         new_sl_order_id=new_order_id,
         breakeven_price=str(trade.entry_price),
+        sl_size=float(remaining_size),
+        open_lot_pct=float(open_lot_pct),
     )
 
     # Dispatch notification
