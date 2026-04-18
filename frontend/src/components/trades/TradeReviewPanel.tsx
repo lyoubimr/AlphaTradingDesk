@@ -177,12 +177,24 @@ export function TradeReviewPanel({
     setTags((prev) => prev.includes(key) ? prev.filter((t) => t !== key) : [...prev, key])
   }
 
-  // Per-strategy compliance stored as `strategy_respected_<id>` in tags array
-  function strategyTagKey(sid: number) { return `strategy_respected_${sid}` }
-  function isStrategyRespected(sid: number) { return tags.includes(strategyTagKey(sid)) }
-  function toggleStrategyRespected(sid: number) {
-    const key = strategyTagKey(sid)
-    setTags((prev) => prev.includes(key) ? prev.filter((t) => t !== key) : [...prev, key])
+  // Per-strategy compliance: 3 states — unset / respected / broken
+  // Stored in tags array as `strategy_respected_<id>` or `strategy_broken_<id>`
+  type StrategyCompliance = 'unset' | 'respected' | 'broken'
+  function getStrategyState(sid: number): StrategyCompliance {
+    if (tags.includes(`strategy_respected_${sid}`)) return 'respected'
+    if (tags.includes(`strategy_broken_${sid}`)) return 'broken'
+    return 'unset'
+  }
+  function cycleStrategyState(sid: number) {
+    const current = getStrategyState(sid)
+    setTags((prev) => {
+      const without = prev.filter(
+        (t) => t !== `strategy_respected_${sid}` && t !== `strategy_broken_${sid}`,
+      )
+      if (current === 'unset') return [...without, `strategy_respected_${sid}`]
+      if (current === 'respected') return [...without, `strategy_broken_${sid}`]
+      return without // broken → unset
+    })
   }
 
   async function handleSaveAll() {
@@ -268,28 +280,39 @@ export function TradeReviewPanel({
         ) : (
           <div className="flex flex-wrap gap-2">
             {strategies.map((s) => {
-              const respected = isStrategyRespected(s.id)
+              const state = getStrategyState(s.id)
               return (
                 <button
                   key={s.id}
                   type="button"
-                  onClick={() => toggleStrategyRespected(s.id)}
+                  onClick={() => cycleStrategyState(s.id)}
+                  title={
+                    state === 'unset'
+                      ? 'Non évalué — cliquer pour marquer comme respectée'
+                      : state === 'respected'
+                        ? 'Respectée ✓ — cliquer pour marquer comme non respectée'
+                        : 'Non respectée ✗ — cliquer pour réinitialiser'
+                  }
                   className={cn(
                     'flex items-center gap-2 rounded-lg border px-3 py-2 text-xs font-medium transition-all duration-150',
-                    respected
+                    state === 'respected'
                       ? 'border-emerald-500/50 bg-emerald-500/10 text-emerald-400'
-                      : 'border-surface-600 bg-surface-800/60 text-slate-500 hover:border-surface-500 hover:text-slate-400',
+                      : state === 'broken'
+                        ? 'border-red-500/50 bg-red-500/10 text-red-400'
+                        : 'border-surface-600 bg-surface-800/60 text-slate-500 hover:border-surface-500 hover:text-slate-400',
                   )}
                 >
                   <span>{s.emoji ?? '📌'}</span>
                   <span>{s.name}</span>
                   <span className={cn(
                     'ml-1 rounded-full w-5 h-5 flex items-center justify-center text-[10px] font-bold border',
-                    respected
+                    state === 'respected'
                       ? 'border-emerald-500/50 bg-emerald-500/20 text-emerald-300'
-                      : 'border-surface-600 bg-surface-700 text-slate-600',
+                      : state === 'broken'
+                        ? 'border-red-500/50 bg-red-500/20 text-red-300'
+                        : 'border-surface-600 bg-surface-700 text-slate-600',
                   )}>
-                    {respected ? '✓' : '✗'}
+                    {state === 'respected' ? '✓' : state === 'broken' ? '✗' : '?'}
                   </span>
                 </button>
               )
