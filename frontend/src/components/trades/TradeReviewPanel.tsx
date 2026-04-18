@@ -225,54 +225,47 @@ export function TradeReviewPanel({
         </div>
       </div>
 
+      {/* ── Outcome (closed/runner only) ──────────────────────────────── */}
       {isClosed ? (
-        <>
-          {/* ── Outcome selector ──────────────────────────────────────── */}
-          <div className="space-y-2">
-            <CatLabel>🏆 Outcome</CatLabel>
-            <div className="grid grid-cols-4 gap-1.5">
-              {OUTCOMES.map((o) => {
-                const active = outcome === o.key
-                return (
-                  <button
-                    key={o.key}
-                    type="button"
-                    onClick={() => setOutcome(active ? null : o.key)}
-                    className={cn(
-                      'relative flex flex-col items-center justify-center gap-1 rounded-xl border py-3 px-1 text-center transition-all duration-200',
-                      active
-                        ? `${o.color} ${o.border} ${o.text} shadow-lg ${o.glow}`
-                        : 'border-surface-700 bg-surface-800/60 text-slate-500 hover:border-surface-600 hover:bg-surface-800 hover:text-slate-400',
-                    )}
-                  >
-                    <span className="text-xl leading-none">{o.emoji}</span>
-                    <span className="text-[9px] font-semibold leading-tight tracking-wide">{o.label}</span>
-                    {o.key === suggested && !active && (
-                      <span className="absolute -top-1.5 right-1 text-[7px] text-brand-400/70 font-medium">
-                        suggested
-                      </span>
-                    )}
-                  </button>
-                )
-              })}
-            </div>
+        <div className="space-y-2">
+          <CatLabel>🏆 Outcome</CatLabel>
+          <div className="grid grid-cols-4 gap-1.5">
+            {OUTCOMES.map((o) => {
+              const active = outcome === o.key
+              return (
+                <button
+                  key={o.key}
+                  type="button"
+                  onClick={() => setOutcome(active ? null : o.key)}
+                  className={cn(
+                    'relative flex flex-col items-center justify-center gap-1 rounded-xl border py-3 px-1 text-center transition-all duration-200',
+                    active
+                      ? `${o.color} ${o.border} ${o.text} shadow-lg ${o.glow}`
+                      : 'border-surface-700 bg-surface-800/60 text-slate-500 hover:border-surface-600 hover:bg-surface-800 hover:text-slate-400',
+                  )}
+                >
+                  <span className="text-xl leading-none">{o.emoji}</span>
+                  <span className="text-[9px] font-semibold leading-tight tracking-wide">{o.label}</span>
+                  {o.key === suggested && !active && (
+                    <span className="absolute -top-1.5 right-1 text-[7px] text-brand-400/70 font-medium">
+                      suggested
+                    </span>
+                  )}
+                </button>
+              )
+            })}
           </div>
-
-          {/* ── Tags (Execution / Psychology / Market) ────────────────── */}
-          <div className="space-y-4">
-            <TagSection title="⚙️ Execution"   tags={EXECUTION_TAGS}  active={tags} onToggle={toggleTag} />
-            <TagSection title="🧠 Psychology"  tags={PSYCHOLOGY_TAGS} active={tags} onToggle={toggleTag} />
-            <TagSection title="🌍 Market"      tags={MARKET_TAGS}     active={tags} onToggle={toggleTag} />
-          </div>
-        </>
+        </div>
       ) : (
-        <p className="text-[11px] text-slate-600 italic">Outcome &amp; tags available after closing.</p>
+        <p className="text-[10px] text-slate-600 italic">🏆 Outcome disponible après clôture.</p>
       )}
 
-      {/* ── Strategy compliance (all statuses — as soon as trade has strategies) */}
-      {strategies.length > 0 && (
-        <div className="space-y-2">
-          <CatLabel>📊 Strategy respected</CatLabel>
+      {/* ── Strategy compliance — toujours visible ────────────────────── */}
+      <div className="space-y-2">
+        <CatLabel>📊 Strategy respected</CatLabel>
+        {strategies.length === 0 ? (
+          <p className="text-[10px] text-slate-600 italic">Aucune stratégie assignée à ce trade.</p>
+        ) : (
           <div className="flex flex-wrap gap-2">
             {strategies.map((s) => {
               const respected = isStrategyRespected(s.id)
@@ -302,8 +295,15 @@ export function TradeReviewPanel({
               )
             })}
           </div>
-        </div>
-      )}
+        )}
+      </div>
+
+      {/* ── Tags — toujours visibles (FOMO/Rule broken s'appliquent à tout moment) */}
+      <div className="space-y-4">
+        <TagSection title="⚙️ Execution"  tags={EXECUTION_TAGS}  active={tags} onToggle={toggleTag} />
+        <TagSection title="🧠 Psychology" tags={PSYCHOLOGY_TAGS} active={tags} onToggle={toggleTag} />
+        <TagSection title="🌍 Market"     tags={MARKET_TAGS}     active={tags} onToggle={toggleTag} />
+      </div>
 
       {/* ── Divider ──────────────────────────────────────────────────── */}
       <div className="border-t border-surface-700/50" />
