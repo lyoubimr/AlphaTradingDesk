@@ -2103,7 +2103,9 @@ export function TradeDetailPage() {
             }
             onUpdated={(updated) => {
               setTrade(updated)
-              setCloseNotesValue(updated.close_notes ?? '')
+              // Do NOT reset closeNotesValue here — it is owned by user input
+              // and saved explicitly via handleSaveCloseNotes.
+              // Resetting would erase unsaved notes when a tag auto-save fires.
             }}
             closeNotes={closeNotesValue}
             onCloseNotesChange={setCloseNotesValue}
