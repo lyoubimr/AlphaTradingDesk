@@ -316,6 +316,24 @@ def _recalculate_current_risk(trade: Trade, db: Session) -> Decimal:
     return (trade.risk_amount * total_open_pct / 100).quantize(Decimal("0.01"))
 
 
+def _compute_is_reviewed(trade: Trade) -> bool:
+    """
+    True when the post-trade review is considered complete:
+      - outcome is set (in post_trade_review JSONB)
+      - close_notes is non-empty  (stored on the trade row, NOT in post_trade_review.note)
+      - at least 1 close screenshot uploaded
+      - at least 1 execution/psychology/market tag (excludes strategy_broken_* tags)
+    """
+    ptr = trade.post_trade_review or {}
+    review_tags = [tag for tag in (ptr.get("tags") or []) if not tag.startswith("strategy_broken_")]
+    return bool(
+        ptr.get("outcome")
+        and trade.close_notes
+        and trade.close_screenshot_urls
+        and review_tags
+    )
+
+
 def _trade_to_out(trade: Trade, size_info: TradeSizeResult | None = None) -> TradeOut:
     """
     Convert a Trade ORM object to a TradeOut schema.
@@ -347,6 +365,7 @@ def _trade_to_out(trade: Trade, size_info: TradeSizeResult | None = None) -> Tra
                 )
                 / total_pct
             ).quantize(Decimal("0.00000001"))
+    out.is_reviewed = _compute_is_reviewed(trade)
     return out
 
 
@@ -728,19 +747,7 @@ def list_trades(
             and t.stop_loss == t.entry_price
         )
         item.has_kraken_orders = t.id in kraken_trade_ids
-        # is_reviewed: post-trade review is complete when all four criteria are met:
-        #   1. outcome is set
-        #   2. note is non-empty
-        #   3. at least one close screenshot
-        #   4. at least one execution/psychology/market tag (not a strategy_broken_* tag)
-        ptr = t.post_trade_review or {}
-        review_tags = [tag for tag in (ptr.get("tags") or []) if not tag.startswith("strategy_broken_")]
-        item.is_reviewed = bool(
-            ptr.get("outcome")
-            and ptr.get("note")
-            and t.close_screenshot_urls
-            and review_tags
-        )
+        item.is_reviewed = _compute_is_reviewed(t)
         items.append(item)
     return items
 

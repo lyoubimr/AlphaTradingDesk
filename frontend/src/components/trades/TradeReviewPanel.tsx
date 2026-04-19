@@ -197,11 +197,28 @@ export function TradeReviewPanel({
     <div className="space-y-5">
 
       {/* ── Section header ─────────────────────────────────────────────── */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <span className="text-base">📋</span>
-          <p className="text-xs font-semibold text-slate-300 tracking-wide">Post-Trade Review</p>
-        </div>
+      {(() => {
+        const reviewTags = (existing?.tags ?? []).filter((t) => !t.startsWith('strategy_broken_'))
+        const isReviewed = Boolean(
+          existing?.outcome &&
+          (trade.close_notes ?? '').trim() &&
+          (trade.close_screenshot_urls ?? []).length > 0 &&
+          reviewTags.length > 0
+        )
+        return (
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <span className="text-base">📋</span>
+              <p className="text-xs font-semibold text-slate-300 tracking-wide">Post-Trade Review</p>
+              {isReviewed && (
+                <span
+                  className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/30 text-[10px] font-medium text-emerald-400"
+                  title="Review complète : outcome + notes + screenshot + tags"
+                >
+                  ✅ reviewed
+                </span>
+              )}
+            </div>
         <div className="flex items-center gap-2">
           {saving && <Loader2 size={11} className="animate-spin text-slate-500" />}
           {!saving && savedAt && !isDirty && (
@@ -216,6 +233,8 @@ export function TradeReviewPanel({
           />
         </div>
       </div>
+        )
+      })()}
 
       {/* ── Outcome (closed/runner only) ──────────────────────────────── */}
       {isClosed ? (

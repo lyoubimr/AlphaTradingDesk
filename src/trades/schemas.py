@@ -423,7 +423,7 @@ class TradeListItem(BaseModel):
     # Auto move SL to BE on TP1 fill
     be_on_tp1: bool = False
     # True when the post-trade review is considered complete:
-    #   outcome set + non-empty note + ≥1 close screenshot + ≥1 non-strategy tag
+    #   outcome set + non-empty close_notes + ≥1 close screenshot + ≥1 non-strategy tag
     is_reviewed: bool = False
 
     @model_validator(mode="after")
