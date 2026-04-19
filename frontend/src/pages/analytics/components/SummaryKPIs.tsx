@@ -73,7 +73,7 @@ export function SummaryKPIs({ kpi }: Props) {
       />
       <KPICard
         label="Expectancy"
-        value={kpi.expectancy != null ? `${kpi.expectancy > 0 ? '+$' : '-$'}${Math.abs(kpi.expectancy).toFixed(0)}` : '—'}
+        value={kpi.expectancy != null ? `${kpi.expectancy >= 0 ? '+$' : '-$'}${Math.abs(kpi.expectancy).toFixed(0)}` : '—'}
         sub={kpi.avg_win_pnl != null && kpi.avg_loss_pnl != null
           ? `W: +$${kpi.avg_win_pnl.toFixed(0)} · L: -$${Math.abs(kpi.avg_loss_pnl).toFixed(0)}`
           : undefined}

@@ -914,6 +914,7 @@ export interface WRByStat {
   wr_pct: number | null
   avg_pnl: number | null
   total_pnl: number
+  avg_pnl_pct: number | null
 }
 
 export interface WRByHour {

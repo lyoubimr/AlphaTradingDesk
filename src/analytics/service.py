@@ -469,18 +469,22 @@ def _compute_pair_leaderboard(trades: list[dict]) -> list[WRByStat]:
     for t in trades:
         label = t["pair"]
         if label not in pairs:
-            pairs[label] = {"trades": 0, "wins": 0, "losses": 0, "pnl_sum": 0.0}
+            pairs[label] = {"trades": 0, "wins": 0, "losses": 0, "pnl_sum": 0.0, "pnl_pct_vals": []}
         pnl = float(t["realized_pnl"])
+        risk = t.get("risk_amount")
         pairs[label]["trades"] += 1
         pairs[label]["pnl_sum"] += pnl
         if pnl > 0:
             pairs[label]["wins"] += 1
         else:
             pairs[label]["losses"] += 1
+        if risk is not None and float(risk) != 0:
+            pairs[label]["pnl_pct_vals"].append(pnl / float(risk) * 100)
     result = []
     for label, p in sorted(pairs.items(), key=lambda x: x[1]["trades"], reverse=True):
         tr = p["trades"]
         w = p["wins"]
+        pct_vals = p["pnl_pct_vals"]
         result.append(WRByStat(
             label=label,
             trades=tr,
@@ -489,6 +493,7 @@ def _compute_pair_leaderboard(trades: list[dict]) -> list[WRByStat]:
             wr_pct=round(w / tr * 100, 1) if tr else None,
             avg_pnl=round(p["pnl_sum"] / tr, 2) if tr else None,
             total_pnl=round(p["pnl_sum"], 2),
+            avg_pnl_pct=round(sum(pct_vals) / len(pct_vals), 1) if pct_vals else None,
         ))
     return result
 

@@ -45,6 +45,7 @@ class WRByStat(BaseModel):
     wr_pct: float | None = None
     avg_pnl: float | None = None
     total_pnl: float = 0.0
+    avg_pnl_pct: float | None = None  # avg realized_pnl / risk_amount * 100 (R-multiple %)
 
 
 class WRByHour(BaseModel):

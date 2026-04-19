@@ -138,6 +138,11 @@ function PairLeaderboard({ rows }: { rows: WRByStat[] }) {
             <span className={`w-16 shrink-0 text-[10px] font-medium tabular-nums text-right shrink-0 ${pnlColor}`}>
               {pnl >= 0 ? '+$' : '-$'}{Math.abs(pnl).toFixed(0)}
             </span>
+            {r.avg_pnl_pct != null && (
+              <span className={`w-12 shrink-0 text-[10px] tabular-nums text-right ${r.avg_pnl_pct >= 0 ? 'text-emerald-500' : 'text-red-500'}`}>
+                {r.avg_pnl_pct >= 0 ? '+' : ''}{r.avg_pnl_pct.toFixed(0)}%
+              </span>
+            )}
           </div>
         )
       })}
