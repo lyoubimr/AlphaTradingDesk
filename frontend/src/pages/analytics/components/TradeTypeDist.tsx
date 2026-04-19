@@ -47,10 +47,13 @@ export function TradeTypeDist({ data }: Props) {
           </Pie>
           <Tooltip
             contentStyle={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: 6, fontSize: 11 }}
-            formatter={(v: number, _n: string, props) => [
-              `${v} trades — WR ${props.payload?.wr?.toFixed(1)}%`,
-              props.payload?.name,
-            ]}
+            formatter={(v: unknown, _n: unknown, props) => {
+              const n = v as number | undefined
+              return [
+                `${n} trades — WR ${props.payload?.wr?.toFixed(1)}%`,
+                props.payload?.name as string,
+              ]
+            }}
           />
           <Legend
             iconSize={10}

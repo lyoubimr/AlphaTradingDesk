@@ -36,7 +36,7 @@ export function AIInsightPanel({ profileId, period, aiEnabled, existing }: Props
     setLoading(true)
     setError(null)
     try {
-      const data = await analyticsApi.generateSummary(profileId, period, false)
+      const data = await analyticsApi.generateSummary(profileId, period)
       setResult(data)
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'Generation failed'
@@ -56,7 +56,6 @@ export function AIInsightPanel({ profileId, period, aiEnabled, existing }: Props
             <span className="text-xs text-slate-600">
               · {PROVIDER_LABELS[result.provider] ?? result.provider}
               {result.model ? ` (${result.model})` : ''}
-              {result.cached ? ' · cached' : ''}
             </span>
           )}
         </div>

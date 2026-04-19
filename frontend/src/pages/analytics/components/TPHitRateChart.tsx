@@ -17,7 +17,7 @@ export function TPHitRateChart({ data }: Props) {
   if (data.length === 0) return <div className="text-slate-500 text-sm py-8 text-center">No TP data</div>
 
   const chartData = data.map(d => ({
-    name: d.tp_label,
+    name: `TP${d.tp_number}`,
     rate: d.hit_rate_pct,
     hits: d.hits,
     total: d.total,
@@ -37,16 +37,19 @@ export function TPHitRateChart({ data }: Props) {
         />
         <Tooltip
           contentStyle={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: 6, fontSize: 11 }}
-          formatter={(v: number, _n: string, props) => [
-            `${v.toFixed(1)}% (${props.payload?.hits}/${props.payload?.total})`,
-            'Hit Rate',
-          ]}
+          formatter={(v: unknown, _n: unknown, props) => {
+            const n = v as number | undefined
+            return [
+              `${(n ?? 0).toFixed(1)}% (${props.payload?.hits}/${props.payload?.total})`,
+              'Hit Rate',
+            ]
+          }}
         />
         <Bar dataKey="rate" radius={[3, 3, 0, 0]}>
           <LabelList
             dataKey="rate"
             position="top"
-            formatter={(v: number) => `${v.toFixed(0)}%`}
+            formatter={(v: unknown) => `${Number(v).toFixed(0)}%`}
             style={{ fontSize: 11, fill: '#94a3b8' }}
           />
           {chartData.map((entry, i) => (

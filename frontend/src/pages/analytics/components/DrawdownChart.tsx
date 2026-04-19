@@ -28,7 +28,7 @@ export function DrawdownChart({ data }: Props) {
           <YAxis tick={{ fontSize: 10, fill: '#64748b' }} tickLine={false} width={40} tickFormatter={v => `${v}%`} />
           <Tooltip
             contentStyle={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: 6, fontSize: 11 }}
-            formatter={(v: number) => [`${v.toFixed(2)}%`, 'Drawdown']}
+            formatter={(v: unknown) => [`${((v as number) ?? 0).toFixed(2)}%`, 'Drawdown']}
           />
           <Area
             type="monotone"

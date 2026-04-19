@@ -59,7 +59,7 @@ function DirectionStats({ rows }: { rows: DirectionRow[] }) {
         <div key={r.direction} className="bg-surface-800 rounded-lg p-3 border border-surface-700">
           <div className="text-xs text-slate-500 capitalize mb-1">{r.direction}</div>
           <div className="text-xl font-bold text-slate-100">{r.wr_pct?.toFixed(1)}%</div>
-          <div className="text-xs text-slate-500">{r.trades} trades · avg {r.avg_pnl >= 0 ? '+' : ''}{r.avg_pnl.toFixed(1)}%</div>
+          <div className="text-xs text-slate-500">{r.trades} trades</div>
         </div>
       ))}
     </div>
@@ -82,9 +82,11 @@ function PairLeaderboard({ rows }: { rows: WRByStat[] }) {
             <div className="flex items-center gap-4 text-xs text-slate-500">
               <span>{r.trades} trades</span>
               <span style={{ color }} className="font-semibold">{wr.toFixed(1)}%</span>
-              <span className={r.avg_pnl >= 0 ? 'text-emerald-400' : 'text-red-400'}>
-                {r.avg_pnl >= 0 ? '+' : ''}{r.avg_pnl.toFixed(2)}%
-              </span>
+              {r.avg_pnl != null && (
+                <span className={r.avg_pnl >= 0 ? 'text-emerald-400' : 'text-red-400'}>
+                  {r.avg_pnl >= 0 ? '+' : ''}{r.avg_pnl.toFixed(2)}%
+                </span>
+              )}
             </div>
           </div>
         )
@@ -180,7 +182,7 @@ export function PerformancePage() {
               <EquityCurve data={report.equity_curve} />
             </SectionCard>
             <SectionCard title="Drawdown">
-              <DrawdownChart data={report.drawdown} maxDrawdown={report.kpi.max_drawdown_pct} />
+              <DrawdownChart data={report.drawdown} />
             </SectionCard>
           </div>
 
@@ -226,7 +228,7 @@ export function PerformancePage() {
 
           {/* Tag insights */}
           <SectionCard title="Tag Insights">
-            <TagInsights winners={report.tag_stats.winners} losers={report.tag_stats.losers} />
+            <TagInsights winners={report.top_tags_winners} losers={report.top_tags_losers} />
           </SectionCard>
 
           {/* Repeat errors */}

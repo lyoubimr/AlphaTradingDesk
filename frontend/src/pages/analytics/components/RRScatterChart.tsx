@@ -48,7 +48,11 @@ export function RRScatterChart({ data }: Props) {
           />
           <Tooltip
             contentStyle={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: 6, fontSize: 11 }}
-            formatter={(v: number, name: string) => [v.toFixed(2), name === 'planned_rr' ? 'Planned' : 'Actual']}
+            formatter={(v: unknown, name: unknown) => {
+              const n = v as number | undefined
+              const nm = name as string
+              return [(n ?? 0).toFixed(2), nm === 'planned_rr' ? 'Planned' : 'Actual']
+            }}
           />
           {/* Diagonal reference line y=x */}
           <ReferenceLine

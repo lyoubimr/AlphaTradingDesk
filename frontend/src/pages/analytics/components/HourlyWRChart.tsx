@@ -30,10 +30,13 @@ export function HourlyWRChart({ data }: Props) {
         />
         <Tooltip
           contentStyle={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: 6, fontSize: 11 }}
-          formatter={(v: number, _n: string, props) => [
-            v != null ? `${v.toFixed(1)}% (${props.payload?.trades} trades)` : 'No trades',
-            'WR',
-          ]}
+          formatter={(v: unknown, _n: unknown, props) => {
+            const n = v as number | undefined
+            return [
+              n != null ? `${n.toFixed(1)}% (${props.payload?.trades} trades)` : 'No trades',
+              'WR',
+            ]
+          }}
           labelFormatter={h => `${h}:00 UTC`}
         />
         <Bar dataKey="wr_pct" radius={[2, 2, 0, 0]}>

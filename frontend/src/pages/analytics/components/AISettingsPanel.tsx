@@ -48,7 +48,7 @@ export function AISettingsPanel({ profileId, settings, aiKeys, onSettingsChange 
   const saveSettings = async () => {
     setSaving(true)
     try {
-      const updated = await analyticsApi.updateSettings(profileId, { config: local.config })
+      const updated = await analyticsApi.updateSettings(profileId, local.config)
       onSettingsChange(updated)
       setSavedOk(true)
       setTimeout(() => setSavedOk(false), 2000)
@@ -97,7 +97,7 @@ export function AISettingsPanel({ profileId, settings, aiKeys, onSettingsChange 
           <label className="text-xs text-slate-500">Provider</label>
           <select
             value={local.config.ai_provider ?? 'openai'}
-            onChange={e => patchLocal({ ai_provider: e.target.value, ai_model: PROVIDER_MODELS[e.target.value as Provider][0] })}
+            onChange={e => patchLocal({ ai_provider: e.target.value as Provider, ai_model: PROVIDER_MODELS[e.target.value as Provider][0] })}
             className="w-full bg-surface-800 border border-surface-700 rounded-md px-3 py-2 text-sm text-slate-200 focus:outline-none focus:ring-1 focus:ring-violet-500"
           >
             {PROVIDERS.map(p => <option key={p} value={p}>{PROVIDER_LABELS[p]}</option>)}
@@ -123,7 +123,7 @@ export function AISettingsPanel({ profileId, settings, aiKeys, onSettingsChange 
           <label className="text-xs text-slate-500">Refresh frequency</label>
           <select
             value={local.config.ai_refresh ?? 'daily'}
-            onChange={e => patchLocal({ ai_refresh: e.target.value })}
+            onChange={e => patchLocal({ ai_refresh: e.target.value as 'per_trade' | 'daily' | 'manual' })}
             className="w-full bg-surface-800 border border-surface-700 rounded-md px-3 py-2 text-sm text-slate-200 focus:outline-none focus:ring-1 focus:ring-violet-500"
           >
             {REFRESH_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
