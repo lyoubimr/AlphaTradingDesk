@@ -2094,6 +2094,7 @@ export function TradeDetailPage() {
         <div id="trade-review" className="bg-surface-800 rounded-xl border border-surface-700 p-5">
           <TradeReviewPanel
             trade={trade}
+            profileId={trade.profile_id}
             strategies={
               (trade.strategy_ids ?? []).reduce<StrategyRef[]>((acc, sid) => {
                 const s = strategyMap.get(sid)
@@ -2103,7 +2104,9 @@ export function TradeDetailPage() {
             }
             onUpdated={(updated) => {
               setTrade(updated)
-              setCloseNotesValue(updated.close_notes ?? '')
+              // Do NOT reset closeNotesValue here — it is owned by user input
+              // and saved explicitly via handleSaveCloseNotes.
+              // Resetting would erase unsaved notes when a tag auto-save fires.
             }}
             closeNotes={closeNotesValue}
             onCloseNotesChange={setCloseNotesValue}
