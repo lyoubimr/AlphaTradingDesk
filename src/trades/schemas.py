@@ -366,6 +366,8 @@ class TradeOut(BaseModel):
     # Runner trailing stop — set when a runner position exists
     runner_trailing_pct: Decimal | None = None
     runner_activated_at: datetime | None = None
+    # True when the post-trade review is complete (computed by _trade_to_out)
+    is_reviewed: bool = False
 
     @model_validator(mode="after")
     def normalise_direction_out(self) -> TradeOut:
