@@ -382,7 +382,7 @@ export function TradesPage() {
                             className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/30 text-[10px] font-medium text-emerald-400"
                             title="Post-trade review complète : outcome + notes + screenshot + tags"
                           >
-                            ✅ reviewed
+                            📋 reviewed
                           </span>
                         )}
                       </div>
@@ -566,7 +566,7 @@ export function TradesPage() {
                               className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/30 text-[10px] font-medium text-emerald-400 whitespace-nowrap"
                               title="Post-trade review complète : outcome + notes + screenshot + tags"
                             >
-                              ✅ reviewed
+                              📋 reviewed
                             </span>
                           )}
                         </td>
