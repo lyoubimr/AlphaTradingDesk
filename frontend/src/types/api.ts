@@ -190,6 +190,9 @@ export interface TradeListItem {
   automation_enabled: boolean
   /** Auto move SL to break-even when TP1 is filled */
   be_on_tp1: boolean
+  /** True when the post-trade review is considered complete:
+   *  outcome set + non-empty note + ≥1 close screenshot + ≥1 non-strategy tag */
+  is_reviewed: boolean
   /** Trailing stop % if a runner position is configured */
   runner_trailing_pct: string | null
 }
