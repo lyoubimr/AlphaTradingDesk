@@ -8,11 +8,23 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { Loader2, CheckCircle2, Save } from 'lucide-react'
-import { tradesApi } from '../../lib/api'
+import { tradesApi, reviewTagsApi } from '../../lib/api'
+import type { CustomTagDef } from '../../lib/api'
 import { cn } from '../../lib/cn'
 import type { TradeOut, ReviewOutcome } from '../../types/api'
 import { EXECUTION_TAGS, PSYCHOLOGY_TAGS, MARKET_TAGS } from './reviewTagDefs'
 import type { TagDef } from './reviewTagDefs'
+
+function customToTagDef(c: CustomTagDef): TagDef {
+  return {
+    key:      c.key,
+    emoji:    '🏷️',
+    label:    c.label,
+    positive: c.positive,
+    mode:     c.mode ?? 'flag',
+    badKey:   c.badKey,
+  }
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Outcome selector
@@ -62,8 +74,7 @@ export interface StrategyRef {
 }
 
 interface Props {
-  trade: TradeOut
-  strategies: StrategyRef[]
+  trade: TradeOut  profileId: number  strategies: StrategyRef[]
   onUpdated: (updated: TradeOut) => void
   // ── Notes (close_notes column) ─────────────────────────────────────────
   closeNotes: string
@@ -76,6 +87,7 @@ interface Props {
 
 export function TradeReviewPanel({
   trade,
+  profileId,
   strategies,
   onUpdated,
   closeNotes,
@@ -84,6 +96,13 @@ export function TradeReviewPanel({
   savingCloseNotes,
   renderCloseScreenshots,
 }: Props) {
+  const [customTags, setCustomTags] = useState<TagDef[]>([])
+
+  useEffect(() => {
+    reviewTagsApi.get(profileId)
+      .then((r) => setCustomTags((r.config.custom_tags ?? []).map(customToTagDef)))
+      .catch(() => { /* silently ignore */ })
+  }, [profileId])
   const existing = trade.post_trade_review
   const isClosed = trade.status === 'closed' || trade.status === 'runner'
 
@@ -318,8 +337,9 @@ export function TradeReviewPanel({
       <div className="space-y-4">
         <TagSection title="⚙️ Execution"  tags={EXECUTION_TAGS}  active={tags} onToggle={handleTagToggle} />
         <TagSection title="🧠 Psychology" tags={PSYCHOLOGY_TAGS} active={tags} onToggle={handleTagToggle} />
-        <TagSection title="🌍 Market"     tags={MARKET_TAGS}     active={tags} onToggle={handleTagToggle} />
-      </div>
+        <TagSection title="🌍 Market"     tags={MARKET_TAGS}     active={tags} onToggle={handleTagToggle} />        {customTags.length > 0 && (
+          <TagSection title="🏷️ Custom" tags={customTags} active={tags} onToggle={handleTagToggle} />
+        )}      </div>
 
       {/* ── Divider ──────────────────────────────────────────────────── */}
       <div className="border-t border-surface-700/50" />
