@@ -36,7 +36,7 @@ export function HourlyWRChart({ data }: Props) {
   return (
     <div className="space-y-1">
       <div className="flex justify-end">
-        <span className="inline-flex items-center text-[10px] font-medium text-slate-200 bg-surface-800 border border-surface-700 rounded-full px-2 py-0.5">
+        <span style={{ color: '#e2e8f0' }} className="inline-flex items-center text-[10px] font-medium bg-surface-800 border border-surface-700 rounded-full px-2 py-0.5">
           {tzLabel}
         </span>
       </div>
