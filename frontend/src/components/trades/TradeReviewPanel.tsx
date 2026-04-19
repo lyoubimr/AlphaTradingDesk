@@ -74,7 +74,9 @@ export interface StrategyRef {
 }
 
 interface Props {
-  trade: TradeOut  profileId: number  strategies: StrategyRef[]
+  trade: TradeOut
+  profileId: number
+  strategies: StrategyRef[]
   onUpdated: (updated: TradeOut) => void
   // ── Notes (close_notes column) ─────────────────────────────────────────
   closeNotes: string
