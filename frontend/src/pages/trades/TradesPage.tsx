@@ -365,10 +365,10 @@ export function TradesPage() {
                         <span className="text-brand-500/60">Open</span>
                       ) : null}
                     </div>
-                    {/* strategy chips */}
-                    {t.strategy_ids && t.strategy_ids.length > 0 && (
-                      <div className="flex flex-wrap gap-1 mt-1.5">
-                        {t.strategy_ids.map((sid) => {
+                    {/* strategy chips + reviewed badge */}
+                    {(t.strategy_ids && t.strategy_ids.length > 0 || t.is_reviewed) && (
+                      <div className="flex flex-wrap items-center gap-1 mt-1.5">
+                        {t.strategy_ids && t.strategy_ids.map((sid) => {
                           const s = strategyMap.get(sid)
                           return (
                             <span key={sid} className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-brand-600/15 border border-brand-500/30 text-[10px] font-medium text-brand-300">
@@ -377,6 +377,14 @@ export function TradesPage() {
                             </span>
                           )
                         })}
+                        {t.is_reviewed && (
+                          <span
+                            className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/30 text-[10px] font-medium text-emerald-400"
+                            title="Post-trade review completed: outcome + notes + screenshot + tags"
+                          >
+                            ✓ reviewed
+                          </span>
+                        )}
                       </div>
                     )}
                     {/* pending actions */}
@@ -411,7 +419,7 @@ export function TradesPage() {
               <table className="w-full text-xs">
                 <thead>
                   <tr className="border-b border-surface-700">
-                    {['Date', 'Pair', 'Side', 'Status', 'Entry', 'Exit', 'Stop Loss', 'Risk', 'Strategy', 'P&L', ''].map((h, i) => (
+                    {['Date', 'Pair', 'Side', 'Status', 'Entry', 'Exit', 'Stop Loss', 'Risk', 'Strategy', 'P&L', '', ''].map((h, i) => (
                       <th
                         key={i}
                         className="px-4 py-2.5 text-left text-slate-600 font-medium uppercase tracking-wider whitespace-nowrap"
@@ -548,6 +556,18 @@ export function TradesPage() {
                             <span className="text-slate-700">—</span>
                           ) : (
                             <span className="text-brand-500/60">Open</span>
+                          )}
+                        </td>
+
+                        {/* Reviewed badge */}
+                        <td className="px-2 py-2.5">
+                          {t.is_reviewed && (
+                            <span
+                              className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/30 text-[10px] font-medium text-emerald-400 whitespace-nowrap"
+                              title="Post-trade review completed: outcome + notes + screenshot + tags"
+                            >
+                              ✓ reviewed
+                            </span>
                           )}
                         </td>
 

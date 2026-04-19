@@ -39,22 +39,37 @@ const inputCls = [
   'focus:outline-none focus:border-brand-500/60 focus:ring-1 focus:ring-brand-500/30 transition-colors',
 ].join(' ')
 
-function winRate(s: Strategy): string {
+/** Raw WR — includes ALL trades tagged to this strategy, even non-respected ones. */
+function rawWR(s: Strategy): string {
   if (s.trades_count < s.min_trades_for_stats) return 'N/A'
   return `${Math.round((s.win_count / s.trades_count) * 100)}%`
 }
 
-/** Disciplined WR: excludes reviewed trades where strategy_respected was unchecked. */
-function disciplinedWR(s: Strategy): string | null {
-  // Only show if there's a difference (some reviewed trades)
-  if (s.disciplined_trades_count < s.min_trades_for_stats) return null
-  const pct = Math.round((s.disciplined_win_count / s.disciplined_trades_count) * 100)
-  return `${pct}%`
+/** True if disciplined WR has enough data to be shown. */
+function hasDisciplined(s: Strategy): boolean {
+  return (s.disciplined_trades_count ?? 0) >= s.min_trades_for_stats
+}
+
+/**
+ * Primary WR: disciplined (excl. strategy_broken trades) when available.
+ * Those trades were taken without the strategy being triggered — they should
+ * not affect the strategy's stats.
+ */
+function primaryWR(s: Strategy): string {
+  if (hasDisciplined(s)) {
+    const pct = Math.round((s.disciplined_win_count / s.disciplined_trades_count) * 100)
+    return `${pct}%`
+  }
+  return rawWR(s)
 }
 
 function wrColor(s: Strategy): string {
-  if (s.trades_count < s.min_trades_for_stats) return 'text-slate-500'
-  const pct = (s.win_count / s.trades_count) * 100
+  const pct = hasDisciplined(s)
+    ? (s.disciplined_win_count / s.disciplined_trades_count) * 100
+    : s.trades_count >= s.min_trades_for_stats
+      ? (s.win_count / s.trades_count) * 100
+      : null
+  if (pct === null) return 'text-slate-500'
   if (pct >= 85) return 'text-violet-300'
   if (pct >= 75) return 'text-cyan-300'
   if (pct >= 70) return 'text-emerald-300'
@@ -357,11 +372,20 @@ function StrategyRow({
         {/* Stats */}
         <div className="flex items-center gap-4 shrink-0">
           <div className="text-right">
-            <p className={cn('text-sm font-bold tabular-nums', wrColor(strategy))}>{winRate(strategy)}</p>
+            <p
+              className={cn('text-sm font-bold tabular-nums', wrColor(strategy))}
+              title={hasDisciplined(strategy) ? `WR discipliné — excl. trades pris hors setup de la strat (${strategy.disciplined_trades_count} trades)` : undefined}
+            >
+              {primaryWR(strategy)}
+              {hasDisciplined(strategy) && <span className="text-[9px] text-emerald-400/50 ml-0.5">✓</span>}
+            </p>
             <p className="text-[10px] text-slate-600">WR</p>
-            {disciplinedWR(strategy) !== null && disciplinedWR(strategy) !== winRate(strategy) && (
-              <p className="text-[9px] text-emerald-400/70 tabular-nums" title="Disciplined WR (excl. reviewed trades where strategy_respected was unchecked)">
-                {disciplinedWR(strategy)} ✓
+            {hasDisciplined(strategy) && rawWR(strategy) !== primaryWR(strategy) && (
+              <p
+                className="text-[9px] text-slate-600 tabular-nums"
+                title="WR brut — inclut tous les trades même ceux pris hors setup de la strat"
+              >
+                {rawWR(strategy)} all
               </p>
             )}
           </div>

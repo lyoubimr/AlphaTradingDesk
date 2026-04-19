@@ -728,6 +728,19 @@ def list_trades(
             and t.stop_loss == t.entry_price
         )
         item.has_kraken_orders = t.id in kraken_trade_ids
+        # is_reviewed: post-trade review is complete when all four criteria are met:
+        #   1. outcome is set
+        #   2. note is non-empty
+        #   3. at least one close screenshot
+        #   4. at least one execution/psychology/market tag (not a strategy_broken_* tag)
+        ptr = t.post_trade_review or {}
+        review_tags = [tag for tag in (ptr.get("tags") or []) if not tag.startswith("strategy_broken_")]
+        item.is_reviewed = bool(
+            ptr.get("outcome")
+            and ptr.get("note")
+            and t.close_screenshot_urls
+            and review_tags
+        )
         items.append(item)
     return items
 
