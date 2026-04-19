@@ -110,6 +110,15 @@ class ReviewRateOut(BaseModel):
     review_rate_pct: float
 
 
+class VIBucket(BaseModel):
+    """Trade performance bucketed by VI score at entry time."""
+    bucket: str            # "Calm", "Normal", "Active", "Extreme"
+    trades: int
+    wr_pct: float | None = None
+    avg_pnl: float | None = None
+    avg_vi: float | None = None   # average VI score in bucket (0-1)
+
+
 # ── Main response model ───────────────────────────────────────────────────────
 
 class PerformanceReport(BaseModel):
@@ -159,6 +168,9 @@ class PerformanceReport(BaseModel):
 
     # ── 15. Review rate
     review_rate: ReviewRateOut
+
+    # ── 16. Volatility correlation
+    vi_correlation: list[VIBucket] = Field(default_factory=list)
 
     # ── AI narrative (None if not generated yet / disabled)
     ai_summary: str | None = None

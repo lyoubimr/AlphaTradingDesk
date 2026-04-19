@@ -979,6 +979,14 @@ export interface ReviewRateOut {
   review_rate_pct: number
 }
 
+export interface VIBucket {
+  bucket: string        // "Calm" | "Normal" | "Active" | "Extreme"
+  trades: number
+  wr_pct: number | null
+  avg_pnl: number | null
+  avg_vi: number | null // 0-1 scale
+}
+
 export interface PerformanceReport {
   profile_id: number
   period: string
@@ -998,6 +1006,7 @@ export interface PerformanceReport {
   top_tags_losers: TagFrequency[]
   repeat_errors: RepeatError[]
   review_rate: ReviewRateOut
+  vi_correlation: VIBucket[]
   ai_summary: string | null
   ai_generated_at: string | null
 }

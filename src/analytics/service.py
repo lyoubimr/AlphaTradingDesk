@@ -42,6 +42,7 @@ from src.analytics.schemas import (
     TagFrequency,
     TPHitRate,
     TradeTypeRow,
+    VIBucket,
     WRByHour,
     WRByStat,
 )
@@ -180,6 +181,7 @@ def compute_performance_report(profile_id: int, period: str, db: Session) -> Per
     direction_bias = _compute_direction_bias(trades)
     top_tags_winners, top_tags_losers, repeat_errors = _compute_tag_stats(trades)
     review_rate = _compute_review_rate(trades)
+    vi_correlation = _compute_vi_correlation(profile_id, cutoff, db, params, date_filter)
 
     # ── AI cache lookup ────────────────────────────────────────────────────
     ai_summary: str | None = None
@@ -212,6 +214,7 @@ def compute_performance_report(profile_id: int, period: str, db: Session) -> Per
         top_tags_losers=top_tags_losers,
         repeat_errors=repeat_errors,
         review_rate=review_rate,
+        vi_correlation=vi_correlation,
         ai_summary=ai_summary,
         ai_generated_at=ai_generated_at,
     )
@@ -694,6 +697,74 @@ def _compute_review_rate(trades: list[dict]) -> ReviewRateOut:
     )
 
 
+# ── Volatility correlation ────────────────────────────────────────────────────
+
+def _compute_vi_correlation(
+    profile_id: int,
+    cutoff: datetime | None,
+    db: Session,
+    params: dict,
+    date_filter: str,
+) -> list[VIBucket]:
+    """Bucket closed trades by VI score at entry time (1h timeframe, ±3h window)."""
+    sql = text(f"""
+        WITH trade_vi AS (
+            SELECT
+                t.id,
+                t.realized_pnl > 0 AS is_win,
+                COALESCE(t.realized_pnl / NULLIF(t.risk_amount, 0) * 100, 0) AS pnl_pct,
+                (
+                    SELECT vs.vi_score
+                    FROM volatility_snapshots vs
+                    WHERE vs.pair = t.pair
+                      AND vs.timeframe = '1h'
+                      AND vs.timestamp
+                          BETWEEN (t.entry_date::timestamp - INTERVAL '3 hours')
+                              AND (t.entry_date::timestamp + INTERVAL '3 hours')
+                    ORDER BY ABS(EXTRACT(EPOCH FROM (
+                        vs.timestamp - t.entry_date::timestamp
+                    )))
+                    LIMIT 1
+                ) AS vi_score
+            FROM trades t
+            WHERE t.profile_id = :profile_id
+              AND t.status = 'closed'
+              AND t.realized_pnl IS NOT NULL
+              {date_filter}
+        )
+        SELECT
+            CASE
+                WHEN vi_score < 0.33 THEN 'Calm'
+                WHEN vi_score < 0.50 THEN 'Normal'
+                WHEN vi_score < 0.67 THEN 'Active'
+                ELSE 'Extreme'
+            END AS bucket,
+            COUNT(*) AS trades,
+            ROUND(COUNT(*) FILTER (WHERE is_win) * 100.0 / NULLIF(COUNT(*), 0), 1) AS wr_pct,
+            ROUND(AVG(pnl_pct)::numeric, 2) AS avg_pnl,
+            ROUND(AVG(vi_score)::numeric, 3) AS avg_vi
+        FROM trade_vi
+        WHERE vi_score IS NOT NULL
+        GROUP BY bucket
+        ORDER BY AVG(vi_score)
+    """)
+    try:
+        rows = db.execute(sql, params).mappings().all()
+        return [
+            VIBucket(
+                bucket=r["bucket"],
+                trades=int(r["trades"]),
+                wr_pct=float(r["wr_pct"]) if r["wr_pct"] is not None else None,
+                avg_pnl=float(r["avg_pnl"]) if r["avg_pnl"] is not None else None,
+                avg_vi=float(r["avg_vi"]) if r["avg_vi"] is not None else None,
+            )
+            for r in rows
+        ]
+    except Exception as exc:
+        logger.warning("VI correlation query failed: %s", exc)
+        return []
+
+
 # ── Empty report ──────────────────────────────────────────────────────────────
 
 def _empty_report(profile_id: int, period: str) -> PerformanceReport:
@@ -720,4 +791,5 @@ def _empty_report(profile_id: int, period: str) -> PerformanceReport:
         top_tags_losers=[],
         repeat_errors=[],
         review_rate=ReviewRateOut(total_closed=0, reviewed_count=0, review_rate_pct=0.0),
+        vi_correlation=[],
     )

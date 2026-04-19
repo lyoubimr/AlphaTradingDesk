@@ -18,7 +18,7 @@ import type {
   VolatilitySettingsOut, NotificationSettingsOut,
   RiskBudgetOut, RiskAdvisorOut, RiskSettingsOut, PairVIOut,
   AutomationSettingsOut, AutomationSettingsUpdateIn, ConnectionTestOut, KrakenOrderOut,
-  PerformanceReport, AnalyticsSettingsOut, AnalyticsSettingsUpdateIn,
+  VIBucket, PerformanceReport, AnalyticsSettingsOut, AnalyticsSettingsUpdateIn,
   AIKeysStatusOut, AIKeysUpdateIn, AIGenerateOut,
 } from '../types/api'
 

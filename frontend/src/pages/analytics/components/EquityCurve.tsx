@@ -20,11 +20,16 @@ export function EquityCurve({ data }: Props) {
             <stop offset="95%" stopColor={isPositive ? '#10b981' : '#ef4444'} stopOpacity={0} />
           </linearGradient>
         </defs>
-        <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
-        <XAxis dataKey="date" tick={{ fontSize: 10, fill: '#64748b' }} tickLine={false} />
+        <CartesianGrid strokeDasharray="3 3" stroke="#1e1e35" />
+        <XAxis
+          dataKey="date"
+          tick={{ fontSize: 10, fill: '#64748b' }}
+          tickLine={false}
+          tickFormatter={d => new Date(d).toLocaleDateString('en', { month: 'short', day: 'numeric' })}
+        />
         <YAxis tick={{ fontSize: 10, fill: '#64748b' }} tickLine={false} width={50} />
         <Tooltip
-          contentStyle={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: 6, fontSize: 11 }}
+          contentStyle={{ background: '#16162a', border: '1px solid #1e1e35', borderRadius: 8, fontSize: 11 }}
           formatter={(v: number) => [v > 0 ? `+${v.toFixed(2)}` : v.toFixed(2), 'PnL']}
         />
         <Area

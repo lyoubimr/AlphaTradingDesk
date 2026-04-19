@@ -16,6 +16,7 @@ import {
   Bell,
   Shield,
   Zap,
+  Sparkles,
   X,
 } from 'lucide-react'
 import { cn } from '../../lib/cn'
@@ -126,6 +127,11 @@ const NAV_GROUPS: NavGroup[] = [
         to: '/settings/risk',
         label: 'Risk',
         icon: <Shield size={16} />,
+      },
+      {
+        to: '/settings/ai',
+        label: 'AI Settings',
+        icon: <Sparkles size={16} />,
       },
       {
         to: '/settings',
