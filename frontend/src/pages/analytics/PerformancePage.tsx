@@ -239,7 +239,15 @@ export function PerformancePage() {
             <SummaryKPIs kpi={report.kpi} />
           </Section>
 
-          {/* ── 3. Top Strategies + Direction Bias ───────────────────────── */}
+          {/* ── 3. Volatility Correlation ─────────────────────────────────── */}
+          <Section title="Volatility Correlation">
+            <ViCorrelation
+              pairData={report.vi_correlation}
+              marketData={report.vi_correlation_market ?? []}
+            />
+          </Section>
+
+          {/* ── 4. Top Strategies + Direction Bias ───────────────────────── */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <Section title="Top Strategies">
               <WRBarChart data={report.wr_by_strategy} />
@@ -249,7 +257,7 @@ export function PerformancePage() {
             </Section>
           </div>
 
-          {/* ── 4. TP Hit Rates + R:R Scatter ────────────────────────────── */}
+          {/* ── 5. TP Hit Rates + R:R Scatter ────────────────────────────── */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <Section title="TP Hit Rates">
               <TPHitRateChart data={report.tp_hit_rates} />
@@ -259,7 +267,7 @@ export function PerformancePage() {
             </Section>
           </div>
 
-          {/* ── 5. Equity Curve + Drawdown ───────────────────────────────── */}
+          {/* ── 6. Equity Curve + Drawdown ───────────────────────────────── */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <Section title="Equity Curve">
               <EquityCurve data={report.equity_curve} />
@@ -269,7 +277,7 @@ export function PerformancePage() {
             </Section>
           </div>
 
-          {/* ── 6. WR by Hour + WR by Session ────────────────────────────── */}
+          {/* ── 7. WR by Hour + WR by Session ────────────────────────────── */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <Section title="WR by Hour (local time)">
               <HourlyWRChart data={report.wr_by_hour} />
@@ -279,30 +287,17 @@ export function PerformancePage() {
             </Section>
           </div>
 
-          {/* ── 7. Pair Leaderboard ───────────────────────────────────────── */}
+          {/* ── 8. Pair Leaderboard ───────────────────────────────────────── */}
           <Section title="Pair Leaderboard">
             <PairLeaderboard rows={report.pair_leaderboard} />
           </Section>
 
-          {/* ── 8. Trade Type + Volatility Correlation ───────────────────── */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <Section title="Trade Type Distribution">
-              <TradeTypeDist data={report.trade_type_dist} />
-            </Section>
-            {report.vi_correlation.length > 0 ? (
-              <Section title="Volatility Correlation">
-                <ViCorrelation data={report.vi_correlation} />
-              </Section>
-            ) : (
-              <Section title="Volatility Correlation" defaultOpen={false}>
-                <div className="text-slate-600 text-sm py-6 text-center">
-                  No VI data — enable volatility snapshots to unlock this section.
-                </div>
-              </Section>
-            )}
-          </div>
+          {/* ── 9. Trade Type Distribution ───────────────────────────────── */}
+          <Section title="Trade Type Distribution">
+            <TradeTypeDist data={report.trade_type_dist} />
+          </Section>
 
-          {/* ── 9. Tag Insights + Repeat Errors ───────────────────────────── */}
+          {/* ── 10. Tag Insights + Repeat Errors ──────────────────────────── */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <Section title="Tag Insights">
               <TagInsights winners={report.top_tags_winners} losers={report.top_tags_losers} />

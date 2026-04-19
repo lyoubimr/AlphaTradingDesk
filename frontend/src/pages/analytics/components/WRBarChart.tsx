@@ -35,7 +35,10 @@ export function WRBarChart({ data, maxItems = 12 }: Props) {
         return (
           <div key={row.label} className="flex items-center gap-2 group hover:bg-surface-800/60 rounded-lg px-2 py-1.5 transition-colors">
             {/* Label */}
-            <div className="w-24 shrink-0 truncate text-xs text-slate-400 group-hover:text-slate-200 transition-colors text-right pr-1.5">
+            <div
+              title={row.label}
+              className="w-36 shrink-0 truncate text-xs text-slate-300 group-hover:text-slate-100 transition-colors text-right pr-1.5"
+            >
               {row.label}
             </div>
             {/* Bar track */}
