@@ -882,3 +882,162 @@ export interface KrakenOrderOut {
   filled_at: string | null
   cancelled_at: string | null
 }
+
+// ── Analytics (Phase 6A) ──────────────────────────────────────────────────
+
+export interface AnalyticsKPISummary {
+  disciplined_wr: number | null
+  raw_wr: number | null
+  expectancy: number | null
+  profit_factor: number | null
+  current_streak: number
+  best_win_streak: number
+  worst_loss_streak: number
+  total_trades: number
+  disciplined_trades: number
+  avg_win_pnl: number | null
+  avg_loss_pnl: number | null
+}
+
+export interface EquityPoint {
+  date: string
+  trade_id: number
+  pnl: number
+  cumulative_pnl: number
+}
+
+export interface WRByStat {
+  label: string
+  trades: number
+  wins: number
+  losses: number
+  wr_pct: number | null
+  avg_pnl: number | null
+  total_pnl: number
+}
+
+export interface WRByHour {
+  hour: number
+  trades: number
+  wins: number
+  wr_pct: number | null
+}
+
+export interface TPHitRate {
+  tp_number: number
+  total: number
+  hits: number
+  hit_rate_pct: number | null
+}
+
+export interface DrawdownPoint {
+  date: string
+  cumulative_pnl: number
+  peak_pnl: number
+  drawdown_pct: number
+}
+
+export interface TradeTypeRow {
+  trade_type: string
+  count: number
+  wins: number
+  wr_pct: number | null
+  avg_pnl: number | null
+}
+
+export interface RRScatterPoint {
+  trade_id: number
+  planned_rr: number | null
+  actual_rr: number | null
+  is_win: boolean
+  pair: string
+}
+
+export interface DirectionRow {
+  direction: string
+  trades: number
+  wins: number
+  wr_pct: number | null
+  total_pnl: number
+}
+
+export interface TagFrequency {
+  tag: string
+  count: number
+  pct: number
+}
+
+export interface RepeatError {
+  tag: string
+  error_count: number
+  last_seen: string | null
+}
+
+export interface ReviewRateOut {
+  total_closed: number
+  reviewed_count: number
+  review_rate_pct: number
+}
+
+export interface PerformanceReport {
+  profile_id: number
+  period: string
+  generated_at: string
+  kpi: AnalyticsKPISummary
+  equity_curve: EquityPoint[]
+  wr_by_strategy: WRByStat[]
+  wr_by_session: WRByStat[]
+  wr_by_hour: WRByHour[]
+  pair_leaderboard: WRByStat[]
+  tp_hit_rates: TPHitRate[]
+  drawdown: DrawdownPoint[]
+  trade_type_dist: TradeTypeRow[]
+  rr_scatter: RRScatterPoint[]
+  direction_bias: DirectionRow[]
+  top_tags_winners: TagFrequency[]
+  top_tags_losers: TagFrequency[]
+  repeat_errors: RepeatError[]
+  review_rate: ReviewRateOut
+  ai_summary: string | null
+  ai_generated_at: string | null
+}
+
+export interface AnalyticsSettingsOut {
+  profile_id: number
+  config: {
+    ai_enabled: boolean
+    ai_provider: 'openai' | 'anthropic' | 'perplexity'
+    ai_model: string
+    ai_refresh: 'per_trade' | 'daily' | 'manual'
+    ai_refresh_hours: number
+  }
+}
+
+export interface AnalyticsSettingsUpdateIn {
+  ai_enabled?: boolean
+  ai_provider?: 'openai' | 'anthropic' | 'perplexity'
+  ai_model?: string
+  ai_refresh?: 'per_trade' | 'daily' | 'manual'
+  ai_refresh_hours?: number
+}
+
+export interface AIKeysStatusOut {
+  profile_id: number
+  openai_configured: boolean
+  anthropic_configured: boolean
+  perplexity_configured: boolean
+}
+
+export interface AIKeysUpdateIn {
+  openai_key?: string | null
+  anthropic_key?: string | null
+  perplexity_key?: string | null
+}
+
+export interface AIGenerateOut {
+  summary: string
+  provider: string
+  model: string
+  tokens_used: number | null
+  generated_at: string
+}

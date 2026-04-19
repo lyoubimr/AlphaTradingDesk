@@ -19,6 +19,7 @@ import { RiskSettingsPage } from './pages/settings/RiskSettingsPage'
 import { AutomationSettingsPage } from './pages/settings/AutomationSettingsPage'
 import { MarketVIPage } from './pages/volatility/MarketVIPage'
 import { WatchlistsPage } from './pages/volatility/WatchlistsPage'
+import { PerformancePage } from './pages/analytics/PerformancePage'
 
 export default function App() {
   return (
@@ -42,6 +43,8 @@ export default function App() {
         <Route path="/settings/notifications" element={<NotificationsSettingsPage />} />
         <Route path="/settings/risk" element={<RiskSettingsPage />} />
         <Route path="/settings/automation" element={<AutomationSettingsPage />} />
+        {/* Phase 6A — Analytics */}
+        <Route path="/analytics" element={<PerformancePage />} />
         {/* Phase 2 — Volatility */}
         <Route path="/volatility" element={<Navigate to="/volatility/market" replace />} />
         <Route path="/volatility/market" element={<MarketVIPage />} />

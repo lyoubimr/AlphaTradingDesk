@@ -4,6 +4,7 @@ import {
   LayoutDashboard,
   BookOpen,
   BarChart2,
+  LineChart,
   Target,
   Settings,
   TrendingUp,
@@ -65,6 +66,11 @@ const NAV_GROUPS: NavGroup[] = [
         to: '/market-analysis',
         label: 'Market Analysis',
         icon: <BarChart2 size={16} />,
+      },
+      {
+        to: '/analytics',
+        label: 'Analytics',
+        icon: <LineChart size={16} />,
       },
       {
         to: '/volatility/market',

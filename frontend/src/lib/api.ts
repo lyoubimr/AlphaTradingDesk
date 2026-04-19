@@ -18,6 +18,8 @@ import type {
   VolatilitySettingsOut, NotificationSettingsOut,
   RiskBudgetOut, RiskAdvisorOut, RiskSettingsOut, PairVIOut,
   AutomationSettingsOut, AutomationSettingsUpdateIn, ConnectionTestOut, KrakenOrderOut,
+  PerformanceReport, AnalyticsSettingsOut, AnalyticsSettingsUpdateIn,
+  AIKeysStatusOut, AIKeysUpdateIn, AIGenerateOut,
 } from '../types/api'
 
 const BASE = '/api'
@@ -666,4 +668,42 @@ export const automationApi = {
     open_positions:   { symbol: string; side: string; size: number; price: number }[]
   }> =>
     request(`/kraken-execution/account/${profileId}`),
+}
+
+// ── Analytics (Phase 6A) ──────────────────────────────────────────────────
+
+export const analyticsApi = {
+  /** GET /api/analytics/performance/{profileId}?period=30d */
+  getPerformance: (profileId: number, period = '30d'): Promise<PerformanceReport> =>
+    request(`/analytics/performance/${profileId}?period=${period}`),
+
+  /** GET /api/analytics/settings/{profileId} */
+  getSettings: (profileId: number): Promise<AnalyticsSettingsOut> =>
+    request(`/analytics/settings/${profileId}`),
+
+  /** PUT /api/analytics/settings/{profileId} */
+  updateSettings: (profileId: number, data: AnalyticsSettingsUpdateIn): Promise<AnalyticsSettingsOut> =>
+    request(`/analytics/settings/${profileId}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+
+  /** GET /api/analytics/ai-keys/{profileId} — status only, never raw keys */
+  getAIKeysStatus: (profileId: number): Promise<AIKeysStatusOut> =>
+    request(`/analytics/ai-keys/${profileId}`),
+
+  /** PUT /api/analytics/ai-keys/{profileId} — save / clear encrypted keys */
+  updateAIKeys: (profileId: number, data: AIKeysUpdateIn): Promise<AIKeysStatusOut> =>
+    request(`/analytics/ai-keys/${profileId}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+
+  /** POST /api/analytics/ai/generate/{profileId}?period=30d — trigger AI generation */
+  generateSummary: (profileId: number, period = '30d'): Promise<AIGenerateOut> =>
+    request(`/analytics/ai/generate/${profileId}?period=${period}`, { method: 'POST' }),
+
+  /** DELETE /api/analytics/ai/cache/{profileId}?period=30d — clear cached summary */
+  clearCache: (profileId: number, period = '30d'): Promise<void> =>
+    request(`/analytics/ai/cache/${profileId}?period=${period}`, { method: 'DELETE' }),
 }
