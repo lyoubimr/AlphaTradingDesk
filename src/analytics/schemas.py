@@ -111,12 +111,16 @@ class ReviewRateOut(BaseModel):
 
 
 class VIBucket(BaseModel):
-    """Trade performance bucketed by VI score at entry time."""
-    bucket: str            # "Calm", "Normal", "Active", "Extreme"
+    """Trade performance bucketed by VI score at entry time.
+
+    Pair VI buckets  : Dead / Calm / Normal / Trending / Active / Extreme
+    Market VI buckets: DEAD / CALM / NORMAL / TRENDING / ACTIVE / EXTREME (regime field)
+    """
+    bucket: str            # regime name
     trades: int
     wr_pct: float | None = None
-    avg_pnl: float | None = None
-    avg_vi: float | None = None   # average VI score in bucket (0-1)
+    avg_pnl: float | None = None   # average realized_pnl in dollars
+    avg_vi: float | None = None   # average VI score in bucket (0–1)
 
 
 # ── Main response model ───────────────────────────────────────────────────────
@@ -169,8 +173,11 @@ class PerformanceReport(BaseModel):
     # ── 15. Review rate
     review_rate: ReviewRateOut
 
-    # ── 16. Volatility correlation
+    # ── 16. Volatility correlation — pair VI (6 buckets by vi_score threshold)
     vi_correlation: list[VIBucket] = Field(default_factory=list)
+
+    # ── 17. Volatility correlation — market VI (by regime field on market_vi_snapshots)
+    vi_correlation_market: list[VIBucket] = Field(default_factory=list)
 
     # ── AI narrative (None if not generated yet / disabled)
     ai_summary: str | None = None

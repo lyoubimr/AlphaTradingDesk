@@ -43,10 +43,10 @@ function Section({ title, children, defaultOpen = true }: {
 }) {
   const [open, setOpen] = useState(defaultOpen)
   return (
-    <div className="bg-surface-900 border border-surface-800 rounded-xl overflow-hidden">
+    <div className="bg-surface-900 border border-surface-800 rounded-xl">
       <button
         onClick={() => setOpen(o => !o)}
-        className="w-full flex items-center justify-between px-4 py-3 hover:bg-surface-800/60 transition-colors"
+        className="w-full flex items-center justify-between px-4 py-3 hover:bg-surface-800/60 transition-colors rounded-t-xl"
       >
         <h2 className="text-xs font-semibold text-slate-500 uppercase tracking-widest">{title}</h2>
         {open

@@ -1006,7 +1006,8 @@ export interface PerformanceReport {
   top_tags_losers: TagFrequency[]
   repeat_errors: RepeatError[]
   review_rate: ReviewRateOut
-  vi_correlation: VIBucket[]
+  vi_correlation: VIBucket[]         // pair VI — 6 buckets (Dead/Calm/Normal/Trending/Active/Extreme)
+  vi_correlation_market: VIBucket[]  // market VI — by regime field
   ai_summary: string | null
   ai_generated_at: string | null
 }

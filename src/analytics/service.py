@@ -182,6 +182,7 @@ def compute_performance_report(profile_id: int, period: str, db: Session) -> Per
     top_tags_winners, top_tags_losers, repeat_errors = _compute_tag_stats(trades)
     review_rate = _compute_review_rate(trades)
     vi_correlation = _compute_vi_correlation(profile_id, cutoff, db, params, date_filter)
+    vi_correlation_market = _compute_vi_correlation_market(profile_id, cutoff, db, params, date_filter)
 
     # ── AI cache lookup ────────────────────────────────────────────────────
     ai_summary: str | None = None
@@ -215,6 +216,7 @@ def compute_performance_report(profile_id: int, period: str, db: Session) -> Per
         repeat_errors=repeat_errors,
         review_rate=review_rate,
         vi_correlation=vi_correlation,
+        vi_correlation_market=vi_correlation_market,
         ai_summary=ai_summary,
         ai_generated_at=ai_generated_at,
     )
@@ -706,13 +708,22 @@ def _compute_vi_correlation(
     params: dict,
     date_filter: str,
 ) -> list[VIBucket]:
-    """Bucket closed trades by VI score at entry time (1h timeframe, ±3h window)."""
+    """Bucket closed trades by pair VI score at entry time (volatility_snapshots, 1h, ±3h).
+
+    Uses the same 6-regime scale as score_to_regime():
+        Dead     vi < 0.17
+        Calm     0.17 – 0.33
+        Normal   0.33 – 0.50
+        Trending 0.50 – 0.67  ← directional move, historically best R:R
+        Active   0.67 – 0.83
+        Extreme  ≥ 0.83
+    """
     sql = text(f"""
         WITH trade_vi AS (
             SELECT
                 t.id,
                 t.realized_pnl > 0 AS is_win,
-                COALESCE(t.realized_pnl / NULLIF(t.risk_amount, 0) * 100, 0) AS pnl_pct,
+                t.realized_pnl            AS pnl,
                 (
                     SELECT vs.vi_score
                     FROM volatility_snapshots vs
@@ -734,14 +745,16 @@ def _compute_vi_correlation(
         )
         SELECT
             CASE
+                WHEN vi_score < 0.17 THEN 'Dead'
                 WHEN vi_score < 0.33 THEN 'Calm'
                 WHEN vi_score < 0.50 THEN 'Normal'
-                WHEN vi_score < 0.67 THEN 'Active'
+                WHEN vi_score < 0.67 THEN 'Trending'
+                WHEN vi_score < 0.83 THEN 'Active'
                 ELSE 'Extreme'
             END AS bucket,
             COUNT(*) AS trades,
             ROUND(COUNT(*) FILTER (WHERE is_win) * 100.0 / NULLIF(COUNT(*), 0), 1) AS wr_pct,
-            ROUND(AVG(pnl_pct)::numeric, 2) AS avg_pnl,
+            ROUND(AVG(pnl)::numeric, 2) AS avg_pnl,
             ROUND(AVG(vi_score)::numeric, 3) AS avg_vi
         FROM trade_vi
         WHERE vi_score IS NOT NULL
@@ -761,7 +774,72 @@ def _compute_vi_correlation(
             for r in rows
         ]
     except Exception as exc:
-        logger.warning("VI correlation query failed: %s", exc)
+        logger.warning("Pair VI correlation query failed: %s", exc)
+        return []
+
+
+def _compute_vi_correlation_market(
+    profile_id: int,
+    cutoff: datetime | None,
+    db: Session,
+    params: dict,
+    date_filter: str,
+) -> list[VIBucket]:
+    """Bucket closed trades by Market VI regime at entry time (market_vi_snapshots, 1h, ±3h).
+
+    Uses the `regime` column (DEAD/CALM/NORMAL/TRENDING/ACTIVE/EXTREME) stored at snapshot time.
+    """
+    sql = text(f"""
+        WITH trade_market_vi AS (
+            SELECT
+                t.id,
+                t.realized_pnl > 0  AS is_win,
+                t.realized_pnl      AS pnl,
+                mvs.regime,
+                mvs.vi_score
+            FROM trades t
+            CROSS JOIN LATERAL (
+                SELECT mvs2.regime, mvs2.vi_score
+                FROM market_vi_snapshots mvs2
+                WHERE mvs2.timeframe = '1h'
+                  AND mvs2.timestamp
+                      BETWEEN (t.entry_date::timestamp - INTERVAL '3 hours')
+                          AND (t.entry_date::timestamp + INTERVAL '3 hours')
+                ORDER BY ABS(EXTRACT(EPOCH FROM (
+                    mvs2.timestamp - t.entry_date::timestamp
+                )))
+                LIMIT 1
+            ) mvs
+            WHERE t.profile_id = :profile_id
+              AND t.status = 'closed'
+              AND t.realized_pnl IS NOT NULL
+              {date_filter}
+        )
+        SELECT
+            regime                                                          AS bucket,
+            COUNT(*)                                                        AS trades,
+            ROUND(COUNT(*) FILTER (WHERE is_win) * 100.0
+                  / NULLIF(COUNT(*), 0), 1)                                AS wr_pct,
+            ROUND(AVG(pnl)::numeric, 2)                                    AS avg_pnl,
+            ROUND(AVG(vi_score)::numeric, 3)                               AS avg_vi
+        FROM trade_market_vi
+        GROUP BY regime
+        ORDER BY AVG(vi_score)
+    """)
+    try:
+        rows = db.execute(sql, params).mappings().all()
+        return [
+            VIBucket(
+                bucket=r["bucket"].capitalize() if r["bucket"] else r["bucket"],
+                trades=int(r["trades"]),
+                wr_pct=float(r["wr_pct"]) if r["wr_pct"] is not None else None,
+                avg_pnl=float(r["avg_pnl"]) if r["avg_pnl"] is not None else None,
+                avg_vi=float(r["avg_vi"]) if r["avg_vi"] is not None else None,
+            )
+            for r in rows
+        ]
+    except Exception as exc:
+        logger.warning("Market VI correlation query failed: %s", exc)
         return []
 
 
@@ -792,4 +870,5 @@ def _empty_report(profile_id: int, period: str) -> PerformanceReport:
         repeat_errors=[],
         review_rate=ReviewRateOut(total_closed=0, reviewed_count=0, review_rate_pct=0.0),
         vi_correlation=[],
+        vi_correlation_market=[],
     )

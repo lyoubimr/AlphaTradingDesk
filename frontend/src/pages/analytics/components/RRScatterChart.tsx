@@ -46,11 +46,11 @@ export function RRScatterChart({ data }: Props) {
           <span className="w-1.5 h-1.5 rounded-full bg-red-400 inline-block" />
           {data.length - wins} losses
         </span>
-        <span className="inline-flex items-center text-[11px] font-medium bg-surface-800 border border-surface-700 text-slate-300 rounded-full px-2.5 py-0.5">
-          Avg planned&nbsp;<strong>{avgPlanned.toFixed(2)}R</strong>
+        <span className="inline-flex items-center text-[11px] font-medium bg-surface-800 border border-surface-700 text-slate-100 rounded-full px-2.5 py-0.5">
+          <span className="text-slate-400 mr-1">Avg planned</span><strong>{avgPlanned.toFixed(2)}R</strong>
         </span>
-        <span className="inline-flex items-center text-[11px] font-medium bg-surface-800 border border-surface-700 text-slate-300 rounded-full px-2.5 py-0.5">
-          Avg actual&nbsp;<strong>{avgActual.toFixed(2)}R</strong>
+        <span className="inline-flex items-center text-[11px] font-medium bg-surface-800 border border-surface-700 text-slate-100 rounded-full px-2.5 py-0.5">
+          <span className="text-slate-400 mr-1">Avg actual</span><strong>{avgActual.toFixed(2)}R</strong>
         </span>
       </div>
       <ResponsiveContainer width="100%" height={220}>
