@@ -140,7 +140,7 @@ export function AISettingsPanel({ profileId, settings, aiKeys, onSettingsChange 
       <button
         onClick={saveSettings}
         disabled={saving}
-        className="flex items-center gap-2 px-4 py-2 text-xs rounded-md bg-violet-700 hover:bg-violet-600 disabled:opacity-50 text-white transition-colors"
+        className="flex items-center gap-2 px-4 py-2.5 min-h-[44px] text-xs rounded-md bg-violet-700 hover:bg-violet-600 disabled:opacity-50 text-white transition-colors"
       >
         {savedOk ? <Check size={12} /> : null}
         {saving ? 'Saving…' : savedOk ? 'Saved!' : 'Save settings'}
@@ -157,7 +157,7 @@ export function AISettingsPanel({ profileId, settings, aiKeys, onSettingsChange 
           return (
             <div key={p} className="space-y-1">
               <div className="flex items-center gap-2">
-                <label className="text-xs text-slate-500 w-24 shrink-0">{PROVIDER_LABELS[p]}</label>
+                <label className="text-xs text-slate-500 w-32 shrink-0">{PROVIDER_LABELS[p]}</label>
                 {hasKey && (
                   <span className="text-xs text-emerald-500 flex items-center gap-1">
                     <Check size={10} /> configured
@@ -176,7 +176,7 @@ export function AISettingsPanel({ profileId, settings, aiKeys, onSettingsChange 
                   <button
                     type="button"
                     onClick={() => setShowKey(prev => ({ ...prev, [p]: !prev[p] }))}
-                    className="text-slate-500 hover:text-slate-300 p-1"
+                    className="text-slate-500 hover:text-slate-300 p-2.5"
                   >
                     {showKey[p] ? <EyeOff size={12} /> : <Eye size={12} />}
                   </button>
@@ -184,7 +184,7 @@ export function AISettingsPanel({ profileId, settings, aiKeys, onSettingsChange 
                     <button
                       type="button"
                       onClick={() => setKeys(prev => ({ ...prev, [p]: '' }))}
-                      className="text-slate-500 hover:text-slate-300 p-1"
+                      className="text-slate-500 hover:text-slate-300 p-2.5"
                     >
                       <X size={12} />
                     </button>
@@ -199,7 +199,7 @@ export function AISettingsPanel({ profileId, settings, aiKeys, onSettingsChange 
           <button
             onClick={saveKeys}
             disabled={keysSaving}
-            className="flex items-center gap-2 px-4 py-2 text-xs rounded-md bg-emerald-700 hover:bg-emerald-600 disabled:opacity-50 text-white transition-colors"
+            className="flex items-center gap-2 px-4 py-2.5 min-h-[44px] text-xs rounded-md bg-emerald-700 hover:bg-emerald-600 disabled:opacity-50 text-white transition-colors"
           >
             {keysOk ? <Check size={12} /> : <KeyRound size={12} />}
             {keysSaving ? 'Saving keys…' : keysOk ? 'Keys saved!' : 'Save API keys'}
