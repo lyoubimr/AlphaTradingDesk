@@ -105,7 +105,7 @@ def _get_decrypted_key(row: AnalyticsAIKeys, provider: str) -> str:
 
 def _build_prompt(report: PerformanceReport) -> str:
     kpi = report.kpi
-    rr = round(abs(kpi.avg_win_pnl / kpi.avg_loss_pnl), 2) if kpi.avg_loss_pnl else "N/A"
+    rr: float | str = round(abs(kpi.avg_win_pnl / kpi.avg_loss_pnl), 2) if (kpi.avg_win_pnl is not None and kpi.avg_loss_pnl) else "N/A"
     lines = [
         "You are an experienced trading coach reviewing a trader's performance data. "
         "Respond ONLY using the exact numbers provided below — never invent or extrapolate figures. "
