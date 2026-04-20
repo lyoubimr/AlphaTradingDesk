@@ -27,7 +27,7 @@ const PROVIDER_MODELS: Record<Provider, string[]> = {
   anthropic: ['claude-3-haiku-20240307', 'claude-3-5-sonnet-20241022', 'claude-3-opus-20240229'],
   perplexity: ['sonar', 'sonar-pro'],
   groq: ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant', 'mistral-saba-24b'],
-  gemini: ['gemini-2.0-flash', 'gemini-1.5-flash'],
+  gemini: ['gemini-2.0-flash', 'gemini-2.0-flash-lite'],
 }
 const REFRESH_OPTIONS = [
   { value: 'per_trade', label: 'After each trade' },

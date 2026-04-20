@@ -105,41 +105,71 @@ def _get_decrypted_key(row: AnalyticsAIKeys, provider: str) -> str:
 
 def _build_prompt(report: PerformanceReport) -> str:
     kpi = report.kpi
+    rr = round(abs(kpi.avg_win_pnl / kpi.avg_loss_pnl), 2) if kpi.avg_loss_pnl else "N/A"
     lines = [
-        "You are a professional trading coach. Analyze the following trading performance data and provide a concise, actionable narrative (3-5 paragraphs). Focus on: what's working, what needs improvement, key patterns, and 2-3 specific actionable recommendations. Be direct and data-driven.",
+        "You are an experienced trading coach reviewing a trader's performance data. "
+        "Respond ONLY using the exact numbers provided below — never invent or extrapolate figures. "
+        "Use emojis generously throughout your response — not just on section headers but also inline on bullet points to make the feedback vivid and easy to scan. "
+        "Structure your response in exactly 3 sections:\n"
+        "✅ What's working\n"
+        "❌ What needs fixing\n"
+        "🎯 Actions to take\n"
+        "Each section: 3-5 bullet points, each starting with a relevant emoji, short and direct. "
+        "Only draw conclusions from data points with enough trades to be meaningful — judge significance yourself from the trade counts. "
+        "On the Actions section: be specific and concrete, reference the actual numbers.",
         "",
-        f"Period: {report.period}",
-        f"Total trades: {kpi.total_trades} (disciplined: {kpi.disciplined_trades})",
-        f"Disciplined WR: {kpi.disciplined_wr}% | Raw WR: {kpi.raw_wr}%",
-        f"Expectancy: {kpi.expectancy} | Profit Factor: {kpi.profit_factor}",
-        f"Current streak: {kpi.current_streak} | Best win streak: {kpi.best_win_streak} | Worst loss streak: {kpi.worst_loss_streak}",
-        f"Avg win: {kpi.avg_win_pnl} | Avg loss: {kpi.avg_loss_pnl}",
+        "━━━ 📊 OVERALL KPIs ━━━",
+        f"📅 Period: {report.period}",
+        f"🔢 Total trades: {kpi.total_trades} | Disciplined: {kpi.disciplined_trades}",
+        f"🎯 Disciplined WR: {kpi.disciplined_wr}% | Raw WR: {kpi.raw_wr}%",
+        f"⚖️  Profit factor: {kpi.profit_factor} | Expectancy: {kpi.expectancy}",
+        f"💰 Avg win: {kpi.avg_win_pnl} | Avg loss: {kpi.avg_loss_pnl} | R:R implied: {rr}",
+        f"🔥 Current streak: {kpi.current_streak} | Best win streak: {kpi.best_win_streak} | Worst loss streak: {kpi.worst_loss_streak}",
         "",
-        "Sessions breakdown:",
+        "━━━ 🕐 SESSIONS ━━━",
     ]
     for s in report.wr_by_session:
-        lines.append(f"  {s.label}: {s.trades} trades, WR {s.wr_pct}%, avg PnL {s.avg_pnl}")
-    lines.append("")
-    lines.append("Top pairs:")
-    for p in report.pair_leaderboard[:5]:
-        lines.append(f"  {p.label}: {p.trades} trades, WR {p.wr_pct}%, total PnL {p.total_pnl}")
-    lines.append("")
-    lines.append("Trade types (scalp/intraday/swing):")
+        lines.append(f"  {s.label}: {s.trades} trades | WR {s.wr_pct}% | avg PnL {s.avg_pnl} | total PnL {s.total_pnl}")
+
+    lines += ["", "━━━ 📈 STRATEGIES ━━━"]
+    for s in report.wr_by_strategy[:5]:
+        lines.append(f"  {s.label}: {s.trades} trades | WR {s.wr_pct}% | avg PnL {s.avg_pnl} | total PnL {s.total_pnl}")
+
+    lines += ["", "━━━ 💱 PAIRS ━━━"]
+    for p in report.pair_leaderboard[:6]:
+        lines.append(f"  {p.label}: {p.trades} trades | WR {p.wr_pct}% | avg PnL {p.avg_pnl} | total PnL {p.total_pnl}")
+
+    lines += ["", "━━━ ⏱️  TRADE STYLE ━━━"]
     for t in report.trade_type_dist:
-        lines.append(f"  {t.trade_type}: {t.count} trades, WR {t.wr_pct}%")
-    lines.append("")
-    lines.append("Direction bias:")
+        lines.append(f"  {t.trade_type}: {t.count} trades | WR {t.wr_pct}% | avg PnL {t.avg_pnl}")
+
+    lines += ["", "━━━ ↕️  DIRECTION ━━━"]
     for d in report.direction_bias:
-        lines.append(f"  {d.direction}: {d.trades} trades, WR {d.wr_pct}%")
-    lines.append("")
+        lines.append(f"  {d.direction}: {d.trades} trades | WR {d.wr_pct}% | total PnL {d.total_pnl}")
+
+    lines += ["", "━━━ 🏷️  TAGS ━━━"]
     if report.top_tags_winners:
-        lines.append("Common tags on winning trades: " + ", ".join(t.tag for t in report.top_tags_winners[:5]))
+        lines.append("Winners: " + ", ".join(f"{t.tag} ({t.count}x)" for t in report.top_tags_winners[:6]))
     if report.top_tags_losers:
-        lines.append("Common tags on losing trades: " + ", ".join(t.tag for t in report.top_tags_losers[:5]))
+        lines.append("Losers:  " + ", ".join(f"{t.tag} ({t.count}x)" for t in report.top_tags_losers[:6]))
     if report.repeat_errors:
-        lines.append("Repeat mistakes (tags on ≥2 losses): " + ", ".join(f"{e.tag} ({e.error_count}x)" for e in report.repeat_errors[:5]))
-    lines.append("")
-    lines.append(f"Review rate: {report.review_rate.review_rate_pct}% ({report.review_rate.reviewed_count}/{report.review_rate.total_closed} trades reviewed)")
+        lines.append("🔁 Repeat mistakes: " + ", ".join(f"{e.tag} ({e.error_count}x)" for e in report.repeat_errors[:5]))
+
+    if report.tp_hit_rates:
+        lines += ["", "━━━ 🎯 TP HIT RATES ━━━"]
+        for tp in report.tp_hit_rates:
+            lines.append(f"  TP{tp.tp_number}: {tp.hits}/{tp.total} hit ({tp.hit_rate_pct}%)")
+
+    if report.vi_correlation:
+        lines += ["", "━━━ 🌊 VOLATILITY (pair VI buckets) ━━━"]
+        for v in report.vi_correlation:
+            lines.append(f"  {v.bucket}: {v.trades} trades | WR {v.wr_pct}% | avg PnL {v.avg_pnl}")
+
+    lines += [
+        "",
+        f"━━━ 📝 REVIEW RATE ━━━",
+        f"  {report.review_rate.review_rate_pct}% of trades reviewed ({report.review_rate.reviewed_count}/{report.review_rate.total_closed})",
+    ]
     return "\n".join(lines)
 
 
