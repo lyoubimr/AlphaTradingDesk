@@ -33,11 +33,37 @@ depends_on = None
 
 
 def upgrade() -> None:
+    # ── Orphaned pg_type cleanup ──────────────────────────────────────────────
+    # PostgreSQL's CREATE TABLE inserts into pg_type BEFORE checking pg_class.
+    # If a prior partial deployment left orphaned type entries (pg_type row
+    # exists but pg_class row does NOT), even "IF NOT EXISTS" raises
+    # UniqueViolation on pg_type_typname_nsp_index.
+    # Fix: delete orphaned composite + array types for each table we manage,
+    # but ONLY when the table itself does not exist — never touch live tables.
+    # In Docker, POSTGRES_USER is a superuser so DELETE FROM pg_type is allowed.
+    op.execute("""
+        DO $$
+        DECLARE
+            ns_oid oid;
+            tnames text[] := ARRAY['analytics_settings', 'analytics_ai_keys', 'analytics_ai_cache'];
+            tname  text;
+        BEGIN
+            SELECT oid INTO ns_oid FROM pg_namespace WHERE nspname = 'public';
+            FOREACH tname IN ARRAY tnames LOOP
+                -- Only remove the type when the real table doesn't exist
+                IF NOT EXISTS (
+                    SELECT 1 FROM pg_class
+                    WHERE relname = tname AND relnamespace = ns_oid AND relkind = 'r'
+                ) THEN
+                    DELETE FROM pg_type
+                    WHERE typname IN (tname, '_' || tname)
+                      AND typnamespace = ns_oid;
+                END IF;
+            END LOOP;
+        END $$
+    """)
+
     # ── 1. analytics_settings — per-profile AI + display preferences ─────────
-    # Use DO/EXCEPTION instead of CREATE TABLE IF NOT EXISTS to handle the
-    # PostgreSQL edge case where an orphaned pg_type entry (from a prior partial
-    # deployment) causes UniqueViolation on pg_type_typname_nsp_index even when
-    # IF NOT EXISTS is specified.
     op.execute("""
         DO $$ BEGIN
             CREATE TABLE analytics_settings (
