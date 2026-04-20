@@ -167,7 +167,7 @@ def _build_prompt(report: PerformanceReport) -> str:
 
     lines += [
         "",
-        f"━━━ 📝 REVIEW RATE ━━━",
+        "━━━ 📝 REVIEW RATE ━━━",
         f"  {report.review_rate.review_rate_pct}% of trades reviewed ({report.review_rate.reviewed_count}/{report.review_rate.total_closed})",
     ]
     return "\n".join(lines)

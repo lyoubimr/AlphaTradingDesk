@@ -16,15 +16,23 @@ export function AISettingsPage() {
 
   useEffect(() => {
     if (!profileId) return
-    setLoading(true)
-    setError(null)
-    Promise.all([
-      analyticsApi.getSettings(profileId),
-      analyticsApi.getAIKeysStatus(profileId),
-    ])
-      .then(([s, k]) => { setSettings(s); setAiKeys(k) })
-      .catch(e => setError(e instanceof Error ? e.message : 'Failed to load AI settings'))
-      .finally(() => setLoading(false))
+    const load = async () => {
+      setLoading(true)
+      setError(null)
+      try {
+        const [s, k] = await Promise.all([
+          analyticsApi.getSettings(profileId),
+          analyticsApi.getAIKeysStatus(profileId),
+        ])
+        setSettings(s)
+        setAiKeys(k)
+      } catch (e) {
+        setError(e instanceof Error ? e.message : 'Failed to load AI settings')
+      } finally {
+        setLoading(false)
+      }
+    }
+    void load()
   }, [profileId])
 
   if (!profileId) return (
