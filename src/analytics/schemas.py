@@ -205,7 +205,7 @@ class AnalyticsSettingsOut(BaseModel):
 
 class AnalyticsSettingsUpdateIn(BaseModel):
     ai_enabled: bool | None = None
-    ai_provider: str | None = Field(default=None, pattern="^(openai|anthropic|perplexity)$")
+    ai_provider: str | None = Field(default=None, pattern="^(openai|anthropic|perplexity|groq|gemini)$")
     ai_model: str | None = None
     ai_refresh: str | None = Field(default=None, pattern="^(per_trade|daily|manual)$")
     ai_refresh_hours: int | None = Field(default=None, ge=1, le=720)
@@ -219,6 +219,8 @@ class AIKeysStatusOut(BaseModel):
     openai_configured: bool
     anthropic_configured: bool
     perplexity_configured: bool
+    groq_configured: bool
+    gemini_configured: bool
 
 
 class AIKeysUpdateIn(BaseModel):
@@ -226,6 +228,8 @@ class AIKeysUpdateIn(BaseModel):
     openai_key: str | None = None       # None = keep existing | "" = clear
     anthropic_key: str | None = None
     perplexity_key: str | None = None
+    groq_key: str | None = None
+    gemini_key: str | None = None
 
 
 # ── AI generation ─────────────────────────────────────────────────────────────

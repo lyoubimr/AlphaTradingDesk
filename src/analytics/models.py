@@ -65,6 +65,8 @@ class AnalyticsAIKeys(Base):
     openai_key_enc: Mapped[bytes | None] = mapped_column(BYTEA, nullable=True)
     anthropic_key_enc: Mapped[bytes | None] = mapped_column(BYTEA, nullable=True)
     perplexity_key_enc: Mapped[bytes | None] = mapped_column(BYTEA, nullable=True)
+    groq_key_enc: Mapped[bytes | None] = mapped_column(BYTEA, nullable=True)
+    gemini_key_enc: Mapped[bytes | None] = mapped_column(BYTEA, nullable=True)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=False), nullable=False, server_default=func.now()
     )

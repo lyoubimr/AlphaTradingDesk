@@ -1017,7 +1017,7 @@ export interface AnalyticsSettingsOut {
   profile_id: number
   config: {
     ai_enabled: boolean
-    ai_provider: 'openai' | 'anthropic' | 'perplexity'
+    ai_provider: 'openai' | 'anthropic' | 'perplexity' | 'groq' | 'gemini'
     ai_model: string
     ai_refresh: 'per_trade' | 'daily' | 'manual'
     ai_refresh_hours: number
@@ -1026,7 +1026,7 @@ export interface AnalyticsSettingsOut {
 
 export interface AnalyticsSettingsUpdateIn {
   ai_enabled?: boolean
-  ai_provider?: 'openai' | 'anthropic' | 'perplexity'
+  ai_provider?: 'openai' | 'anthropic' | 'perplexity' | 'groq' | 'gemini'
   ai_model?: string
   ai_refresh?: 'per_trade' | 'daily' | 'manual'
   ai_refresh_hours?: number
@@ -1037,12 +1037,16 @@ export interface AIKeysStatusOut {
   openai_configured: boolean
   anthropic_configured: boolean
   perplexity_configured: boolean
+  groq_configured: boolean
+  gemini_configured: boolean
 }
 
 export interface AIKeysUpdateIn {
   openai_key?: string | null
   anthropic_key?: string | null
   perplexity_key?: string | null
+  groq_key?: string | null
+  gemini_key?: string | null
 }
 
 export interface AIGenerateOut {

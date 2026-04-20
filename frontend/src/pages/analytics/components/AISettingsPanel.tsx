@@ -12,18 +12,22 @@ interface Props {
   onSettingsChange: (s: AnalyticsSettingsOut) => void
 }
 
-const PROVIDERS = ['openai', 'anthropic', 'perplexity'] as const
+const PROVIDERS = ['openai', 'anthropic', 'perplexity', 'groq', 'gemini'] as const
 type Provider = (typeof PROVIDERS)[number]
 
 const PROVIDER_LABELS: Record<Provider, string> = {
   openai: 'OpenAI',
   anthropic: 'Anthropic',
   perplexity: 'Perplexity',
+  groq: 'Groq (Free)',
+  gemini: 'Google Gemini (Free)',
 }
 const PROVIDER_MODELS: Record<Provider, string[]> = {
   openai: ['gpt-4o-mini', 'gpt-4o', 'gpt-4-turbo'],
   anthropic: ['claude-3-haiku-20240307', 'claude-3-5-sonnet-20241022', 'claude-3-opus-20240229'],
   perplexity: ['sonar', 'sonar-pro'],
+  groq: ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant', 'mistral-saba-24b'],
+  gemini: ['gemini-2.0-flash', 'gemini-1.5-flash'],
 }
 const REFRESH_OPTIONS = [
   { value: 'per_trade', label: 'After each trade' },
@@ -35,8 +39,8 @@ export function AISettingsPanel({ profileId, settings, aiKeys, onSettingsChange 
   const [saving, setSaving] = useState(false)
   const [savedOk, setSavedOk] = useState(false)
   const [local, setLocal] = useState(settings)
-  const [keys, setKeys] = useState<Record<Provider, string>>({ openai: '', anthropic: '', perplexity: '' })
-  const [showKey, setShowKey] = useState<Record<Provider, boolean>>({ openai: false, anthropic: false, perplexity: false })
+  const [keys, setKeys] = useState<Record<Provider, string>>({ openai: '', anthropic: '', perplexity: '', groq: '', gemini: '' })
+  const [showKey, setShowKey] = useState<Record<Provider, boolean>>({ openai: false, anthropic: false, perplexity: false, groq: false, gemini: false })
   const [keysSaving, setKeysSaving] = useState(false)
   const [keysOk, setKeysOk] = useState(false)
 
@@ -64,8 +68,10 @@ export function AISettingsPanel({ profileId, settings, aiKeys, onSettingsChange 
         openai_key: keys.openai || undefined,
         anthropic_key: keys.anthropic || undefined,
         perplexity_key: keys.perplexity || undefined,
+        groq_key: keys.groq || undefined,
+        gemini_key: keys.gemini || undefined,
       })
-      setKeys({ openai: '', anthropic: '', perplexity: '' })
+      setKeys({ openai: '', anthropic: '', perplexity: '', groq: '', gemini: '' })
       setKeysOk(true)
       setTimeout(() => setKeysOk(false), 2000)
     } finally {

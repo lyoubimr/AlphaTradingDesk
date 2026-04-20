@@ -62,6 +62,8 @@ def save_ai_keys(
     anthropic_key: str | None,
     perplexity_key: str | None,
     db: Session,
+    groq_key: str | None = None,
+    gemini_key: str | None = None,
 ) -> None:
     """Encrypt and persist AI API keys. None = keep existing, '' = clear."""
     row = get_ai_keys_row(profile_id, db)
@@ -72,6 +74,10 @@ def save_ai_keys(
         row.anthropic_key_enc = encrypt_key(anthropic_key) if anthropic_key else None
     if perplexity_key is not None:
         row.perplexity_key_enc = encrypt_key(perplexity_key) if perplexity_key else None
+    if groq_key is not None:
+        row.groq_key_enc = encrypt_key(groq_key) if groq_key else None
+    if gemini_key is not None:
+        row.gemini_key_enc = encrypt_key(gemini_key) if gemini_key else None
 
     row.updated_at = datetime.now(UTC).replace(tzinfo=None)
     db.commit()
@@ -83,6 +89,8 @@ def _get_decrypted_key(row: AnalyticsAIKeys, provider: str) -> str:
         "openai": row.openai_key_enc,
         "anthropic": row.anthropic_key_enc,
         "perplexity": row.perplexity_key_enc,
+        "groq": row.groq_key_enc,
+        "gemini": row.gemini_key_enc,
     }
     enc = enc_col_map.get(provider)
     if not enc:
@@ -202,6 +210,48 @@ async def _call_perplexity(api_key: str, model: str, prompt: str) -> tuple[str, 
     return summary, tokens
 
 
+async def _call_groq(api_key: str, model: str, prompt: str) -> tuple[str, int]:
+    """Call Groq API (OpenAI-compatible, free tier). Returns (summary, tokens_used)."""
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        resp = await client.post(
+            "https://api.groq.com/openai/v1/chat/completions",
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            json={
+                "model": model,
+                "messages": [{"role": "user", "content": prompt}],
+                "max_tokens": 800,
+                "temperature": 0.7,
+            },
+        )
+    if resp.status_code != 200:
+        _raise_provider_error("Groq", resp)
+    data = resp.json()
+    summary = data["choices"][0]["message"]["content"].strip()
+    tokens = data.get("usage", {}).get("total_tokens", 0)
+    return summary, tokens
+
+
+async def _call_gemini(api_key: str, model: str, prompt: str) -> tuple[str, int]:
+    """Call Google Gemini via OpenAI-compatible endpoint. Returns (summary, tokens_used)."""
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        resp = await client.post(
+            "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            json={
+                "model": model,
+                "messages": [{"role": "user", "content": prompt}],
+                "max_tokens": 800,
+                "temperature": 0.7,
+            },
+        )
+    if resp.status_code != 200:
+        _raise_provider_error("Google Gemini", resp)
+    data = resp.json()
+    summary = data["choices"][0]["message"]["content"].strip()
+    tokens = data.get("usage", {}).get("total_tokens", 0)
+    return summary, tokens
+
+
 def _raise_provider_error(provider: str, resp: httpx.Response) -> None:
     try:
         detail = resp.json()
@@ -243,6 +293,10 @@ async def generate_ai_summary(
         summary, tokens = await _call_anthropic(api_key, model, prompt)
     elif provider == "perplexity":
         summary, tokens = await _call_perplexity(api_key, model, prompt)
+    elif provider == "groq":
+        summary, tokens = await _call_groq(api_key, model, prompt)
+    elif provider == "gemini":
+        summary, tokens = await _call_gemini(api_key, model, prompt)
     else:
         raise HTTPException(status_code=400, detail=f"Unknown provider '{provider}'.")
 

@@ -102,6 +102,8 @@ def get_ai_keys_status(profile_id: int, db: Session) -> AIKeysStatusOut:
         openai_configured=row.openai_key_enc is not None,
         anthropic_configured=row.anthropic_key_enc is not None,
         perplexity_configured=row.perplexity_key_enc is not None,
+        groq_configured=row.groq_key_enc is not None,
+        gemini_configured=row.gemini_key_enc is not None,
     )
 
 

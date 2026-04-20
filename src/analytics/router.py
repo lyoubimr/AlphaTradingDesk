@@ -103,6 +103,8 @@ def update_ai_keys(
         openai_key=body.openai_key,
         anthropic_key=body.anthropic_key,
         perplexity_key=body.perplexity_key,
+        groq_key=body.groq_key,
+        gemini_key=body.gemini_key,
         db=db,
     )
     return get_ai_keys_status(profile_id, db)
