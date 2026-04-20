@@ -34,41 +34,54 @@ depends_on = None
 
 def upgrade() -> None:
     # ── 1. analytics_settings — per-profile AI + display preferences ─────────
+    # Use DO/EXCEPTION instead of CREATE TABLE IF NOT EXISTS to handle the
+    # PostgreSQL edge case where an orphaned pg_type entry (from a prior partial
+    # deployment) causes UniqueViolation on pg_type_typname_nsp_index even when
+    # IF NOT EXISTS is specified.
     op.execute("""
-        CREATE TABLE IF NOT EXISTS analytics_settings (
-            profile_id   BIGINT     PRIMARY KEY
-                                    REFERENCES profiles(id) ON DELETE CASCADE,
-            config       JSONB      NOT NULL DEFAULT '{}',
-            updated_at   TIMESTAMP  NOT NULL DEFAULT NOW()
-        )
+        DO $$ BEGIN
+            CREATE TABLE analytics_settings (
+                profile_id   BIGINT     PRIMARY KEY
+                                        REFERENCES profiles(id) ON DELETE CASCADE,
+                config       JSONB      NOT NULL DEFAULT '{}',
+                updated_at   TIMESTAMP  NOT NULL DEFAULT NOW()
+            );
+        EXCEPTION WHEN duplicate_table THEN NULL;
+        END $$
     """)
 
     # ── 2. analytics_ai_keys — Fernet-encrypted provider API keys ───────────
     # Each key column stores NULL when not configured, or Fernet token (BYTEA).
     op.execute("""
-        CREATE TABLE IF NOT EXISTS analytics_ai_keys (
-            profile_id          BIGINT  PRIMARY KEY
-                                        REFERENCES profiles(id) ON DELETE CASCADE,
-            openai_key_enc      BYTEA,
-            anthropic_key_enc   BYTEA,
-            perplexity_key_enc  BYTEA,
-            updated_at          TIMESTAMP  NOT NULL DEFAULT NOW()
-        )
+        DO $$ BEGIN
+            CREATE TABLE analytics_ai_keys (
+                profile_id          BIGINT  PRIMARY KEY
+                                            REFERENCES profiles(id) ON DELETE CASCADE,
+                openai_key_enc      BYTEA,
+                anthropic_key_enc   BYTEA,
+                perplexity_key_enc  BYTEA,
+                updated_at          TIMESTAMP  NOT NULL DEFAULT NOW()
+            );
+        EXCEPTION WHEN duplicate_table THEN NULL;
+        END $$
     """)
 
     # ── 3. analytics_ai_cache — cached AI narrative per (profile, period) ───
     # Unique on (profile_id, period) → upserted on each AI generation.
     op.execute("""
-        CREATE TABLE IF NOT EXISTS analytics_ai_cache (
-            id              BIGSERIAL   PRIMARY KEY,
-            profile_id      BIGINT      NOT NULL
-                                        REFERENCES profiles(id) ON DELETE CASCADE,
-            period          VARCHAR(10) NOT NULL,
-            summary         TEXT        NOT NULL,
-            generated_at    TIMESTAMP   NOT NULL DEFAULT NOW(),
-            tokens_used     INTEGER,
-            UNIQUE (profile_id, period)
-        )
+        DO $$ BEGIN
+            CREATE TABLE analytics_ai_cache (
+                id              BIGSERIAL   PRIMARY KEY,
+                profile_id      BIGINT      NOT NULL
+                                            REFERENCES profiles(id) ON DELETE CASCADE,
+                period          VARCHAR(10) NOT NULL,
+                summary         TEXT        NOT NULL,
+                generated_at    TIMESTAMP   NOT NULL DEFAULT NOW(),
+                tokens_used     INTEGER,
+                UNIQUE (profile_id, period)
+            );
+        EXCEPTION WHEN duplicate_table THEN NULL;
+        END $$
     """)
 
     op.execute("""
