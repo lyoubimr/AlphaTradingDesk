@@ -30,7 +30,7 @@ export function EquityCurve({ data }: Props) {
         <YAxis tick={{ fontSize: 10, fill: '#64748b' }} tickLine={false} width={50} />
         <Tooltip
           contentStyle={{ background: '#16162a', border: '1px solid #1e1e35', borderRadius: 8, fontSize: 11 }}
-          formatter={(v: number) => [v > 0 ? `+${v.toFixed(2)}` : v.toFixed(2), 'PnL']}
+          formatter={(v) => { const n = Number(v); return [n > 0 ? `+${n.toFixed(2)}` : n.toFixed(2), 'PnL'] }}
         />
         <Area
           type="monotone"
