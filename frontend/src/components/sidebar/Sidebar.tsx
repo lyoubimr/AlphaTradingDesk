@@ -4,6 +4,7 @@ import {
   LayoutDashboard,
   BookOpen,
   BarChart2,
+  LineChart,
   Target,
   Settings,
   TrendingUp,
@@ -15,6 +16,7 @@ import {
   Bell,
   Shield,
   Zap,
+  Sparkles,
   X,
 } from 'lucide-react'
 import { cn } from '../../lib/cn'
@@ -65,6 +67,11 @@ const NAV_GROUPS: NavGroup[] = [
         to: '/market-analysis',
         label: 'Market Analysis',
         icon: <BarChart2 size={16} />,
+      },
+      {
+        to: '/analytics',
+        label: 'Analytics',
+        icon: <LineChart size={16} />,
       },
       {
         to: '/volatility/market',
@@ -120,6 +127,11 @@ const NAV_GROUPS: NavGroup[] = [
         to: '/settings/risk',
         label: 'Risk',
         icon: <Shield size={16} />,
+      },
+      {
+        to: '/settings/ai',
+        label: 'AI Settings',
+        icon: <Sparkles size={16} />,
       },
       {
         to: '/settings',
