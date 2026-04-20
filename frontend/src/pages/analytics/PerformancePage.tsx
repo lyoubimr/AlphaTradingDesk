@@ -7,7 +7,6 @@ import { analyticsApi } from '../../lib/api'
 import type {
   PerformanceReport,
   AnalyticsSettingsOut,
-  AIKeysStatusOut,
   DirectionRow,
   WRByStat,
 } from '../../types/api'
@@ -158,7 +157,6 @@ export function PerformancePage() {
   const [period, setPeriod] = useState<Period>('30d')
   const [report, setReport] = useState<PerformanceReport | null>(null)
   const [settings, setSettings] = useState<AnalyticsSettingsOut | null>(null)
-  const [_aiKeys, setAiKeys] = useState<AIKeysStatusOut | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -167,14 +165,12 @@ export function PerformancePage() {
     setLoading(true)
     setError(null)
     try {
-      const [rep, cfg, keys] = await Promise.all([
+      const [rep, cfg] = await Promise.all([
         analyticsApi.getPerformance(profileId, period),
         analyticsApi.getSettings(profileId),
-        analyticsApi.getAIKeysStatus(profileId),
       ])
       setReport(rep)
       setSettings(cfg)
-      setAiKeys(keys)
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Failed to load analytics')
     } finally {
