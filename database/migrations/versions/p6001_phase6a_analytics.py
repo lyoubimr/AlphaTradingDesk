@@ -33,42 +33,81 @@ depends_on = None
 
 
 def upgrade() -> None:
+    # ── Orphaned pg_type cleanup ──────────────────────────────────────────────
+    # PostgreSQL's CREATE TABLE inserts into pg_type BEFORE checking pg_class.
+    # If a prior partial deployment left orphaned type entries (pg_type row
+    # exists but pg_class row does NOT), even "IF NOT EXISTS" raises
+    # UniqueViolation on pg_type_typname_nsp_index.
+    # Fix: delete orphaned composite + array types for each table we manage,
+    # but ONLY when the table itself does not exist — never touch live tables.
+    # In Docker, POSTGRES_USER is a superuser so DELETE FROM pg_type is allowed.
+    op.execute("""
+        DO $$
+        DECLARE
+            ns_oid oid;
+            tnames text[] := ARRAY['analytics_settings', 'analytics_ai_keys', 'analytics_ai_cache'];
+            tname  text;
+        BEGIN
+            SELECT oid INTO ns_oid FROM pg_namespace WHERE nspname = 'public';
+            FOREACH tname IN ARRAY tnames LOOP
+                -- Only remove the type when the real table doesn't exist
+                IF NOT EXISTS (
+                    SELECT 1 FROM pg_class
+                    WHERE relname = tname AND relnamespace = ns_oid AND relkind = 'r'
+                ) THEN
+                    DELETE FROM pg_type
+                    WHERE typname IN (tname, '_' || tname)
+                      AND typnamespace = ns_oid;
+                END IF;
+            END LOOP;
+        END $$
+    """)
+
     # ── 1. analytics_settings — per-profile AI + display preferences ─────────
     op.execute("""
-        CREATE TABLE IF NOT EXISTS analytics_settings (
-            profile_id   BIGINT     PRIMARY KEY
-                                    REFERENCES profiles(id) ON DELETE CASCADE,
-            config       JSONB      NOT NULL DEFAULT '{}',
-            updated_at   TIMESTAMP  NOT NULL DEFAULT NOW()
-        )
+        DO $$ BEGIN
+            CREATE TABLE analytics_settings (
+                profile_id   BIGINT     PRIMARY KEY
+                                        REFERENCES profiles(id) ON DELETE CASCADE,
+                config       JSONB      NOT NULL DEFAULT '{}',
+                updated_at   TIMESTAMP  NOT NULL DEFAULT NOW()
+            );
+        EXCEPTION WHEN duplicate_table THEN NULL;
+        END $$
     """)
 
     # ── 2. analytics_ai_keys — Fernet-encrypted provider API keys ───────────
     # Each key column stores NULL when not configured, or Fernet token (BYTEA).
     op.execute("""
-        CREATE TABLE IF NOT EXISTS analytics_ai_keys (
-            profile_id          BIGINT  PRIMARY KEY
-                                        REFERENCES profiles(id) ON DELETE CASCADE,
-            openai_key_enc      BYTEA,
-            anthropic_key_enc   BYTEA,
-            perplexity_key_enc  BYTEA,
-            updated_at          TIMESTAMP  NOT NULL DEFAULT NOW()
-        )
+        DO $$ BEGIN
+            CREATE TABLE analytics_ai_keys (
+                profile_id          BIGINT  PRIMARY KEY
+                                            REFERENCES profiles(id) ON DELETE CASCADE,
+                openai_key_enc      BYTEA,
+                anthropic_key_enc   BYTEA,
+                perplexity_key_enc  BYTEA,
+                updated_at          TIMESTAMP  NOT NULL DEFAULT NOW()
+            );
+        EXCEPTION WHEN duplicate_table THEN NULL;
+        END $$
     """)
 
     # ── 3. analytics_ai_cache — cached AI narrative per (profile, period) ───
     # Unique on (profile_id, period) → upserted on each AI generation.
     op.execute("""
-        CREATE TABLE IF NOT EXISTS analytics_ai_cache (
-            id              BIGSERIAL   PRIMARY KEY,
-            profile_id      BIGINT      NOT NULL
-                                        REFERENCES profiles(id) ON DELETE CASCADE,
-            period          VARCHAR(10) NOT NULL,
-            summary         TEXT        NOT NULL,
-            generated_at    TIMESTAMP   NOT NULL DEFAULT NOW(),
-            tokens_used     INTEGER,
-            UNIQUE (profile_id, period)
-        )
+        DO $$ BEGIN
+            CREATE TABLE analytics_ai_cache (
+                id              BIGSERIAL   PRIMARY KEY,
+                profile_id      BIGINT      NOT NULL
+                                            REFERENCES profiles(id) ON DELETE CASCADE,
+                period          VARCHAR(10) NOT NULL,
+                summary         TEXT        NOT NULL,
+                generated_at    TIMESTAMP   NOT NULL DEFAULT NOW(),
+                tokens_used     INTEGER,
+                UNIQUE (profile_id, period)
+            );
+        EXCEPTION WHEN duplicate_table THEN NULL;
+        END $$
     """)
 
     op.execute("""

@@ -19,6 +19,7 @@
 | 🤝 **Brokers** | Track which broker/account each trade goes through |
 | 📈 **Volatility** | Per-pair + market-wide VI scores (H1/H4/D1), watchlist generation |
 | 🛡️ **Dynamic Risk** | Risk engine + advisor + guard — adjusts exposure based on market conditions |
+| 🤖 **AI Analytics** | Deep performance analytics — KPIs, equity curve, session/pair/strategy breakdown + AI narrative (OpenAI, Anthropic, Perplexity, Groq, Gemini) |
 
 ---
 
