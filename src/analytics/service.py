@@ -369,7 +369,7 @@ def _compute_wr_by_strategy(
           AND t.status = 'closed'
           AND t.realized_pnl IS NOT NULL
           {date_filter}
-        GROUP BY s.name
+        GROUP BY s.name, s.emoji
         ORDER BY trades DESC
     """)
     rows = db.execute(sql, params).mappings().all()
