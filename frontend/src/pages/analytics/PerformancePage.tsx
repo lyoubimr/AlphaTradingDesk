@@ -139,8 +139,11 @@ function PairLeaderboard({ rows }: { rows: WRByStat[] }) {
               {pnl >= 0 ? '+$' : '-$'}{Math.abs(pnl).toFixed(0)}
             </span>
             {r.avg_pnl_pct != null && (
-              <span className={`w-12 shrink-0 text-[10px] tabular-nums text-right ${r.avg_pnl_pct >= 0 ? 'text-emerald-500' : 'text-red-500'}`}>
-                {r.avg_pnl_pct >= 0 ? '+' : ''}{r.avg_pnl_pct.toFixed(0)}%
+              <span
+                title="avg P&L as % of capital"
+                className={`w-14 shrink-0 text-[10px] tabular-nums text-right ${r.avg_pnl_pct >= 0 ? 'text-emerald-500' : 'text-red-500'}`}
+              >
+                {r.avg_pnl_pct >= 0 ? '+' : ''}{r.avg_pnl_pct.toFixed(1)}%
               </span>
             )}
           </div>
@@ -242,6 +245,11 @@ export function PerformancePage() {
           {/* ── 2. KPI Summary ───────────────────────────────────────────── */}
           <Section title="Key Metrics">
             <SummaryKPIs kpi={report.kpi} />
+            {report.direction_bias.length > 0 && (
+              <div className="mt-3 pt-3 border-t border-surface-800">
+                <DirectionBias rows={report.direction_bias} />
+              </div>
+            )}
           </Section>
 
           {/* ── 3. Volatility Correlation ─────────────────────────────────── */}
@@ -252,15 +260,10 @@ export function PerformancePage() {
             />
           </Section>
 
-          {/* ── 4. Top Strategies + Direction Bias ───────────────────────── */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <Section title="Top Strategies">
-              <WRBarChart data={report.wr_by_strategy} />
-            </Section>
-            <Section title="Direction Bias">
-              <DirectionBias rows={report.direction_bias} />
-            </Section>
-          </div>
+          {/* ── 4. Top Strategies ───────────────────────────────────────────────────────────── */}
+          <Section title="Top Strategies">
+            <WRBarChart data={report.wr_by_strategy} />
+          </Section>
 
           {/* ── 5. TP Hit Rates + R:R Scatter ────────────────────────────── */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -284,7 +287,7 @@ export function PerformancePage() {
 
           {/* ── 7. WR by Hour + WR by Session ────────────────────────────── */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <Section title="WR by Hour (local time)">
+            <Section title="WR by Trade Open Hour (local time)">
               <HourlyWRChart data={report.wr_by_hour} />
             </Section>
             <Section title="WR by Session">

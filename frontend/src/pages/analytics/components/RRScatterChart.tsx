@@ -75,6 +75,8 @@ export function RRScatterChart({ data }: Props) {
           />
           <Tooltip
             contentStyle={{ background: '#16162a', border: '1px solid #1e1e35', borderRadius: 8, fontSize: 11 }}
+            labelStyle={{ color: '#94a3b8' }}
+            itemStyle={{ color: '#e2e8f0' }}
             formatter={(v: unknown, name: unknown) => {
               const n = v as number | undefined
               const nm = name as string

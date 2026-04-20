@@ -58,6 +58,8 @@ export function HourlyWRChart({ data }: Props) {
           />
           <Tooltip
             contentStyle={{ background: '#16162a', border: '1px solid #1e1e35', borderRadius: 8, fontSize: 11 }}
+            labelStyle={{ color: '#e2e8f0' }}
+            itemStyle={{ color: '#94a3b8' }}
             formatter={(v: unknown, _n: unknown, props) => {
               const n = v as number | undefined
               return [

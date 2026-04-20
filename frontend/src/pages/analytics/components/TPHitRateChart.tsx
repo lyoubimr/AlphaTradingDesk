@@ -17,7 +17,6 @@ export function TPHitRateChart({ data }: Props) {
         const pct = d.hit_rate_pct ?? 0
         const color = COLORS[i] ?? '#6366f1'
         const qualityColor = pct >= 60 ? 'text-emerald-400' : pct >= 40 ? 'text-amber-400' : 'text-red-400'
-        const isTP3 = d.tp_number === 3
         return (
           <div
             key={d.tp_number}
@@ -38,8 +37,9 @@ export function TPHitRateChart({ data }: Props) {
             </div>
             {/* Label under hero */}
             <span className="text-[10px] text-slate-500 text-center leading-snug">
-              trades reached TP{d.tp_number}
-              {isTP3 && <><br /><span className="text-slate-700">(targeting TP3 only)</span></>}
+              {d.tp_number === 1
+                ? 'trades reached TP1'
+                : `of TP${d.tp_number - 1} hits reached TP${d.tp_number}`}
             </span>
             {/* Progress bar + % */}
             <div className="w-full space-y-1">

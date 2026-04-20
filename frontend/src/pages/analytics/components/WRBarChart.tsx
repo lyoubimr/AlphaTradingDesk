@@ -37,7 +37,7 @@ export function WRBarChart({ data, maxItems = 12 }: Props) {
             {/* Label */}
             <div
               title={row.label}
-              className="w-36 shrink-0 truncate text-xs text-slate-300 group-hover:text-slate-100 transition-colors text-right pr-1.5"
+              className="w-44 shrink-0 truncate text-xs text-slate-300 group-hover:text-slate-100 transition-colors text-right pr-1.5"
             >
               {row.label}
             </div>

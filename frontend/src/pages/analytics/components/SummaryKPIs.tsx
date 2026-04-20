@@ -55,8 +55,8 @@ export function SummaryKPIs({ kpi }: Props) {
   const streakColor = kpi.current_streak > 0 ? 'text-emerald-400'
     : kpi.current_streak < 0 ? 'text-red-400' : 'text-slate-400'
 
-  const streakLabel = kpi.current_streak > 0 ? `${kpi.current_streak}W` 
-    : kpi.current_streak < 0 ? `${Math.abs(kpi.current_streak)}L` : '–'
+  const streakLabel = kpi.current_streak > 0 ? `${kpi.current_streak} Win`
+    : kpi.current_streak < 0 ? `${Math.abs(kpi.current_streak)} Loss` : '–'
 
   const reviewPct = kpi.total_trades > 0
     ? Math.round((kpi.total_trades - kpi.disciplined_trades) / kpi.total_trades * 100)

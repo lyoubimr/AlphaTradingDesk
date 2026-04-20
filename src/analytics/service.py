@@ -174,7 +174,7 @@ def compute_performance_report(profile_id: int, period: str, db: Session) -> Per
     wr_by_strategy = _compute_wr_by_strategy(profile_id, period, cutoff, db, params, date_filter)
     wr_by_session = _compute_wr_by_session(trades)
     wr_by_hour = _compute_wr_by_hour(trades)
-    pair_leaderboard = _compute_pair_leaderboard(trades)
+    pair_leaderboard = _compute_pair_leaderboard(trades, float(profile.capital_current))
     tp_hit_rates = _compute_tp_hit_rates(profile_id, period, cutoff, db, params, date_filter)
     trade_type_dist = _compute_trade_type_dist(trades)
     rr_scatter = _compute_rr_scatter(trades)
@@ -353,7 +353,10 @@ def _compute_wr_by_strategy(
 ) -> list[WRByStat]:
     sql = text(f"""
         SELECT
-            COALESCE(s.name, 'Unassigned') AS label,
+            COALESCE(
+                CASE WHEN s.emoji IS NOT NULL AND s.emoji != '' THEN s.emoji || ' ' || s.name ELSE s.name END,
+                'Unassigned'
+            ) AS label,
             COUNT(*) AS trades,
             SUM(CASE WHEN t.realized_pnl > 0 THEN 1 ELSE 0 END) AS wins,
             SUM(CASE WHEN t.realized_pnl <= 0 THEN 1 ELSE 0 END) AS losses,
@@ -464,36 +467,36 @@ def _compute_wr_by_hour(trades: list[dict]) -> list[WRByHour]:
 
 # ── Pair leaderboard ──────────────────────────────────────────────────────────
 
-def _compute_pair_leaderboard(trades: list[dict]) -> list[WRByStat]:
+def _compute_pair_leaderboard(trades: list[dict], capital: float) -> list[WRByStat]:
+    """capital = profile.capital_current — used to express avg P&L as % of equity."""
     pairs: dict[str, dict] = {}
     for t in trades:
         label = t["pair"]
         if label not in pairs:
-            pairs[label] = {"trades": 0, "wins": 0, "losses": 0, "pnl_sum": 0.0, "pnl_pct_vals": []}
+            pairs[label] = {"trades": 0, "wins": 0, "losses": 0, "pnl_sum": 0.0}
         pnl = float(t["realized_pnl"])
-        risk = t.get("risk_amount")
         pairs[label]["trades"] += 1
         pairs[label]["pnl_sum"] += pnl
         if pnl > 0:
             pairs[label]["wins"] += 1
         else:
             pairs[label]["losses"] += 1
-        if risk is not None and float(risk) != 0:
-            pairs[label]["pnl_pct_vals"].append(pnl / float(risk) * 100)
     result = []
     for label, p in sorted(pairs.items(), key=lambda x: x[1]["trades"], reverse=True):
         tr = p["trades"]
         w = p["wins"]
-        pct_vals = p["pnl_pct_vals"]
+        avg_pnl = round(p["pnl_sum"] / tr, 2) if tr else None
+        # avg_pnl_pct = avg P&L as % of current capital (equity impact per trade)
+        avg_pnl_pct = round(avg_pnl / capital * 100, 2) if avg_pnl is not None and capital > 0 else None
         result.append(WRByStat(
             label=label,
             trades=tr,
             wins=w,
             losses=p["losses"],
             wr_pct=round(w / tr * 100, 1) if tr else None,
-            avg_pnl=round(p["pnl_sum"] / tr, 2) if tr else None,
+            avg_pnl=avg_pnl,
             total_pnl=round(p["pnl_sum"], 2),
-            avg_pnl_pct=round(sum(pct_vals) / len(pct_vals), 1) if pct_vals else None,
+            avg_pnl_pct=avg_pnl_pct,
         ))
     return result
 
@@ -533,6 +536,17 @@ def _compute_tp_hit_rates(
             hits=hits,
             hit_rate_pct=round(hits / total * 100, 1) if total else None,
         ))
+    # Sequential denominators: TP2 = of TP1 hits, TP3 = of TP2 hits.
+    # A trade can only reach TP2 after hitting TP1, etc.
+    for i in range(1, len(result)):
+        prev_hits = result[i - 1].hits
+        cur_hits = min(result[i].hits, prev_hits)
+        result[i] = TPHitRate(
+            tp_number=result[i].tp_number,
+            total=prev_hits,
+            hits=cur_hits,
+            hit_rate_pct=round(cur_hits / prev_hits * 100, 1) if prev_hits else None,
+        )
     return result
 
 

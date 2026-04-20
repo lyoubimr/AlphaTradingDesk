@@ -106,8 +106,20 @@ export function AIInsightPanel({ profileId, period, aiEnabled, existing }: Props
           )}
 
           {error && (
-            <div className="text-xs text-red-400 bg-red-950/40 border border-red-900/50 rounded-lg px-3 py-2">
-              {error}
+            <div className="text-xs bg-red-950/40 border border-red-900/50 rounded-lg px-3 py-2 space-y-0.5">
+              {error.includes('429') || error.toLowerCase().includes('quota') || error.toLowerCase().includes('insufficient') ? (
+                <>
+                  <div className="font-semibold text-red-400">API quota exceeded</div>
+                  <div className="text-slate-500">
+                    Your AI provider has run out of credits. Top up your balance or switch model in{' '}
+                    <button onClick={() => navigate('/settings/ai')} className="text-violet-400 hover:text-violet-300 underline underline-offset-2">
+                      AI Settings
+                    </button>.
+                  </div>
+                </>
+              ) : (
+                <div className="text-red-400">{error}</div>
+              )}
             </div>
           )}
 
