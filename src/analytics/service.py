@@ -532,11 +532,20 @@ def _compute_tp_hit_rates(
     params: dict,
     date_filter: str,
 ) -> list[TPHitRate]:
+    # tp_hit=TRUE  → position exited at its take_profit_price (set by partial_close)
+    # tp_hit=FALSE → position closed early via full_close before reaching TP
+    # early_exits (TP1 only): TP1 position closed but tp_hit=FALSE
     sql = text(f"""
         SELECT
             p.position_number,
             COUNT(*) AS total,
-            SUM(CASE WHEN p.status = 'closed' THEN 1 ELSE 0 END) AS hits
+            SUM(CASE WHEN p.tp_hit = TRUE THEN 1 ELSE 0 END) AS hits,
+            SUM(CASE
+                WHEN p.position_number = 1
+                     AND p.status = 'closed'
+                     AND p.tp_hit = FALSE
+                THEN 1 ELSE 0
+            END) AS early_exits
         FROM positions p
         JOIN trades t ON t.id = p.trade_id
         WHERE t.profile_id = :profile_id
@@ -551,14 +560,15 @@ def _compute_tp_hit_rates(
     for r in rows:
         total = r["total"] or 0
         hits = r["hits"] or 0
+        early = r["early_exits"] or 0
         result.append(TPHitRate(
             tp_number=r["position_number"],
             total=total,
             hits=hits,
             hit_rate_pct=round(hits / total * 100, 1) if total else None,
+            early_exits=early if r["position_number"] == 1 else 0,
         ))
     # Sequential denominators: TP2 = of TP1 hits, TP3 = of TP2 hits.
-    # A trade can only reach TP2 after hitting TP1, etc.
     for i in range(1, len(result)):
         prev_hits = result[i - 1].hits
         cur_hits = min(result[i].hits, prev_hits)
@@ -567,6 +577,7 @@ def _compute_tp_hit_rates(
             total=prev_hits,
             hits=cur_hits,
             hit_rate_pct=round(cur_hits / prev_hits * 100, 1) if prev_hits else None,
+            early_exits=0,
         )
     return result
 

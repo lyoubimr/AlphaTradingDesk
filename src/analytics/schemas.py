@@ -58,8 +58,9 @@ class WRByHour(BaseModel):
 class TPHitRate(BaseModel):
     tp_number: int             # 1, 2, 3
     total: int                 # trades with this TP defined
-    hits: int                  # positions that reached 'closed'
+    hits: int                  # positions that actually reached the TP price
     hit_rate_pct: float | None = None
+    early_exits: int = 0       # TP1 only: trades closed before reaching TP1
 
 
 class DrawdownPoint(BaseModel):

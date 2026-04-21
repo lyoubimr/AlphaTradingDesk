@@ -195,6 +195,8 @@ export interface TradeListItem {
   is_reviewed: boolean
   /** Trailing stop % if a runner position is configured */
   runner_trailing_pct: string | null
+  /** Position numbers (1-based) where tp_hit=True — excludes runners */
+  tp_hits: number[]
 }
 
 export interface TradePosition_Out {
@@ -205,6 +207,8 @@ export interface TradePosition_Out {
   lot_percentage: string            // Decimal serialised as string
   is_runner: boolean
   status: string
+  /** True = closed AT take_profit_price. False = closed early before reaching TP. */
+  tp_hit: boolean
   exit_price: string | null
   exit_date: string | null
   realized_pnl: string | null
@@ -929,6 +933,7 @@ export interface TPHitRate {
   total: number
   hits: number
   hit_rate_pct: number | null
+  early_exits: number  // TP1 only: trades closed before reaching TP1
 }
 
 export interface DrawdownPoint {

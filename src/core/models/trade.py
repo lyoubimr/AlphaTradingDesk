@@ -315,6 +315,9 @@ class Position(Base):
     # is_runner=True → this position is managed as a Kraken trailing stop, not a fixed TP
     is_runner: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     status: Mapped[str] = mapped_column(String(50), nullable=False, default="open")
+    # tp_hit=True  → position closed AT its take_profit_price (real TP hit)
+    # tp_hit=False → position closed early / via full_close before reaching TP
+    tp_hit: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     exit_price: Mapped[Decimal | None] = mapped_column(Numeric(20, 8))
     exit_date: Mapped[datetime | None] = mapped_column(DateTime)
     realized_pnl: Mapped[Decimal | None] = mapped_column(Numeric(20, 2))
