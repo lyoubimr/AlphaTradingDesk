@@ -1,9 +1,9 @@
 // ── SummaryKPIs ───────────────────────────────────────────────────────────────
 // Compact KPI row with info tooltips
 import { HelpCircle } from 'lucide-react'
-import type { AnalyticsKPISummary } from '../../../types/api'
+import type { AnalyticsKPISummary, ReviewRateOut } from '../../../types/api'
 
-interface Props { kpi: AnalyticsKPISummary }
+interface Props { kpi: AnalyticsKPISummary; reviewRate?: ReviewRateOut }
 
 export function InfoTip({ text }: { text: string }) {
   return (
@@ -40,7 +40,7 @@ function KPICard({ label, value, sub, color, tip }: KPICardProps) {
   )
 }
 
-export function SummaryKPIs({ kpi }: Props) {
+export function SummaryKPIs({ kpi, reviewRate }: Props) {
   const wrColor = kpi.disciplined_wr == null ? 'text-slate-400'
     : kpi.disciplined_wr >= 55 ? 'text-emerald-400'
     : kpi.disciplined_wr >= 45 ? 'text-amber-400' : 'text-red-400'
@@ -61,6 +61,10 @@ export function SummaryKPIs({ kpi }: Props) {
   const reviewPct = kpi.total_trades > 0
     ? Math.round((kpi.total_trades - kpi.disciplined_trades) / kpi.total_trades * 100)
     : 0
+
+  const reviewCoverage = reviewRate != null && reviewRate.total_closed > 0
+    ? Math.round(reviewRate.review_rate_pct)
+    : null
 
   return (
     <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5">
@@ -105,12 +109,12 @@ export function SummaryKPIs({ kpi }: Props) {
       />
       <KPICard
         label="Review Coverage"
-        value={kpi.total_trades > 0
-          ? `${Math.round(kpi.disciplined_trades / kpi.total_trades * 100)}%`
-          : '—'}
-        sub={`${kpi.total_trades} closed trades`}
+        value={reviewCoverage != null ? `${reviewCoverage}%` : '—'}
+        sub={reviewRate != null
+          ? `${reviewRate.reviewed_count} / ${reviewRate.total_closed} trades reviewed`
+          : undefined}
         color="text-violet-400"
-        tip="Percentage of closed trades included in performance analysis. Higher = more accurate stats."
+        tip="Percentage of closed trades with a complete post-trade review: outcome tagged, close notes written, screenshot uploaded, and at least one non-strategy-broken tag."
       />
     </div>
   )

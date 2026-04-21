@@ -146,8 +146,9 @@ def compute_performance_report(profile_id: int, period: str, db: Session) -> Per
               (t.realized_pnl / NULLIF(t.risk_amount, 0) * 100),
               0
             ) AS pnl_pct,
-            -- is_be: |pnl_pct| < threshold
-            ABS(COALESCE(t.realized_pnl / NULLIF(t.risk_amount, 0) * 100, 0)) < :min_pnl_pct AS is_be,
+            -- is_be: |pnl/risk| < threshold (same units as min_pnl_pct_for_stats)
+            -- ⚠️ do NOT multiply by 100 here — min_pnl_pct_for_stats is stored as ratio (0.100 = 10%)
+            ABS(COALESCE(t.realized_pnl / NULLIF(t.risk_amount, 0), 0)) < :min_pnl_pct AS is_be,
             -- strategy_broken: post_trade_review->>'tags' contains a tag starting with 'strategy_broken_'
             EXISTS (
               SELECT 1 FROM jsonb_array_elements_text(
@@ -353,6 +354,9 @@ def _compute_wr_by_strategy(
     params: dict,
     date_filter: str,
 ) -> list[WRByStat]:
+    # Mirror the disciplined filter from the main KPI query:
+    # exclude break-even trades (|pnl_pct| < min_pnl_pct) and
+    # trades flagged as strategy_broken in post_trade_review tags.
     sql = text(f"""
         SELECT
             COALESCE(
@@ -370,6 +374,13 @@ def _compute_wr_by_strategy(
         WHERE t.profile_id = :profile_id
           AND t.status = 'closed'
           AND t.realized_pnl IS NOT NULL
+          AND ABS(COALESCE(t.realized_pnl / NULLIF(t.risk_amount, 0), 0)) >= :min_pnl_pct
+          AND NOT EXISTS (
+              SELECT 1 FROM jsonb_array_elements_text(
+                  COALESCE(t.post_trade_review->'tags', '[]'::jsonb)
+              ) tag
+              WHERE tag LIKE 'strategy_broken_%'
+          )
           {date_filter}
         GROUP BY s.name, s.emoji
         ORDER BY trades DESC
