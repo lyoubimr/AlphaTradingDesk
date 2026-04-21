@@ -28,9 +28,10 @@ def upgrade() -> None:
     # Add tp_hit column — default FALSE so all existing positions stay safe.
     # Existing rows are conservatively left as FALSE (unknown intent) rather
     # than trying to retroactively infer TP hits from exit_price proximity.
-    op.add_column(
-        "positions",
-        sa.Column("tp_hit", sa.Boolean(), nullable=False, server_default="false"),
+    # IF NOT EXISTS guard — idempotent in case the column was added manually.
+    op.execute(
+        "ALTER TABLE positions ADD COLUMN IF NOT EXISTS"
+        " tp_hit BOOLEAN NOT NULL DEFAULT FALSE"
     )
 
 
