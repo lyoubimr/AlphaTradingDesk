@@ -58,6 +58,9 @@ class PositionOut(BaseModel):
     lot_percentage: Decimal
     is_runner: bool
     status: str
+    # tp_hit=True  → closed at take_profit_price (real TP hit)
+    # tp_hit=False → closed early via full_close before reaching TP
+    tp_hit: bool = False
     exit_price: Decimal | None
     exit_date: datetime | None
     realized_pnl: Decimal | None

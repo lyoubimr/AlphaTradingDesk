@@ -1,5 +1,6 @@
 // ── TPHitRateChart ────────────────────────────────────────────────────────────
 // Stat cards: TP1 / TP2 / TP3 — hero metric is hits/total (not the %)
+// TP1 also shows early_exits: trades closed before reaching TP1.
 import type { TPHitRate } from '../../../types/api'
 
 interface Props { data: TPHitRate[] }
@@ -17,6 +18,7 @@ export function TPHitRateChart({ data }: Props) {
         const pct = d.hit_rate_pct ?? 0
         const color = COLORS[i] ?? '#6366f1'
         const qualityColor = pct >= 60 ? 'text-emerald-400' : pct >= 40 ? 'text-amber-400' : 'text-red-400'
+        const earlyExits = d.tp_number === 1 ? (d.early_exits ?? 0) : 0
         return (
           <div
             key={d.tp_number}
@@ -41,6 +43,12 @@ export function TPHitRateChart({ data }: Props) {
                 ? 'trades reached TP1'
                 : `of TP${d.tp_number - 1} hits reached TP${d.tp_number}`}
             </span>
+            {/* Early exits badge — TP1 only */}
+            {earlyExits > 0 && (
+              <span className="text-[10px] text-amber-500/80 tabular-nums">
+                {earlyExits} closed before TP1
+              </span>
+            )}
             {/* Progress bar + % */}
             <div className="w-full space-y-1">
               <div className="w-full h-1.5 rounded-full bg-surface-700">

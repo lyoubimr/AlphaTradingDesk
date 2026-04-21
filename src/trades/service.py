@@ -1180,6 +1180,17 @@ def partial_close(db: Session, trade_id: int, data: TradePartialClose) -> TradeO
     position.exit_date = exit_dt
     position.realized_pnl = pnl
     position.status = "closed"
+    # tp_hit=True only when exit_price actually reached the planned TP price.
+    # 0.5% tolerance absorbs minor slippage on the fill.
+    if position.take_profit_price is not None:
+        tp = position.take_profit_price
+        ep = data.exit_price
+        if trade.direction == "long":
+            position.tp_hit = ep >= tp * Decimal("0.995")
+        else:
+            position.tp_hit = ep <= tp * Decimal("1.005")
+    else:
+        position.tp_hit = False  # runner position — no fixed TP
 
     if data.move_to_be:
         trade.stop_loss = trade.entry_price
@@ -1250,6 +1261,7 @@ def full_close(db: Session, trade_id: int, data: TradeClose) -> TradeOut:
             position.exit_date = exit_dt
             position.realized_pnl = pnl
             position.status = "closed"
+            position.tp_hit = False  # closed early — TP price was never reached
             total_pnl += pnl
             newly_closed_pnl += pnl  # credit capital for this position only
         elif position.realized_pnl is not None:

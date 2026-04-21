@@ -1950,7 +1950,11 @@ export function TradeDetailPage() {
                 const tpDistP    = Math.abs(tpNum - entryP)
                 const rr         = (!isRunner && slDistP > 0) ? tpDistP / slDistP : null
                 const isOpen     = pos.status === 'open'
-                const isHit      = pos.status === 'closed' || pos.status === 'partial'
+                const isClosed   = pos.status === 'closed' || pos.status === 'partial'
+                // True TP hit: position was closed at its take_profit_price
+                const isHit      = isClosed && pos.tp_hit === true
+                // Early exit: position was closed before reaching TP (full_close / manual)
+                const isEarlyExit = isClosed && pos.tp_hit === false
                 const canClose   = isActive && isOpen && !isRunner  // runner closed by automation only
                 const lotPct     = parseFloat(pos.lot_percentage)
                 const totalUnits = slDistP > 0 ? parseFloat(trade.risk_amount) / slDistP : 0
@@ -1959,7 +1963,7 @@ export function TradeDetailPage() {
                 const runnerActive = trade.runner_activated_at != null
 
                 return (
-                  <div key={pos.id} className={cn('px-5 py-3', isHit && 'opacity-60')}>
+                  <div key={pos.id} className={cn('px-5 py-3', isClosed && 'opacity-60')}>
                     <div className="flex items-center justify-between gap-3">
                       <div className="flex items-center gap-3 min-w-0">
                         <span className={cn(
@@ -1968,8 +1972,9 @@ export function TradeDetailPage() {
                             ? (runnerActive
                               ? 'bg-amber-500/20 border-amber-500/40 text-amber-400'
                               : 'bg-slate-700/40 border-slate-600/40 text-slate-400')
-                            : isHit ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-400'
-                            : isOpen ? 'bg-brand-500/20 border-brand-500/40 text-brand-300'
+                            : isHit      ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-400'
+                            : isEarlyExit ? 'bg-amber-500/15 border-amber-500/30 text-amber-500/70'
+                            : isOpen     ? 'bg-brand-500/20 border-brand-500/40 text-brand-300'
                             : 'bg-surface-700 border-surface-600 text-slate-500',
                         )}>
                           {isRunner ? '🚀' : posNum}
@@ -1988,6 +1993,9 @@ export function TradeDetailPage() {
                             {isRunner && runnerActive && <span className="ml-1.5 text-amber-400/80">● active</span>}
                             {isHit && pos.exit_price && (
                               <span className="text-emerald-400 ml-1.5">✓ {fmt(pos.exit_price, 4)}</span>
+                            )}
+                            {isEarlyExit && pos.exit_price && (
+                              <span className="text-amber-500/70 ml-1.5">⚡ {fmt(pos.exit_price, 4)} — early exit</span>
                             )}
                           </p>
                         </div>
