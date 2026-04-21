@@ -37,8 +37,8 @@ function cleanPairName(pair: string): string {
   return pair.replace(/^PF[_.]/i, '')
 }
 
-function Section({ title, children, defaultOpen = true }: {
-  title: string; children: React.ReactNode; defaultOpen?: boolean
+function Section({ title, hint, children, defaultOpen = true }: {
+  title: string; hint?: string; children: React.ReactNode; defaultOpen?: boolean
 }) {
   const [open, setOpen] = useState(defaultOpen)
   return (
@@ -47,7 +47,10 @@ function Section({ title, children, defaultOpen = true }: {
         onClick={() => setOpen(o => !o)}
         className="w-full flex items-center justify-between px-4 py-3 hover:bg-surface-800/60 transition-colors rounded-t-xl"
       >
-        <h2 className="text-xs font-semibold text-slate-500 uppercase tracking-widest">{title}</h2>
+        <div className="flex items-center gap-2">
+          <h2 className="text-xs font-semibold text-slate-500 uppercase tracking-widest">{title}</h2>
+          {hint && <span className="text-[10px] text-slate-700 normal-case tracking-normal font-normal">{hint}</span>}
+        </div>
         {open
           ? <ChevronUp size={13} className="text-slate-700" />
           : <ChevronDown size={13} className="text-slate-700" />}
@@ -164,6 +167,7 @@ export function PerformancePage() {
     if (!profileId) return
     setLoading(true)
     setError(null)
+    setReport(null)  // reset so AIInsightPanel remounts with correct existing
     try {
       const [rep, cfg] = await Promise.all([
         analyticsApi.getPerformance(profileId, period),
@@ -235,12 +239,22 @@ export function PerformancePage() {
             profileId={profileId}
             period={period}
             aiEnabled={settings?.config?.ai_enabled ?? false}
-            existing={null}
+            existing={
+              report.ai_summary
+                ? {
+                    summary: report.ai_summary,
+                    provider: '',
+                    model: '',
+                    tokens_used: null,
+                    generated_at: report.ai_generated_at ?? '',
+                  }
+                : null
+            }
           />
 
           {/* ── 2. KPI Summary ───────────────────────────────────────────── */}
           <Section title="Key Metrics">
-            <SummaryKPIs kpi={report.kpi} />
+            <SummaryKPIs kpi={report.kpi} reviewRate={report.review_rate} />
             {report.direction_bias.length > 0 && (
               <div className="mt-3 pt-3 border-t border-surface-800">
                 <DirectionBias rows={report.direction_bias} />
@@ -256,8 +270,8 @@ export function PerformancePage() {
             />
           </Section>
 
-          {/* ── 4. Top Strategies ───────────────────────────────────────────────────────────── */}
-          <Section title="Top Strategies">
+          {/* ── 4. Top Strategies ─────────────────────────────────────────────── */}
+          <Section title="Top Strategies" hint="disciplined only">
             <WRBarChart data={report.wr_by_strategy} />
           </Section>
 
@@ -273,31 +287,31 @@ export function PerformancePage() {
 
           {/* ── 6. Equity Curve + Drawdown ───────────────────────────────── */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <Section title="Equity Curve">
+            <Section title="Equity Curve" hint="all closed trades">
               <EquityCurve data={report.equity_curve} />
             </Section>
-            <Section title="Drawdown">
+            <Section title="Drawdown" hint="all closed trades">
               <DrawdownChart data={report.drawdown} />
             </Section>
           </div>
 
           {/* ── 7. WR by Hour + WR by Session ────────────────────────────── */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <Section title="WR by Trade Open Hour (local time)">
+            <Section title="WR by Trade Open Hour" hint="all closed trades">
               <HourlyWRChart data={report.wr_by_hour} />
             </Section>
-            <Section title="WR by Session">
+            <Section title="WR by Session" hint="all closed trades">
               <WRBarChart data={report.wr_by_session} />
             </Section>
           </div>
 
           {/* ── 8. Pair Leaderboard ───────────────────────────────────────── */}
-          <Section title="Pair Leaderboard">
+          <Section title="Pair Leaderboard" hint="all closed trades">
             <PairLeaderboard rows={report.pair_leaderboard} />
           </Section>
 
           {/* ── 9. Trade Type Distribution ───────────────────────────────── */}
-          <Section title="Trade Type Distribution">
+          <Section title="Trade Type Distribution" hint="all closed trades">
             <TradeTypeDist data={report.trade_type_dist} />
           </Section>
 
