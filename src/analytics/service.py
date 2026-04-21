@@ -375,11 +375,19 @@ def _compute_wr_by_strategy(
           AND t.status = 'closed'
           AND t.realized_pnl IS NOT NULL
           AND ABS(COALESCE(t.realized_pnl / NULLIF(t.risk_amount, 0), 0)) >= :min_pnl_pct
-          AND NOT EXISTS (
-              SELECT 1 FROM jsonb_array_elements_text(
-                  COALESCE(t.post_trade_review->'tags', '[]'::jsonb)
-              ) tag
-              WHERE tag LIKE 'strategy_broken_%'
+          AND (
+              CASE
+                  -- Per-strategy check: mirrors enrich_strategies_disciplined exactly
+                  WHEN s.id IS NOT NULL THEN
+                      NOT (COALESCE(t.post_trade_review->'tags', '[]'::jsonb) ? ('strategy_broken_' || s.id::text))
+                  -- Unassigned trades: exclude if any strategy_broken tag present
+                  ELSE
+                      NOT EXISTS (
+                          SELECT 1 FROM jsonb_array_elements_text(
+                              COALESCE(t.post_trade_review->'tags', '[]'::jsonb)
+                          ) tag WHERE tag LIKE 'strategy_broken_%'
+                      )
+              END
           )
           {date_filter}
         GROUP BY s.name, s.emoji
@@ -649,6 +657,10 @@ def _compute_direction_bias(trades: list[dict]) -> list[DirectionRow]:
 
 # ── Tag stats ─────────────────────────────────────────────────────────────────
 
+# Tags reflecting positive execution quality — always excluded from losers/repeat-errors
+_POSITIVE_EXECUTION_TAGS = frozenset({"good_entry", "good_sl", "smart_exit"})
+
+
 def _compute_tag_stats(
     trades: list[dict],
 ) -> tuple[list[TagFrequency], list[TagFrequency], list[RepeatError]]:
@@ -656,7 +668,7 @@ def _compute_tag_stats(
     losses = [t for t in trades if float(t["realized_pnl"]) <= 0]
 
     top_winners = _tag_frequency(wins, top_n=10)
-    top_losers = _tag_frequency(losses, top_n=10)
+    top_losers = _tag_frequency(losses, top_n=10, exclude_tags=_POSITIVE_EXECUTION_TAGS)
 
     # Repeat errors: tags on losers that appear in ≥2 losing trades
     repeat_errors = _compute_repeat_errors(losses)
@@ -664,13 +676,19 @@ def _compute_tag_stats(
     return top_winners, top_losers, repeat_errors
 
 
-def _tag_frequency(trades: list[dict], top_n: int = 10) -> list[TagFrequency]:
+def _tag_frequency(
+    trades: list[dict],
+    top_n: int = 10,
+    exclude_tags: frozenset[str] | None = None,
+) -> list[TagFrequency]:
     tag_count: dict[str, int] = {}
     for t in trades:
         ptr = t.get("post_trade_review") or {}
         tags = ptr.get("tags") if isinstance(ptr, dict) else []
         for tag in (tags or []):
             if tag and not tag.startswith("strategy_broken_"):
+                if exclude_tags and tag in exclude_tags:
+                    continue
                 tag_count[tag] = tag_count.get(tag, 0) + 1
     total = len(trades)
     sorted_tags = sorted(tag_count.items(), key=lambda x: x[1], reverse=True)[:top_n]
@@ -693,7 +711,7 @@ def _compute_repeat_errors(losses: list[dict]) -> list[RepeatError]:
         closed_at = t["closed_at"]
         date_str = closed_at.strftime("%Y-%m-%d") if hasattr(closed_at, "strftime") else str(closed_at)[:10]
         for tag in (tags or []):
-            if tag and not tag.startswith("strategy_broken_"):
+            if tag and not tag.startswith("strategy_broken_") and tag not in _POSITIVE_EXECUTION_TAGS:
                 if tag not in tag_data:
                     tag_data[tag] = {"count": 0, "last_seen": date_str}
                 tag_data[tag]["count"] += 1
