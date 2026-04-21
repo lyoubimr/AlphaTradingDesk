@@ -25,6 +25,7 @@ scripts/update_vantage_catalog.py
 scripts/_fix_docs.py
 scripts/analyze_volatility.py
 scripts/test_alembic_env.py
+scripts/backfill_tp_hit.py
 
 
 # C extensions

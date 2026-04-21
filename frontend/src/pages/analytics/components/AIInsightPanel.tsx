@@ -25,7 +25,7 @@ export function AIInsightPanel({ profileId, period, aiEnabled, existing }: Props
   const [result, setResult] = useState<AIGenerateOut | null>(existing ?? null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [collapsed, setCollapsed] = useState(false)
+  const [collapsed, setCollapsed] = useState(true)
   const navigate = useNavigate()
 
   const generate = async () => {
