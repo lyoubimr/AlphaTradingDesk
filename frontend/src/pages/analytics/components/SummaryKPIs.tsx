@@ -58,9 +58,11 @@ export function SummaryKPIs({ kpi, reviewRate }: Props) {
   const streakLabel = kpi.current_streak > 0 ? `${kpi.current_streak} Win`
     : kpi.current_streak < 0 ? `${Math.abs(kpi.current_streak)} Loss` : '–'
 
-  const reviewPct = kpi.total_trades > 0
-    ? Math.round((kpi.total_trades - kpi.disciplined_trades) / kpi.total_trades * 100)
+  const disciplinePct = kpi.total_trades > 0
+    ? Math.round(kpi.disciplined_trades / kpi.total_trades * 100)
     : 0
+  const disciplineColor = disciplinePct >= 70 ? 'text-emerald-400'
+    : disciplinePct >= 50 ? 'text-amber-400' : 'text-red-400'
 
   const reviewCoverage = reviewRate != null && reviewRate.total_closed > 0
     ? Math.round(reviewRate.review_rate_pct)
@@ -103,8 +105,8 @@ export function SummaryKPIs({ kpi, reviewRate }: Props) {
       <KPICard
         label="Disciplined Trades"
         value={`${kpi.disciplined_trades}`}
-        sub={`${kpi.total_trades} total · ${reviewPct}% filtered`}
-        color="text-slate-200"
+        sub={`${kpi.total_trades} total closed · ${disciplinePct}% disciplined`}
+        color={disciplineColor}
         tip="Trades counted toward disciplined stats — total trades minus break-even and strategy-broken sessions."
       />
       <KPICard
