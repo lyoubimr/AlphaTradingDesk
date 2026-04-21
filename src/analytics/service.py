@@ -375,11 +375,19 @@ def _compute_wr_by_strategy(
           AND t.status = 'closed'
           AND t.realized_pnl IS NOT NULL
           AND ABS(COALESCE(t.realized_pnl / NULLIF(t.risk_amount, 0), 0)) >= :min_pnl_pct
-          AND NOT EXISTS (
-              SELECT 1 FROM jsonb_array_elements_text(
-                  COALESCE(t.post_trade_review->'tags', '[]'::jsonb)
-              ) tag
-              WHERE tag LIKE 'strategy_broken_%'
+          AND (
+              CASE
+                  -- Per-strategy check: mirrors enrich_strategies_disciplined exactly
+                  WHEN s.id IS NOT NULL THEN
+                      NOT (COALESCE(t.post_trade_review->'tags', '[]'::jsonb) ? ('strategy_broken_' || s.id::text))
+                  -- Unassigned trades: exclude if any strategy_broken tag present
+                  ELSE
+                      NOT EXISTS (
+                          SELECT 1 FROM jsonb_array_elements_text(
+                              COALESCE(t.post_trade_review->'tags', '[]'::jsonb)
+                          ) tag WHERE tag LIKE 'strategy_broken_%'
+                      )
+              END
           )
           {date_filter}
         GROUP BY s.name, s.emoji
