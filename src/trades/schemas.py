@@ -430,6 +430,9 @@ class TradeListItem(BaseModel):
     # True when the post-trade review is considered complete:
     #   outcome set + non-empty close_notes + ≥1 close screenshot + ≥1 non-strategy tag
     is_reviewed: bool = False
+    # Position numbers (1-based) where tp_hit=True — excludes runners.
+    # Empty for not-yet-closed trades, SL hits, and full-close exits.
+    tp_hits: list[int] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def normalise_direction_list(self) -> TradeListItem:

@@ -195,6 +195,8 @@ export interface TradeListItem {
   is_reviewed: boolean
   /** Trailing stop % if a runner position is configured */
   runner_trailing_pct: string | null
+  /** Position numbers (1-based) where tp_hit=True — excludes runners */
+  tp_hits: number[]
 }
 
 export interface TradePosition_Out {

@@ -1938,7 +1938,25 @@ export function TradeDetailPage() {
             {showPositions ? <ChevronUp size={14} className="text-slate-600" /> : <ChevronDown size={14} className="text-slate-600" />}
           </button>
 
-          {showPositions && (
+          {showPositions && (() => {
+            // Detect a full early exit: all non-runner closed positions have tp_hit=false
+            const nonRunnerClosed = trade.positions.filter(
+              (p) => !p.is_runner && (p.status === 'closed' || p.status === 'partial')
+            )
+            const isFullEarlyExit =
+              nonRunnerClosed.length > 0 && nonRunnerClosed.every((p) => p.tp_hit === false)
+            const earlyExitPrice = isFullEarlyExit
+              ? nonRunnerClosed[0].exit_price
+              : null
+            // Sum ALL closed positions (including runner) — runner PnL is real even on early exit
+            const allClosed = trade.positions.filter(
+              (p) => p.status === 'closed' || p.status === 'partial'
+            )
+            const totalEarlyPnl = isFullEarlyExit
+              ? allClosed.reduce((sum, p) => sum + parseFloat(p.realized_pnl ?? '0'), 0)
+              : null
+
+            return (
             <div className="divide-y divide-surface-700/50">
               {trade.positions.map((pos) => {
                 const posNum     = pos.position_number
@@ -1991,10 +2009,13 @@ export function TradeDetailPage() {
                             {lotPct}% · {isRunner ? '∞R' : rr != null ? `${rr.toFixed(2)}R` : '—'}
                             {isRunner && !runnerActive && <span className="ml-1.5 text-slate-600">⏳ waiting for previous TPs</span>}
                             {isRunner && runnerActive && <span className="ml-1.5 text-amber-400/80">● active</span>}
-                            {isHit && pos.exit_price && (
+                            {!isRunner && isHit && pos.exit_price && (
                               <span className="text-emerald-400 ml-1.5">✓ {fmt(pos.exit_price, 4)}</span>
                             )}
-                            {isEarlyExit && pos.exit_price && (
+                            {isRunner && isClosed && runnerActive && pos.exit_price && (
+                              <span className="text-amber-400/70 ml-1.5">→ {fmt(pos.exit_price, 4)}</span>
+                            )}
+                            {!isRunner && isEarlyExit && pos.exit_price && (
                               <span className="text-amber-500/70 ml-1.5">⚡ {fmt(pos.exit_price, 4)} — early exit</span>
                             )}
                           </p>
@@ -2002,7 +2023,8 @@ export function TradeDetailPage() {
                       </div>
 
                       <div className="flex items-center gap-2">
-                        {pos.realized_pnl != null && (
+                        {/* Hide per-position P&L when it's a full early exit — shown consolidated below */}
+                        {pos.realized_pnl != null && !isFullEarlyExit && (
                           <span className={cn(
                             'text-xs font-mono font-bold',
                             parseFloat(pos.realized_pnl) > 0 ? 'text-emerald-400'
@@ -2040,8 +2062,29 @@ export function TradeDetailPage() {
                   </div>
                 )
               })}
+
+              {/* Consolidated early exit summary */}
+              {isFullEarlyExit && earlyExitPrice != null && totalEarlyPnl != null && (
+                <div className="px-5 py-3 flex items-center justify-between gap-3 bg-amber-500/5 border-t border-amber-500/20">
+                  <div className="flex items-center gap-2 text-[11px] text-amber-400/80">
+                    <span>⚡</span>
+                    <span className="font-mono">Early exit @ {fmt(earlyExitPrice, 4)}</span>
+                    <span className="text-slate-600">— no TP reached</span>
+                  </div>
+                  <span className={cn(
+                    'text-sm font-mono font-bold',
+                    totalEarlyPnl > 0 ? 'text-emerald-400'
+                    : totalEarlyPnl < 0 ? 'text-red-400'
+                    : 'text-amber-400/80',
+                  )}>
+                    {totalEarlyPnl > 0 ? '+' : ''}{totalEarlyPnl.toFixed(2)}
+                    {totalEarlyPnl === 0 && <span className="ml-1 text-[10px] opacity-60">(BE)</span>}
+                  </span>
+                </div>
+              )}
             </div>
-          )}
+            )
+          })()}
         </div>
 
         {/* ── Entry notes + screenshots ────────────────────────────────── */}

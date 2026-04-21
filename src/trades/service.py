@@ -748,6 +748,11 @@ def list_trades(
         )
         item.has_kraken_orders = t.id in kraken_trade_ids
         item.is_reviewed = _compute_is_reviewed(t)
+        item.tp_hits = [
+            p.position_number
+            for p in t.positions
+            if p.tp_hit and not p.is_runner
+        ]
         items.append(item)
     return items
 

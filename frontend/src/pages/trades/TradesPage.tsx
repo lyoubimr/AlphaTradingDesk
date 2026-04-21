@@ -559,16 +559,23 @@ export function TradesPage() {
                           )}
                         </td>
 
-                        {/* Reviewed badge */}
+                        {/* Reviewed badge + TP hits */}
                         <td className="px-2 py-2.5">
-                          {t.is_reviewed && (
-                            <span
-                              className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/30 text-[10px] font-medium text-emerald-400 whitespace-nowrap"
-                              title="Post-trade review complète : outcome + notes + screenshot + tags"
-                            >
-                              📋 reviewed
-                            </span>
-                          )}
+                          <div className="flex flex-wrap gap-1">
+                            {t.status === 'closed' && t.tp_hits?.map((n) => (
+                              <span key={n} className="inline-flex items-center px-1.5 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/30 text-[10px] font-medium text-emerald-400 whitespace-nowrap">
+                                TP{n} ✅
+                              </span>
+                            ))}
+                            {t.is_reviewed && (
+                              <span
+                                className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/30 text-[10px] font-medium text-emerald-400 whitespace-nowrap"
+                                title="Post-trade review complète : outcome + notes + screenshot + tags"
+                              >
+                                📋 reviewed
+                              </span>
+                            )}
+                          </div>
                         </td>
 
                         {/* Actions */}
