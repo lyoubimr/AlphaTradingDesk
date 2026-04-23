@@ -838,7 +838,7 @@ export function NewAnalysisPage() {
         setSelectedId(session.module_id)
         setAnswers(session.answers.map((a) => ({
           indicator_id: a.indicator_id,
-          score:        a.score,
+          score:        a.score as AnswerScore,
           answer_label: a.answer_label,
         })))
         setNotes(session.notes ?? '')
