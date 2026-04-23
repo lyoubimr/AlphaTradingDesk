@@ -807,6 +807,7 @@ export function NewAnalysisPage() {
   const [searchParams] = useSearchParams()
 
   const preselectedId = searchParams.get('module') ? Number(searchParams.get('module')) : null
+  const sessionIdParam  = searchParams.get('session') ? Number(searchParams.get('session')) : null
 
   const [step,          setStep]          = useState<1 | 2 | 3>(preselectedId ? 2 : 1)
   const [modules,       setModules]       = useState<MAModule[]>([])
@@ -825,6 +826,38 @@ export function NewAnalysisPage() {
   useEffect(() => {
     maApi.listModules().then(setModules).catch((e: Error) => setError(e.message))
   }, [])
+
+  // Load existing session when ?session=<id> is present
+  useEffect(() => {
+    if (!sessionIdParam || !activeProfile) return
+    let cancelled = false
+    setLoading(true); setError(null)
+    maApi.getSession(sessionIdParam)
+      .then(async (session) => {
+        if (cancelled) return
+        setSelectedId(session.module_id)
+        setAnswers(session.answers.map((a) => ({
+          indicator_id: a.indicator_id,
+          score:        a.score,
+          answer_label: a.answer_label,
+        })))
+        setNotes(session.notes ?? '')
+        setSavedSession(session)
+        if (session.score_composite_a != null) {
+          try {
+            const c = await maApi.getConclusion(session.id)
+            if (!cancelled) setConclusion(c)
+          } catch {
+            // non-fatal
+          }
+        }
+        if (!cancelled) setStep(3)
+      })
+      .catch((e: Error) => { if (!cancelled) setError(e.message) })
+      .finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionIdParam, activeProfile?.id])
 
   // Load indicators when module is picked and step transitions to 2
   const loadIndicators = useCallback(async (moduleId: number) => {
@@ -899,7 +932,7 @@ export function NewAnalysisPage() {
     <div className="max-w-2xl mx-auto">
       <PageHeader
         icon="🧭"
-        title="New Analysis"
+        title={sessionIdParam ? 'View Analysis' : 'New Analysis'}
         subtitle="Complete the indicator checklist to compute your market bias"
         actions={
           <button type="button" className="atd-btn-ghost" onClick={() => navigate('/market-analysis')}>

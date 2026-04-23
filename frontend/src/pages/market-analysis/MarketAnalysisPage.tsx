@@ -168,12 +168,13 @@ function ConclusionBadge({ conclusion }: { conclusion: MATradeConclusion | null 
 // ─────────────────────────────────────────────────────────────────────────────
 
 function ModuleCard({
-  mod, staleness, last, onNew,
+  mod, staleness, last, onNew, onView,
 }: {
   mod: MAModule
   staleness: MAStalenessItem | undefined
   last: MASessionListItem | undefined
   onNew: () => void
+  onView: () => void
 }) {
   const isStale   = !staleness?.last_analyzed_at || staleness.is_stale
   const isNever   = !staleness?.last_analyzed_at
@@ -205,7 +206,7 @@ function ModuleCard({
 
   return (
     <div
-      onClick={onNew}
+      onClick={last ? onView : onNew}
       className={`group relative rounded-2xl bg-surface-800 border p-5 flex flex-col gap-3.5 cursor-pointer
         transition-all duration-200 hover:bg-surface-700/50 hover:-translate-y-0.5 hover:shadow-xl hover:shadow-black/20
         ${borderCls}`}
@@ -432,6 +433,10 @@ export function MarketAnalysisPage() {
     navigate(`/market-analysis/new${moduleId != null ? `?module=${moduleId}` : ''}`)
   }
 
+  const goView = (sessionId: number, moduleId: number) => {
+    navigate(`/market-analysis/new?session=${sessionId}&module=${moduleId}`)
+  }
+
   return (
     <div>
       <PageHeader
@@ -561,6 +566,7 @@ export function MarketAnalysisPage() {
                       staleness={staleness.find((s) => s.module_id === mod.id)}
                       last={lastByMod[mod.id]}
                       onNew={() => goNew(mod.id)}
+                      onView={() => lastByMod[mod.id] && goView(lastByMod[mod.id].id, mod.id)}
                     />
                   ))}
             </div>
