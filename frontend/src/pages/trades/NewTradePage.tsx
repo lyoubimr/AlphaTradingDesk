@@ -2515,7 +2515,7 @@ export function NewTradePage() {
                 type="file"
                 accept="image/*"
                 multiple
-                className="sr-only"
+                className="hidden"
                 onChange={(e) => {
                   const files = Array.from(e.target.files ?? [])
                   if (files.length) setEntryScreenshots((prev) => [...prev, ...files])
