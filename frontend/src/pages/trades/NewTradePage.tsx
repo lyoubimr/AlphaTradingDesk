@@ -1033,6 +1033,27 @@ export function NewTradePage() {
     })
   }, [entryScreenshots])
 
+  // Clipboard paste → add to entry screenshots (skip when pasting in text inputs)
+  useEffect(() => {
+    const onPaste = (e: ClipboardEvent) => {
+      const target = e.target as HTMLElement
+      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') return
+      const items = e.clipboardData?.items
+      if (!items) return
+      for (const item of Array.from(items)) {
+        if (item.type.startsWith('image/')) {
+          const blob = item.getAsFile()
+          if (!blob) continue
+          const file = new File([blob], `paste-${Date.now()}.png`, { type: blob.type })
+          setEntryScreenshots((prev) => [...prev, file])
+          break
+        }
+      }
+    }
+    document.addEventListener('paste', onPaste)
+    return () => document.removeEventListener('paste', onPaste)
+  }, [])
+
   // ── Risk Advisor state ────────────────────────────────────────────────────
   const [advisorSnapshot, setAdvisorSnapshot] = useState<Record<string, unknown> | null>(null)
   const [forceOpen, setForceOpen]             = useState(false)
@@ -2502,6 +2523,7 @@ export function NewTradePage() {
                 }}
               />
             </label>
+            <p className="text-[10px] text-slate-600 mt-1">⌘V / Ctrl+V to paste a screenshot</p>
           </div>
 
           {/* Notes */}

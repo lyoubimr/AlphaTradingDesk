@@ -245,12 +245,11 @@ function SnapshotGallery({
   const [deleting, setDeleting]   = useState<string | null>(null)
   const [err, setErr]             = useState<string | null>(null)
   const [lightbox, setLightbox]   = useState<string | null>(null)
+  const [hovered, setHovered]     = useState(false)
 
   const list = urls ?? []
 
-  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file) return
+  const handleUploadFile = useCallback(async (file: File) => {
     setUploading(true); setErr(null)
     try {
       const updated = kind === 'entry'
@@ -261,9 +260,34 @@ function SnapshotGallery({
       setErr((ex as Error).message)
     } finally {
       setUploading(false)
-      e.target.value = ''
     }
+  }, [kind, tradeId, onUpdated])
+
+  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    await handleUploadFile(file)
+    e.target.value = ''
   }
+
+  // Clipboard paste — active only while the gallery is hovered
+  useEffect(() => {
+    if (readOnly || !hovered) return
+    const onPaste = (e: ClipboardEvent) => {
+      const items = e.clipboardData?.items
+      if (!items) return
+      for (const item of Array.from(items)) {
+        if (item.type.startsWith('image/')) {
+          const blob = item.getAsFile()
+          if (!blob) continue
+          void handleUploadFile(new File([blob], `paste-${Date.now()}.png`, { type: blob.type }))
+          break
+        }
+      }
+    }
+    document.addEventListener('paste', onPaste)
+    return () => document.removeEventListener('paste', onPaste)
+  }, [readOnly, hovered, handleUploadFile])
 
   const handleDelete = async (url: string) => {
     setDeleting(url); setErr(null)
@@ -280,7 +304,11 @@ function SnapshotGallery({
   }
 
   return (
-    <div className="space-y-2">
+    <div
+      className="space-y-2"
+      onMouseEnter={() => !readOnly && setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+    >
       {/* Lightbox */}
       {lightbox && (
         <div
@@ -365,6 +393,10 @@ function SnapshotGallery({
           </label>
         )}
       </div>
+
+      {!readOnly && hovered && !uploading && (
+        <p className="text-[10px] text-slate-600">⌘V / Ctrl+V to paste a screenshot</p>
+      )}
 
       {list.length === 0 && readOnly && (
         <p className="text-xs text-slate-600 italic">No screenshots.</p>
