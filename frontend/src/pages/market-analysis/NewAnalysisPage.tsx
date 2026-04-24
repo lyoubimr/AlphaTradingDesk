@@ -843,6 +843,27 @@ export function NewAnalysisPage() {
         })))
         setNotes(session.notes ?? '')
         setSavedSession(session)
+
+        // Load indicators + thresholds for this module so StepSummary can
+        // compute scores. Note: no setAnswers([]) here — answers come from session.
+        try {
+          const [inds, cfg, thr] = await Promise.all([
+            maApi.listIndicators(session.module_id),
+            maApi.getIndicatorConfig(activeProfile.id),
+            maApi.getThresholds(session.module_id),
+          ])
+          if (!cancelled) {
+            setThresholds(thr)
+            const cfgMap: Record<number, boolean> = {}
+            for (const c of cfg.configs) cfgMap[c.indicator_id] = c.enabled
+            setIndicators(inds.filter((i) =>
+              cfgMap[i.id] !== undefined ? cfgMap[i.id] : i.default_enabled,
+            ))
+          }
+        } catch {
+          // non-fatal — scores ring will stay empty but conclusion still shows
+        }
+
         if (session.score_composite_a != null) {
           try {
             const c = await maApi.getConclusion(session.id)
@@ -933,7 +954,7 @@ export function NewAnalysisPage() {
       <PageHeader
         icon="🧭"
         title={sessionIdParam ? 'View Analysis' : 'New Analysis'}
-        subtitle="Complete the indicator checklist to compute your market bias"
+        subtitle={sessionIdParam ? 'Read-only view of a saved analysis session' : 'Complete the indicator checklist to compute your market bias'}
         actions={
           <button type="button" className="atd-btn-ghost" onClick={() => navigate('/market-analysis')}>
             <ArrowLeft size={14} /> Back
