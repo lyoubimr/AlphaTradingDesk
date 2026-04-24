@@ -2478,7 +2478,7 @@ export function NewTradePage() {
           </div>
 
           {/* Entry screenshots — optional, uploaded after trade creation */}
-          <div>
+          <div className="[overflow-anchor:none]">
             <span className="flex items-center gap-1 text-xs font-medium text-slate-400 mb-1.5">
               <ImagePlus size={12} className="text-slate-500" />
               Entry screenshots
@@ -2515,7 +2515,7 @@ export function NewTradePage() {
                 type="file"
                 accept="image/*"
                 multiple
-                className="sr-only"
+                className="hidden"
                 onChange={(e) => {
                   const files = Array.from(e.target.files ?? [])
                   if (files.length) setEntryScreenshots((prev) => [...prev, ...files])

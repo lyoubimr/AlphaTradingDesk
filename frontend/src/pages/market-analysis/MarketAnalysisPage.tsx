@@ -433,8 +433,10 @@ export function MarketAnalysisPage() {
     navigate(`/market-analysis/new${moduleId != null ? `?module=${moduleId}` : ''}`)
   }
 
-  const goView = (sessionId: number, moduleId: number) => {
-    navigate(`/market-analysis/new?session=${sessionId}&module=${moduleId}`)
+  const goView = (sessionId: number) => {
+    // Do NOT pass ?module= here — it would init step=2 and trigger loadIndicators
+    // which clears answers before the session fetch completes.
+    navigate(`/market-analysis/new?session=${sessionId}`)
   }
 
   return (
@@ -566,7 +568,7 @@ export function MarketAnalysisPage() {
                       staleness={staleness.find((s) => s.module_id === mod.id)}
                       last={lastByMod[mod.id]}
                       onNew={() => goNew(mod.id)}
-                      onView={() => lastByMod[mod.id] && goView(lastByMod[mod.id].id, mod.id)}
+                      onView={() => lastByMod[mod.id] && goView(lastByMod[mod.id].id)}
                     />
                   ))}
             </div>

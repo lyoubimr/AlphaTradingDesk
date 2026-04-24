@@ -809,7 +809,7 @@ export function NewAnalysisPage() {
   const preselectedId = searchParams.get('module') ? Number(searchParams.get('module')) : null
   const sessionIdParam  = searchParams.get('session') ? Number(searchParams.get('session')) : null
 
-  const [step,          setStep]          = useState<1 | 2 | 3>(preselectedId ? 2 : 1)
+  const [step,          setStep]          = useState<1 | 2 | 3>(preselectedId && !sessionIdParam ? 2 : 1)
   const [modules,       setModules]       = useState<MAModule[]>([])
   const [selectedId,    setSelectedId]    = useState<number | null>(preselectedId)
   const [indicators,    setIndicators]    = useState<MAIndicator[]>([])
