@@ -31,6 +31,13 @@ from src.core.database import Base, _normalise_db_url
 from src.core.deps import get_db
 from src.main import app
 
+# ── Safety guard — never run against atd_dev or atd_prod ─────────────────────
+_db_url = settings.database_url
+assert "atd_test" in _db_url, (
+    f"ABORT: pytest must target 'atd_test', got: {_db_url!r}. "
+    "Make sure APP_ENV=test is set (pyproject.toml env = ['APP_ENV=test'])."
+)
+
 # ── Engine pointed at the test DB ────────────────────────────────────────────
 _test_engine = create_engine(
     _normalise_db_url(settings.database_url),
