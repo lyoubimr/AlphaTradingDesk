@@ -21,6 +21,7 @@ import { AISettingsPage } from './pages/settings/AISettingsPage'
 import { MarketVIPage } from './pages/volatility/MarketVIPage'
 import { WatchlistsPage } from './pages/volatility/WatchlistsPage'
 import { PerformancePage } from './pages/analytics/PerformancePage'
+import { RitualPage } from './pages/ritual/RitualPage'
 
 export default function App() {
   return (
@@ -51,6 +52,8 @@ export default function App() {
         <Route path="/volatility" element={<Navigate to="/volatility/market" replace />} />
         <Route path="/volatility/market" element={<MarketVIPage />} />
         <Route path="/volatility/pairs" element={<WatchlistsPage />} />
+        {/* Phase 4D — Ritual */}
+        <Route path="/ritual" element={<RitualPage />} />
       </Route>
     </Routes>
   )

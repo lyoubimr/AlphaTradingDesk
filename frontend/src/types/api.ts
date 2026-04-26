@@ -1102,3 +1102,115 @@ export interface AIGenerateOut {
   tokens_used: number | null
   generated_at: string
 }
+
+// ── Ritual (Phase 4D) ──────────────────────────────────────────────────────
+
+export type SessionType = 'weekly_setup' | 'daily_prep' | 'trade_session' | 'weekend_review'
+export type SessionOutcome = 'trade_opened' | 'no_opportunity' | 'abandoned' | 'vol_too_low'
+export type PinnedTF = '1W' | '1D' | '4H' | '1H' | '15m'
+
+export interface RitualSettings {
+  profile_id: number
+  config: Record<string, unknown>
+  updated_at: string
+}
+
+export interface PinnedPair {
+  id: number
+  profile_id: number
+  pair: string
+  tv_symbol: string | null
+  timeframe: string
+  note: string | null
+  pinned_at: string
+  expires_at: string
+  status: 'active' | 'expired' | 'archived'
+  source: 'watchlist' | 'manual'
+  hours_remaining: number | null
+  ttl_pct: number | null
+  is_suspended: boolean
+}
+
+export interface PinnedPairCreate {
+  pair: string
+  timeframe: PinnedTF
+  note?: string | null
+  source?: 'watchlist' | 'manual'
+  tv_symbol?: string | null
+}
+
+export interface RitualStep {
+  id: number
+  profile_id: number
+  session_type: string
+  position: number
+  step_type: string
+  label: string
+  cadence_hours: number | null
+  is_mandatory: boolean
+  linked_module: string | null
+  est_minutes: number | null
+  config: Record<string, unknown>
+  emoji: string
+  module_path: string | null
+}
+
+export interface StepLog {
+  id: number
+  ritual_session_id: number
+  step_id: number | null
+  step_type: string
+  position: number
+  status: 'pending' | 'done' | 'skipped'
+  completed_at: string | null
+  output: Record<string, unknown>
+  emoji: string
+}
+
+export interface RitualSession {
+  id: number
+  profile_id: number
+  session_type: SessionType
+  started_at: string
+  ended_at: string | null
+  status: 'in_progress' | 'completed' | 'abandoned'
+  outcome: SessionOutcome | null
+  discipline_points: number
+  notes: string | null
+  step_logs: StepLog[]
+  session_label: string
+  session_emoji: string
+  duration_minutes: number | null
+}
+
+export interface SmartWLPairEntry {
+  pair: string
+  tv_symbol: string
+  vi_score: number
+  regime: string
+  ema_signal: string
+  score: number
+  is_pinned: boolean
+  pin_note: string | null
+  pin_id: number | null
+}
+
+export interface SmartWLResult {
+  generated_at: string
+  session_type: string
+  top_n: number
+  broker_name: string
+  timeframes: Record<string, SmartWLPairEntry[]>
+  market_analysis_pairs: string[]
+}
+
+export interface WeeklyScore {
+  id: number
+  profile_id: number
+  week_start: string
+  score: number
+  max_score: number
+  details: Record<string, unknown>
+  pct: number
+  grade: string
+}

@@ -14,6 +14,7 @@ from sqlalchemy import text
 
 from src.analytics.router import router as analytics_router
 from src.brokers.router import router as brokers_router
+from src.ritual.router import router as ritual_router
 from src.brokers.router import styles_router
 from src.core.celery_app import celery_app
 from src.core.config import settings
@@ -81,6 +82,7 @@ app.include_router(volatility_router, prefix=API_PREFIX)
 app.include_router(risk_router, prefix=API_PREFIX)
 app.include_router(kraken_execution_router, prefix=API_PREFIX)
 app.include_router(analytics_router, prefix=API_PREFIX)
+app.include_router(ritual_router, prefix=API_PREFIX)
 
 
 @app.get("/api/health")

@@ -20,6 +20,8 @@ import type {
   AutomationSettingsOut, AutomationSettingsUpdateIn, ConnectionTestOut, KrakenOrderOut,
   PerformanceReport, AnalyticsSettingsOut, AnalyticsSettingsUpdateIn,
   AIKeysStatusOut, AIKeysUpdateIn, AIGenerateOut,
+  RitualSettings, PinnedPair, PinnedPairCreate, RitualStep, RitualSession,
+  SmartWLResult, WeeklyScore, StepLog,
 } from '../types/api'
 
 const BASE = '/api'
@@ -706,4 +708,62 @@ export const analyticsApi = {
   /** DELETE /api/analytics/ai/cache/{profileId}?period=30d — clear cached summary */
   clearCache: (profileId: number, period = '30d'): Promise<void> =>
     request(`/analytics/ai/cache/${profileId}?period=${period}`, { method: 'DELETE' }),
+}
+
+// ── Ritual (Phase 4D) ────────────────────────────────────────────────────
+
+const R = (profileId: number) => `/profiles/${profileId}/ritual`
+
+export const ritualApi = {
+  getSettings:  (pid: number): Promise<RitualSettings> =>
+    request(`${R(pid)}/settings`),
+  updateSettings: (pid: number, config: Record<string, unknown>): Promise<RitualSettings> =>
+    request(`${R(pid)}/settings`, { method: 'PUT', body: JSON.stringify({ config }) }),
+
+  getSteps: (pid: number, sessionType: string): Promise<RitualStep[]> =>
+    request(`${R(pid)}/steps/${sessionType}`),
+  updateStep: (pid: number, stepId: number, data: Partial<RitualStep>): Promise<RitualStep> =>
+    request(`${R(pid)}/steps/${stepId}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  resetSteps: (pid: number, sessionType: string): Promise<RitualStep[]> =>
+    request(`${R(pid)}/steps/${sessionType}/reset`, { method: 'POST' }),
+
+  listPinned: (pid: number, includeExpired = false): Promise<PinnedPair[]> =>
+    request(`${R(pid)}/pinned?include_expired=${includeExpired}`),
+  addPinned: (pid: number, data: PinnedPairCreate): Promise<PinnedPair> =>
+    request(`${R(pid)}/pinned`, { method: 'POST', body: JSON.stringify(data) }),
+  removePinned: (pid: number, pinId: number): Promise<void> =>
+    request(`${R(pid)}/pinned/${pinId}`, { method: 'DELETE' }),
+  extendPinned: (pid: number, pinId: number, hours: number): Promise<PinnedPair> =>
+    request(`${R(pid)}/pinned/${pinId}/extend`, { method: 'POST', body: JSON.stringify({ hours }) }),
+
+  listSessions: (pid: number, limit = 20): Promise<RitualSession[]> =>
+    request(`${R(pid)}/sessions?limit=${limit}`),
+  getActiveSession: (pid: number): Promise<RitualSession | null> =>
+    request(`${R(pid)}/sessions/active`),
+  startSession: (pid: number, sessionType: string): Promise<RitualSession> =>
+    request(`${R(pid)}/sessions`, { method: 'POST', body: JSON.stringify({ session_type: sessionType }) }),
+  completeStep: (pid: number, sessionId: number, stepLogId: number, status: 'done' | 'skipped', output?: Record<string, unknown>): Promise<StepLog> =>
+    request(`${R(pid)}/sessions/${sessionId}/steps/${stepLogId}/complete`, {
+      method: 'POST', body: JSON.stringify({ status, output: output ?? {} }),
+    }),
+  completeSession: (pid: number, sessionId: number, outcome?: string | null, notes?: string | null): Promise<RitualSession> =>
+    request(`${R(pid)}/sessions/${sessionId}/complete`, {
+      method: 'POST', body: JSON.stringify({ outcome, notes }),
+    }),
+  abandonSession: (pid: number, sessionId: number): Promise<RitualSession> =>
+    request(`${R(pid)}/sessions/${sessionId}/abandon`, { method: 'POST' }),
+
+  generateWatchlist: (pid: number, sessionType: string, topN?: number): Promise<SmartWLResult> => {
+    const q = topN ? `?session_type=${sessionType}&top_n=${topN}` : `?session_type=${sessionType}`
+    return request(`${R(pid)}/smart-watchlist/generate${q}`, { method: 'POST' })
+  },
+  downloadWatchlistUrl: (pid: number, sessionType: string, topN?: number): string => {
+    const q = topN ? `?session_type=${sessionType}&top_n=${topN}` : `?session_type=${sessionType}`
+    return `/api${R(pid)}/smart-watchlist/download${q}`
+  },
+
+  getScore: (pid: number): Promise<WeeklyScore> =>
+    request(`${R(pid)}/score`),
+  getScoreHistory: (pid: number, weeks = 8): Promise<WeeklyScore[]> =>
+    request(`${R(pid)}/score/history?weeks=${weeks}`),
 }
