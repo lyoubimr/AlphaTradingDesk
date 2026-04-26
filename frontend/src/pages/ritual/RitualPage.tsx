@@ -10,7 +10,7 @@ import {
   Star, Pin, PinOff, Plus, Download, RefreshCw,
   ChevronRight, CheckCircle2, SkipForward, Circle,
   Timer, Flame, BookOpen, Clock, XCircle,
-  ExternalLink, Loader2,
+  ExternalLink, Loader2, Settings,
   ChevronDown, ChevronUp,
 } from 'lucide-react'
 import { PageHeader } from '../../components/ui/PageHeader'
@@ -19,7 +19,7 @@ import { ritualApi } from '../../lib/api'
 import { cn } from '../../lib/cn'
 import type {
   RitualSession, RitualStep, PinnedPair,
-  SmartWLResult, WeeklyScore, StepLog,
+  SmartWLResult, WeeklyScore, StepLog, RitualSettings,
   SessionType, SessionOutcome, PinnedTF,
 } from '../../types/api'
 
@@ -27,34 +27,38 @@ import type {
 // Constants & helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
-const SESSION_TYPES: { type: SessionType; emoji: string; label: string; desc: string; est: string }[] = [
+// inline type for market analysis staleness
+type MAStaleness = { module_name: string; last_session_at: string | null; days_old: number | null; is_stale: boolean }
+
+const SESSION_TYPES: { type: SessionType; emoji: string; label: string; desc: string; est: string; secondary?: boolean }[] = [
   {
     type: 'weekly_setup',
     emoji: '📅',
     label: 'Weekly Setup',
-    desc: 'Structure your week: Market Analysis → Goals → Watchlist 1W/1D → Pin pairs',
-    est: '~50 min',
-  },
-  {
-    type: 'daily_prep',
-    emoji: '☀️',
-    label: 'Daily Prep',
-    desc: 'VI check + Smart Watchlist 1D/4H → TradingView analysis',
-    est: '~25 min',
+    desc: 'Lundi — Market Analysis + Watchlist complet (1W/1D/4H/1H/15m) → Pin les paires clés',
+    est: '~45 min',
   },
   {
     type: 'trade_session',
     emoji: '🎯',
     label: 'Trade Session',
-    desc: 'AI Brief → VI → Pinned pairs → Smart WL 4H/1H/15m → Outcome',
+    desc: 'Fenêtre de trading — VI check + Paires pinnées + WL (4H/1H/15m) → Résultat',
     est: '~30 min',
   },
   {
     type: 'weekend_review',
     emoji: '📊',
     label: 'Weekend Review',
-    desc: 'Analytics → Trade Journal → Goals review → Learning note',
+    desc: 'Samedi/Dimanche — Analytics + Journal + Objectifs + Note d\'apprentissage',
     est: '~35 min',
+  },
+  {
+    type: 'daily_prep',
+    emoji: '☀️',
+    label: 'Mid-Week Prep',
+    desc: 'Mar-Ven — VI rapide + WL 1D/4H si pas de Weekly ce jour',
+    est: '~15 min',
+    secondary: true,
   },
 ]
 
@@ -178,11 +182,98 @@ function ScoreRing({ score, maxScore, pct, grade }: { score: number; maxScore: n
   )
 }
 
+// ── Market Analysis step panel ───────────────────────────────────────────────
+function MarketAnalysisPanel({
+  profileId, logId, onComplete,
+}: {
+  profileId: number
+  logId: number
+  onComplete: (logId: number, status: 'done' | 'skipped', output?: Record<string, unknown>) => void
+}) {
+  const navigate = useNavigate()
+  const [staleness, setStaleness] = useState<MAStaleness[] | null>(null)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    fetch(`/api/profiles/${profileId}/market-analysis/staleness`)
+      .then(r => r.ok ? r.json() as Promise<MAStaleness[]> : [])
+      .then(setStaleness)
+      .catch(() => setStaleness([]))
+      .finally(() => setLoading(false))
+  }, [profileId])
+
+  const staleModules = staleness?.filter(s => s.is_stale) ?? []
+  const allFresh = staleness !== null && staleness.length > 0 && staleModules.length === 0
+
+  return (
+    <div className="mt-2 rounded-lg border border-surface-700 bg-surface-900/60 p-3 space-y-2">
+      {loading ? (
+        <div className="flex items-center gap-2">
+          <Loader2 size={12} className="animate-spin text-slate-500" />
+          <span className="text-xs text-slate-500">Vérification Market Analysis…</span>
+        </div>
+      ) : allFresh ? (
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-1.5">
+            <CheckCircle2 size={14} className="text-green-500" />
+            <span className="text-xs text-green-400 font-medium">Market Analysis à jour</span>
+          </div>
+          <button
+            onClick={() => onComplete(logId, 'done', { market_analysis: 'fresh' })}
+            className="px-2.5 py-1 rounded-lg bg-green-700/20 border border-green-700/40 text-green-400 text-xs font-medium hover:bg-green-700/30 transition-colors"
+          >
+            ✓ Done
+          </button>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          <div className="flex items-center gap-1.5">
+            <span className="text-amber-400 text-sm">⚠</span>
+            <span className="text-xs text-amber-400 font-medium">
+              {staleness === null || staleness.length === 0
+                ? 'Aucune analyse trouvée'
+                : `${staleModules.length} module(s) non mis à jour cette semaine`}
+            </span>
+          </div>
+          {staleness && staleness.length > 0 && (
+            <div className="space-y-1 rounded-lg border border-surface-700 bg-surface-900 p-2">
+              {staleness.map(s => (
+                <div key={s.module_name} className="flex items-center justify-between">
+                  <span className="text-xs text-slate-400">{s.module_name}</span>
+                  <span className={cn('text-[10px] font-medium', s.is_stale ? 'text-red-400' : 'text-green-400')}>
+                    {s.is_stale ? (s.last_session_at ? `il y a ${s.days_old}j` : 'Jamais') : '✓ OK'}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="flex gap-2">
+            <button
+              onClick={() => navigate('/market-analysis')}
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-brand-700/20 border border-brand-600/40 text-brand-400 text-xs font-medium hover:bg-brand-700/30 transition-colors"
+            >
+              <ExternalLink size={11} />
+              Ouvrir Market Analysis
+            </button>
+            <button
+              onClick={() => onComplete(logId, 'done', { market_analysis: 'skip_update' })}
+              className="px-2.5 py-1 rounded-lg border border-surface-600 text-slate-500 text-xs hover:text-slate-300 transition-colors"
+            >
+              Continuer quand même
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ── Step item ──────────────────────────────────────────────────────────────────
 interface StepItemProps {
   log: StepLog
   step?: RitualStep
   isCurrent: boolean
+  profileId: number
   onComplete: (logId: number, status: 'done' | 'skipped', output?: Record<string, unknown>) => void
   onGenerateWL?: () => void
   wlResult?: SmartWLResult | null
@@ -193,7 +284,7 @@ interface StepItemProps {
 }
 
 function StepItem({
-  log, step, isCurrent,
+  log, step, isCurrent, profileId,
   onComplete, onGenerateWL, wlResult, wlLoading, downloadUrl, topN, setTopN,
 }: StepItemProps) {
   const navigate = useNavigate()
@@ -248,7 +339,7 @@ function StepItem({
           </div>
 
           {/* Linked module shortcut */}
-          {step?.module_path && isCurrent && !isDoneOrSkipped && (
+          {step?.module_path && isCurrent && !isDoneOrSkipped && log.step_type !== 'market_analysis' && (
             <button
               onClick={() => navigate(step.module_path!)}
               className="mt-1.5 inline-flex items-center gap-1 text-[11px] text-brand-400 hover:text-brand-300 transition-colors"
@@ -256,6 +347,15 @@ function StepItem({
               <ExternalLink size={10} />
               Open {step.linked_module}
             </button>
+          )}
+
+          {/* Market Analysis status panel */}
+          {log.step_type === 'market_analysis' && isCurrent && !isDoneOrSkipped && (
+            <MarketAnalysisPanel
+              profileId={profileId}
+              logId={log.id}
+              onComplete={onComplete}
+            />
           )}
 
           {/* Smart WL panel */}
@@ -342,6 +442,8 @@ function SmartWLPanel({
   setTopN: (n: number) => void
   onGenerate: () => void
 }) {
+  const navigate = useNavigate()
+  const hasData = result !== null && Object.keys(result.timeframes).length > 0
   return (
     <div className="mt-3 space-y-3">
       {/* Controls */}
@@ -375,8 +477,24 @@ function SmartWLPanel({
         )}
       </div>
 
-      {/* Result preview */}
-      {result && (
+      {/* Result preview — no data state */}
+      {result && !hasData && (
+        <div className="mt-2 rounded-lg border border-amber-700/40 bg-amber-900/10 p-3">
+          <p className="text-xs text-amber-400 font-medium">⚠️ Aucune donnée de volatilité</p>
+          <p className="text-xs text-slate-500 mt-1">
+            Lance d&apos;abord l&apos;analyse de volatilité pour alimenter les watchlists.
+          </p>
+          <button
+            onClick={() => navigate('/volatility/market')}
+            className="mt-2 flex items-center gap-1.5 text-xs text-brand-400 hover:text-brand-300 transition-colors"
+          >
+            <ExternalLink size={11} /> Aller à Volatility →
+          </button>
+        </div>
+      )}
+
+      {/* Result preview — data available */}
+      {result && hasData && (
         <div className="rounded-lg border border-surface-700 bg-surface-900/60 divide-y divide-surface-700/60">
           {result.market_analysis_pairs.length > 0 && (
             <div className="px-3 py-2">
@@ -584,6 +702,127 @@ function AddPinForm({ instruments, onAdd }: AddPinFormProps) {
             >
               <Pin size={12} />
             </button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Ritual Settings Panel ─────────────────────────────────────────────────────
+function RitualSettingsPanel({ profileId }: { profileId: number }) {
+  const [isOpen, setIsOpen] = useState(false)
+  const [settings, setSettings] = useState<RitualSettings | null>(null)
+  const [saving, setSaving] = useState(false)
+  const [resetting, setResetting] = useState<string | null>(null)
+  const [resetDone, setResetDone] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!isOpen || settings) return
+    ritualApi.getSettings(profileId).then(setSettings).catch(() => null)
+  }, [profileId, isOpen, settings])
+
+  const cfg = settings?.config ?? {}
+  const topNMap = (cfg.top_n as Record<string, number>) ?? {}
+  const topNValue = (type: string) => topNMap[type] ?? 20
+
+  const updateTopN = async (type: string, value: number) => {
+    const newConfig = { ...cfg, top_n: { ...topNMap, [type]: value } }
+    setSaving(true)
+    try {
+      const updated = await ritualApi.updateSettings(profileId, newConfig)
+      setSettings(updated)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleReset = async (sessionType: string) => {
+    setResetting(sessionType)
+    try {
+      await ritualApi.resetSteps(profileId, sessionType)
+      setResetDone(sessionType)
+      setTimeout(() => setResetDone(null), 2000)
+    } finally {
+      setResetting(null)
+    }
+  }
+
+  const SESSION_TYPE_LIST = ['weekly_setup', 'trade_session', 'daily_prep', 'weekend_review'] as const
+
+  return (
+    <div className="rounded-xl border border-surface-700 bg-surface-800/30">
+      <button
+        onClick={() => setIsOpen(o => !o)}
+        className="w-full flex items-center gap-2 px-4 py-3 text-left hover:bg-surface-700/20 rounded-xl transition-colors"
+      >
+        <Settings size={14} className="text-slate-400" />
+        <span className="text-sm font-semibold text-slate-300">Ritual Settings</span>
+        {isOpen
+          ? <ChevronUp size={14} className="ml-auto text-slate-500" />
+          : <ChevronDown size={14} className="ml-auto text-slate-500" />}
+      </button>
+
+      {isOpen && (
+        <div className="px-4 pb-5 space-y-5 border-t border-surface-700">
+
+          {/* Smart WL Top N per session */}
+          <div className="pt-4">
+            <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">Smart Watchlist — Top N per Session</p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {SESSION_TYPE_LIST.map(type => {
+                const info = SESSION_TYPES.find(s => s.type === type)!
+                return (
+                  <div key={type} className="flex items-center justify-between gap-2 rounded-lg border border-surface-700 bg-surface-900/60 px-3 py-2">
+                    <span className="text-xs text-slate-400 shrink-0">{info.emoji} {info.label}</span>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="range" min={5} max={50} step={5}
+                        value={topNValue(type)}
+                        onChange={e => updateTopN(type, Number(e.target.value))}
+                        className="w-20 accent-brand-500"
+                        disabled={saving || !settings}
+                      />
+                      <span className="text-xs text-slate-300 w-5 text-right">{topNValue(type)}</span>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+
+          {/* Reset steps */}
+          <div>
+            <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Reset Steps to Default</p>
+            <p className="text-[11px] text-slate-500 mb-3">
+              Reseeds step templates from the latest defaults. Use this after an update removes or changes steps (e.g. removal of ai_brief).
+            </p>
+            <div className="grid grid-cols-2 gap-2">
+              {SESSION_TYPE_LIST.map(type => {
+                const info = SESSION_TYPES.find(s => s.type === type)!
+                const isDone = resetDone === type
+                return (
+                  <button
+                    key={type}
+                    onClick={() => handleReset(type)}
+                    disabled={resetting !== null}
+                    className={cn(
+                      'flex items-center gap-1.5 px-3 py-2 rounded-lg border text-xs transition-colors disabled:opacity-50',
+                      isDone
+                        ? 'border-green-700/40 text-green-400 bg-green-900/10'
+                        : 'border-surface-700 text-slate-400 hover:border-amber-700/40 hover:text-amber-400',
+                    )}
+                  >
+                    {resetting === type
+                      ? <Loader2 size={11} className="animate-spin" />
+                      : isDone
+                        ? <CheckCircle2 size={11} />
+                        : <RefreshCw size={11} />}
+                    {info.emoji} {info.label}
+                  </button>
+                )
+              })}
+            </div>
           </div>
         </div>
       )}
@@ -909,6 +1148,7 @@ export function RitualPage() {
                       log={log}
                       step={step}
                       isCurrent={isCurrent}
+                      profileId={profileId}
                       onComplete={handleCompleteStep}
                       onGenerateWL={handleGenerateWL}
                       wlResult={wlResult}
@@ -923,37 +1163,73 @@ export function RitualPage() {
             </div>
           ) : (
             /* ── Session type picker ─────────────────────────────────────── */
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              {SESSION_TYPES.map((st) => (
-                <button
-                  key={st.type}
-                  onClick={() => handleStart(st.type)}
-                  disabled={starting !== null}
-                  className={cn(
-                    'rounded-xl border p-4 text-left transition-all group',
-                    'border-surface-700 bg-surface-800/40',
-                    'hover:border-brand-600/60 hover:bg-brand-950/20',
-                    'focus:outline-none focus:ring-2 focus:ring-brand-500/40',
-                    starting === st.type && 'opacity-60 cursor-wait',
-                  )}
-                >
-                  <div className="flex items-start justify-between mb-2">
-                    <span className="text-2xl">{st.emoji}</span>
-                    {starting === st.type && <Loader2 size={14} className="animate-spin text-brand-400 mt-1" />}
-                  </div>
-                  <p className="text-sm font-semibold text-slate-200 group-hover:text-slate-100">
-                    {st.label}
-                  </p>
-                  <p className="mt-1 text-[11px] text-slate-500 leading-relaxed">{st.desc}</p>
-                  <div className="mt-3 flex items-center justify-between">
-                    <span className="flex items-center gap-1 text-[11px] text-slate-500">
-                      <Clock size={10} />
-                      {st.est}
-                    </span>
-                    <ChevronRight size={14} className="text-slate-600 group-hover:text-brand-400 transition-colors" />
-                  </div>
-                </button>
-              ))}
+            <div className="space-y-3">
+              {/* Primary sessions: 3-col grid */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                {SESSION_TYPES.filter(s => !s.secondary).map((st) => (
+                  <button
+                    key={st.type}
+                    onClick={() => handleStart(st.type)}
+                    disabled={starting !== null}
+                    className={cn(
+                      'rounded-xl border p-4 text-left transition-all group',
+                      'border-surface-700 bg-surface-800/40',
+                      'hover:border-brand-600/60 hover:bg-brand-950/20',
+                      'focus:outline-none focus:ring-2 focus:ring-brand-500/40',
+                      starting === st.type && 'opacity-60 cursor-wait',
+                    )}
+                  >
+                    <div className="flex items-start justify-between mb-2">
+                      <span className="text-2xl">{st.emoji}</span>
+                      {starting === st.type && <Loader2 size={14} className="animate-spin text-brand-400 mt-1" />}
+                    </div>
+                    <p className="text-sm font-semibold text-slate-200 group-hover:text-slate-100">
+                      {st.label}
+                    </p>
+                    <p className="mt-1 text-[11px] text-slate-500 leading-relaxed">{st.desc}</p>
+                    <div className="mt-3 flex items-center justify-between">
+                      <span className="flex items-center gap-1 text-[11px] text-slate-500">
+                        <Clock size={10} />
+                        {st.est}
+                      </span>
+                      <ChevronRight size={14} className="text-slate-600 group-hover:text-brand-400 transition-colors" />
+                    </div>
+                  </button>
+                ))}
+              </div>
+
+              {/* Secondary sessions: smaller compact row */}
+              <div>
+                <p className="text-[10px] text-slate-600 uppercase tracking-wider mb-2">Option rapide</p>
+                <div className="flex flex-col sm:flex-row gap-2">
+                  {SESSION_TYPES.filter(s => s.secondary).map((st) => (
+                    <button
+                      key={st.type}
+                      onClick={() => handleStart(st.type)}
+                      disabled={starting !== null}
+                      className={cn(
+                        'flex items-center gap-3 rounded-lg border px-4 py-2.5 text-left transition-all group',
+                        'border-surface-700 bg-surface-800/20',
+                        'hover:border-brand-600/40 hover:bg-brand-950/10',
+                        'focus:outline-none focus:ring-2 focus:ring-brand-500/30',
+                        starting === st.type && 'opacity-60 cursor-wait',
+                      )}
+                    >
+                      <span className="text-xl">{st.emoji}</span>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-semibold text-slate-300 group-hover:text-slate-100">{st.label}</p>
+                        <p className="text-[10px] text-slate-500 truncate">{st.desc}</p>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <span className="text-[11px] text-slate-500">{st.est}</span>
+                        {starting === st.type
+                          ? <Loader2 size={12} className="animate-spin text-brand-400" />
+                          : <ChevronRight size={12} className="text-slate-600 group-hover:text-brand-400 transition-colors" />}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </div>
             </div>
           )}
 
@@ -1002,6 +1278,11 @@ export function RitualPage() {
                 ))}
               </div>
             </div>
+          )}
+
+          {/* ── Settings (always visible in main col) ──────────────────────── */}
+          {!activeSession && (
+            <RitualSettingsPanel profileId={profileId} />
           )}
         </div>
 

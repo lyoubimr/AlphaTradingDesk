@@ -288,40 +288,35 @@ DEFAULT_RITUAL_CONFIG: dict[str, Any] = {
 DEFAULT_STEPS: dict[str, list[dict]] = {
     "weekly_setup": [
         {
-            "position": 1, "step_type": "ai_brief", "label": "AI Market Brief",
-            "est_minutes": 2, "is_mandatory": True, "linked_module": None,
-            "cadence_hours": None, "config": {},
-        },
-        {
-            "position": 2, "step_type": "market_analysis",
+            "position": 1, "step_type": "market_analysis",
             "label": "Update Market Analysis", "est_minutes": 10,
             "is_mandatory": True, "linked_module": "market_analysis",
             "cadence_hours": None, "config": {},
         },
         {
-            "position": 3, "step_type": "goals_review", "label": "Review Weekly Goals",
-            "est_minutes": 5, "is_mandatory": False, "linked_module": "goals",
-            "cadence_hours": None, "config": {},
-        },
-        {
-            "position": 4, "step_type": "smart_wl",
-            "label": "Generate Smart Watchlist (1W + 1D)",
+            "position": 2, "step_type": "smart_wl",
+            "label": "Generate Smart Watchlist (1W + 1D + 4H + 1H + 15m)",
             "est_minutes": 1, "is_mandatory": True, "linked_module": None,
-            "cadence_hours": None, "config": {"timeframes": ["1W", "1D"]},
+            "cadence_hours": None, "config": {"timeframes": ["1W", "1D", "4H", "1H", "15m"]},
         },
         {
-            "position": 5, "step_type": "tv_analysis",
+            "position": 3, "step_type": "tv_analysis",
             "label": "Analyse watchlist in TradingView", "est_minutes": 30,
             "is_mandatory": True, "linked_module": None,
             "cadence_hours": None, "config": {},
         },
         {
-            "position": 6, "step_type": "pin_pairs", "label": "Pin retained pairs",
+            "position": 4, "step_type": "pin_pairs", "label": "Pin retained pairs",
             "est_minutes": 2, "is_mandatory": False, "linked_module": None,
             "cadence_hours": None, "config": {},
         },
         {
-            "position": 7, "step_type": "weekly_notes",
+            "position": 5, "step_type": "goals_review", "label": "Review Weekly Goals",
+            "est_minutes": 5, "is_mandatory": False, "linked_module": "goals",
+            "cadence_hours": None, "config": {},
+        },
+        {
+            "position": 6, "step_type": "weekly_notes",
             "label": "Write weekly setup notes", "est_minutes": 3,
             "is_mandatory": False, "linked_module": None,
             "cadence_hours": None, "config": {},
@@ -354,41 +349,36 @@ DEFAULT_STEPS: dict[str, list[dict]] = {
     ],
     "trade_session": [
         {
-            "position": 1, "step_type": "ai_brief", "label": "AI Trading Brief",
-            "est_minutes": 2, "is_mandatory": True, "linked_module": None,
-            "cadence_hours": None, "config": {},
-        },
-        {
-            "position": 2, "step_type": "vi_check",
+            "position": 1, "step_type": "vi_check",
             "label": "Check Volatility Index", "est_minutes": 1,
             "is_mandatory": True, "linked_module": "volatility",
             "cadence_hours": None, "config": {},
         },
         {
-            "position": 3, "step_type": "pinned_review",
+            "position": 2, "step_type": "pinned_review",
             "label": "Review active pinned pairs", "est_minutes": 2,
             "is_mandatory": True, "linked_module": None,
             "cadence_hours": None, "config": {},
         },
         {
-            "position": 4, "step_type": "smart_wl",
+            "position": 3, "step_type": "smart_wl",
             "label": "Generate Smart Watchlist (4H + 1H + 15m)",
             "est_minutes": 1, "is_mandatory": True, "linked_module": None,
             "cadence_hours": None, "config": {"timeframes": ["4H", "1H", "15m"]},
         },
         {
-            "position": 5, "step_type": "tv_analysis",
+            "position": 4, "step_type": "tv_analysis",
             "label": "Analyse watchlist in TradingView", "est_minutes": 20,
             "is_mandatory": True, "linked_module": None,
             "cadence_hours": None, "config": {},
         },
         {
-            "position": 6, "step_type": "pin_pairs", "label": "Pin retained pairs",
+            "position": 5, "step_type": "pin_pairs", "label": "Pin retained pairs",
             "est_minutes": 2, "is_mandatory": False, "linked_module": None,
             "cadence_hours": None, "config": {},
         },
         {
-            "position": 7, "step_type": "outcome", "label": "Session Outcome",
+            "position": 6, "step_type": "outcome", "label": "Session Outcome",
             "est_minutes": 1, "is_mandatory": True, "linked_module": None,
             "cadence_hours": None, "config": {},
         },
