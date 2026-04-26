@@ -61,6 +61,7 @@ class WRByDayHour(BaseModel):
     trades: int
     wins: int
     wr_pct: float | None = None
+    avg_rr: float | None = None  # avg actual R:R across trades in this cell
 
 
 class TPHitRate(BaseModel):

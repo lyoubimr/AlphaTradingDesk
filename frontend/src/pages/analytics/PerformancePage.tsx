@@ -650,7 +650,7 @@ export function PerformancePage() {
 
           {/* ── 7b. Day × Hour heatmap (full width) ──────────────────────── */}
           {report.wr_by_day_hour.length > 0 && (
-            <Section title="By Day × Hour">
+            <Section title="WR by Day × Hour">
               <DayHourHeatmap data={report.wr_by_day_hour} />
             </Section>
           )}

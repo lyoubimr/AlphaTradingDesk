@@ -934,6 +934,7 @@ export interface WRByDayHour {
   trades: number
   wins: number
   wr_pct: number | null
+  avg_rr: number | null
 }
 
 export interface TPHitRate {

@@ -510,7 +510,7 @@ def _compute_wr_by_hour(trades: list[dict]) -> list[WRByHour]:
 
 
 def _compute_wr_by_day_hour(trades: list[dict]) -> list[WRByDayHour]:
-    """7×24 grid of WR% keyed by (weekday, UTC hour). Day 0=Mon ... 6=Sun."""
+    """7×24 grid of WR% + avg actual R:R keyed by (weekday, UTC hour). Day 0=Mon ... 6=Sun."""
     grid: dict[tuple[int, int], dict] = {}
     for t in trades:
         entry = t["entry_date"]
@@ -520,19 +520,27 @@ def _compute_wr_by_day_hour(trades: list[dict]) -> list[WRByDayHour]:
         hour = entry.hour
         key = (day, hour)
         if key not in grid:
-            grid[key] = {"trades": 0, "wins": 0}
+            grid[key] = {"trades": 0, "wins": 0, "rr_sum": 0.0, "rr_count": 0}
         grid[key]["trades"] += 1
         if float(t["pnl_pct"]) > 0:
             grid[key]["wins"] += 1
+        risk = float(t["risk_amount"]) if t.get("risk_amount") else None
+        pnl = float(t["realized_pnl"]) if t.get("realized_pnl") is not None else None
+        if risk and risk > 0 and pnl is not None:
+            grid[key]["rr_sum"] += pnl / risk
+            grid[key]["rr_count"] += 1
     result = []
     for (day, hour), v in sorted(grid.items()):
         tr, w = v["trades"], v["wins"]
+        rr_count = v["rr_count"]
+        avg_rr = round(v["rr_sum"] / rr_count, 2) if rr_count > 0 else None
         result.append(WRByDayHour(
             day=day,
             hour=hour,
             trades=tr,
             wins=w,
             wr_pct=round(w / tr * 100, 1) if tr else None,
+            avg_rr=avg_rr,
         ))
     return result
 

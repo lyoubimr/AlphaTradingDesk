@@ -86,16 +86,25 @@ export function DayHourHeatmap({ data }: Props) {
                   const alpha = 0.3 + (cell.trades / maxTrades) * 0.65
                   const bg = wrColor(wr, alpha)
                   const textColor = wrTextColor(wr)
+                  const rr = cell.avg_rr
+                  const rrStr = rr !== null && rr !== undefined
+                    ? (rr >= 0 ? `+${rr.toFixed(1)}R` : `${rr.toFixed(1)}R`)
+                    : null
                   return (
                     <td key={h} className="py-0.5 px-0.5">
                       <div
-                        title={`${label} ${String(h).padStart(2, '0')}:00 ${tzLabel} — WR ${wr.toFixed(0)}% (${cell.trades} trade${cell.trades > 1 ? 's' : ''})`}
+                        title={`${label} ${String(h).padStart(2, '0')}:00 ${tzLabel} — WR ${wr.toFixed(0)}%${rrStr ? ` · avg R:R ${rrStr}` : ''} (${cell.trades} trade${cell.trades > 1 ? 's' : ''})`}
                         style={{ background: bg }}
-                        className="h-6 rounded-sm flex items-center justify-center cursor-default select-none"
+                        className="h-9 rounded-sm flex flex-col items-center justify-center gap-px cursor-default select-none px-0.5"
                       >
-                        <span style={{ color: textColor }} className="font-bold leading-none">
+                        <span style={{ color: textColor }} className="font-bold leading-none text-[9px]">
                           {wr.toFixed(0)}%
                         </span>
+                        {rrStr && (
+                          <span style={{ color: textColor }} className="leading-none text-[8px] opacity-80">
+                            {rrStr}
+                          </span>
+                        )}
                       </div>
                     </td>
                   )
