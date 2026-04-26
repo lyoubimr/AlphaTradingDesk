@@ -63,6 +63,24 @@ from src.trades.schemas import (
 
 # CFD: safe_margin = (lots x contract_size x entry_price / max_leverage) x MARGIN_SAFETY_FACTOR
 # We flag a warning when capital_current < safe_margin.
+
+
+def _detect_session(dt: datetime) -> str:
+    """Return session label from a UTC datetime (server-side fallback).
+
+    Priority: Weekend > Overlap > New York > London > Asian
+    Uses UTC weekday so it is DST-agnostic.
+    """
+    if dt.weekday() >= 5:  # Saturday=5, Sunday=6
+        return "Weekend"
+    h = dt.hour
+    if 13 <= h < 17:
+        return "Overlap"
+    if 13 <= h < 22:
+        return "New York"
+    if 7 <= h < 16:
+        return "London"
+    return "Asian"
 MARGIN_SAFETY_FACTOR = Decimal("2.5")
 DEFAULT_CFD_CONTRACT_SIZE = Decimal("100000")  # standard lot; overridden by instrument if set
 DEFAULT_CFD_MAX_LEVERAGE = 100  # conservative fallback
@@ -628,7 +646,7 @@ def open_trade(db: Session, data: TradeOpen) -> TradeOut:
         # MARKET orders start as 'open'   — full risk reserved immediately.
         status="pending" if data.order_type == "LIMIT" else "open",
         current_risk=Decimal("0.00") if data.order_type == "LIMIT" else risk_amount,
-        session_tag=data.session_tag,
+        session_tag=data.session_tag or _detect_session(data.entry_date or datetime.utcnow()),
         notes=data.notes,
         confidence_score=data.confidence_score,
         leverage=data.leverage,
