@@ -33,14 +33,12 @@ export function DayHourHeatmap({ data }: Props) {
     return { localDay, localHour, trades: d.trades, wins: d.wins, wr_pct: d.wr_pct }
   })
 
-  // Active hours range — start at 12:00 minimum (most trades in afternoon/evening)
-  const activeHours = [...new Set(cells.filter(c => c.trades > 0).map(c => c.localHour))].sort((a, b) => a - b)
-  if (activeHours.length === 0) return (
+  // Fixed full-day range: 00h → 23h
+  const hasData = cells.some(c => c.trades > 0)
+  if (!hasData) return (
     <div className="text-slate-600 text-sm py-4 text-center">No data</div>
   )
-  const minH = Math.max(12, activeHours[0] - 1)
-  const maxH = Math.min(23, activeHours[activeHours.length - 1] + 1)
-  const hourRange = Array.from({ length: maxH - minH + 1 }, (_, i) => minH + i)
+  const hourRange = Array.from({ length: 24 }, (_, i) => i)
 
   // Build cell lookup
   const map = new Map<string, Cell>()

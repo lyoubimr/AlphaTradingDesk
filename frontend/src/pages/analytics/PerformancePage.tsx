@@ -633,16 +633,10 @@ export function PerformancePage() {
             </Section>
           </div>
 
-          {/* ── 7. WR by Hour + Day×Hour Heatmap + WR by Session ───────────── */}
+          {/* ── 7. WR by Hour + WR by Session ───────────────────────────── */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <Section title="WR by Trade Open Hour">
               <HourlyWRChart data={report.wr_by_hour} />
-              {report.wr_by_day_hour.length > 0 && (
-                <div className="mt-3 pt-3 border-t border-surface-700/50">
-                  <p className="text-[10px] text-slate-500 mb-2 uppercase tracking-wide">By Day × Hour</p>
-                  <DayHourHeatmap data={report.wr_by_day_hour} />
-                </div>
-              )}
             </Section>
             <Section title="WR by Session">
               <WRBarChart
@@ -653,6 +647,13 @@ export function PerformancePage() {
               />
             </Section>
           </div>
+
+          {/* ── 7b. Day × Hour heatmap (full width) ──────────────────────── */}
+          {report.wr_by_day_hour.length > 0 && (
+            <Section title="By Day × Hour">
+              <DayHourHeatmap data={report.wr_by_day_hour} />
+            </Section>
+          )}
 
           {/* ── 8. Pair Leaderboard + Trade Type Distribution ────────────── */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
