@@ -168,15 +168,15 @@ const SESSIONS = [
   { label: 'London',   emoji: '🇬🇧', hours: '07–16 UTC' },
   { label: 'New York', emoji: '🗽', hours: '13–22 UTC' },
   { label: 'Overlap',  emoji: '⚡', hours: '13–17 UTC' },
+  { label: 'Weekend',  emoji: '🌙', hours: 'Sam–Dim' },
 ] as const
 type SessionLabel = typeof SESSIONS[number]['label']
 
 function detectSession(): SessionLabel {
-  // Use local hour so traders see the session that matches their clock,
-  // regardless of where the server is located.
-  // Session times expressed as LOCAL equivalents of UTC ranges are
-  // approximated by converting UTC boundaries to the browser's timezone.
-  const nowUtcH = new Date().getUTCHours()
+  const now = new Date()
+  const day = now.getUTCDay() // 0 = Sun, 6 = Sat
+  if (day === 0 || day === 6) return 'Weekend'
+  const nowUtcH = now.getUTCHours()
   if (nowUtcH >= 13 && nowUtcH < 17) return 'Overlap'
   if (nowUtcH >= 13 && nowUtcH < 22) return 'New York'
   if (nowUtcH >= 7  && nowUtcH < 16) return 'London'
@@ -2338,6 +2338,9 @@ export function NewTradePage() {
 
           {/* TP rows */}
           <div className="space-y-2">
+            {/* Column headers + input rows — scrollable on mobile so inputs stay reachable */}
+            <div className="overflow-x-auto">
+            <div className="min-w-[36rem] space-y-2">
             {/* Column headers */}
             <div className="grid gap-2 text-[9px] text-slate-600 uppercase tracking-wider font-medium"
               style={{ gridTemplateColumns: '2.5rem 1fr 5rem 1.5rem 6rem 5rem 8rem' }}>
@@ -2410,6 +2413,8 @@ export function NewTradePage() {
                 </div>
               )
             })}
+            </div>{/* end min-w-[36rem] */}
+            </div>{/* end overflow-x-auto */}
 
             {/* Split total */}
             <div className={cn('flex items-center gap-1.5 text-[10px] font-semibold',
