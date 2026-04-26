@@ -385,7 +385,8 @@ def _compute_wr_by_strategy(
             SUM(CASE WHEN t.realized_pnl > 0 THEN 1 ELSE 0 END) AS wins,
             SUM(CASE WHEN t.realized_pnl <= 0 THEN 1 ELSE 0 END) AS losses,
             ROUND(AVG(t.realized_pnl)::numeric, 2) AS avg_pnl,
-            ROUND(SUM(t.realized_pnl)::numeric, 2) AS total_pnl
+            ROUND(SUM(t.realized_pnl)::numeric, 2) AS total_pnl,
+            ROUND(AVG(t.realized_pnl / NULLIF(t.risk_amount, 0))::numeric, 2) AS avg_rr
         FROM trades t
         LEFT JOIN trade_strategies ts ON ts.trade_id = t.id
         LEFT JOIN strategies s ON s.id = ts.strategy_id
@@ -424,6 +425,7 @@ def _compute_wr_by_strategy(
             wr_pct=round(wins / trades * 100, 1) if trades else None,
             avg_pnl=float(r["avg_pnl"]) if r["avg_pnl"] is not None else None,
             total_pnl=float(r["total_pnl"] or 0),
+            avg_pnl_pct=float(r["avg_rr"]) if r["avg_rr"] is not None else None,
         ))
     return result
 
@@ -507,7 +509,7 @@ def _compute_wr_by_hour(trades: list[dict]) -> list[WRByHour]:
 # ── Top / Worst trades ────────────────────────────────────────────────────────
 
 def _compute_top_worst_trades(
-    trades: list[dict], n: int = 5
+    trades: list[dict], n: int = 10
 ) -> tuple[list[TradeSummaryRow], list[TradeSummaryRow]]:
     """Return (top_n, worst_n) sorted by realized_pnl descending / ascending."""
     def to_row(t: dict) -> TradeSummaryRow:
@@ -741,6 +743,8 @@ def _compute_rr_scatter(trades: list[dict]) -> list[RRScatterPoint]:
             actual_rr=actual_rr,
             is_win=pnl > 0,
             pair=t["pair"],
+            strategy_name=t.get("strategy_name"),
+            session_tag=t.get("session_tag") or None,
         ))
     return result
 

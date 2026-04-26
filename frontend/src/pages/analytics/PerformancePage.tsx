@@ -665,17 +665,17 @@ export function PerformancePage() {
             </Section>
           </div>
 
-          {/* ── 11. Top / Worst Trades ────────────────────────────────────── */}
-          {(report.top_trades.length > 0 || report.worst_trades.length > 0) && (
-            <Section title="Top / Worst Trades" hint="by realized P&L">
-              <TopWorstTrades top={report.top_trades} worst={report.worst_trades} />
-            </Section>
-          )}
-
-          {/* ── 12. Strategy × Session ────────────────────────────────────── */}
+          {/* ── 11. Strategy × Session ─────────────────────────────────── */}
           {report.wr_by_strategy_session.length > 0 && (
             <Section title="Strategy × Session">
               <StrategySessionMatrix data={report.wr_by_strategy_session} period={period} />
+            </Section>
+          )}
+
+          {/* ── 12. Top / Worst Trades ─────────────────────────────── */}
+          {(report.top_trades.length > 0 || report.worst_trades.length > 0) && (
+            <Section title="Top / Worst Trades" hint="by realized P&L">
+              <TopWorstTrades top={report.top_trades} worst={report.worst_trades} />
             </Section>
           )}
         </div>

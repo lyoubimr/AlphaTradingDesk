@@ -6,6 +6,12 @@ import type { DrawdownPoint } from '../../../types/api'
 
 interface Props { data: DrawdownPoint[] }
 
+const LastDotDD = (lastIdx: number) =>
+  (props: { index?: number; cx?: number; cy?: number }) => {
+    if (props.index !== lastIdx) return null
+    return <circle cx={props.cx} cy={props.cy} r={4} fill="#ef4444" stroke="#0f172a" strokeWidth={1.5} />
+  }
+
 export function DrawdownChart({ data }: Props) {
   if (data.length === 0) return <div className="text-slate-500 text-sm py-8 text-center">No data</div>
   const maxDD = Math.min(...data.map(d => d.drawdown_pct))
@@ -41,7 +47,8 @@ export function DrawdownChart({ data }: Props) {
             stroke="#ef4444"
             fill="url(#dd-grad)"
             strokeWidth={2}
-            dot={false}
+            dot={LastDotDD(data.length - 1) as never}
+            activeDot={{ r: 4, fill: '#ef4444', stroke: '#0f172a', strokeWidth: 1.5 }}
           />
         </AreaChart>
       </ResponsiveContainer>

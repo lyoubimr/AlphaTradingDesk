@@ -71,6 +71,15 @@ export function WRBarChart({ data, maxItems = 12, labelTooltips }: Props) {
               {pnl >= 0 ? '+$' : '-$'}{Math.abs(pnl).toFixed(0)}
               <span className="text-slate-600 font-normal ml-0.5">avg/tr</span>
             </span>
+            {/* Avg actual R:R — only shown when available (strategies) */}
+            {row.avg_pnl_pct != null && (
+              <span
+                className={`w-14 shrink-0 text-[10px] font-medium tabular-nums text-right ${row.avg_pnl_pct >= 0 ? 'text-sky-400' : 'text-orange-400'}`}
+                title="avg actual R:R"
+              >
+                {row.avg_pnl_pct >= 0 ? '+' : ''}{row.avg_pnl_pct.toFixed(2)}R
+              </span>
+            )}
           </div>
         )
       })}

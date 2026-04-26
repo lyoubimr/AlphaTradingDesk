@@ -957,6 +957,8 @@ export interface RRScatterPoint {
   actual_rr: number | null
   is_win: boolean
   pair: string
+  strategy_name: string | null
+  session_tag: string | null
 }
 
 export interface DirectionRow {

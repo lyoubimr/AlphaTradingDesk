@@ -84,6 +84,8 @@ class RRScatterPoint(BaseModel):
     actual_rr: float | None    # realized_pnl / risk_amount
     is_win: bool
     pair: str
+    strategy_name: str | None = None
+    session_tag: str | None = None
 
 
 class DirectionRow(BaseModel):
