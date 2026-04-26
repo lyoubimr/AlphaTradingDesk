@@ -6,17 +6,37 @@ import type { EquityPoint } from '../../../types/api'
 
 interface Props { data: EquityPoint[] }
 
-const LastDot = (lastIdx: number, color: string) =>
-  (props: { index?: number; cx?: number; cy?: number }) => {
+/** Dot rendered only on the last data point; color depends on that point's value */
+const LastDot = (lastIdx: number) =>
+  (props: { index?: number; cx?: number; cy?: number; payload?: EquityPoint }) => {
     if (props.index !== lastIdx) return null
+    const color = (props.payload?.cumulative_pnl ?? 0) >= 0 ? '#10b981' : '#ef4444'
     return <circle cx={props.cx} cy={props.cy} r={4} fill={color} stroke="#0f172a" strokeWidth={1.5} />
   }
+
+/** Custom tooltip: PnL value colored green/red per-point */
+const EquityTooltip = ({ active, payload, label }: {
+  active?: boolean
+  payload?: { value: number }[]
+  label?: string
+}) => {
+  if (!active || !payload?.length) return null
+  const val = payload[0].value
+  const color = val >= 0 ? '#10b981' : '#ef4444'
+  const date = label ? new Date(label).toLocaleDateString('en', { month: 'short', day: 'numeric', year: 'numeric' }) : ''
+  return (
+    <div style={{ background: '#16162a', border: '1px solid #1e1e35', borderRadius: 8, fontSize: 11, padding: '6px 10px' }}>
+      <div style={{ color: '#64748b', marginBottom: 2 }}>{date}</div>
+      <div style={{ color }}>PnL  {val >= 0 ? '+' : ''}{val.toFixed(2)}</div>
+    </div>
+  )
+}
 
 export function EquityCurve({ data }: Props) {
   if (data.length === 0) return <div className="text-slate-500 text-sm py-8 text-center">No data</div>
 
-  const isPositive = data[data.length - 1].cumulative_pnl >= 0
-  const lineColor = isPositive ? '#10b981' : '#ef4444'
+  const lastVal = data[data.length - 1].cumulative_pnl
+  const lineColor = lastVal >= 0 ? '#10b981' : '#ef4444'
 
   return (
     <ResponsiveContainer width="100%" height={200}>
@@ -35,18 +55,18 @@ export function EquityCurve({ data }: Props) {
           tickFormatter={d => new Date(d).toLocaleDateString('en', { month: 'short', day: 'numeric' })}
         />
         <YAxis tick={{ fontSize: 10, fill: '#64748b' }} tickLine={false} width={50} />
-        <Tooltip
-          contentStyle={{ background: '#16162a', border: '1px solid #1e1e35', borderRadius: 8, fontSize: 11 }}
-          formatter={(v) => { const n = Number(v); return [n > 0 ? `+${n.toFixed(2)}` : n.toFixed(2), 'PnL'] }}
-        />
+        <Tooltip content={<EquityTooltip />} />
         <Area
           type="monotone"
           dataKey="cumulative_pnl"
           stroke={lineColor}
           fill="url(#eq-grad)"
           strokeWidth={2}
-          dot={LastDot(data.length - 1, lineColor) as never}
-          activeDot={{ r: 4, fill: lineColor, stroke: '#0f172a', strokeWidth: 1.5 }}
+          dot={LastDot(data.length - 1) as never}
+          activeDot={(props: { cx?: number; cy?: number; payload?: EquityPoint }) => {
+            const color = (props.payload?.cumulative_pnl ?? 0) >= 0 ? '#10b981' : '#ef4444'
+            return <circle cx={props.cx} cy={props.cy} r={4} fill={color} stroke="#0f172a" strokeWidth={1.5} />
+          }}
         />
       </AreaChart>
     </ResponsiveContainer>

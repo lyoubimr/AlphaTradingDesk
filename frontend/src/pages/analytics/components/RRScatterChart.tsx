@@ -28,7 +28,7 @@ const CustomTooltip = ({ active, payload }: { active?: boolean; payload?: { payl
   if (!active || !payload?.length) return null
   const p = payload[0].payload
   return (
-    <div className="bg-[#16162a] border border-surface-700 rounded-lg px-3 py-2 text-[11px] space-y-0.5 shadow-xl">
+    <div style={{ background: 'rgba(15,23,42,0.82)', backdropFilter: 'blur(6px)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 8 }} className="px-3 py-2 text-[11px] space-y-0.5 shadow-xl">
       <div className="font-semibold text-slate-200">{p.pair} <span className={p.is_win ? 'text-emerald-400' : 'text-red-400'}>{p.is_win ? 'Win' : 'Loss'}</span></div>
       {p.strategy_name && <div className="text-slate-400">Strategy: <span className="text-slate-200">{p.strategy_name}</span></div>}
       {p.session_tag && <div className="text-slate-400">Session: <span className="text-slate-200">{p.session_tag}</span></div>}
