@@ -175,7 +175,7 @@ type SessionLabel = typeof SESSIONS[number]['label']
 
 function detectSession(): SessionLabel {
   const now = new Date()
-  const day = now.getUTCDay() // 0 = Sun, 6 = Sat
+  const day = now.getDay() // local day — 0 = Sun, 6 = Sat
   if (day === 0 || day === 6) return 'Weekend'
   const nowUtcH = now.getUTCHours()
   if (nowUtcH >= 13 && nowUtcH < 17) return 'Overlap'
@@ -1007,7 +1007,8 @@ export function NewTradePage() {
   const [entryScreenshots, setEntryScreenshots] = useState<File[]>([])
 
   const [showSession, setShowSession] = useState(false)
-  const [sessionTag, setSessionTag]   = useState<SessionLabel | ''>(detectSession)
+  // sessionTag = '' means "no manual selection" — detectSession() is called fresh at submit time
+  const [sessionTag, setSessionTag]   = useState<SessionLabel | ''>('')
 
   const [submitting, setSubmitting]       = useState(false)
   const [error, setError]                 = useState<string | null>(null)
@@ -1542,7 +1543,7 @@ export function NewTradePage() {
         ...(isCrypto && effectiveMargin != null && effectiveMargin > 0 && { margin_used: effectiveMargin }),
         strategy_ids:         strategyIds.length > 0 ? strategyIds : undefined,
         strategy_id:          strategyIds[0] ?? null,
-        session_tag:          sessionTag || null,
+        session_tag:          (sessionTag || detectSession()) || null,
         notes:                notes || null,
         confidence_score:     confidence ? Number(confidence) : null,
         force:                forceOpen || undefined,
