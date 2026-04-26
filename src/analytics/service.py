@@ -182,7 +182,7 @@ def compute_performance_report(profile_id: int, period: str, db: Session) -> Per
 
     kpi = _compute_kpi(trades, profile)
     equity_curve = _compute_equity_curve(trades)
-    drawdown = _compute_drawdown(equity_curve)
+    drawdown = _compute_drawdown(equity_curve, float(profile.capital_start))
     wr_by_strategy = _compute_wr_by_strategy(profile_id, period, cutoff, db, params, date_filter)
     wr_by_session = _compute_wr_by_session(trades)
     wr_by_hour = _compute_wr_by_hour(trades)
@@ -337,22 +337,25 @@ def _compute_equity_curve(trades: list[dict]) -> list[EquityPoint]:
 
 # ── Drawdown curve ────────────────────────────────────────────────────────────
 
-def _compute_drawdown(equity: list[EquityPoint]) -> list[DrawdownPoint]:
+def _compute_drawdown(equity: list[EquityPoint], capital_start: float = 0.0) -> list[DrawdownPoint]:
+    """Drawdown as % of peak account equity (capital_start + cumulative P&L).
+
+    Using only cumulative P&L as denominator produces nonsensical values like
+    -194% when the P&L peak is tiny (e.g. $36) but later cumulative drops
+    to -$34 — a $70 swing that is only ~22% on a real $325 account.
+    """
     if not equity:
         return []
-    peak = 0.0
+    peak_equity = capital_start  # starts at initial capital, never goes below it
     points: list[DrawdownPoint] = []
     for e in equity:
-        cum = e.cumulative_pnl
-        peak = max(peak, cum)
-        if peak > 0:
-            dd_pct = round((cum - peak) / peak * 100, 2)
-        else:
-            dd_pct = 0.0
+        account_equity = capital_start + e.cumulative_pnl
+        peak_equity = max(peak_equity, account_equity)
+        dd_pct = round((account_equity - peak_equity) / peak_equity * 100, 2) if peak_equity > 0 else 0.0
         points.append(DrawdownPoint(
             date=e.date,
-            cumulative_pnl=cum,
-            peak_pnl=round(peak, 2),
+            cumulative_pnl=e.cumulative_pnl,
+            peak_pnl=round(peak_equity - capital_start, 2),  # back to cumulative PnL at peak
             drawdown_pct=dd_pct,
         ))
     return points
