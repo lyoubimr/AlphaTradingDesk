@@ -1103,7 +1103,7 @@ export interface AIGenerateOut {
   generated_at: string
 }
 
-// ── Ritual (Phase 4D) ──────────────────────────────────────────────────────
+// ── Ritual (Phase 6B) ──────────────────────────────────────────────────────
 
 export type SessionType = 'weekly_setup' | 'daily_prep' | 'trade_session' | 'weekend_review'
 export type SessionOutcome = 'trade_opened' | 'no_opportunity' | 'abandoned' | 'vol_too_low'

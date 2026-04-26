@@ -52,7 +52,7 @@ export default function App() {
         <Route path="/volatility" element={<Navigate to="/volatility/market" replace />} />
         <Route path="/volatility/market" element={<MarketVIPage />} />
         <Route path="/volatility/pairs" element={<WatchlistsPage />} />
-        {/* Phase 4D — Ritual */}
+        {/* Phase 6B — Ritual */}
         <Route path="/ritual" element={<RitualPage />} />
       </Route>
     </Routes>

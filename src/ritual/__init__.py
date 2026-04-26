@@ -1,1 +1,1 @@
-# Ritual module — Trading Session Planner (Phase 4D)
+# Ritual module — Trading Session Planner (Phase 6B)

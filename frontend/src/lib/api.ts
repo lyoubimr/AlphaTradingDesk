@@ -710,7 +710,7 @@ export const analyticsApi = {
     request(`/analytics/ai/cache/${profileId}?period=${period}`, { method: 'DELETE' }),
 }
 
-// ── Ritual (Phase 4D) ────────────────────────────────────────────────────
+// ── Ritual (Phase 6B) ────────────────────────────────────────────────────
 
 const R = (profileId: number) => `/profiles/${profileId}/ritual`
 

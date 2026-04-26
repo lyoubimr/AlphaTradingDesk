@@ -697,8 +697,8 @@ function PinnedPanel({ profileId, onPinsChanged }: PinnedPanelProps) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export function RitualPage() {
-  const { profile } = useProfile()
-  const profileId = profile?.id
+  const { activeProfile } = useProfile()
+  const profileId = activeProfile?.id
 
   const [activeSession, setActiveSession] = useState<RitualSession | null>(null)
   const [steps, setSteps] = useState<RitualStep[]>([])
