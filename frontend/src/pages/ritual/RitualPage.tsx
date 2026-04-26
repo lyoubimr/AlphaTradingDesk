@@ -35,28 +35,28 @@ const SESSION_TYPES: { type: SessionType; emoji: string; label: string; desc: st
     type: 'weekly_setup',
     emoji: '📅',
     label: 'Weekly Setup',
-    desc: 'Lundi — Market Analysis + Watchlist complet (1W/1D/4H/1H/15m) → Pin les paires clés',
+    desc: 'Monday — Market Analysis + Full Watchlist (1W/1D/4H/1H/15m) → Pin key pairs',
     est: '~45 min',
   },
   {
     type: 'trade_session',
     emoji: '🎯',
     label: 'Trade Session',
-    desc: 'Fenêtre de trading — VI check + Paires pinnées + WL (4H/1H/15m) → Résultat',
+    desc: 'Trading window — VI check + Pinned pairs + WL (4H/1H/15m) → Log outcome',
     est: '~30 min',
   },
   {
     type: 'weekend_review',
     emoji: '📊',
     label: 'Weekend Review',
-    desc: 'Samedi/Dimanche — Analytics + Journal + Objectifs + Note d\'apprentissage',
+    desc: 'Sat/Sun — Analytics + Trade Journal + Goals + Learning note',
     est: '~35 min',
   },
   {
     type: 'daily_prep',
     emoji: '☀️',
-    label: 'Mid-Week Prep',
-    desc: 'Mar-Ven — VI rapide + WL 1D/4H si pas de Weekly ce jour',
+    label: 'Daily Prep',
+    desc: 'Tue–Fri — Quick VI + WL (1D/4H) when no Weekly Setup was done today',
     est: '~15 min',
     secondary: true,
   },
@@ -210,13 +210,13 @@ function MarketAnalysisPanel({
       {loading ? (
         <div className="flex items-center gap-2">
           <Loader2 size={12} className="animate-spin text-slate-500" />
-          <span className="text-xs text-slate-500">Vérification Market Analysis…</span>
+          <span className="text-xs text-slate-500">Checking Market Analysis status…</span>
         </div>
       ) : allFresh ? (
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-1.5">
             <CheckCircle2 size={14} className="text-green-500" />
-            <span className="text-xs text-green-400 font-medium">Market Analysis à jour</span>
+            <span className="text-xs text-green-400 font-medium">Market Analysis up to date</span>
           </div>
           <button
             onClick={() => onComplete(logId, 'done', { market_analysis: 'fresh' })}
@@ -231,8 +231,8 @@ function MarketAnalysisPanel({
             <span className="text-amber-400 text-sm">⚠</span>
             <span className="text-xs text-amber-400 font-medium">
               {staleness === null || staleness.length === 0
-                ? 'Aucune analyse trouvée'
-                : `${staleModules.length} module(s) non mis à jour cette semaine`}
+                ? 'No analysis found — run Market Analysis first'
+                : `${staleModules.length} module(s) not updated this week`}
             </span>
           </div>
           {staleness && staleness.length > 0 && (
@@ -241,7 +241,7 @@ function MarketAnalysisPanel({
                 <div key={s.module_name} className="flex items-center justify-between">
                   <span className="text-xs text-slate-400">{s.module_name}</span>
                   <span className={cn('text-[10px] font-medium', s.is_stale ? 'text-red-400' : 'text-green-400')}>
-                    {s.is_stale ? (s.last_session_at ? `il y a ${s.days_old}j` : 'Jamais') : '✓ OK'}
+                    {s.is_stale ? (s.last_session_at ? `${s.days_old}d ago` : 'Never') : '✓ OK'}
                   </span>
                 </div>
               ))}
@@ -253,13 +253,13 @@ function MarketAnalysisPanel({
               className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-brand-700/20 border border-brand-600/40 text-brand-400 text-xs font-medium hover:bg-brand-700/30 transition-colors"
             >
               <ExternalLink size={11} />
-              Ouvrir Market Analysis
+              Open Market Analysis
             </button>
             <button
               onClick={() => onComplete(logId, 'done', { market_analysis: 'skip_update' })}
               className="px-2.5 py-1 rounded-lg border border-surface-600 text-slate-500 text-xs hover:text-slate-300 transition-colors"
             >
-              Continuer quand même
+              Continue anyway
             </button>
           </div>
         </div>
@@ -310,10 +310,8 @@ function StepItem({
             <CheckCircle2 size={18} className="text-green-500" />
           ) : isSkipped ? (
             <SkipForward size={18} className="text-slate-500" />
-          ) : isCurrent ? (
-            <div className="w-[18px] h-[18px] rounded-full border-2 border-brand-500 bg-brand-900/40 animate-pulse" />
           ) : (
-            <Circle size={18} className="text-slate-700" />
+            <Circle size={18} className="text-brand-500" />
           )}
         </div>
 
@@ -480,15 +478,15 @@ function SmartWLPanel({
       {/* Result preview — no data state */}
       {result && !hasData && (
         <div className="mt-2 rounded-lg border border-amber-700/40 bg-amber-900/10 p-3">
-          <p className="text-xs text-amber-400 font-medium">⚠️ Aucune donnée de volatilité</p>
+          <p className="text-xs text-amber-400 font-medium">⚠️ No volatility data</p>
           <p className="text-xs text-slate-500 mt-1">
-            Lance d&apos;abord l&apos;analyse de volatilité pour alimenter les watchlists.
+            Run the volatility analysis first to populate the watchlists.
           </p>
           <button
             onClick={() => navigate('/volatility/market')}
             className="mt-2 flex items-center gap-1.5 text-xs text-brand-400 hover:text-brand-300 transition-colors"
           >
-            <ExternalLink size={11} /> Aller à Volatility →
+            <ExternalLink size={11} /> Go to Volatility →
           </button>
         </div>
       )}
@@ -710,45 +708,64 @@ function AddPinForm({ instruments, onAdd }: AddPinFormProps) {
 }
 
 // ── Ritual Settings Panel ─────────────────────────────────────────────────────
+const SETTINGS_SESSION_TYPES = ['weekly_setup', 'trade_session', 'daily_prep', 'weekend_review'] as const
+
 function RitualSettingsPanel({ profileId }: { profileId: number }) {
   const [isOpen, setIsOpen] = useState(false)
+  const [stepsMap, setStepsMap] = useState<Record<string, RitualStep[]>>({})
+  const [loadingSteps, setLoadingSteps] = useState(false)
   const [settings, setSettings] = useState<RitualSettings | null>(null)
+  const [topNLocal, setTopNLocal] = useState<Record<string, number>>({})
   const [saving, setSaving] = useState(false)
   const [resetting, setResetting] = useState<string | null>(null)
   const [resetDone, setResetDone] = useState<string | null>(null)
 
-  useEffect(() => {
-    if (!isOpen || settings) return
-    ritualApi.getSettings(profileId).then(setSettings).catch(() => null)
-  }, [profileId, isOpen, settings])
-
-  const cfg = settings?.config ?? {}
-  const topNMap = (cfg.top_n as Record<string, number>) ?? {}
-  const topNValue = (type: string) => topNMap[type] ?? 20
-
-  const updateTopN = async (type: string, value: number) => {
-    const newConfig = { ...cfg, top_n: { ...topNMap, [type]: value } }
-    setSaving(true)
+  const loadAll = useCallback(async () => {
+    setLoadingSteps(true)
     try {
-      const updated = await ritualApi.updateSettings(profileId, newConfig)
-      setSettings(updated)
+      const [settingsData, ...stepsArrays] = await Promise.all([
+        ritualApi.getSettings(profileId),
+        ...SETTINGS_SESSION_TYPES.map(t => ritualApi.getSteps(profileId, t)),
+      ])
+      setSettings(settingsData)
+      const map: Record<string, RitualStep[]> = {}
+      SETTINGS_SESSION_TYPES.forEach((t, i) => { map[t] = stepsArrays[i] })
+      setStepsMap(map)
+      const tnMap = ((settingsData.config?.top_n) as Record<string, number>) ?? {}
+      setTopNLocal(tnMap)
     } finally {
-      setSaving(false)
+      setLoadingSteps(false)
     }
-  }
+  }, [profileId])
+
+  useEffect(() => {
+    if (isOpen) loadAll()
+  }, [isOpen, loadAll])
 
   const handleReset = async (sessionType: string) => {
     setResetting(sessionType)
     try {
-      await ritualApi.resetSteps(profileId, sessionType)
+      const newSteps = await ritualApi.resetSteps(profileId, sessionType)
+      setStepsMap(prev => ({ ...prev, [sessionType]: newSteps }))
       setResetDone(sessionType)
-      setTimeout(() => setResetDone(null), 2000)
+      setTimeout(() => setResetDone(null), 2500)
     } finally {
       setResetting(null)
     }
   }
 
-  const SESSION_TYPE_LIST = ['weekly_setup', 'trade_session', 'daily_prep', 'weekend_review'] as const
+  const updateTopN = async (type: string, value: number) => {
+    const newTopN = { ...topNLocal, [type]: value }
+    setTopNLocal(newTopN)
+    setSaving(true)
+    try {
+      const cfg = settings?.config ?? {}
+      const updated = await ritualApi.updateSettings(profileId, { ...cfg, top_n: newTopN })
+      setSettings(updated)
+    } finally {
+      setSaving(false)
+    }
+  }
 
   return (
     <div className="rounded-xl border border-surface-700 bg-surface-800/30">
@@ -764,66 +781,94 @@ function RitualSettingsPanel({ profileId }: { profileId: number }) {
       </button>
 
       {isOpen && (
-        <div className="px-4 pb-5 space-y-5 border-t border-surface-700">
-
-          {/* Smart WL Top N per session */}
-          <div className="pt-4">
-            <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">Smart Watchlist — Top N per Session</p>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              {SESSION_TYPE_LIST.map(type => {
-                const info = SESSION_TYPES.find(s => s.type === type)!
-                return (
-                  <div key={type} className="flex items-center justify-between gap-2 rounded-lg border border-surface-700 bg-surface-900/60 px-3 py-2">
-                    <span className="text-xs text-slate-400 shrink-0">{info.emoji} {info.label}</span>
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="range" min={5} max={50} step={5}
-                        value={topNValue(type)}
-                        onChange={e => updateTopN(type, Number(e.target.value))}
-                        className="w-20 accent-brand-500"
-                        disabled={saving || !settings}
-                      />
-                      <span className="text-xs text-slate-300 w-5 text-right">{topNValue(type)}</span>
-                    </div>
-                  </div>
-                )
-              })}
+        <div className="px-4 pb-5 space-y-6 border-t border-surface-700">
+          {loadingSteps ? (
+            <div className="flex items-center gap-2 pt-4">
+              <Loader2 size={13} className="animate-spin text-slate-500" />
+              <span className="text-xs text-slate-500">Loading settings…</span>
             </div>
-          </div>
+          ) : (
+            <>
+              {/* ── Step Templates ── */}
+              <div className="pt-4">
+                <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">Step Templates</p>
+                <div className="space-y-2">
+                  {SETTINGS_SESSION_TYPES.map(type => {
+                    const info = SESSION_TYPES.find(s => s.type === type)!
+                    const steps = (stepsMap[type] ?? []).slice().sort((a, b) => a.position - b.position)
+                    const isDone = resetDone === type
+                    return (
+                      <div key={type} className="rounded-lg border border-surface-700 bg-surface-900/40 overflow-hidden">
+                        {/* Session header */}
+                        <div className="flex items-center gap-2 px-3 py-2 border-b border-surface-700/50">
+                          <span className="text-sm">{info.emoji}</span>
+                          <span className="text-xs font-semibold text-slate-300 flex-1">{info.label}</span>
+                          <span className="text-[10px] text-slate-500 mr-1">{steps.length} steps · top {topNLocal[type] ?? 20}</span>
+                          <button
+                            onClick={() => handleReset(type)}
+                            disabled={resetting !== null}
+                            className={cn(
+                              'flex items-center gap-1 px-2 py-0.5 rounded text-[11px] border transition-colors disabled:opacity-50',
+                              isDone
+                                ? 'border-green-700/40 text-green-400 bg-green-900/10'
+                                : 'border-surface-600 text-slate-500 hover:border-amber-700/40 hover:text-amber-400',
+                            )}
+                          >
+                            {resetting === type
+                              ? <Loader2 size={9} className="animate-spin" />
+                              : isDone ? <CheckCircle2 size={9} /> : <RefreshCw size={9} />}
+                            Reset
+                          </button>
+                        </div>
 
-          {/* Reset steps */}
-          <div>
-            <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Reset Steps to Default</p>
-            <p className="text-[11px] text-slate-500 mb-3">
-              Reseeds step templates from the latest defaults. Use this after an update removes or changes steps (e.g. removal of ai_brief).
-            </p>
-            <div className="grid grid-cols-2 gap-2">
-              {SESSION_TYPE_LIST.map(type => {
-                const info = SESSION_TYPES.find(s => s.type === type)!
-                const isDone = resetDone === type
-                return (
-                  <button
-                    key={type}
-                    onClick={() => handleReset(type)}
-                    disabled={resetting !== null}
-                    className={cn(
-                      'flex items-center gap-1.5 px-3 py-2 rounded-lg border text-xs transition-colors disabled:opacity-50',
-                      isDone
-                        ? 'border-green-700/40 text-green-400 bg-green-900/10'
-                        : 'border-surface-700 text-slate-400 hover:border-amber-700/40 hover:text-amber-400',
-                    )}
-                  >
-                    {resetting === type
-                      ? <Loader2 size={11} className="animate-spin" />
-                      : isDone
-                        ? <CheckCircle2 size={11} />
-                        : <RefreshCw size={11} />}
-                    {info.emoji} {info.label}
-                  </button>
-                )
-              })}
-            </div>
-          </div>
+                        {/* Steps list */}
+                        <div className="px-3 py-2 space-y-1.5">
+                          {steps.length === 0 ? (
+                            <p className="text-[11px] text-slate-500 italic">No steps — click Reset to seed defaults.</p>
+                          ) : steps.map(step => {
+                            const tfs = (step.config?.timeframes as string[]) ?? []
+                            return (
+                              <div key={step.id} className="flex items-center gap-2 min-w-0">
+                                <span className="text-[10px] text-slate-600 w-4 text-right shrink-0">{step.position}.</span>
+                                <span className="text-[11px] text-slate-300 flex-1 truncate">{step.label}</span>
+                                {tfs.length > 0 && (
+                                  <div className="flex gap-0.5 shrink-0">
+                                    {tfs.map(tf => <TFBadge key={tf} tf={tf} />)}
+                                  </div>
+                                )}
+                                <span className={cn(
+                                  'text-[9px] px-1.5 py-0.5 rounded shrink-0',
+                                  step.is_mandatory ? 'text-brand-400 bg-brand-900/30' : 'text-slate-600 bg-surface-700/40',
+                                )}>
+                                  {step.is_mandatory ? 'req' : 'opt'}
+                                </span>
+                                {step.est_minutes && (
+                                  <span className="text-[10px] text-slate-600 shrink-0">{step.est_minutes}m</span>
+                                )}
+                              </div>
+                            )
+                          })}
+                        </div>
+
+                        {/* Top N slider per session */}
+                        <div className="flex items-center gap-3 px-3 py-2 border-t border-surface-700/40 bg-surface-900/20">
+                          <span className="text-[11px] text-slate-500">Smart WL top N:</span>
+                          <input
+                            type="range" min={5} max={50} step={5}
+                            value={topNLocal[type] ?? 20}
+                            onChange={e => updateTopN(type, Number(e.target.value))}
+                            className="flex-1 accent-brand-500"
+                            disabled={saving}
+                          />
+                          <span className="text-[11px] text-slate-300 w-5 text-right">{topNLocal[type] ?? 20}</span>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            </>
+          )}
         </div>
       )}
     </div>
@@ -1030,11 +1075,11 @@ export function RitualPage() {
     ? ritualApi.downloadWatchlistUrl(profileId, activeSession.session_type, topN)
     : ''
 
-  // Determine current (first pending) step log
-  const currentIndex = activeSession?.step_logs.findIndex(l => l.status === 'pending') ?? -1
-  const doneCount = activeSession?.step_logs.filter(l => l.status !== 'pending').length ?? 0
-  const totalCount = activeSession?.step_logs.length ?? 0
-  const allDone = activeSession && doneCount === totalCount
+  // Filter obsolete step types; all pending steps are independently actionable (non-procedural)
+  const visibleLogs = activeSession?.step_logs.filter(l => l.step_type !== 'ai_brief') ?? []
+  const doneCount = visibleLogs.filter(l => l.status !== 'pending').length
+  const totalCount = visibleLogs.length
+  const allDone = activeSession && totalCount > 0 && doneCount === totalCount
 
   // Outcome from outcome step log if done
   const outcomeLog = activeSession?.step_logs.find(l => l.step_type === 'outcome' && l.status === 'done')
@@ -1137,11 +1182,11 @@ export function RitualPage() {
                 </div>
               </div>
 
-              {/* Steps list */}
+              {/* Steps list — non-procedural: all pending steps are independently actionable */}
               <div className="p-4 space-y-2">
-                {activeSession.step_logs.map((log, idx) => {
+                {visibleLogs.map((log) => {
                   const step = steps.find(s => s.id === log.step_id || s.position === log.position)
-                  const isCurrent = log.status === 'pending' && idx === currentIndex
+                  const isCurrent = log.status === 'pending'
                   return (
                     <StepItem
                       key={log.id}
@@ -1200,7 +1245,7 @@ export function RitualPage() {
 
               {/* Secondary sessions: smaller compact row */}
               <div>
-                <p className="text-[10px] text-slate-600 uppercase tracking-wider mb-2">Option rapide</p>
+                <p className="text-[10px] text-slate-600 uppercase tracking-wider mb-2">Quick option</p>
                 <div className="flex flex-col sm:flex-row gap-2">
                   {SESSION_TYPES.filter(s => s.secondary).map((st) => (
                     <button
@@ -1280,10 +1325,8 @@ export function RitualPage() {
             </div>
           )}
 
-          {/* ── Settings (always visible in main col) ──────────────────────── */}
-          {!activeSession && (
-            <RitualSettingsPanel profileId={profileId} />
-          )}
+          {/* ── Settings ─────────────────────────────────────────────────── */}
+          <RitualSettingsPanel profileId={profileId} />
         </div>
 
         {/* ── Pinned pairs sidebar ─────────────────────────────────────────── */}
