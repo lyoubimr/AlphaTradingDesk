@@ -812,7 +812,8 @@ export function RitualPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Trading Ritual 🎯"
+        icon="🎯"
+        title="Trading Ritual"
         subtitle="Your structured session workflow — build discipline, stay consistent"
       />
 

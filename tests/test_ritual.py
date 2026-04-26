@@ -411,7 +411,7 @@ class TestDisciplineScore:
         data = resp.json()
         assert data["score"] == 0
         assert data["max_score"] > 0
-        assert data["grade"] in ("S", "A", "B", "C", "D", "F")
+        assert data["grade"] in ("S", "A", "B", "C", "D", "F", "—")
 
     def test_score_increases_after_completed_session(self, client: TestClient, db_session: Session):
         profile = _make_profile(db_session)

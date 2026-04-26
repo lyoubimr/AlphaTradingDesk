@@ -13,7 +13,7 @@ from fastapi import APIRouter, Depends, Query
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
-from src.core.database import get_db
+from src.core.deps import get_db
 from src.ritual import service
 from src.ritual.schemas import (
     PinnedPairCreate,
@@ -122,6 +122,7 @@ def add_pinned(
 @router.delete(
     "/pinned/{pin_id}",
     status_code=204,
+    response_model=None,
     summary="Archive (remove) a pinned pair",
 )
 def remove_pinned(profile_id: int, pin_id: int, db: DbDep) -> None:
