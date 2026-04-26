@@ -46,8 +46,8 @@ from src.analytics.schemas import (
     TradeSummaryRow,
     TradeTypeRow,
     VIBucket,
-    WRByHour,
     WRByDayHour,
+    WRByHour,
     WRByStat,
 )
 from src.core.models.broker import Profile
