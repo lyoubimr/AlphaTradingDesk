@@ -63,9 +63,13 @@ export function WRBarChart({ data, maxItems = 12, labelTooltips }: Props) {
             <span className="w-14 shrink-0 text-[10px] text-slate-500 tabular-nums text-right">
               {row.trades}tr
             </span>
-            {/* Avg PnL */}
-            <span className={`w-16 shrink-0 text-[10px] font-medium tabular-nums text-right ${pnlColor}`}>
+            {/* Avg PnL per trade */}
+            <span
+              className={`w-20 shrink-0 text-[10px] font-medium tabular-nums text-right ${pnlColor}`}
+              title={`avg/trade: ${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)}${row.total_pnl != null ? `  |  total: ${row.total_pnl >= 0 ? '+' : ''}$${row.total_pnl.toFixed(2)}` : ''}`}
+            >
               {pnl >= 0 ? '+$' : '-$'}{Math.abs(pnl).toFixed(0)}
+              <span className="text-slate-600 font-normal ml-0.5">avg/tr</span>
             </span>
           </div>
         )
