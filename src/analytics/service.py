@@ -144,6 +144,7 @@ def compute_performance_report(profile_id: int, period: str, db: Session) -> Per
             t.session_tag,
             t.post_trade_review,
             t.close_notes,
+            t.entry_screenshot_urls,
             t.close_screenshot_urls,
             COALESCE(
               (t.realized_pnl / NULLIF(t.risk_amount, 0) * 100),
@@ -521,6 +522,8 @@ def _compute_top_worst_trades(
             realized_pnl=round(float(t["realized_pnl"]), 2),
             strategy_name=t.get("strategy_name"),
             close_notes=t.get("close_notes") or None,
+            entry_screenshot_urls=list(t.get("entry_screenshot_urls") or []),
+            close_screenshot_urls=list(t.get("close_screenshot_urls") or []),
         )
 
     sorted_desc = sorted(trades, key=lambda t: float(t["realized_pnl"]), reverse=True)

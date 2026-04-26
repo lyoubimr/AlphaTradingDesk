@@ -1002,6 +1002,8 @@ export interface TradeSummaryRow {
   realized_pnl: number
   strategy_name: string | null
   close_notes: string | null
+  entry_screenshot_urls: string[]
+  close_screenshot_urls: string[]
 }
 
 export interface StrategySessionCell {

@@ -1,6 +1,6 @@
 // ── PerformancePage ───────────────────────────────────────────────────────────
 // Phase 6A — Deep Performance Analytics
-import { useCallback, useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useState } from 'react'
 import { BarChart2, ChevronDown, ChevronUp, Info, TrendingDown, TrendingUp } from 'lucide-react'
 import { useProfile } from '../../context/ProfileContext'
 import { analyticsApi } from '../../lib/api'
@@ -209,13 +209,116 @@ function SessionBadge({ session }: { session: string }) {
   )
 }
 
+// ── Screenshot split-screen lightbox (read-only, analytics context) ──────────
+type SplitViewState = { entryUrls: string[]; closeUrls: string[] }
+
+function ScreenshotSplitLightbox({ state, onClose }: { state: SplitViewState; onClose: () => void }) {
+  const [entryIdx, setEntryIdx] = useState(0)
+  const [closeIdx, setCloseIdx] = useState(0)
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose()
+      if (e.key === 'ArrowLeft') {
+        setEntryIdx(i => Math.max(0, i - 1))
+        setCloseIdx(i => Math.max(0, i - 1))
+      }
+      if (e.key === 'ArrowRight') {
+        setEntryIdx(i => Math.min(state.entryUrls.length - 1, i + 1))
+        setCloseIdx(i => Math.min(state.closeUrls.length - 1, i + 1))
+      }
+    }
+    document.addEventListener('keydown', handler)
+    return () => document.removeEventListener('keydown', handler)
+  }, [onClose, state.entryUrls.length, state.closeUrls.length])
+
+  function ImagePanel({ urls, idx, setIdx, label, accentCls }: {
+    urls: string[]
+    idx: number
+    setIdx: React.Dispatch<React.SetStateAction<number>>
+    label: string
+    accentCls: string
+  }) {
+    if (!urls.length) return (
+      <div className="flex-1 flex items-center justify-center border-r border-white/10 last:border-r-0">
+        <div className="text-center text-slate-700">
+          <p className="text-sm">{label}</p>
+          <p className="text-[11px] mt-1">No screenshots</p>
+        </div>
+      </div>
+    )
+    return (
+      <div className="flex-1 flex flex-col min-w-0 border-r border-white/10 last:border-r-0">
+        {/* Panel header */}
+        <div className={`px-4 py-2 text-xs font-semibold ${accentCls} border-b border-white/10 flex items-center gap-2 shrink-0`}>
+          <span>{label}</span>
+          {urls.length > 1 && <span className="text-slate-600 font-normal">{idx + 1} / {urls.length}</span>}
+        </div>
+        {/* Image */}
+        <div className="flex-1 relative overflow-hidden bg-black flex items-center justify-center">
+          <img src={urls[idx]} alt={label} className="max-w-full max-h-full object-contain" />
+        </div>
+        {/* Nav dots */}
+        {urls.length > 1 && (
+          <div className="flex items-center justify-center gap-3 py-2.5 border-t border-white/10 shrink-0">
+            <button
+              onClick={() => setIdx(i => Math.max(0, i - 1))}
+              disabled={idx === 0}
+              className="text-slate-400 hover:text-white disabled:opacity-20 transition-colors px-1"
+            >←</button>
+            <div className="flex gap-1.5">
+              {urls.map((_, i) => (
+                <button
+                  key={i}
+                  onClick={() => setIdx(i)}
+                  className={`w-1.5 h-1.5 rounded-full transition-colors ${i === idx ? 'bg-white' : 'bg-slate-600 hover:bg-slate-400'}`}
+                />
+              ))}
+            </div>
+            <button
+              onClick={() => setIdx(i => Math.min(urls.length - 1, i + 1))}
+              disabled={idx === urls.length - 1}
+              className="text-slate-400 hover:text-white disabled:opacity-20 transition-colors px-1"
+            >→</button>
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  return (
+    <div className="fixed inset-0 z-[9999] bg-black/95 flex flex-col" onClick={onClose}>
+      {/* Header bar */}
+      <div
+        className="flex items-center justify-between px-4 py-2.5 border-b border-white/10 shrink-0"
+        onClick={e => e.stopPropagation()}
+      >
+        <span className="text-xs text-slate-400">
+          Entry ↔ Close comparison
+          <span className="text-slate-600 ml-2">· Esc or click outside to close · ← → to navigate</span>
+        </span>
+        <button onClick={onClose} className="text-slate-500 hover:text-white text-xl leading-none transition-colors">×</button>
+      </div>
+      {/* Split panels */}
+      <div className="flex-1 flex min-h-0" onClick={e => e.stopPropagation()}>
+        <ImagePanel urls={state.entryUrls} idx={entryIdx} setIdx={setEntryIdx} label="🎯 Entry" accentCls="text-blue-300" />
+        <ImagePanel urls={state.closeUrls} idx={closeIdx} setIdx={setCloseIdx} label="✅ Close" accentCls="text-emerald-300" />
+      </div>
+    </div>
+  )
+}
+
 function TopWorstTrades({ top, worst }: { top: TradeSummaryRow[]; worst: TradeSummaryRow[] }) {
+  const [splitView, setSplitView] = useState<SplitViewState | null>(null)
+
   if (!top.length && !worst.length) {
     return <div className="text-slate-600 text-sm py-4 text-center">No data</div>
   }
+
   function TradeRow({ rank, row, isWin }: { rank: number; row: TradeSummaryRow; isWin: boolean }) {
     const pnlColor = isWin ? 'text-emerald-400' : 'text-red-400'
     const pnl = row.realized_pnl
+    const hasScreenshots = row.entry_screenshot_urls.length > 0 || row.close_screenshot_urls.length > 0
     return (
       <div className="bg-surface-800/50 rounded-xl p-3 border border-surface-700/50 space-y-1.5">
         <div className="flex items-center gap-2">
@@ -239,32 +342,71 @@ function TopWorstTrades({ top, worst }: { top: TradeSummaryRow[]; worst: TradeSu
             {row.close_notes}
           </div>
         )}
+        {/* Screenshot thumbnails — entry (blue border) | close (green border) */}
+        {hasScreenshots && (
+          <div className="pl-6 flex flex-wrap items-center gap-1.5 pt-0.5">
+            {row.entry_screenshot_urls.slice(0, 3).map((url, i) => (
+              <img
+                key={url}
+                src={url}
+                alt={`entry ${i + 1}`}
+                title="Click to compare entry vs close"
+                className="w-14 h-10 object-cover rounded border border-blue-500/30 cursor-pointer hover:border-blue-400/70 hover:scale-105 transition-all duration-150"
+                onClick={() => setSplitView({ entryUrls: row.entry_screenshot_urls, closeUrls: row.close_screenshot_urls })}
+              />
+            ))}
+            {row.entry_screenshot_urls.length > 0 && row.close_screenshot_urls.length > 0 && (
+              <div className="w-px h-7 bg-surface-600 mx-0.5 shrink-0" />
+            )}
+            {row.close_screenshot_urls.slice(0, 3).map((url, i) => (
+              <img
+                key={url}
+                src={url}
+                alt={`close ${i + 1}`}
+                title="Click to compare entry vs close"
+                className="w-14 h-10 object-cover rounded border border-emerald-500/30 cursor-pointer hover:border-emerald-400/70 hover:scale-105 transition-all duration-150"
+                onClick={() => setSplitView({ entryUrls: row.entry_screenshot_urls, closeUrls: row.close_screenshot_urls })}
+              />
+            ))}
+            <button
+              className="ml-1 text-[9px] text-slate-700 hover:text-slate-300 transition-colors flex items-center gap-0.5"
+              onClick={() => setSplitView({ entryUrls: row.entry_screenshot_urls, closeUrls: row.close_screenshot_urls })}
+              title="Open side-by-side comparison"
+            >
+              <span>⇔</span><span>compare</span>
+            </button>
+          </div>
+        )}
       </div>
     )
   }
+
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-      {top.length > 0 && (
-        <div>
-          <p className="text-[10px] text-slate-600 uppercase tracking-widest font-semibold mb-2">
-            🏆 Best trades
-          </p>
-          <div className="space-y-2">
-            {top.map((r, i) => <TradeRow key={r.trade_id} rank={i + 1} row={r} isWin />)}
+    <>
+      {splitView && <ScreenshotSplitLightbox state={splitView} onClose={() => setSplitView(null)} />}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        {top.length > 0 && (
+          <div>
+            <p className="text-[10px] text-slate-600 uppercase tracking-widest font-semibold mb-2">
+              🏆 Best trades
+            </p>
+            <div className="space-y-2">
+              {top.map((r, i) => <TradeRow key={r.trade_id} rank={i + 1} row={r} isWin />)}
+            </div>
           </div>
-        </div>
-      )}
-      {worst.length > 0 && (
-        <div>
-          <p className="text-[10px] text-slate-600 uppercase tracking-widest font-semibold mb-2">
-            💀 Worst trades
-          </p>
-          <div className="space-y-2">
-            {worst.map((r, i) => <TradeRow key={r.trade_id} rank={i + 1} row={r} isWin={false} />)}
+        )}
+        {worst.length > 0 && (
+          <div>
+            <p className="text-[10px] text-slate-600 uppercase tracking-widest font-semibold mb-2">
+              💀 Worst trades
+            </p>
+            <div className="space-y-2">
+              {worst.map((r, i) => <TradeRow key={r.trade_id} rank={i + 1} row={r} isWin={false} />)}
+            </div>
           </div>
-        </div>
-      )}
-    </div>
+        )}
+      </div>
+    </>
   )
 }
 

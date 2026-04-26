@@ -135,6 +135,8 @@ class TradeSummaryRow(BaseModel):
     realized_pnl: float
     strategy_name: str | None = None
     close_notes: str | None = None
+    entry_screenshot_urls: list[str] = Field(default_factory=list)
+    close_screenshot_urls: list[str] = Field(default_factory=list)
 
 
 class StrategySessionCell(BaseModel):
