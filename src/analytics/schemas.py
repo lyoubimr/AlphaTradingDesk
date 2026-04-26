@@ -125,6 +125,32 @@ class VIBucket(BaseModel):
     avg_vi: float | None = None   # average VI score in bucket (0–1)
 
 
+class TradeSummaryRow(BaseModel):
+    """Minimal trade record used for Top/Worst trades tiles."""
+    trade_id: int
+    pair: str
+    direction: str
+    session_tag: str
+    closed_at: str            # ISO date (YYYY-MM-DD)
+    realized_pnl: float
+    strategy_name: str | None = None
+    close_notes: str | None = None
+
+
+class StrategySessionCell(BaseModel):
+    """One cell in the Strategy × Session cross-tab."""
+    session: str
+    trades: int
+    wins: int
+    wr_pct: float | None = None
+
+
+class StrategySessionRow(BaseModel):
+    """One strategy row in the Strategy × Session cross-tab."""
+    strategy: str
+    cells: list[StrategySessionCell]
+
+
 # ── Main response model ───────────────────────────────────────────────────────
 
 class PerformanceReport(BaseModel):
@@ -180,6 +206,13 @@ class PerformanceReport(BaseModel):
 
     # ── 17. Volatility correlation — market VI (by regime field on market_vi_snapshots)
     vi_correlation_market: list[VIBucket] = Field(default_factory=list)
+
+    # ── 18. Top / Worst trades (by realized P&L)
+    top_trades: list[TradeSummaryRow] = Field(default_factory=list)
+    worst_trades: list[TradeSummaryRow] = Field(default_factory=list)
+
+    # ── 19. Strategy × Session cross-tab (disciplined filter)
+    wr_by_strategy_session: list[StrategySessionRow] = Field(default_factory=list)
 
     # ── AI narrative (None if not generated yet / disabled)
     ai_summary: str | None = None

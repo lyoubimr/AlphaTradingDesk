@@ -39,8 +39,11 @@ from src.analytics.schemas import (
     RepeatError,
     ReviewRateOut,
     RRScatterPoint,
+    StrategySessionCell,
+    StrategySessionRow,
     TagFrequency,
     TPHitRate,
+    TradeSummaryRow,
     TradeTypeRow,
     VIBucket,
     WRByHour,
@@ -155,7 +158,13 @@ def compute_performance_report(profile_id: int, period: str, db: Session) -> Per
                 COALESCE(t.post_trade_review->'tags', '[]'::jsonb)
               ) tag
               WHERE tag LIKE 'strategy_broken_%'
-            ) AS is_strategy_broken
+            ) AS is_strategy_broken,
+            -- strategy_name: first assigned strategy (LIMIT 1 to avoid double-counting)
+            (SELECT CASE WHEN s.emoji IS NOT NULL AND s.emoji != ''
+                         THEN s.emoji || ' ' || s.name ELSE s.name END
+             FROM trade_strategies ts
+             JOIN strategies s ON s.id = ts.strategy_id
+             WHERE ts.trade_id = t.id LIMIT 1) AS strategy_name
         FROM trades t
         WHERE t.profile_id = :profile_id
           AND t.status = 'closed'
@@ -186,6 +195,8 @@ def compute_performance_report(profile_id: int, period: str, db: Session) -> Per
     review_rate = _compute_review_rate(trades)
     vi_correlation = _compute_vi_correlation(profile_id, cutoff, db, params, date_filter)
     vi_correlation_market = _compute_vi_correlation_market(profile_id, cutoff, db, params, date_filter)
+    top_trades, worst_trades = _compute_top_worst_trades(trades)
+    wr_by_strategy_session = _compute_wr_by_strategy_session(profile_id, db, params, date_filter)
 
     # ── AI cache lookup ────────────────────────────────────────────────────
     ai_summary: str | None = None
@@ -220,6 +231,9 @@ def compute_performance_report(profile_id: int, period: str, db: Session) -> Per
         review_rate=review_rate,
         vi_correlation=vi_correlation,
         vi_correlation_market=vi_correlation_market,
+        top_trades=top_trades,
+        worst_trades=worst_trades,
+        wr_by_strategy_session=wr_by_strategy_session,
         ai_summary=ai_summary,
         ai_generated_at=ai_generated_at,
     )
@@ -426,7 +440,7 @@ def _compute_wr_by_session(trades: list[dict]) -> list[WRByStat]:
         else:
             sessions[label]["losses"] += 1
 
-    order = ["London", "New York", "Asia", "Tokyo", "Unknown"]
+    order = ["Asian", "London", "Overlap", "New York", "Weekend", "Unknown"]
     result = []
     for label in order:
         if label in sessions:
@@ -483,6 +497,93 @@ def _compute_wr_by_hour(trades: list[dict]) -> list[WRByHour]:
             ))
         else:
             result.append(WRByHour(hour=h, trades=0, wins=0, wr_pct=None))
+    return result
+
+
+# ── Top / Worst trades ────────────────────────────────────────────────────────
+
+def _compute_top_worst_trades(
+    trades: list[dict], n: int = 5
+) -> tuple[list[TradeSummaryRow], list[TradeSummaryRow]]:
+    """Return (top_n, worst_n) sorted by realized_pnl descending / ascending."""
+    def to_row(t: dict) -> TradeSummaryRow:
+        closed = t["closed_at"]
+        date_str = closed.strftime("%Y-%m-%d") if hasattr(closed, "strftime") else str(closed)[:10]
+        return TradeSummaryRow(
+            trade_id=t["id"],
+            pair=t["pair"],
+            direction=t["direction"],
+            session_tag=t["session_tag"] or "Unknown",
+            closed_at=date_str,
+            realized_pnl=round(float(t["realized_pnl"]), 2),
+            strategy_name=t.get("strategy_name"),
+            close_notes=t.get("close_notes") or None,
+        )
+
+    sorted_desc = sorted(trades, key=lambda t: float(t["realized_pnl"]), reverse=True)
+    top_n = [to_row(t) for t in sorted_desc[:n]]
+    worst_n = [to_row(t) for t in sorted_desc[max(0, len(sorted_desc) - n):][::-1]]
+    return top_n, worst_n
+
+
+# ── Strategy × Session cross-tab ──────────────────────────────────────────────
+
+def _compute_wr_by_strategy_session(
+    profile_id: int,
+    db: Session,
+    params: dict,
+    date_filter: str,
+) -> list[StrategySessionRow]:
+    """Cross-tab of all closed trades: rows = strategies, cells = sessions."""
+    sql = text(f"""
+        SELECT
+            COALESCE(
+                CASE WHEN s.emoji IS NOT NULL AND s.emoji != '' THEN s.emoji || ' ' || s.name ELSE s.name END,
+                'Unassigned'
+            ) AS strategy,
+            COALESCE(t.session_tag, 'Unknown') AS session,
+            COUNT(*) AS trades,
+            SUM(CASE WHEN t.realized_pnl > 0 THEN 1 ELSE 0 END) AS wins
+        FROM trades t
+        LEFT JOIN trade_strategies ts ON ts.trade_id = t.id
+        LEFT JOIN strategies s ON s.id = ts.strategy_id
+        WHERE t.profile_id = :profile_id
+          AND t.status = 'closed'
+          AND t.realized_pnl IS NOT NULL
+          {date_filter}
+        GROUP BY s.name, s.emoji, t.session_tag
+        ORDER BY strategy, session
+    """)
+    rows = db.execute(sql, params).mappings().all()
+
+    matrix: dict[str, dict[str, dict]] = {}
+    for r in rows:
+        strat = r["strategy"]
+        sess = r["session"]
+        if strat not in matrix:
+            matrix[strat] = {}
+        tr = r["trades"] or 0
+        w = r["wins"] or 0
+        matrix[strat][sess] = {
+            "trades": tr,
+            "wins": w,
+            "wr_pct": round(w / tr * 100, 1) if tr else None,
+        }
+
+    session_order = ["Asian", "London", "Overlap", "New York", "Weekend", "Unknown"]
+    result = []
+    for strat in sorted(matrix.keys()):
+        cells = [
+            StrategySessionCell(
+                session=sess,
+                trades=data["trades"],
+                wins=data["wins"],
+                wr_pct=data["wr_pct"],
+            )
+            for sess, data in matrix[strat].items()
+        ]
+        cells.sort(key=lambda c: session_order.index(c.session) if c.session in session_order else 99)
+        result.append(StrategySessionRow(strategy=strat, cells=cells))
     return result
 
 

@@ -5,9 +5,11 @@ import type { WRByStat } from '../../../types/api'
 interface Props {
   data: WRByStat[]
   maxItems?: number
+  /** Optional tooltip per label — e.g. session hours */
+  labelTooltips?: Record<string, string>
 }
 
-export function WRBarChart({ data, maxItems = 12 }: Props) {
+export function WRBarChart({ data, maxItems = 12, labelTooltips }: Props) {
   // Composite score: volume × win-rate — rewards both high-trade-count AND high-WR
   const active = data
     .filter(d => d.trades > 0)
@@ -36,8 +38,8 @@ export function WRBarChart({ data, maxItems = 12 }: Props) {
           <div key={row.label} className="flex items-center gap-2 group hover:bg-surface-800/60 rounded-lg px-2 py-1.5 transition-colors">
             {/* Label */}
             <div
-              title={row.label}
-              className="w-44 shrink-0 truncate text-xs text-slate-300 group-hover:text-slate-100 transition-colors text-right pr-1.5"
+              title={labelTooltips?.[row.label] ?? row.label}
+              className={`w-44 shrink-0 truncate text-xs text-slate-300 group-hover:text-slate-100 transition-colors text-right pr-1.5${labelTooltips?.[row.label] ? ' cursor-help' : ''}`}
             >
               {row.label}
             </div>

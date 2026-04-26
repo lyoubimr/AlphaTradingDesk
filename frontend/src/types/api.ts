@@ -993,6 +993,29 @@ export interface VIBucket {
   avg_vi: number | null // 0-1 scale
 }
 
+export interface TradeSummaryRow {
+  trade_id: number
+  pair: string
+  direction: string
+  session_tag: string
+  closed_at: string
+  realized_pnl: number
+  strategy_name: string | null
+  close_notes: string | null
+}
+
+export interface StrategySessionCell {
+  session: string
+  trades: number
+  wins: number
+  wr_pct: number | null
+}
+
+export interface StrategySessionRow {
+  strategy: string
+  cells: StrategySessionCell[]
+}
+
 export interface PerformanceReport {
   profile_id: number
   period: string
@@ -1014,6 +1037,9 @@ export interface PerformanceReport {
   review_rate: ReviewRateOut
   vi_correlation: VIBucket[]         // pair VI — 6 buckets (Dead/Calm/Normal/Trending/Active/Extreme)
   vi_correlation_market: VIBucket[]  // market VI — by regime field
+  top_trades: TradeSummaryRow[]
+  worst_trades: TradeSummaryRow[]
+  wr_by_strategy_session: StrategySessionRow[]
   ai_summary: string | null
   ai_generated_at: string | null
 }
