@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { BarChart2, ChevronDown, ChevronUp, Info, TrendingDown, TrendingUp } from 'lucide-react'
 import { useProfile } from '../../context/ProfileContext'
 import { analyticsApi } from '../../lib/api'
+import { sessionTooltip } from '../../utils/sessionUtils'
 import type {
   PerformanceReport,
   AnalyticsSettingsOut,
@@ -166,17 +167,14 @@ const SESSION_COLORS: Record<string, string> = {
   Unknown: 'bg-slate-700/20 text-slate-500 border-slate-700/30',
 }
 
-const SESSION_HOURS: Record<string, string> = {
-  Asian: '🌏 Asian (Tokyo/Sydney): 00:00–08:00 UTC',
-  London: '🇬🇧 London (EUR/GBP): 07:00–16:00 UTC',
-  Overlap: '⚡ London × NY Overlap: 13:00–17:00 UTC — volatility peak',
-  'New York': '🗽 New York (USD/CAD): 13:00–22:00 UTC',
-  Weekend: '🌙 Weekend Sat–Sun — crypto only, low liquidity',
+/** Tooltip text for a session — computed at render time in browser's local tz. */
+function sessionHint(s: string): string {
+  return sessionTooltip(s)
 }
 
 function SessionInfoIcon({ session }: { session: string }) {
   const [pos, setPos] = useState<{ x: number; y: number } | null>(null)
-  const text = SESSION_HOURS[session]
+  const text = sessionHint(session)
   if (!text) return null
   return (
     <>
@@ -496,7 +494,12 @@ export function PerformancePage() {
               <HourlyWRChart data={report.wr_by_hour} />
             </Section>
             <Section title="WR by Session">
-              <WRBarChart data={report.wr_by_session.filter(r => r.label !== 'Unknown')} labelTooltips={SESSION_HOURS} />
+              <WRBarChart
+                data={report.wr_by_session.filter(r => r.label !== 'Unknown')}
+                labelTooltips={Object.fromEntries(
+                  ['Asian', 'London', 'Overlap', 'New York', 'Weekend'].map(s => [s, sessionHint(s)])
+                )}
+              />
             </Section>
           </div>
 

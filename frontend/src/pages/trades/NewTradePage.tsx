@@ -35,6 +35,7 @@ import { useRiskCalc } from '../../hooks/useRiskCalc'
 import type { RiskCalcResult } from '../../hooks/useRiskCalc'
 import { cn } from '../../lib/cn'
 import type { Instrument, InstrumentCreate, Profile, Strategy, WinRateStats, GoalProgressItem } from '../../types/api'
+import { formatSessionRange, tzLabel } from '../../utils/sessionUtils'
 import { RiskAdvisorPanel } from '../../components/risk/RiskAdvisorPanel'
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -164,11 +165,11 @@ function PriceInput({
 // ─────────────────────────────────────────────────────────────────────────────
 
 const SESSIONS = [
-  { label: 'Asian',    emoji: '🌏', hours: '00–08 UTC' },
-  { label: 'London',   emoji: '🇬🇧', hours: '07–16 UTC' },
-  { label: 'New York', emoji: '🗽', hours: '13–22 UTC' },
-  { label: 'Overlap',  emoji: '⚡', hours: '13–17 UTC' },
-  { label: 'Weekend',  emoji: '🌙', hours: 'Sam–Dim' },
+  { label: 'Asian',     emoji: '🌏', hours: formatSessionRange('Asian')     },
+  { label: 'London',   emoji: '🇬🇧', hours: formatSessionRange('London')    },
+  { label: 'New York', emoji: '🗽', hours: formatSessionRange('New York') },
+  { label: 'Overlap',  emoji: '⚡', hours: formatSessionRange('Overlap')   },
+  { label: 'Weekend',  emoji: '🌙', hours: formatSessionRange('Weekend')   },
 ] as const
 type SessionLabel = typeof SESSIONS[number]['label']
 
@@ -183,18 +184,9 @@ function detectSession(): SessionLabel {
   return 'Asian'
 }
 
-/** Display-only local time string for the session hint. */
+/** Display-only local time string for the current time. */
 function localTimeStr(): string {
   return new Date().toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hour12: false })
-}
-
-/** IANA timezone abbreviation (e.g. "CET", "EST", "JST"). */
-function tzLabel(): string {
-  try {
-    return Intl.DateTimeFormat(undefined, { timeZoneName: 'short' })
-      .formatToParts(new Date())
-      .find((p) => p.type === 'timeZoneName')?.value ?? 'local'
-  } catch { return 'local' }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
