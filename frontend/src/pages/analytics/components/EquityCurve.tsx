@@ -29,7 +29,7 @@ const EquityTooltip = ({ active, payload, label }: {
   return (
     <div style={{ background: '#16162a', border: '1px solid #1e1e35', borderRadius: 8, fontSize: 11, padding: '6px 10px' }}>
       <div style={{ color: '#64748b', marginBottom: 2 }}>{dateStr}</div>
-      <div style={{ color }}>PnL  {val >= 0 ? '+' : ''}{val.toFixed(2)}</div>
+      <div style={{ color }}>PnL {val >= 0 ? '+' : ''}{val.toFixed(2)}</div>
     </div>
   )
 }
