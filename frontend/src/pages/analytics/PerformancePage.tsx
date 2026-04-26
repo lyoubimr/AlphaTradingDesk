@@ -1,7 +1,7 @@
 // ── PerformancePage ───────────────────────────────────────────────────────────
 // Phase 6A — Deep Performance Analytics
 import { useCallback, useEffect, useState } from 'react'
-import { BarChart2, ChevronDown, ChevronUp, TrendingDown, TrendingUp } from 'lucide-react'
+import { BarChart2, ChevronDown, ChevronUp, Info, TrendingDown, TrendingUp } from 'lucide-react'
 import { useProfile } from '../../context/ProfileContext'
 import { analyticsApi } from '../../lib/api'
 import type {
@@ -169,20 +169,44 @@ const SESSION_COLORS: Record<string, string> = {
 const SESSION_HOURS: Record<string, string> = {
   Asian: '🌏 Asian (Tokyo/Sydney): 00:00–08:00 UTC',
   London: '🇬🇧 London (EUR/GBP): 07:00–16:00 UTC',
-  Overlap: '⚡ London × NY Overlap: 13:00–17:00 UTC — pic de volatilité',
+  Overlap: '⚡ London × NY Overlap: 13:00–17:00 UTC — volatility peak',
   'New York': '🗽 New York (USD/CAD): 13:00–22:00 UTC',
-  Weekend: '🌙 Weekend Sam–Dim — crypto only, liquidité basse',
+  Weekend: '🌙 Weekend Sat–Sun — crypto only, low liquidity',
+}
+
+function SessionInfoIcon({ session }: { session: string }) {
+  const [pos, setPos] = useState<{ x: number; y: number } | null>(null)
+  const text = SESSION_HOURS[session]
+  if (!text) return null
+  return (
+    <>
+      <Info
+        size={10}
+        className="text-slate-600 hover:text-slate-300 cursor-help ml-0.5 shrink-0 transition-colors"
+        onMouseEnter={e => {
+          const r = (e.currentTarget as SVGElement).getBoundingClientRect()
+          setPos({ x: r.left + r.width / 2, y: r.top })
+        }}
+        onMouseLeave={() => setPos(null)}
+      />
+      {pos && (
+        <span
+          className="pointer-events-none fixed z-[9999] whitespace-nowrap text-[11px] bg-slate-900 border border-slate-700 text-slate-200 px-2.5 py-1.5 rounded-lg shadow-xl"
+          style={{ left: pos.x, top: pos.y - 8, transform: 'translate(-50%, -100%)' }}
+        >
+          {text}
+        </span>
+      )}
+    </>
+  )
 }
 
 function SessionBadge({ session }: { session: string }) {
   const cls = SESSION_COLORS[session] ?? SESSION_COLORS.Unknown
-  const tooltip = SESSION_HOURS[session]
   return (
-    <span
-      title={tooltip}
-      className={`inline-flex items-center text-[9px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded border ${cls}`}
-    >
+    <span className={`inline-flex items-center text-[9px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded border ${cls}`}>
       {session}
+      <SessionInfoIcon session={session} />
     </span>
   )
 }
@@ -270,8 +294,8 @@ function StrategySessionMatrix({ data, period }: { data: StrategySessionRow[]; p
     <div className="space-y-2">
       {period !== 'all' && (
         <p className="text-[10px] text-slate-600">
-          Période&nbsp;: <span className="text-slate-400 font-medium">{period}</span>
-          {' '}— passe à <span className="text-slate-400 font-medium">All</span> pour voir toutes les sessions historiques
+          Period: <span className="text-slate-400 font-medium">{period}</span>
+          {' '}— switch to <span className="text-slate-400 font-medium">All</span> to see full session history
         </p>
       )}
       <div className="overflow-x-auto">
@@ -284,10 +308,12 @@ function StrategySessionMatrix({ data, period }: { data: StrategySessionRow[]; p
               {ALL_SESSIONS.map(s => (
                 <th
                   key={s}
-                  title={SESSION_HOURS[s]}
-                  className={`text-center text-[9px] uppercase tracking-wider font-medium pb-1 px-1 whitespace-nowrap cursor-help ${hasDataForSession(s) ? 'text-slate-500' : 'text-slate-700'}`}
+                  className={`text-center text-[9px] uppercase tracking-wider font-medium pb-1 px-1 whitespace-nowrap ${hasDataForSession(s) ? 'text-slate-500' : 'text-slate-700'}`}
                 >
-                  {s}
+                  <span className="inline-flex items-center justify-center gap-0.5">
+                    {s}
+                    <SessionInfoIcon session={s} />
+                  </span>
                 </th>
               ))}
             </tr>

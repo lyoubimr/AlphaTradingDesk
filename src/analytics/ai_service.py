@@ -106,38 +106,58 @@ def _get_decrypted_key(row: AnalyticsAIKeys, provider: str) -> str:
 def _build_prompt(report: PerformanceReport) -> str:
     kpi = report.kpi
     rr: float | str = round(abs(kpi.avg_win_pnl / kpi.avg_loss_pnl), 2) if (kpi.avg_win_pnl is not None and kpi.avg_loss_pnl) else "N/A"
+    # Max drawdown
+    max_dd_pct = min((p.drawdown_pct for p in report.drawdown), default=0.0) if report.drawdown else 0.0
+
     lines = [
-        "You are an experienced trading coach reviewing a trader's performance data. "
+        "You are an expert trading performance coach. "
+        "Always respond in English. "
         "Respond ONLY using the exact numbers provided below — never invent or extrapolate figures. "
-        "Use emojis generously throughout your response — not just on section headers but also inline on bullet points to make the feedback vivid and easy to scan. "
+        "Only draw conclusions from data points with enough sample size to be statistically meaningful — "
+        "judge significance yourself from the trade counts (< 5 trades = inconclusive). "
+        "Use emojis generously throughout — not just on headers but inline on bullets to make feedback vivid. "
         "Structure your response in exactly 3 sections:\n"
         "✅ What's working\n"
         "❌ What needs fixing\n"
         "🎯 Actions to take\n"
         "Each section: 3-5 bullet points, each starting with a relevant emoji, short and direct. "
-        "Only draw conclusions from data points with enough trades to be meaningful — judge significance yourself from the trade counts. "
-        "On the Actions section: be specific and concrete, reference the actual numbers.",
+        "On the Actions section: be specific, actionable, and reference the actual numbers. "
+        "Cross-reference sessions vs strategies where the data shows a clear edge or a clear weakness.",
         "",
         "━━━ 📊 OVERALL KPIs ━━━",
         f"📅 Period: {report.period}",
         f"🔢 Total trades: {kpi.total_trades} | Disciplined: {kpi.disciplined_trades}",
         f"🎯 Disciplined WR: {kpi.disciplined_wr}% | Raw WR: {kpi.raw_wr}%",
         f"⚖️  Profit factor: {kpi.profit_factor} | Expectancy: {kpi.expectancy}",
-        f"💰 Avg win: {kpi.avg_win_pnl} | Avg loss: {kpi.avg_loss_pnl} | R:R implied: {rr}",
+        f"💰 Avg win: {kpi.avg_win_pnl} | Avg loss: {kpi.avg_loss_pnl} | Implied R:R: {rr}",
         f"🔥 Current streak: {kpi.current_streak} | Best win streak: {kpi.best_win_streak} | Worst loss streak: {kpi.worst_loss_streak}",
+        f"📉 Max drawdown: {max_dd_pct:.1f}%",
         "",
         "━━━ 🕐 SESSIONS ━━━",
     ]
     for s in report.wr_by_session:
+        if s.label == "Unknown":
+            continue
         lines.append(f"  {s.label}: {s.trades} trades | WR {s.wr_pct}% | avg PnL {s.avg_pnl} | total PnL {s.total_pnl}")
 
     lines += ["", "━━━ 📈 STRATEGIES ━━━"]
-    for s in report.wr_by_strategy[:5]:
+    for s in report.wr_by_strategy[:6]:
         lines.append(f"  {s.label}: {s.trades} trades | WR {s.wr_pct}% | avg PnL {s.avg_pnl} | total PnL {s.total_pnl}")
 
-    lines += ["", "━━━ 💱 PAIRS ━━━"]
+    if report.wr_by_strategy_session:
+        lines += ["", "━━━ 🔀 STRATEGY × SESSION CROSS-TAB ━━━"]
+        lines.append("  (strategy | session: trades, WR%)")
+        for row in report.wr_by_strategy_session:
+            cells_str = " | ".join(
+                f"{c.session}: {c.trades}t {c.wr_pct}%"
+                for c in row.cells if c.trades > 0
+            )
+            if cells_str:
+                lines.append(f"  {row.strategy}: {cells_str}")
+
+    lines += ["", "━━━ 💱 TOP PAIRS ━━━"]
     for p in report.pair_leaderboard[:6]:
-        lines.append(f"  {p.label}: {p.trades} trades | WR {p.wr_pct}% | avg PnL {p.avg_pnl} | total PnL {p.total_pnl}")
+        lines.append(f"  {p.label}: {p.trades} trades | WR {p.wr_pct}% | avg PnL {p.avg_pnl} | avg PnL% {p.avg_pnl_pct}")
 
     lines += ["", "━━━ ⏱️  TRADE STYLE ━━━"]
     for t in report.trade_type_dist:
@@ -164,6 +184,18 @@ def _build_prompt(report: PerformanceReport) -> str:
         lines += ["", "━━━ 🌊 VOLATILITY (pair VI buckets) ━━━"]
         for v in report.vi_correlation:
             lines.append(f"  {v.bucket}: {v.trades} trades | WR {v.wr_pct}% | avg PnL {v.avg_pnl}")
+
+    if report.top_trades:
+        lines += ["", "━━━ 🏆 BEST TRADES ━━━"]
+        for t in report.top_trades[:3]:
+            lines.append(f"  {t.pair} {t.direction} | {t.session_tag} | PnL +${t.realized_pnl:.0f} | {t.strategy_name or 'no strat'}")
+
+    if report.worst_trades:
+        lines += ["", "━━━ 💀 WORST TRADES ━━━"]
+        for t in report.worst_trades[:3]:
+            lines.append(f"  {t.pair} {t.direction} | {t.session_tag} | PnL ${t.realized_pnl:.0f} | {t.strategy_name or 'no strat'}")
+            if t.close_notes:
+                lines.append(f"    Note: {t.close_notes[:120]}")
 
     lines += [
         "",
