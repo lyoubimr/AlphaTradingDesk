@@ -25,12 +25,12 @@ export function DayHourHeatmap({ data }: Props) {
   const tzLabel = tzOff >= 0 ? `UTC+${tzOff}` : `UTC${tzOff}`
 
   // Convert each UTC (day, hour) → local (day, hour)
-  type Cell = { localDay: number; localHour: number; trades: number; wins: number; wr_pct: number | null }
+  type Cell = { localDay: number; localHour: number; trades: number; wins: number; wr_pct: number | null; avg_rr: number | null }
   const cells: Cell[] = data.map(d => {
     const totalLocal = d.day * 24 + d.hour + tzOff
     const localDay = ((Math.floor(totalLocal / 24)) % 7 + 7) % 7
     const localHour = ((totalLocal % 24) + 24) % 24
-    return { localDay, localHour, trades: d.trades, wins: d.wins, wr_pct: d.wr_pct }
+    return { localDay, localHour, trades: d.trades, wins: d.wins, wr_pct: d.wr_pct, avg_rr: d.avg_rr ?? null }
   })
 
   // Fixed full-day range: 00h → 23h
@@ -80,29 +80,40 @@ export function DayHourHeatmap({ data }: Props) {
                 {hourRange.map(h => {
                   const cell = map.get(`${idx}-${h}`)
                   if (!cell || cell.trades === 0) {
-                    return <td key={h} className="py-0.5 px-0.5"><div className="h-6 rounded-sm bg-surface-800/30" /></td>
+                    return <td key={h} className="py-0.5 px-0.5"><div className="h-10 rounded-sm bg-surface-800/30" /></td>
                   }
                   const wr = cell.wr_pct ?? 0
                   const alpha = 0.3 + (cell.trades / maxTrades) * 0.65
                   const bg = wrColor(wr, alpha)
                   const textColor = wrTextColor(wr)
                   const rr = cell.avg_rr
-                  const rrStr = rr !== null && rr !== undefined
-                    ? (rr >= 0 ? `+${rr.toFixed(1)}R` : `${rr.toFixed(1)}R`)
-                    : null
+                  const rrStr = rr !== null ? (rr >= 0 ? `+${rr.toFixed(1)}R` : `${rr.toFixed(1)}R`) : null
+                  const rrColor = rr !== null ? (rr >= 0 ? '#6ee7b7' : '#fca5a5') : textColor
                   return (
                     <td key={h} className="py-0.5 px-0.5">
                       <div
                         title={`${label} ${String(h).padStart(2, '0')}:00 ${tzLabel} — WR ${wr.toFixed(0)}%${rrStr ? ` · avg R:R ${rrStr}` : ''} (${cell.trades} trade${cell.trades > 1 ? 's' : ''})`}
                         style={{ background: bg }}
-                        className="h-9 rounded-sm flex flex-col items-center justify-center gap-px cursor-default select-none px-0.5"
+                        className="relative h-10 rounded-sm overflow-hidden cursor-default select-none"
                       >
-                        <span style={{ color: textColor }} className="font-bold leading-none text-[9px]">
-                          {wr.toFixed(0)}%
-                        </span>
-                        {rrStr && (
-                          <span style={{ color: textColor }} className="leading-none text-[8px] opacity-80">
-                            {rrStr}
+                        {rrStr ? (
+                          <>
+                            {/* Diagonal line bottom-left → top-right */}
+                            <svg className="absolute inset-0 w-full h-full pointer-events-none" preserveAspectRatio="none">
+                              <line x1="0" y1="100%" x2="100%" y2="0" stroke="rgba(0,0,0,0.25)" strokeWidth="1" />
+                            </svg>
+                            {/* WR — top-right */}
+                            <span style={{ color: textColor }} className="absolute top-0.5 right-1 font-bold leading-none text-[9px]">
+                              {wr.toFixed(0)}%
+                            </span>
+                            {/* R:R — bottom-left */}
+                            <span style={{ color: rrColor }} className="absolute bottom-0.5 left-1 leading-none text-[8px] font-medium">
+                              {rrStr}
+                            </span>
+                          </>
+                        ) : (
+                          <span style={{ color: textColor }} className="absolute inset-0 flex items-center justify-center font-bold text-[9px]">
+                            {wr.toFixed(0)}%
                           </span>
                         )}
                       </div>
