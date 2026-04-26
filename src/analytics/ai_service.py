@@ -160,8 +160,8 @@ def _build_prompt(report: PerformanceReport) -> str:
         lines.append(f"  {p.label}: {p.trades} trades | WR {p.wr_pct}% | avg PnL {p.avg_pnl} | avg PnL% {p.avg_pnl_pct}")
 
     lines += ["", "━━━ ⏱️  TRADE STYLE ━━━"]
-    for t in report.trade_type_dist:
-        lines.append(f"  {t.trade_type}: {t.count} trades | WR {t.wr_pct}% | avg PnL {t.avg_pnl}")
+    for tt in report.trade_type_dist:
+        lines.append(f"  {tt.trade_type}: {tt.count} trades | WR {tt.wr_pct}% | avg PnL {tt.avg_pnl}")
 
     lines += ["", "━━━ ↕️  DIRECTION ━━━"]
     for d in report.direction_bias:
@@ -187,15 +187,15 @@ def _build_prompt(report: PerformanceReport) -> str:
 
     if report.top_trades:
         lines += ["", "━━━ 🏆 BEST TRADES ━━━"]
-        for t in report.top_trades[:3]:
-            lines.append(f"  {t.pair} {t.direction} | {t.session_tag} | PnL +${t.realized_pnl:.0f} | {t.strategy_name or 'no strat'}")
+        for tr in report.top_trades[:3]:
+            lines.append(f"  {tr.pair} {tr.direction} | {tr.session_tag} | PnL +${tr.realized_pnl:.0f} | {tr.strategy_name or 'no strat'}")
 
     if report.worst_trades:
         lines += ["", "━━━ 💀 WORST TRADES ━━━"]
-        for t in report.worst_trades[:3]:
-            lines.append(f"  {t.pair} {t.direction} | {t.session_tag} | PnL ${t.realized_pnl:.0f} | {t.strategy_name or 'no strat'}")
-            if t.close_notes:
-                lines.append(f"    Note: {t.close_notes[:120]}")
+        for tr in report.worst_trades[:3]:
+            lines.append(f"  {tr.pair} {tr.direction} | {tr.session_tag} | PnL ${tr.realized_pnl:.0f} | {tr.strategy_name or 'no strat'}")
+            if tr.close_notes:
+                lines.append(f"    Note: {tr.close_notes[:120]}")
 
     lines += [
         "",

@@ -777,7 +777,12 @@ def _compute_rr_scatter(trades: list[dict]) -> list[RRScatterPoint]:
         actual_rr = round(pnl / risk, 2) if risk and risk > 0 else None
         planned_rr = round(pot / risk, 2) if risk and risk > 0 and pot else None
         closed = t.get("closed_at")
-        closed_at_str = closed.isoformat()[:16] if hasattr(closed, "isoformat") else str(closed)[:16] if closed else None
+        if closed is None:
+            closed_at_str: str | None = None
+        elif hasattr(closed, "isoformat"):
+            closed_at_str = closed.isoformat()[:16]
+        else:
+            closed_at_str = str(closed)[:16]
         result.append(RRScatterPoint(
             trade_id=t["id"],
             planned_rr=planned_rr,
