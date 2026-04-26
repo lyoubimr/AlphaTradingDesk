@@ -102,12 +102,16 @@ export function DayHourHeatmap({ data }: Props) {
                             <svg className="absolute inset-0 w-full h-full pointer-events-none" preserveAspectRatio="none">
                               <line x1="0" y1="100%" x2="100%" y2="0" stroke="rgba(0,0,0,0.25)" strokeWidth="1" />
                             </svg>
-                            {/* WR — top-right */}
-                            <span style={{ color: textColor }} className="absolute top-0.5 right-1 font-bold leading-none text-[9px]">
+                            {/* WR — top-left */}
+                            <span style={{ color: textColor }} className="absolute top-0.5 left-1 font-bold leading-none text-[9px]">
                               {wr.toFixed(0)}%
                             </span>
-                            {/* R:R — bottom-left */}
-                            <span style={{ color: rrColor }} className="absolute bottom-0.5 left-1 leading-none text-[8px] font-medium">
+                            {/* trade count — center */}
+                            <span style={{ color: 'rgba(255,255,255,0.55)' }} className="absolute inset-0 flex items-center justify-center leading-none text-[8px]">
+                              {cell.trades}
+                            </span>
+                            {/* R:R — bottom-right */}
+                            <span style={{ color: rrColor }} className="absolute bottom-0.5 right-1 leading-none text-[8px] font-medium">
                               {rrStr}
                             </span>
                           </>
