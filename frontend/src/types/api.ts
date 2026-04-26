@@ -928,6 +928,14 @@ export interface WRByHour {
   wr_pct: number | null
 }
 
+export interface WRByDayHour {
+  day: number       // 0=Mon..6=Sun
+  hour: number      // 0-23 UTC
+  trades: number
+  wins: number
+  wr_pct: number | null
+}
+
 export interface TPHitRate {
   tp_number: number
   total: number
@@ -959,6 +967,7 @@ export interface RRScatterPoint {
   pair: string
   strategy_name: string | null
   session_tag: string | null
+  closed_at: string | null
 }
 
 export interface DirectionRow {
@@ -1029,6 +1038,7 @@ export interface PerformanceReport {
   wr_by_strategy: WRByStat[]
   wr_by_session: WRByStat[]
   wr_by_hour: WRByHour[]
+  wr_by_day_hour: WRByDayHour[]
   pair_leaderboard: WRByStat[]
   tp_hit_rates: TPHitRate[]
   drawdown: DrawdownPoint[]

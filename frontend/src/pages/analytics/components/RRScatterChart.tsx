@@ -27,9 +27,16 @@ const CustomDot = (props: { cx?: number; cy?: number; payload?: RRScatterPoint }
 const CustomTooltip = ({ active, payload }: { active?: boolean; payload?: { payload: RRScatterPoint }[] }) => {
   if (!active || !payload?.length) return null
   const p = payload[0].payload
+  const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+  let dateLabel = ''
+  if (p.closed_at) {
+    const d = new Date(p.closed_at)
+    dateLabel = `${DOW[d.getDay()]} ${d.toLocaleDateString('en', { month: 'short', day: 'numeric' })} ${p.closed_at.slice(11, 16)}`
+  }
   return (
     <div style={{ background: 'rgba(15,23,42,0.82)', backdropFilter: 'blur(6px)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 8 }} className="px-3 py-2 text-[11px] space-y-0.5 shadow-xl">
       <div className="font-semibold text-slate-200">{p.pair} <span className={p.is_win ? 'text-emerald-400' : 'text-red-400'}>{p.is_win ? 'Win' : 'Loss'}</span></div>
+      {dateLabel && <div className="text-slate-400">{dateLabel}</div>}
       {p.strategy_name && <div className="text-slate-400">Strategy: <span className="text-slate-200">{p.strategy_name}</span></div>}
       {p.session_tag && <div className="text-slate-400">Session: <span className="text-slate-200">{p.session_tag}</span></div>}
       <div className="text-slate-400">Planned: <span className="text-slate-200">{(p.planned_rr ?? 0).toFixed(2)}R</span></div>

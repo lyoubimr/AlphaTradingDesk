@@ -23,10 +23,12 @@ const EquityTooltip = ({ active, payload, label }: {
   if (!active || !payload?.length) return null
   const val = payload[0].value
   const color = val >= 0 ? '#10b981' : '#ef4444'
-  const date = label ? new Date(label).toLocaleDateString('en', { month: 'short', day: 'numeric', year: 'numeric' }) : ''
+  const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+  const d = label ? new Date(label) : null
+  const dateStr = d ? `${DOW[d.getDay()]} ${d.toLocaleDateString('en', { month: 'short', day: 'numeric', year: 'numeric' })}` : ''
   return (
     <div style={{ background: '#16162a', border: '1px solid #1e1e35', borderRadius: 8, fontSize: 11, padding: '6px 10px' }}>
-      <div style={{ color: '#64748b', marginBottom: 2 }}>{date}</div>
+      <div style={{ color: '#64748b', marginBottom: 2 }}>{dateStr}</div>
       <div style={{ color }}>PnL  {val >= 0 ? '+' : ''}{val.toFixed(2)}</div>
     </div>
   )
@@ -52,7 +54,7 @@ export function EquityCurve({ data }: Props) {
           dataKey="date"
           tick={{ fontSize: 10, fill: '#64748b' }}
           tickLine={false}
-          tickFormatter={d => new Date(d).toLocaleDateString('en', { month: 'short', day: 'numeric' })}
+          tickFormatter={d => { const dt = new Date(d); const DOW = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat']; return `${DOW[dt.getDay()]} ${dt.toLocaleDateString('en', { month: 'short', day: 'numeric' })}` }}
         />
         <YAxis tick={{ fontSize: 10, fill: '#64748b' }} tickLine={false} width={50} />
         <Tooltip content={<EquityTooltip />} />

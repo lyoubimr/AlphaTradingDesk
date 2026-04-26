@@ -18,6 +18,7 @@ import { EquityCurve } from './components/EquityCurve'
 import { DrawdownChart } from './components/DrawdownChart'
 import { WRBarChart } from './components/WRBarChart'
 import { HourlyWRChart } from './components/HourlyWRChart'
+import { DayHourHeatmap } from './components/DayHourHeatmap'
 import { TPHitRateChart } from './components/TPHitRateChart'
 import { TradeTypeDist } from './components/TradeTypeDist'
 import { RRScatterChart } from './components/RRScatterChart'
@@ -329,7 +330,9 @@ function TopWorstTrades({ top, worst }: { top: TradeSummaryRow[]; worst: TradeSu
             <span className="text-slate-500 font-normal ml-1 text-[10px]">{row.direction}</span>
           </span>
           <SessionBadge session={row.session_tag} />
-          <span className="text-[10px] text-slate-600 shrink-0 tabular-nums">{row.closed_at}</span>
+          <span className="text-[10px] text-slate-600 shrink-0 tabular-nums">
+            {(() => { const DOW = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat']; const d = new Date(row.closed_at); return `${DOW[d.getDay()]} ${row.closed_at}` })()}
+          </span>
           <span className={`text-xs font-bold tabular-nums shrink-0 ${pnlColor}`}>
             {pnl >= 0 ? '+$' : '-$'}{Math.abs(pnl).toFixed(0)}
           </span>
@@ -630,10 +633,16 @@ export function PerformancePage() {
             </Section>
           </div>
 
-          {/* ── 7. WR by Hour + WR by Session ────────────────────────────── */}
+          {/* ── 7. WR by Hour + Day×Hour Heatmap + WR by Session ───────────── */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <Section title="WR by Trade Open Hour">
               <HourlyWRChart data={report.wr_by_hour} />
+              {report.wr_by_day_hour.length > 0 && (
+                <div className="mt-3 pt-3 border-t border-surface-700/50">
+                  <p className="text-[10px] text-slate-500 mb-2 uppercase tracking-wide">By Day × Hour</p>
+                  <DayHourHeatmap data={report.wr_by_day_hour} />
+                </div>
+              )}
             </Section>
             <Section title="WR by Session">
               <WRBarChart

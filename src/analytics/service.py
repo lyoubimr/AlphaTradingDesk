@@ -47,6 +47,7 @@ from src.analytics.schemas import (
     TradeTypeRow,
     VIBucket,
     WRByHour,
+    WRByDayHour,
     WRByStat,
 )
 from src.core.models.broker import Profile
@@ -187,6 +188,7 @@ def compute_performance_report(profile_id: int, period: str, db: Session) -> Per
     wr_by_strategy = _compute_wr_by_strategy(profile_id, period, cutoff, db, params, date_filter)
     wr_by_session = _compute_wr_by_session(trades)
     wr_by_hour = _compute_wr_by_hour(trades)
+    wr_by_day_hour = _compute_wr_by_day_hour(trades)
     pair_leaderboard = _compute_pair_leaderboard(trades, float(profile.capital_current))
     tp_hit_rates = _compute_tp_hit_rates(profile_id, period, cutoff, db, params, date_filter)
     trade_type_dist = _compute_trade_type_dist(trades)
@@ -220,6 +222,7 @@ def compute_performance_report(profile_id: int, period: str, db: Session) -> Per
         wr_by_strategy=wr_by_strategy,
         wr_by_session=wr_by_session,
         wr_by_hour=wr_by_hour,
+        wr_by_day_hour=wr_by_day_hour,
         pair_leaderboard=pair_leaderboard,
         tp_hit_rates=tp_hit_rates,
         drawdown=drawdown,
@@ -506,6 +509,34 @@ def _compute_wr_by_hour(trades: list[dict]) -> list[WRByHour]:
     return result
 
 
+def _compute_wr_by_day_hour(trades: list[dict]) -> list[WRByDayHour]:
+    """7×24 grid of WR% keyed by (weekday, UTC hour). Day 0=Mon ... 6=Sun."""
+    grid: dict[tuple[int, int], dict] = {}
+    for t in trades:
+        entry = t["entry_date"]
+        if not hasattr(entry, "hour"):
+            continue
+        day = entry.weekday()   # 0=Mon, 6=Sun
+        hour = entry.hour
+        key = (day, hour)
+        if key not in grid:
+            grid[key] = {"trades": 0, "wins": 0}
+        grid[key]["trades"] += 1
+        if float(t["pnl_pct"]) > 0:
+            grid[key]["wins"] += 1
+    result = []
+    for (day, hour), v in sorted(grid.items()):
+        tr, w = v["trades"], v["wins"]
+        result.append(WRByDayHour(
+            day=day,
+            hour=hour,
+            trades=tr,
+            wins=w,
+            wr_pct=round(w / tr * 100, 1) if tr else None,
+        ))
+    return result
+
+
 # ── Top / Worst trades ────────────────────────────────────────────────────────
 
 def _compute_top_worst_trades(
@@ -737,6 +768,8 @@ def _compute_rr_scatter(trades: list[dict]) -> list[RRScatterPoint]:
         pot = float(t["potential_profit"]) if t["potential_profit"] else None
         actual_rr = round(pnl / risk, 2) if risk and risk > 0 else None
         planned_rr = round(pot / risk, 2) if risk and risk > 0 and pot else None
+        closed = t.get("closed_at")
+        closed_at_str = closed.isoformat()[:16] if hasattr(closed, "isoformat") else str(closed)[:16] if closed else None
         result.append(RRScatterPoint(
             trade_id=t["id"],
             planned_rr=planned_rr,
@@ -745,6 +778,7 @@ def _compute_rr_scatter(trades: list[dict]) -> list[RRScatterPoint]:
             pair=t["pair"],
             strategy_name=t.get("strategy_name"),
             session_tag=t.get("session_tag") or None,
+            closed_at=closed_at_str,
         ))
     return result
 
@@ -1043,4 +1077,5 @@ def _empty_report(profile_id: int, period: str) -> PerformanceReport:
         review_rate=ReviewRateOut(total_closed=0, reviewed_count=0, review_rate_pct=0.0),
         vi_correlation=[],
         vi_correlation_market=[],
+        wr_by_day_hour=[],
     )
