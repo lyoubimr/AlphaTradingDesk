@@ -24,6 +24,27 @@ const CustomDot = (props: { cx?: number; cy?: number; payload?: RRScatterPoint }
   )
 }
 
+const CustomTooltip = ({ active, payload }: { active?: boolean; payload?: { payload: RRScatterPoint }[] }) => {
+  if (!active || !payload?.length) return null
+  const p = payload[0].payload
+  const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+  let dateLabel = ''
+  if (p.closed_at) {
+    const d = new Date(p.closed_at)
+    dateLabel = `${DOW[d.getDay()]} ${d.toLocaleDateString('en', { month: 'short', day: 'numeric' })} ${p.closed_at.slice(11, 16)}`
+  }
+  return (
+    <div style={{ background: 'rgba(15,23,42,0.82)', backdropFilter: 'blur(6px)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 8 }} className="px-3 py-2 text-[11px] space-y-0.5 shadow-xl">
+      <div className="font-semibold text-slate-200">{p.pair} <span className={p.is_win ? 'text-emerald-400' : 'text-red-400'}>{p.is_win ? 'Win' : 'Loss'}</span></div>
+      {dateLabel && <div className="text-slate-400">{dateLabel}</div>}
+      {p.strategy_name && <div className="text-slate-400">Strategy: <span className="text-slate-200">{p.strategy_name}</span></div>}
+      {p.session_tag && <div className="text-slate-400">Session: <span className="text-slate-200">{p.session_tag}</span></div>}
+      <div className="text-slate-400">Planned: <span className="text-slate-200">{(p.planned_rr ?? 0).toFixed(2)}R</span></div>
+      <div className="text-slate-400">Actual: <span className={p.actual_rr != null && p.actual_rr >= 0 ? 'text-emerald-400' : 'text-red-400'}>{(p.actual_rr ?? 0).toFixed(2)}R</span></div>
+    </div>
+  )
+}
+
 export function RRScatterChart({ data }: Props) {
   if (data.length === 0) return <div className="text-slate-600 text-sm py-8 text-center">No R:R data</div>
 
@@ -37,20 +58,20 @@ export function RRScatterChart({ data }: Props) {
   return (
     <div className="space-y-3">
       {/* Mini stats — visible badges */}
-      <div className="flex gap-2 flex-wrap">
-        <span className="inline-flex items-center gap-1.5 text-[11px] font-medium bg-emerald-950/50 border border-emerald-900/40 text-emerald-300 rounded-full px-2.5 py-0.5">
+      <div className="flex gap-1.5 flex-wrap">
+        <span className="inline-flex items-center gap-1 text-[10px] font-medium bg-emerald-950/50 border border-emerald-900/40 text-emerald-300 rounded-full px-2 py-px">
           <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 inline-block" />
-          {wins} wins
+          {wins}W
         </span>
-        <span className="inline-flex items-center gap-1.5 text-[11px] font-medium bg-red-950/50 border border-red-900/40 text-red-300 rounded-full px-2.5 py-0.5">
+        <span className="inline-flex items-center gap-1 text-[10px] font-medium bg-red-950/50 border border-red-900/40 text-red-300 rounded-full px-2 py-px">
           <span className="w-1.5 h-1.5 rounded-full bg-red-400 inline-block" />
-          {data.length - wins} losses
+          {data.length - wins}L
         </span>
-        <span style={{ color: '#e2e8f0' }} className="inline-flex items-center gap-1 text-[11px] font-medium bg-surface-800 border border-surface-700 rounded-full px-2.5 py-0.5">
-          Planned <strong style={{ color: '#ffffff' }}>{avgPlanned.toFixed(2)}R</strong>
+        <span style={{ color: '#e2e8f0' }} className="inline-flex items-center gap-1 text-[10px] font-medium bg-surface-800 border border-surface-700 rounded-full px-2 py-px">
+          Plan <strong style={{ color: '#ffffff' }}>{avgPlanned.toFixed(2)}R</strong>
         </span>
-        <span style={{ color: '#e2e8f0' }} className="inline-flex items-center gap-1 text-[11px] font-medium bg-surface-800 border border-surface-700 rounded-full px-2.5 py-0.5">
-          Actual <strong style={{ color: '#ffffff' }}>{avgActual.toFixed(2)}R</strong>
+        <span style={{ color: '#e2e8f0' }} className="inline-flex items-center gap-1 text-[10px] font-medium bg-surface-800 border border-surface-700 rounded-full px-2 py-px">
+          Act <strong style={{ color: '#ffffff' }}>{avgActual.toFixed(2)}R</strong>
         </span>
       </div>
       <ResponsiveContainer width="100%" height={220}>
@@ -73,16 +94,7 @@ export function RRScatterChart({ data }: Props) {
             width={36}
             label={{ value: 'Actual R:R', angle: -90, position: 'insideLeft', fontSize: 10, fill: '#94a3b8' }}
           />
-          <Tooltip
-            contentStyle={{ background: '#16162a', border: '1px solid #1e1e35', borderRadius: 8, fontSize: 11 }}
-            labelStyle={{ color: '#94a3b8' }}
-            itemStyle={{ color: '#e2e8f0' }}
-            formatter={(v: unknown, name: unknown) => {
-              const n = v as number | undefined
-              const nm = name as string
-              return [(n ?? 0).toFixed(2), nm === 'planned_rr' ? 'Planned R:R' : 'Actual R:R']
-            }}
-          />
+          <Tooltip content={<CustomTooltip />} />
           {/* y = x diagonal reference */}
           <ReferenceLine
             segment={[{ x: 0, y: 0 }, { x: maxVal, y: maxVal }]}

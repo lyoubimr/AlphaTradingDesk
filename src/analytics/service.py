@@ -39,10 +39,14 @@ from src.analytics.schemas import (
     RepeatError,
     ReviewRateOut,
     RRScatterPoint,
+    StrategySessionCell,
+    StrategySessionRow,
     TagFrequency,
     TPHitRate,
+    TradeSummaryRow,
     TradeTypeRow,
     VIBucket,
+    WRByDayHour,
     WRByHour,
     WRByStat,
 )
@@ -141,6 +145,7 @@ def compute_performance_report(profile_id: int, period: str, db: Session) -> Per
             t.session_tag,
             t.post_trade_review,
             t.close_notes,
+            t.entry_screenshot_urls,
             t.close_screenshot_urls,
             COALESCE(
               (t.realized_pnl / NULLIF(t.risk_amount, 0) * 100),
@@ -155,7 +160,13 @@ def compute_performance_report(profile_id: int, period: str, db: Session) -> Per
                 COALESCE(t.post_trade_review->'tags', '[]'::jsonb)
               ) tag
               WHERE tag LIKE 'strategy_broken_%'
-            ) AS is_strategy_broken
+            ) AS is_strategy_broken,
+            -- strategy_name: first assigned strategy (LIMIT 1 to avoid double-counting)
+            (SELECT CASE WHEN s.emoji IS NOT NULL AND s.emoji != ''
+                         THEN s.emoji || ' ' || s.name ELSE s.name END
+             FROM trade_strategies ts
+             JOIN strategies s ON s.id = ts.strategy_id
+             WHERE ts.trade_id = t.id LIMIT 1) AS strategy_name
         FROM trades t
         WHERE t.profile_id = :profile_id
           AND t.status = 'closed'
@@ -173,10 +184,11 @@ def compute_performance_report(profile_id: int, period: str, db: Session) -> Per
 
     kpi = _compute_kpi(trades, profile)
     equity_curve = _compute_equity_curve(trades)
-    drawdown = _compute_drawdown(equity_curve)
+    drawdown = _compute_drawdown(equity_curve, float(profile.capital_start))
     wr_by_strategy = _compute_wr_by_strategy(profile_id, period, cutoff, db, params, date_filter)
     wr_by_session = _compute_wr_by_session(trades)
     wr_by_hour = _compute_wr_by_hour(trades)
+    wr_by_day_hour = _compute_wr_by_day_hour(trades)
     pair_leaderboard = _compute_pair_leaderboard(trades, float(profile.capital_current))
     tp_hit_rates = _compute_tp_hit_rates(profile_id, period, cutoff, db, params, date_filter)
     trade_type_dist = _compute_trade_type_dist(trades)
@@ -186,6 +198,8 @@ def compute_performance_report(profile_id: int, period: str, db: Session) -> Per
     review_rate = _compute_review_rate(trades)
     vi_correlation = _compute_vi_correlation(profile_id, cutoff, db, params, date_filter)
     vi_correlation_market = _compute_vi_correlation_market(profile_id, cutoff, db, params, date_filter)
+    top_trades, worst_trades = _compute_top_worst_trades(trades)
+    wr_by_strategy_session = _compute_wr_by_strategy_session(profile_id, db, params, date_filter)
 
     # ── AI cache lookup ────────────────────────────────────────────────────
     ai_summary: str | None = None
@@ -208,6 +222,7 @@ def compute_performance_report(profile_id: int, period: str, db: Session) -> Per
         wr_by_strategy=wr_by_strategy,
         wr_by_session=wr_by_session,
         wr_by_hour=wr_by_hour,
+        wr_by_day_hour=wr_by_day_hour,
         pair_leaderboard=pair_leaderboard,
         tp_hit_rates=tp_hit_rates,
         drawdown=drawdown,
@@ -220,6 +235,9 @@ def compute_performance_report(profile_id: int, period: str, db: Session) -> Per
         review_rate=review_rate,
         vi_correlation=vi_correlation,
         vi_correlation_market=vi_correlation_market,
+        top_trades=top_trades,
+        worst_trades=worst_trades,
+        wr_by_strategy_session=wr_by_strategy_session,
         ai_summary=ai_summary,
         ai_generated_at=ai_generated_at,
     )
@@ -323,22 +341,25 @@ def _compute_equity_curve(trades: list[dict]) -> list[EquityPoint]:
 
 # ── Drawdown curve ────────────────────────────────────────────────────────────
 
-def _compute_drawdown(equity: list[EquityPoint]) -> list[DrawdownPoint]:
+def _compute_drawdown(equity: list[EquityPoint], capital_start: float = 0.0) -> list[DrawdownPoint]:
+    """Drawdown as % of peak account equity (capital_start + cumulative P&L).
+
+    Using only cumulative P&L as denominator produces nonsensical values like
+    -194% when the P&L peak is tiny (e.g. $36) but later cumulative drops
+    to -$34 — a $70 swing that is only ~22% on a real $325 account.
+    """
     if not equity:
         return []
-    peak = 0.0
+    peak_equity = capital_start  # starts at initial capital, never goes below it
     points: list[DrawdownPoint] = []
     for e in equity:
-        cum = e.cumulative_pnl
-        peak = max(peak, cum)
-        if peak > 0:
-            dd_pct = round((cum - peak) / peak * 100, 2)
-        else:
-            dd_pct = 0.0
+        account_equity = capital_start + e.cumulative_pnl
+        peak_equity = max(peak_equity, account_equity)
+        dd_pct = round((account_equity - peak_equity) / peak_equity * 100, 2) if peak_equity > 0 else 0.0
         points.append(DrawdownPoint(
             date=e.date,
-            cumulative_pnl=cum,
-            peak_pnl=round(peak, 2),
+            cumulative_pnl=e.cumulative_pnl,
+            peak_pnl=round(peak_equity - capital_start, 2),  # back to cumulative PnL at peak
             drawdown_pct=dd_pct,
         ))
     return points
@@ -367,7 +388,8 @@ def _compute_wr_by_strategy(
             SUM(CASE WHEN t.realized_pnl > 0 THEN 1 ELSE 0 END) AS wins,
             SUM(CASE WHEN t.realized_pnl <= 0 THEN 1 ELSE 0 END) AS losses,
             ROUND(AVG(t.realized_pnl)::numeric, 2) AS avg_pnl,
-            ROUND(SUM(t.realized_pnl)::numeric, 2) AS total_pnl
+            ROUND(SUM(t.realized_pnl)::numeric, 2) AS total_pnl,
+            ROUND(AVG(t.realized_pnl / NULLIF(t.risk_amount, 0))::numeric, 2) AS avg_rr
         FROM trades t
         LEFT JOIN trade_strategies ts ON ts.trade_id = t.id
         LEFT JOIN strategies s ON s.id = ts.strategy_id
@@ -406,6 +428,7 @@ def _compute_wr_by_strategy(
             wr_pct=round(wins / trades * 100, 1) if trades else None,
             avg_pnl=float(r["avg_pnl"]) if r["avg_pnl"] is not None else None,
             total_pnl=float(r["total_pnl"] or 0),
+            avg_pnl_pct=float(r["avg_rr"]) if r["avg_rr"] is not None else None,
         ))
     return result
 
@@ -426,7 +449,7 @@ def _compute_wr_by_session(trades: list[dict]) -> list[WRByStat]:
         else:
             sessions[label]["losses"] += 1
 
-    order = ["London", "New York", "Asia", "Tokyo", "Unknown"]
+    order = ["Asian", "London", "Overlap", "New York", "Weekend", "Unknown"]
     result = []
     for label in order:
         if label in sessions:
@@ -483,6 +506,131 @@ def _compute_wr_by_hour(trades: list[dict]) -> list[WRByHour]:
             ))
         else:
             result.append(WRByHour(hour=h, trades=0, wins=0, wr_pct=None))
+    return result
+
+
+def _compute_wr_by_day_hour(trades: list[dict]) -> list[WRByDayHour]:
+    """7×24 grid of WR% + avg actual R:R keyed by (weekday, UTC hour). Day 0=Mon ... 6=Sun."""
+    grid: dict[tuple[int, int], dict] = {}
+    for t in trades:
+        entry = t["entry_date"]
+        if not hasattr(entry, "hour"):
+            continue
+        day = entry.weekday()   # 0=Mon, 6=Sun
+        hour = entry.hour
+        key = (day, hour)
+        if key not in grid:
+            grid[key] = {"trades": 0, "wins": 0, "rr_sum": 0.0, "rr_count": 0}
+        grid[key]["trades"] += 1
+        if float(t["pnl_pct"]) > 0:
+            grid[key]["wins"] += 1
+        risk = float(t["risk_amount"]) if t.get("risk_amount") else None
+        pnl = float(t["realized_pnl"]) if t.get("realized_pnl") is not None else None
+        if risk and risk > 0 and pnl is not None:
+            grid[key]["rr_sum"] += pnl / risk
+            grid[key]["rr_count"] += 1
+    result = []
+    for (day, hour), v in sorted(grid.items()):
+        tr, w = v["trades"], v["wins"]
+        rr_count = v["rr_count"]
+        avg_rr = round(v["rr_sum"] / rr_count, 2) if rr_count > 0 else None
+        result.append(WRByDayHour(
+            day=day,
+            hour=hour,
+            trades=tr,
+            wins=w,
+            wr_pct=round(w / tr * 100, 1) if tr else None,
+            avg_rr=avg_rr,
+        ))
+    return result
+
+
+# ── Top / Worst trades ────────────────────────────────────────────────────────
+
+def _compute_top_worst_trades(
+    trades: list[dict], n: int = 10
+) -> tuple[list[TradeSummaryRow], list[TradeSummaryRow]]:
+    """Return (top_n, worst_n) sorted by realized_pnl descending / ascending."""
+    def to_row(t: dict) -> TradeSummaryRow:
+        closed = t["closed_at"]
+        date_str = closed.strftime("%Y-%m-%d") if hasattr(closed, "strftime") else str(closed)[:10]
+        return TradeSummaryRow(
+            trade_id=t["id"],
+            pair=t["pair"],
+            direction=t["direction"],
+            session_tag=t["session_tag"] or "Unknown",
+            closed_at=date_str,
+            realized_pnl=round(float(t["realized_pnl"]), 2),
+            strategy_name=t.get("strategy_name"),
+            close_notes=t.get("close_notes") or None,
+            entry_screenshot_urls=list(t.get("entry_screenshot_urls") or []),
+            close_screenshot_urls=list(t.get("close_screenshot_urls") or []),
+        )
+
+    sorted_desc = sorted(trades, key=lambda t: float(t["realized_pnl"]), reverse=True)
+    top_n = [to_row(t) for t in sorted_desc[:n]]
+    worst_n = [to_row(t) for t in sorted_desc[max(0, len(sorted_desc) - n):][::-1]]
+    return top_n, worst_n
+
+
+# ── Strategy × Session cross-tab ──────────────────────────────────────────────
+
+def _compute_wr_by_strategy_session(
+    profile_id: int,
+    db: Session,
+    params: dict,
+    date_filter: str,
+) -> list[StrategySessionRow]:
+    """Cross-tab of all closed trades: rows = strategies, cells = sessions."""
+    sql = text(f"""
+        SELECT
+            COALESCE(
+                CASE WHEN s.emoji IS NOT NULL AND s.emoji != '' THEN s.emoji || ' ' || s.name ELSE s.name END,
+                'Unassigned'
+            ) AS strategy,
+            COALESCE(t.session_tag, 'Unknown') AS session,
+            COUNT(*) AS trades,
+            SUM(CASE WHEN t.realized_pnl > 0 THEN 1 ELSE 0 END) AS wins
+        FROM trades t
+        LEFT JOIN trade_strategies ts ON ts.trade_id = t.id
+        LEFT JOIN strategies s ON s.id = ts.strategy_id
+        WHERE t.profile_id = :profile_id
+          AND t.status = 'closed'
+          AND t.realized_pnl IS NOT NULL
+          {date_filter}
+        GROUP BY s.name, s.emoji, t.session_tag
+        ORDER BY strategy, session
+    """)
+    rows = db.execute(sql, params).mappings().all()
+
+    matrix: dict[str, dict[str, dict]] = {}
+    for r in rows:
+        strat = r["strategy"]
+        sess = r["session"]
+        if strat not in matrix:
+            matrix[strat] = {}
+        tr = r["trades"] or 0
+        w = r["wins"] or 0
+        matrix[strat][sess] = {
+            "trades": tr,
+            "wins": w,
+            "wr_pct": round(w / tr * 100, 1) if tr else None,
+        }
+
+    session_order = ["Asian", "London", "Overlap", "New York", "Weekend", "Unknown"]
+    result = []
+    for strat in sorted(matrix.keys()):
+        cells = [
+            StrategySessionCell(
+                session=sess,
+                trades=data["trades"],
+                wins=data["wins"],
+                wr_pct=data["wr_pct"],
+            )
+            for sess, data in matrix[strat].items()
+        ]
+        cells.sort(key=lambda c: session_order.index(c.session) if c.session in session_order else 99)
+        result.append(StrategySessionRow(strategy=strat, cells=cells))
     return result
 
 
@@ -628,12 +776,22 @@ def _compute_rr_scatter(trades: list[dict]) -> list[RRScatterPoint]:
         pot = float(t["potential_profit"]) if t["potential_profit"] else None
         actual_rr = round(pnl / risk, 2) if risk and risk > 0 else None
         planned_rr = round(pot / risk, 2) if risk and risk > 0 and pot else None
+        closed = t.get("closed_at")
+        if closed is None:
+            closed_at_str: str | None = None
+        elif hasattr(closed, "isoformat"):
+            closed_at_str = closed.isoformat()[:16]
+        else:
+            closed_at_str = str(closed)[:16]
         result.append(RRScatterPoint(
             trade_id=t["id"],
             planned_rr=planned_rr,
             actual_rr=actual_rr,
             is_win=pnl > 0,
             pair=t["pair"],
+            strategy_name=t.get("strategy_name"),
+            session_tag=t.get("session_tag") or None,
+            closed_at=closed_at_str,
         ))
     return result
 
@@ -932,4 +1090,5 @@ def _empty_report(profile_id: int, period: str) -> PerformanceReport:
         review_rate=ReviewRateOut(total_closed=0, reviewed_count=0, review_rate_pct=0.0),
         vi_correlation=[],
         vi_correlation_market=[],
+        wr_by_day_hour=[],
     )

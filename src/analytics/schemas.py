@@ -55,6 +55,15 @@ class WRByHour(BaseModel):
     wr_pct: float | None = None
 
 
+class WRByDayHour(BaseModel):
+    day: int                   # 0=Mon, 1=Tue, ..., 6=Sun (Python weekday)
+    hour: int                  # 0–23 UTC
+    trades: int
+    wins: int
+    wr_pct: float | None = None
+    avg_rr: float | None = None  # avg actual R:R across trades in this cell
+
+
 class TPHitRate(BaseModel):
     tp_number: int             # 1, 2, 3
     total: int                 # trades with this TP defined
@@ -84,6 +93,9 @@ class RRScatterPoint(BaseModel):
     actual_rr: float | None    # realized_pnl / risk_amount
     is_win: bool
     pair: str
+    strategy_name: str | None = None
+    session_tag: str | None = None
+    closed_at: str | None = None   # ISO datetime (minutes precision) for tooltip
 
 
 class DirectionRow(BaseModel):
@@ -125,6 +137,34 @@ class VIBucket(BaseModel):
     avg_vi: float | None = None   # average VI score in bucket (0–1)
 
 
+class TradeSummaryRow(BaseModel):
+    """Minimal trade record used for Top/Worst trades tiles."""
+    trade_id: int
+    pair: str
+    direction: str
+    session_tag: str
+    closed_at: str            # ISO date (YYYY-MM-DD)
+    realized_pnl: float
+    strategy_name: str | None = None
+    close_notes: str | None = None
+    entry_screenshot_urls: list[str] = Field(default_factory=list)
+    close_screenshot_urls: list[str] = Field(default_factory=list)
+
+
+class StrategySessionCell(BaseModel):
+    """One cell in the Strategy × Session cross-tab."""
+    session: str
+    trades: int
+    wins: int
+    wr_pct: float | None = None
+
+
+class StrategySessionRow(BaseModel):
+    """One strategy row in the Strategy × Session cross-tab."""
+    strategy: str
+    cells: list[StrategySessionCell]
+
+
 # ── Main response model ───────────────────────────────────────────────────────
 
 class PerformanceReport(BaseModel):
@@ -146,6 +186,9 @@ class PerformanceReport(BaseModel):
 
     # ── 5. WR by hour (UTC)
     wr_by_hour: list[WRByHour]
+
+    # ── 5b. WR by day × hour (UTC) — heatmap
+    wr_by_day_hour: list[WRByDayHour] = Field(default_factory=list)
 
     # ── 6. Pair leaderboard
     pair_leaderboard: list[WRByStat]
@@ -180,6 +223,13 @@ class PerformanceReport(BaseModel):
 
     # ── 17. Volatility correlation — market VI (by regime field on market_vi_snapshots)
     vi_correlation_market: list[VIBucket] = Field(default_factory=list)
+
+    # ── 18. Top / Worst trades (by realized P&L)
+    top_trades: list[TradeSummaryRow] = Field(default_factory=list)
+    worst_trades: list[TradeSummaryRow] = Field(default_factory=list)
+
+    # ── 19. Strategy × Session cross-tab (disciplined filter)
+    wr_by_strategy_session: list[StrategySessionRow] = Field(default_factory=list)
 
     # ── AI narrative (None if not generated yet / disabled)
     ai_summary: str | None = None

@@ -5,9 +5,11 @@ import type { WRByStat } from '../../../types/api'
 interface Props {
   data: WRByStat[]
   maxItems?: number
+  /** Optional tooltip per label — e.g. session hours */
+  labelTooltips?: Record<string, string>
 }
 
-export function WRBarChart({ data, maxItems = 12 }: Props) {
+export function WRBarChart({ data, maxItems = 12, labelTooltips }: Props) {
   // Composite score: volume × win-rate — rewards both high-trade-count AND high-WR
   const active = data
     .filter(d => d.trades > 0)
@@ -36,8 +38,8 @@ export function WRBarChart({ data, maxItems = 12 }: Props) {
           <div key={row.label} className="flex items-center gap-2 group hover:bg-surface-800/60 rounded-lg px-2 py-1.5 transition-colors">
             {/* Label */}
             <div
-              title={row.label}
-              className="w-44 shrink-0 truncate text-xs text-slate-300 group-hover:text-slate-100 transition-colors text-right pr-1.5"
+              title={labelTooltips?.[row.label] ?? row.label}
+              className={`w-44 shrink-0 truncate text-xs text-slate-300 group-hover:text-slate-100 transition-colors text-right pr-1.5${labelTooltips?.[row.label] ? ' cursor-help' : ''}`}
             >
               {row.label}
             </div>
@@ -61,10 +63,23 @@ export function WRBarChart({ data, maxItems = 12 }: Props) {
             <span className="w-14 shrink-0 text-[10px] text-slate-500 tabular-nums text-right">
               {row.trades}tr
             </span>
-            {/* Avg PnL */}
-            <span className={`w-16 shrink-0 text-[10px] font-medium tabular-nums text-right ${pnlColor}`}>
+            {/* Avg PnL per trade */}
+            <span
+              className={`w-20 shrink-0 text-[10px] font-medium tabular-nums text-right ${pnlColor}`}
+              title={`avg/trade: ${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)}${row.total_pnl != null ? `  |  total: ${row.total_pnl >= 0 ? '+' : ''}$${row.total_pnl.toFixed(2)}` : ''}`}
+            >
               {pnl >= 0 ? '+$' : '-$'}{Math.abs(pnl).toFixed(0)}
+              <span className="text-slate-600 font-normal ml-0.5">avg/tr</span>
             </span>
+            {/* Avg actual R:R — only shown when available (strategies) */}
+            {row.avg_pnl_pct != null && (
+              <span
+                className={`w-14 shrink-0 text-[10px] font-medium tabular-nums text-right ${row.avg_pnl_pct >= 0 ? 'text-sky-400' : 'text-orange-400'}`}
+                title="avg actual R:R"
+              >
+                {row.avg_pnl_pct >= 0 ? '+' : ''}{row.avg_pnl_pct.toFixed(2)}R
+              </span>
+            )}
           </div>
         )
       })}

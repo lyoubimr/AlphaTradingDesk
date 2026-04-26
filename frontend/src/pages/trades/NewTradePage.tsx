@@ -35,6 +35,7 @@ import { useRiskCalc } from '../../hooks/useRiskCalc'
 import type { RiskCalcResult } from '../../hooks/useRiskCalc'
 import { cn } from '../../lib/cn'
 import type { Instrument, InstrumentCreate, Profile, Strategy, WinRateStats, GoalProgressItem } from '../../types/api'
+import { formatSessionRange, tzLabel } from '../../utils/sessionUtils'
 import { RiskAdvisorPanel } from '../../components/risk/RiskAdvisorPanel'
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -164,37 +165,28 @@ function PriceInput({
 // ─────────────────────────────────────────────────────────────────────────────
 
 const SESSIONS = [
-  { label: 'Asian',    emoji: '🌏', hours: '00–08 UTC' },
-  { label: 'London',   emoji: '🇬🇧', hours: '07–16 UTC' },
-  { label: 'New York', emoji: '🗽', hours: '13–22 UTC' },
-  { label: 'Overlap',  emoji: '⚡', hours: '13–17 UTC' },
+  { label: 'Asian',     emoji: '🌏', hours: formatSessionRange('Asian')     },
+  { label: 'London',   emoji: '🇬🇧', hours: formatSessionRange('London')    },
+  { label: 'New York', emoji: '🗽', hours: formatSessionRange('New York') },
+  { label: 'Overlap',  emoji: '⚡', hours: formatSessionRange('Overlap')   },
+  { label: 'Weekend',  emoji: '🌙', hours: formatSessionRange('Weekend')   },
 ] as const
 type SessionLabel = typeof SESSIONS[number]['label']
 
 function detectSession(): SessionLabel {
-  // Use local hour so traders see the session that matches their clock,
-  // regardless of where the server is located.
-  // Session times expressed as LOCAL equivalents of UTC ranges are
-  // approximated by converting UTC boundaries to the browser's timezone.
-  const nowUtcH = new Date().getUTCHours()
+  const now = new Date()
+  const day = now.getDay() // local day — 0 = Sun, 6 = Sat
+  if (day === 0 || day === 6) return 'Weekend'
+  const nowUtcH = now.getUTCHours()
   if (nowUtcH >= 13 && nowUtcH < 17) return 'Overlap'
   if (nowUtcH >= 13 && nowUtcH < 22) return 'New York'
   if (nowUtcH >= 7  && nowUtcH < 16) return 'London'
   return 'Asian'
 }
 
-/** Display-only local time string for the session hint. */
+/** Display-only local time string for the current time. */
 function localTimeStr(): string {
   return new Date().toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hour12: false })
-}
-
-/** IANA timezone abbreviation (e.g. "CET", "EST", "JST"). */
-function tzLabel(): string {
-  try {
-    return Intl.DateTimeFormat(undefined, { timeZoneName: 'short' })
-      .formatToParts(new Date())
-      .find((p) => p.type === 'timeZoneName')?.value ?? 'local'
-  } catch { return 'local' }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1015,7 +1007,8 @@ export function NewTradePage() {
   const [entryScreenshots, setEntryScreenshots] = useState<File[]>([])
 
   const [showSession, setShowSession] = useState(false)
-  const [sessionTag, setSessionTag]   = useState<SessionLabel | ''>(detectSession)
+  // sessionTag = '' means "no manual selection" — detectSession() is called fresh at submit time
+  const [sessionTag, setSessionTag]   = useState<SessionLabel | ''>('')
 
   const [submitting, setSubmitting]       = useState(false)
   const [error, setError]                 = useState<string | null>(null)
@@ -1550,7 +1543,7 @@ export function NewTradePage() {
         ...(isCrypto && effectiveMargin != null && effectiveMargin > 0 && { margin_used: effectiveMargin }),
         strategy_ids:         strategyIds.length > 0 ? strategyIds : undefined,
         strategy_id:          strategyIds[0] ?? null,
-        session_tag:          sessionTag || null,
+        session_tag:          (sessionTag || detectSession()) || null,
         notes:                notes || null,
         confidence_score:     confidence ? Number(confidence) : null,
         force:                forceOpen || undefined,
@@ -2338,6 +2331,9 @@ export function NewTradePage() {
 
           {/* TP rows */}
           <div className="space-y-2">
+            {/* Column headers + input rows — scrollable on mobile so inputs stay reachable */}
+            <div className="overflow-x-auto">
+            <div className="min-w-[36rem] space-y-2">
             {/* Column headers */}
             <div className="grid gap-2 text-[9px] text-slate-600 uppercase tracking-wider font-medium"
               style={{ gridTemplateColumns: '2.5rem 1fr 5rem 1.5rem 6rem 5rem 8rem' }}>
@@ -2410,6 +2406,8 @@ export function NewTradePage() {
                 </div>
               )
             })}
+            </div>{/* end min-w-[36rem] */}
+            </div>{/* end overflow-x-auto */}
 
             {/* Split total */}
             <div className={cn('flex items-center gap-1.5 text-[10px] font-semibold',

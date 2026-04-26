@@ -1,20 +1,24 @@
 // ── PerformancePage ───────────────────────────────────────────────────────────
 // Phase 6A — Deep Performance Analytics
-import { useCallback, useEffect, useState } from 'react'
-import { BarChart2, ChevronDown, ChevronUp, TrendingDown, TrendingUp } from 'lucide-react'
+import React, { useCallback, useEffect, useState } from 'react'
+import { BarChart2, ChevronDown, ChevronUp, Info, TrendingDown, TrendingUp } from 'lucide-react'
 import { useProfile } from '../../context/ProfileContext'
 import { analyticsApi } from '../../lib/api'
+import { sessionTooltip } from '../../utils/sessionUtils'
 import type {
   PerformanceReport,
   AnalyticsSettingsOut,
   DirectionRow,
   WRByStat,
+  TradeSummaryRow,
+  StrategySessionRow,
 } from '../../types/api'
 import { SummaryKPIs } from './components/SummaryKPIs'
 import { EquityCurve } from './components/EquityCurve'
 import { DrawdownChart } from './components/DrawdownChart'
 import { WRBarChart } from './components/WRBarChart'
 import { HourlyWRChart } from './components/HourlyWRChart'
+import { DayHourHeatmap } from './components/DayHourHeatmap'
 import { TPHitRateChart } from './components/TPHitRateChart'
 import { TradeTypeDist } from './components/TradeTypeDist'
 import { RRScatterChart } from './components/RRScatterChart'
@@ -155,9 +159,343 @@ function PairLeaderboard({ rows }: { rows: WRByStat[] }) {
   )
 }
 
+const SESSION_COLORS: Record<string, string> = {
+  Asian: 'bg-sky-500/20 text-sky-300 border-sky-500/30',
+  London: 'bg-blue-500/20 text-blue-300 border-blue-500/30',
+  Overlap: 'bg-violet-500/20 text-violet-300 border-violet-500/30',
+  'New York': 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30',
+  Weekend: 'bg-amber-500/20 text-amber-300 border-amber-500/30',
+  Unknown: 'bg-slate-700/20 text-slate-500 border-slate-700/30',
+}
+
+/** Tooltip text for a session — computed at render time in browser's local tz. */
+function sessionHint(s: string): string {
+  return sessionTooltip(s)
+}
+
+function SessionInfoIcon({ session }: { session: string }) {
+  const [pos, setPos] = useState<{ x: number; y: number } | null>(null)
+  const text = sessionHint(session)
+  if (!text) return null
+  return (
+    <>
+      <Info
+        size={10}
+        className="text-slate-600 hover:text-slate-300 cursor-help ml-0.5 shrink-0 transition-colors"
+        onMouseEnter={e => {
+          const r = (e.currentTarget as SVGElement).getBoundingClientRect()
+          setPos({ x: r.left + r.width / 2, y: r.top })
+        }}
+        onMouseLeave={() => setPos(null)}
+      />
+      {pos && (
+        <span
+          className="pointer-events-none fixed z-[9999] whitespace-nowrap text-[11px] bg-slate-900 border border-slate-700 text-slate-200 px-2.5 py-1.5 rounded-lg shadow-xl"
+          style={{ left: pos.x, top: pos.y - 8, transform: 'translate(-50%, -100%)' }}
+        >
+          {text}
+        </span>
+      )}
+    </>
+  )
+}
+
+function SessionBadge({ session }: { session: string }) {
+  const cls = SESSION_COLORS[session] ?? SESSION_COLORS.Unknown
+  return (
+    <span className={`inline-flex items-center text-[9px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded border ${cls}`}>
+      {session}
+      <SessionInfoIcon session={session} />
+    </span>
+  )
+}
+
+// ── Screenshot split-screen lightbox (read-only, analytics context) ──────────
+type SplitViewState = { entryUrls: string[]; closeUrls: string[] }
+
+function ImagePanel({ urls, idx, setIdx, label, accentCls }: {
+  urls: string[]
+  idx: number
+  setIdx: React.Dispatch<React.SetStateAction<number>>
+  label: string
+  accentCls: string
+}) {
+  if (!urls.length) return (
+    <div className="flex-1 flex items-center justify-center border-r border-white/10 last:border-r-0">
+      <div className="text-center text-slate-700">
+        <p className="text-sm">{label}</p>
+        <p className="text-[11px] mt-1">No screenshots</p>
+      </div>
+    </div>
+  )
+  return (
+    <div className="flex-1 flex flex-col min-w-0 border-r border-white/10 last:border-r-0">
+      {/* Panel header */}
+      <div className={`px-4 py-2 text-xs font-semibold ${accentCls} border-b border-white/10 flex items-center gap-2 shrink-0`}>
+        <span>{label}</span>
+        {urls.length > 1 && <span className="text-slate-600 font-normal">{idx + 1} / {urls.length}</span>}
+      </div>
+      {/* Image */}
+      <div className="flex-1 relative overflow-hidden bg-black flex items-center justify-center">
+        <img src={urls[idx]} alt={label} className="max-w-full max-h-full object-contain" />
+      </div>
+      {/* Nav dots */}
+      {urls.length > 1 && (
+        <div className="flex items-center justify-center gap-3 py-2.5 border-t border-white/10 shrink-0">
+          <button
+            onClick={() => setIdx(i => Math.max(0, i - 1))}
+            disabled={idx === 0}
+            className="text-slate-400 hover:text-white disabled:opacity-20 transition-colors px-1"
+          >←</button>
+          <div className="flex gap-1.5">
+            {urls.map((_, i) => (
+              <button
+                key={i}
+                onClick={() => setIdx(i)}
+                className={`w-1.5 h-1.5 rounded-full transition-colors ${i === idx ? 'bg-white' : 'bg-slate-600 hover:bg-slate-400'}`}
+              />
+            ))}
+          </div>
+          <button
+            onClick={() => setIdx(i => Math.min(urls.length - 1, i + 1))}
+            disabled={idx === urls.length - 1}
+            className="text-slate-400 hover:text-white disabled:opacity-20 transition-colors px-1"
+          >→</button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function ScreenshotSplitLightbox({ state, onClose }: { state: SplitViewState; onClose: () => void }) {
+  const [entryIdx, setEntryIdx] = useState(0)
+  const [closeIdx, setCloseIdx] = useState(0)
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose()
+      if (e.key === 'ArrowLeft') {
+        setEntryIdx(i => Math.max(0, i - 1))
+        setCloseIdx(i => Math.max(0, i - 1))
+      }
+      if (e.key === 'ArrowRight') {
+        setEntryIdx(i => Math.min(state.entryUrls.length - 1, i + 1))
+        setCloseIdx(i => Math.min(state.closeUrls.length - 1, i + 1))
+      }
+    }
+    document.addEventListener('keydown', handler)
+    return () => document.removeEventListener('keydown', handler)
+  }, [onClose, state.entryUrls.length, state.closeUrls.length])
+
+  return (
+    <div className="fixed inset-0 z-[9999] bg-black/95 flex flex-col" onClick={onClose}>
+      {/* Header bar */}
+      <div
+        className="flex items-center justify-between px-4 py-2.5 border-b border-white/10 shrink-0"
+        onClick={e => e.stopPropagation()}
+      >
+        <span className="text-xs text-slate-400">
+          Entry ↔ Close comparison
+          <span className="text-slate-600 ml-2">· Esc or click outside to close · ← → to navigate</span>
+        </span>
+        <button onClick={onClose} className="text-slate-500 hover:text-white text-xl leading-none transition-colors">×</button>
+      </div>
+      {/* Split panels */}
+      <div className="flex-1 flex min-h-0" onClick={e => e.stopPropagation()}>
+        <ImagePanel urls={state.entryUrls} idx={entryIdx} setIdx={setEntryIdx} label="🎯 Entry" accentCls="text-blue-300" />
+        <ImagePanel urls={state.closeUrls} idx={closeIdx} setIdx={setCloseIdx} label="✅ Close" accentCls="text-emerald-300" />
+      </div>
+    </div>
+  )
+}
+
+function TopWorstTrades({ top, worst }: { top: TradeSummaryRow[]; worst: TradeSummaryRow[] }) {
+  const [splitView, setSplitView] = useState<SplitViewState | null>(null)
+
+  if (!top.length && !worst.length) {
+    return <div className="text-slate-600 text-sm py-4 text-center">No data</div>
+  }
+
+  function TradeRow({ rank, row, isWin }: { rank: number; row: TradeSummaryRow; isWin: boolean }) {
+    const pnlColor = isWin ? 'text-emerald-400' : 'text-red-400'
+    const pnl = row.realized_pnl
+    const hasScreenshots = row.entry_screenshot_urls.length > 0 || row.close_screenshot_urls.length > 0
+    return (
+      <div className="bg-surface-800/50 rounded-xl p-3 border border-surface-700/50 space-y-1.5">
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] w-4 shrink-0 font-mono text-slate-700">#{rank}</span>
+          <span className="text-sm shrink-0">{isWin ? '🏆' : '💀'}</span>
+          <span className="flex-1 text-xs font-bold text-slate-100 truncate">
+            {cleanPairName(row.pair)}
+            <span className="text-slate-500 font-normal ml-1 text-[10px]">{row.direction}</span>
+          </span>
+          <SessionBadge session={row.session_tag} />
+          <span className="text-[10px] text-slate-600 shrink-0 tabular-nums">
+            {(() => { const DOW = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat']; const d = new Date(row.closed_at); return `${DOW[d.getDay()]} ${row.closed_at}` })()}
+          </span>
+          <span className={`text-xs font-bold tabular-nums shrink-0 ${pnlColor}`}>
+            {pnl >= 0 ? '+$' : '-$'}{Math.abs(pnl).toFixed(0)}
+          </span>
+        </div>
+        {row.strategy_name && (
+          <div className="pl-6 text-[10px] text-slate-500">{row.strategy_name}</div>
+        )}
+        {row.close_notes && (
+          <div className="pl-6 text-[11px] text-slate-400 italic leading-snug line-clamp-3 border-l-2 border-surface-600 ml-6">
+            {row.close_notes}
+          </div>
+        )}
+        {/* Screenshot thumbnails — entry (blue border) | close (green border) */}
+        {hasScreenshots && (
+          <div className="pl-6 flex flex-wrap items-center gap-1.5 pt-0.5">
+            {row.entry_screenshot_urls.slice(0, 3).map((url, i) => (
+              <img
+                key={url}
+                src={url}
+                alt={`entry ${i + 1}`}
+                title="Click to compare entry vs close"
+                className="w-14 h-10 object-cover rounded border border-blue-500/30 cursor-pointer hover:border-blue-400/70 hover:scale-105 transition-all duration-150"
+                onClick={() => setSplitView({ entryUrls: row.entry_screenshot_urls, closeUrls: row.close_screenshot_urls })}
+              />
+            ))}
+            {row.entry_screenshot_urls.length > 0 && row.close_screenshot_urls.length > 0 && (
+              <div className="w-px h-7 bg-surface-600 mx-0.5 shrink-0" />
+            )}
+            {row.close_screenshot_urls.slice(0, 3).map((url, i) => (
+              <img
+                key={url}
+                src={url}
+                alt={`close ${i + 1}`}
+                title="Click to compare entry vs close"
+                className="w-14 h-10 object-cover rounded border border-emerald-500/30 cursor-pointer hover:border-emerald-400/70 hover:scale-105 transition-all duration-150"
+                onClick={() => setSplitView({ entryUrls: row.entry_screenshot_urls, closeUrls: row.close_screenshot_urls })}
+              />
+            ))}
+            <button
+              className="ml-1 text-[9px] text-slate-700 hover:text-slate-300 transition-colors flex items-center gap-0.5"
+              onClick={() => setSplitView({ entryUrls: row.entry_screenshot_urls, closeUrls: row.close_screenshot_urls })}
+              title="Open side-by-side comparison"
+            >
+              <span>⇔</span><span>compare</span>
+            </button>
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  return (
+    <>
+      {splitView && <ScreenshotSplitLightbox state={splitView} onClose={() => setSplitView(null)} />}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        {top.length > 0 && (
+          <div>
+            <p className="text-[10px] text-slate-600 uppercase tracking-widest font-semibold mb-2">
+              🏆 Best trades
+            </p>
+            <div className="space-y-2">
+              {top.map((r, i) => <TradeRow key={r.trade_id} rank={i + 1} row={r} isWin />)}
+            </div>
+          </div>
+        )}
+        {worst.length > 0 && (
+          <div>
+            <p className="text-[10px] text-slate-600 uppercase tracking-widest font-semibold mb-2">
+              💀 Worst trades
+            </p>
+            <div className="space-y-2">
+              {worst.map((r, i) => <TradeRow key={r.trade_id} rank={i + 1} row={r} isWin={false} />)}
+            </div>
+          </div>
+        )}
+      </div>
+    </>
+  )
+}
+
+const ALL_SESSIONS = ['Asian', 'London', 'Overlap', 'New York', 'Weekend']
+
+function StrategySessionMatrix({ data, period }: { data: StrategySessionRow[]; period: string }) {
+  if (!data.length) {
+    return <div className="text-slate-600 text-sm py-4 text-center">No data</div>
+  }
+  // Always show all 6 sessions — empty cells show "—"
+  // This ensures Asia/Tokyo/Weekend always appear even when period filter hides their trades
+
+  function cellColor(wr: number | null): string {
+    if (wr === null) return 'bg-surface-700/30 text-slate-700'
+    if (wr >= 65) return 'bg-emerald-500/25 text-emerald-300'
+    if (wr >= 55) return 'bg-emerald-500/15 text-emerald-400'
+    if (wr >= 45) return 'bg-amber-500/15 text-amber-400'
+    return 'bg-red-500/15 text-red-400'
+  }
+
+  const hasDataForSession = (s: string) =>
+    data.some(row => row.cells.some(c => c.session === s && c.trades > 0))
+
+  return (
+    <div className="space-y-2">
+      {period !== 'all' && (
+        <p className="text-[10px] text-slate-600">
+          Period: <span className="text-slate-400 font-medium">{period}</span>
+          {' '}— switch to <span className="text-slate-400 font-medium">All</span> to see full session history
+        </p>
+      )}
+      <div className="overflow-x-auto">
+        <table className="w-full text-xs border-separate border-spacing-0.5">
+          <thead>
+            <tr>
+              <th className="text-left text-[10px] text-slate-600 uppercase tracking-wider font-medium pb-1 pr-3 whitespace-nowrap">
+                Strategy
+              </th>
+              {ALL_SESSIONS.map(s => (
+                <th
+                  key={s}
+                  className={`text-center text-[9px] uppercase tracking-wider font-medium pb-1 px-1 whitespace-nowrap ${hasDataForSession(s) ? 'text-slate-500' : 'text-slate-700'}`}
+                >
+                  <span className="inline-flex items-center justify-center gap-0.5">
+                    {s}
+                    <SessionInfoIcon session={s} />
+                  </span>
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {data.map(row => (
+              <tr key={row.strategy}>
+                <td className="pr-3 py-0.5 text-[11px] text-slate-300 font-medium whitespace-nowrap max-w-[8rem] truncate">
+                  {row.strategy}
+                </td>
+                {ALL_SESSIONS.map(s => {
+                  const cell = row.cells.find(c => c.session === s)
+                  const wr = cell?.wr_pct ?? null
+                  const trades = cell?.trades ?? 0
+                  return (
+                    <td key={s} className={`rounded px-1 py-0.5 text-center ${cellColor(wr)}`}>
+                      {wr !== null ? (
+                        <div className="flex flex-col items-center leading-none">
+                          <span className="font-bold tabular-nums text-[11px]">{wr.toFixed(0)}%</span>
+                          <span className="text-[8px] opacity-60 tabular-nums">{trades}t</span>
+                        </div>
+                      ) : (
+                        <span className="text-[10px] text-slate-800">—</span>
+                      )}
+                    </td>
+                  )
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
 export function PerformancePage() {
   const { activeProfileId: profileId } = useProfile()
-  const [period, setPeriod] = useState<Period>('30d')
+  const [period, setPeriod] = useState<Period>('all')
   const [report, setReport] = useState<PerformanceReport | null>(null)
   const [settings, setSettings] = useState<AnalyticsSettingsOut | null>(null)
   const [loading, setLoading] = useState(false)
@@ -287,33 +625,45 @@ export function PerformancePage() {
 
           {/* ── 6. Equity Curve + Drawdown ───────────────────────────────── */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <Section title="Equity Curve" hint="all closed trades">
+            <Section title="Equity Curve">
               <EquityCurve data={report.equity_curve} />
             </Section>
-            <Section title="Drawdown" hint="all closed trades">
+            <Section title="Drawdown">
               <DrawdownChart data={report.drawdown} />
             </Section>
           </div>
 
-          {/* ── 7. WR by Hour + WR by Session ────────────────────────────── */}
+          {/* ── 7. WR by Hour + WR by Session ───────────────────────────── */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <Section title="WR by Trade Open Hour" hint="all closed trades">
+            <Section title="WR by Trade Open Hour">
               <HourlyWRChart data={report.wr_by_hour} />
             </Section>
-            <Section title="WR by Session" hint="all closed trades">
-              <WRBarChart data={report.wr_by_session} />
+            <Section title="WR by Session">
+              <WRBarChart
+                data={report.wr_by_session.filter(r => r.label !== 'Unknown')}
+                labelTooltips={Object.fromEntries(
+                  ['Asian', 'London', 'Overlap', 'New York', 'Weekend'].map(s => [s, sessionHint(s)])
+                )}
+              />
             </Section>
           </div>
 
-          {/* ── 8. Pair Leaderboard ───────────────────────────────────────── */}
-          <Section title="Pair Leaderboard" hint="all closed trades">
-            <PairLeaderboard rows={report.pair_leaderboard} />
-          </Section>
+          {/* ── 7b. Day × Hour heatmap (full width) ──────────────────────── */}
+          {report.wr_by_day_hour.length > 0 && (
+            <Section title="WR by Day × Hour">
+              <DayHourHeatmap data={report.wr_by_day_hour} />
+            </Section>
+          )}
 
-          {/* ── 9. Trade Type Distribution ───────────────────────────────── */}
-          <Section title="Trade Type Distribution" hint="all closed trades">
-            <TradeTypeDist data={report.trade_type_dist} />
-          </Section>
+          {/* ── 8. Pair Leaderboard + Trade Type Distribution ────────────── */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <Section title="Pair Leaderboard">
+              <PairLeaderboard rows={report.pair_leaderboard} />
+            </Section>
+            <Section title="Trade Type Distribution">
+              <TradeTypeDist data={report.trade_type_dist} />
+            </Section>
+          </div>
 
           {/* ── 10. Tag Insights + Repeat Errors ──────────────────────────── */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -324,6 +674,20 @@ export function PerformancePage() {
               <RepeatErrors data={report.repeat_errors} />
             </Section>
           </div>
+
+          {/* ── 11. Strategy × Session ─────────────────────────────────── */}
+          {report.wr_by_strategy_session.length > 0 && (
+            <Section title="Strategy × Session">
+              <StrategySessionMatrix data={report.wr_by_strategy_session} period={period} />
+            </Section>
+          )}
+
+          {/* ── 12. Top / Worst Trades ─────────────────────────────── */}
+          {(report.top_trades.length > 0 || report.worst_trades.length > 0) && (
+            <Section title="Top / Worst Trades" hint="by realized P&L">
+              <TopWorstTrades top={report.top_trades} worst={report.worst_trades} />
+            </Section>
+          )}
         </div>
       )}
     </div>
