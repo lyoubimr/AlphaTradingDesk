@@ -3,7 +3,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { Link } from 'react-router-dom'
 import {
   ArrowLeft, Loader2, RefreshCw, CheckCircle2,
-  Pencil, Save, X, Settings, Layers,
+  Pencil, Save, X, Settings, Layers, Plus,
 } from 'lucide-react'
 import { PageHeader } from '../../components/ui/PageHeader'
 import { useProfile } from '../../context/ProfileContext'
@@ -66,6 +66,31 @@ function TFBadge({ tf }: { tf: string }) {
   )
 }
 
+// ── Suggested market context pairs (for config UI) ────────────────────────────
+const SUGGESTED_CONTEXT_PAIRS: { symbol: string; label: string; category: string }[] = [
+  // Market Structure
+  { symbol: 'CRYPTOCAP:BTC.D',    label: 'BTC Dominance',      category: 'Market Structure' },
+  { symbol: 'CRYPTOCAP:TOTAL',    label: 'Total Market Cap',   category: 'Market Structure' },
+  { symbol: 'CRYPTOCAP:TOTAL2',   label: 'Total (no BTC)',     category: 'Market Structure' },
+  { symbol: 'CRYPTOCAP:USDT.D',   label: 'USDT Dominance',     category: 'Market Structure' },
+  { symbol: 'CRYPTOCAP:OTHERS.D', label: 'Alts Dominance',     category: 'Market Structure' },
+  { symbol: 'CRYPTOCAP:TOTAL3',   label: 'Total (no BTC+ETH)', category: 'Market Structure' },
+  // Spot — Binance
+  { symbol: 'BINANCE:BTCUSDT',    label: 'BTC/USDT',           category: 'Spot — Binance' },
+  { symbol: 'BINANCE:ETHUSDT',    label: 'ETH/USDT',           category: 'Spot — Binance' },
+  { symbol: 'BINANCE:ETHBTC',     label: 'ETH/BTC',            category: 'Spot — Binance' },
+  { symbol: 'BINANCE:SOLUSDT',    label: 'SOL/USDT',           category: 'Spot — Binance' },
+  { symbol: 'BINANCE:BNBUSDT',    label: 'BNB/USDT',           category: 'Spot — Binance' },
+  { symbol: 'BINANCE:XRPUSDT',    label: 'XRP/USDT',           category: 'Spot — Binance' },
+  // Spot — Kraken
+  { symbol: 'KRAKEN:XBTUSD',      label: 'BTC/USD',            category: 'Spot — Kraken' },
+  { symbol: 'KRAKEN:ETHUSD',      label: 'ETH/USD',            category: 'Spot — Kraken' },
+  { symbol: 'KRAKEN:SOLUSD',      label: 'SOL/USD',            category: 'Spot — Kraken' },
+  // Sector
+  { symbol: 'CRYPTOCAP:DEFI',     label: 'DeFi Cap',           category: 'Sector' },
+  { symbol: 'CRYPTOCAP:NFT',      label: 'NFT Cap',            category: 'Sector' },
+]
+
 // ── Types ─────────────────────────────────────────────────────────────────────
 type StepEditDraft = {
   label: string
@@ -102,6 +127,12 @@ export function RitualSettingsPage() {
   const [savingWeights, setSavingWeights] = useState(false)
   const [weightsSaved, setWeightsSaved]   = useState(false)
 
+  // Market context pairs
+  const [marketPairs, setMarketPairs]     = useState<string[]>([])
+  const [savingPairs, setSavingPairs]     = useState(false)
+  const [pairsSaved, setPairsSaved]       = useState(false)
+  const [customSymbol, setCustomSymbol]   = useState('')
+
   // ── Load all ────────────────────────────────────────────────────────────────
   const loadAll = useCallback(async () => {
     if (!profileId) return
@@ -122,6 +153,7 @@ export function RitualSettingsPage() {
         ?? DEFAULT_WEIGHTS
       )
       setWeights(wMap)
+      setMarketPairs((settingsData.config?.market_analysis_pairs as string[]) ?? [])
     } finally {
       setLoading(false)
     }
@@ -171,6 +203,37 @@ export function RitualSettingsPage() {
     } finally {
       setSavingWeights(false)
     }
+  }
+
+  const saveMarketPairs = async (pairs: string[]) => {
+    if (!profileId) return
+    setSavingPairs(true)
+    try {
+      const cfg = settings?.config ?? {}
+      const updated = await ritualApi.updateSettings(profileId, { ...cfg, market_analysis_pairs: pairs })
+      setSettings(updated)
+      setPairsSaved(true)
+      setTimeout(() => setPairsSaved(false), 1500)
+    } finally {
+      setSavingPairs(false)
+    }
+  }
+
+  const toggleMarketPair = (symbol: string) => {
+    const next = marketPairs.includes(symbol)
+      ? marketPairs.filter(s => s !== symbol)
+      : [...marketPairs, symbol]
+    setMarketPairs(next)
+    void saveMarketPairs(next)
+  }
+
+  const addCustomPair = () => {
+    const s = customSymbol.trim().toUpperCase()
+    if (!s || marketPairs.includes(s)) return
+    setCustomSymbol('')
+    const next = [...marketPairs, s]
+    setMarketPairs(next)
+    void saveMarketPairs(next)
   }
 
   const startEdit = (step: RitualStep) => {
@@ -489,6 +552,106 @@ export function RitualSettingsPage() {
           ══════════════════════════════════════════════════════════════════════ */}
           {activeTab === 'config' && (
             <div className="space-y-4">
+
+              {/* ── Market Context Pairs ─────────────────────────────────────── */}
+              <div className="rounded-xl border border-surface-700 bg-surface-800/40 overflow-hidden">
+                <div className="px-4 py-3 border-b border-surface-700 bg-surface-800/60 flex items-center justify-between">
+                  <div>
+                    <h3 className="text-sm font-semibold text-slate-200">Market Context Pairs</h3>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      Always pinned at the top of the Smart WL, regardless of scoring. Use for macro structure.
+                    </p>
+                  </div>
+                  <div className="shrink-0 w-4 h-4 flex items-center justify-center">
+                    {savingPairs && <Loader2 size={12} className="animate-spin text-slate-500" />}
+                    {!savingPairs && pairsSaved && <CheckCircle2 size={12} className="text-green-400" />}
+                  </div>
+                </div>
+                <div className="px-4 py-4 space-y-4">
+
+                  {/* Active pills */}
+                  {marketPairs.length > 0 && (
+                    <div>
+                      <p className="text-[10px] uppercase tracking-wider text-slate-500 mb-2">Active ({marketPairs.length})</p>
+                      <div className="flex flex-wrap gap-2">
+                        {marketPairs.map(sym => (
+                          <span
+                            key={sym}
+                            className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-brand-900/30 border border-brand-700/40 text-xs text-brand-300 font-mono"
+                          >
+                            {sym}
+                            <button
+                              onClick={() => toggleMarketPair(sym)}
+                              className="text-brand-600 hover:text-red-400 transition-colors"
+                              title="Remove"
+                            >
+                              <X size={10} />
+                            </button>
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Suggested pairs grouped by category */}
+                  {(Object.entries(
+                    SUGGESTED_CONTEXT_PAIRS.reduce<Record<string, typeof SUGGESTED_CONTEXT_PAIRS>>(
+                      (acc, p) => { ;(acc[p.category] ??= []).push(p); return acc },
+                      {},
+                    ),
+                  ) as [string, typeof SUGGESTED_CONTEXT_PAIRS][]).map(([cat, pairs]) => (
+                    <div key={cat}>
+                      <p className="text-[10px] uppercase tracking-wider text-slate-500 mb-2">{cat}</p>
+                      <div className="flex flex-wrap gap-2">
+                        {pairs.map(p => {
+                          const active = marketPairs.includes(p.symbol)
+                          return (
+                            <button
+                              key={p.symbol}
+                              onClick={() => toggleMarketPair(p.symbol)}
+                              title={p.symbol}
+                              className={cn(
+                                'flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs transition-all',
+                                active
+                                  ? 'border-brand-700/60 bg-brand-900/30 text-brand-300'
+                                  : 'border-surface-600 bg-surface-700/20 text-slate-500 hover:border-slate-500 hover:text-slate-300',
+                              )}
+                            >
+                              {active && <CheckCircle2 size={10} className="text-brand-400" />}
+                              <span className="font-medium">{p.label}</span>
+                              <span className="ml-0.5 text-[10px] opacity-50 font-mono">{p.symbol.split(':')[1]}</span>
+                            </button>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  ))}
+
+                  {/* Custom symbol input */}
+                  <div>
+                    <p className="text-[10px] uppercase tracking-wider text-slate-500 mb-2">Custom symbol</p>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="text"
+                        placeholder="e.g. BINANCE:DOGEUSDT"
+                        value={customSymbol}
+                        onChange={e => setCustomSymbol(e.target.value)}
+                        onKeyDown={e => e.key === 'Enter' && addCustomPair()}
+                        className="flex-1 max-w-xs bg-surface-800 border border-surface-600 rounded-lg px-3 py-1.5 text-sm text-slate-200 placeholder-slate-600 focus:outline-none focus:border-brand-500 font-mono"
+                      />
+                      <button
+                        onClick={addCustomPair}
+                        disabled={!customSymbol.trim() || marketPairs.includes(customSymbol.trim().toUpperCase())}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-brand-700/40 text-brand-400 bg-brand-900/20 text-xs hover:bg-brand-900/30 transition-colors disabled:opacity-40"
+                      >
+                        <Plus size={11} />
+                        Add
+                      </button>
+                    </div>
+                  </div>
+
+                </div>
+              </div>
 
               {/* Top N per session */}
               <div className="rounded-xl border border-surface-700 bg-surface-800/40 overflow-hidden">

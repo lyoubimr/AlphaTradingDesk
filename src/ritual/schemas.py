@@ -267,6 +267,9 @@ DEFAULT_RITUAL_CONFIG: dict[str, Any] = {
         "CRYPTOCAP:TOTAL",
         "CRYPTOCAP:TOTAL2",
         "CRYPTOCAP:USDT.D",
+        "BINANCE:BTCUSDT",
+        "BINANCE:ETHUSDT",
+        "BINANCE:ETHBTC",
     ],
     "top_n": {
         "weekly_setup": 30,
