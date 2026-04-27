@@ -362,9 +362,9 @@ DEFAULT_STEPS: dict[str, list[dict]] = {
         },
         {
             "position": 3, "step_type": "smart_wl",
-            "label": "Generate Smart Watchlist (4H + 1H + 15m)",
+            "label": "Generate Smart Watchlist (1D + 4H + 1H + 15m)",
             "est_minutes": 1, "is_mandatory": True, "linked_module": None,
-            "cadence_hours": None, "config": {"timeframes": ["4H", "1H", "15m"]},
+            "cadence_hours": None, "config": {"timeframes": ["1D", "4H", "1H", "15m"]},
         },
         {
             "position": 4, "step_type": "tv_analysis",

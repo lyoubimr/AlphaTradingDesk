@@ -8,7 +8,7 @@ import { useEffect, useState, useCallback } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import {
   Star, Pin, PinOff, Plus, Download, RefreshCw,
-  ChevronRight, CheckCircle2, SkipForward, Circle,
+  ChevronRight, CheckCircle2, SkipForward,
   Timer, Flame, BookOpen, Clock, XCircle,
   ExternalLink, Loader2, Settings,
   ChevronDown, ChevronUp,
@@ -30,37 +30,60 @@ import type {
 // inline type for market analysis staleness (field names match backend StalenessItem)
 type MAStaleness = { module_name: string; last_analyzed_at: string | null; days_old: number | null; is_stale: boolean }
 
-const SESSION_TYPES: { type: SessionType; emoji: string; label: string; desc: string; est: string; secondary?: boolean }[] = [
+const SESSION_TYPES: { type: SessionType; emoji: string; label: string; when: string; desc: string; est: string; accent: string }[] = [
   {
     type: 'weekly_setup',
     emoji: '📅',
     label: 'Weekly Setup',
-    desc: 'Monday — Market Analysis + Full Watchlist (1W/1D/4H/1H/15m) → Pin key pairs',
+    when: 'Monday',
+    desc: 'Market Analysis + Full Watchlist (1W → 15m) → Pin key pairs for the week',
     est: '~45 min',
+    accent: '#6366f1',
   },
   {
     type: 'trade_session',
     emoji: '🎯',
     label: 'Trade Session',
-    desc: 'Trading window — VI check + Pinned pairs + WL (4H/1H/15m) → Log outcome',
+    when: 'Before entering a position',
+    desc: 'VI check + Pinned pairs + WL (1D → 15m) → Trade decision + Record outcome',
     est: '~30 min',
-  },
-  {
-    type: 'weekend_review',
-    emoji: '📊',
-    label: 'Weekend Review',
-    desc: 'Sat/Sun — Analytics + Trade Journal + Goals + Learning note',
-    est: '~35 min',
+    accent: '#f59e0b',
   },
   {
     type: 'daily_prep',
     emoji: '☀️',
     label: 'Daily Prep',
-    desc: 'Tue–Fri — Quick VI + WL (1D/4H) when no Weekly Setup was done today',
+    when: 'Tue – Fri, no trade planned',
+    desc: 'Quick VI + WL (1D/4H) for daily orientation — no trade required',
     est: '~15 min',
-    secondary: true,
+    accent: '#22c55e',
+  },
+  {
+    type: 'weekend_review',
+    emoji: '📊',
+    label: 'Weekend Review',
+    when: 'Saturday or Sunday',
+    desc: 'Analytics + Trade Journal + Goals + Learning note',
+    est: '~35 min',
+    accent: '#2dd4bf',
   },
 ]
+
+// Step type → accent color for pending indicator ring
+const STEP_ACCENTS: Record<string, string> = {
+  vi_check:        '#f59e0b',
+  smart_wl:        '#6366f1',
+  tv_analysis:     '#22c55e',
+  market_analysis: '#a855f7',
+  pinned_review:   '#eab308',
+  pin_pairs:       '#ec4899',
+  goals_review:    '#f97316',
+  outcome:         '#4ade80',
+  analytics:       '#818cf8',
+  journal:         '#2dd4bf',
+  learning_note:   '#94a3b8',
+  weekly_notes:    '#94a3b8',
+}
 
 const OUTCOME_OPTIONS: { value: SessionOutcome; label: string; emoji: string; color: string }[] = [
   { value: 'trade_opened',    label: 'Trade Opened',    emoji: '✅', color: 'text-green-400' },
@@ -338,7 +361,13 @@ function StepItem({
           ) : isSkipped ? (
             <SkipForward size={18} className="text-slate-500" />
           ) : (
-            <Circle size={18} className="text-brand-500" />
+            <div
+              className="w-[18px] h-[18px] rounded-full border-2 shrink-0"
+              style={{
+                borderColor: STEP_ACCENTS[log.step_type] ?? '#6366f1',
+                backgroundColor: `${STEP_ACCENTS[log.step_type] ?? '#6366f1'}1a`,
+              }}
+            />
           )}
         </div>
 
@@ -476,13 +505,13 @@ function SmartWLPanel({
       {/* Controls */}
       <div className="flex items-center gap-2 flex-wrap">
         <div className="flex items-center gap-2">
-          <label className="text-[11px] text-slate-400 whitespace-nowrap">Top N:</label>
+          <label className="text-[11px] text-slate-400 whitespace-nowrap">Per TF:</label>
           <input
             type="range" min={5} max={50} step={5} value={topN}
             onChange={(e) => setTopN(Number(e.target.value))}
             className="w-24 accent-brand-500"
           />
-          <span className="text-[12px] text-slate-300 w-4 text-right">{topN}</span>
+          <span className="text-[12px] text-brand-400 font-semibold w-6 text-right">{topN}</span>
         </div>
         <button
           onClick={onGenerate}
@@ -1045,15 +1074,12 @@ export function RitualPage() {
               {/* Session header */}
               <div className="flex items-center gap-3 px-4 py-3 border-b border-brand-700/30 bg-brand-900/20">
                 <span className="text-xl">{activeSession.session_emoji}</span>
-                <div className="flex-1">
-                  <p className="text-sm font-semibold text-slate-100">{activeSession.session_label}</p>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-slate-100 truncate">{activeSession.session_label}</p>
                   <div className="flex items-center gap-2 mt-0.5">
                     <span className="flex items-center gap-1 text-[11px] text-slate-400">
                       <Timer size={10} />
                       {elapsed}
-                    </span>
-                    <span className="text-[11px] text-slate-500">
-                      {doneCount}/{totalCount} steps
                     </span>
                     <div className="flex-1 bg-surface-800 rounded-full h-1">
                       <div
@@ -1061,6 +1087,9 @@ export function RitualPage() {
                         style={{ width: `${totalCount > 0 ? (doneCount / totalCount) * 100 : 0}%` }}
                       />
                     </div>
+                    <span className="text-[11px] text-slate-500 shrink-0">
+                      {doneCount}/{totalCount}
+                    </span>
                   </div>
                 </div>
                 <div className="flex items-center gap-1.5">
