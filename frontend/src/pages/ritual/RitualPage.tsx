@@ -1171,6 +1171,43 @@ export function RitualPage() {
                 </button>
               ))}
             </div>
+          )}
+
+          {/* ── Recent sessions ───────────────────────────────────────────── */}
+          {recentSessions.length > 0 && !activeSession && (
+            <div className="rounded-xl border border-surface-700 bg-surface-800/30 overflow-hidden">
+              <div className="px-4 py-2.5 border-b border-surface-700">
+                <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+                  <BookOpen size={12} />
+                  Recent Sessions
+                </p>
+              </div>
+              <div className="divide-y divide-surface-700/60">
+                {recentSessions.slice(0, 5).map((s) => {
+                  const visLogs = s.step_logs.filter(l => l.step_type !== 'ai_brief')
+                  const total = visLogs.length
+                  const done = visLogs.filter(l => l.status !== 'pending').length
+                  const pct = total > 0 ? Math.round(done / total * 100) : null
+                  return (
+                  <div key={s.id} className="flex items-center gap-3 px-4 py-2.5">
+                    <span className="text-base">{s.session_emoji}</span>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-medium text-slate-300">{s.session_label}</p>
+                      <p className="text-[10px] text-slate-500">
+                        {new Date(s.started_at).toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })}
+                        {s.duration_minutes && ` · ${s.duration_minutes}m`}
+                      </p>
+                      {s.status !== 'completed' && pct !== null && (
+                        <div className="mt-1 flex items-center gap-1.5">
+                          <div className="flex-1 h-1 rounded-full bg-surface-700 max-w-[80px]">
+                            <div
+                              className={cn('h-1 rounded-full transition-all', s.status === 'abandoned' ? 'bg-red-500/60' : 'bg-amber-500/60')}
+                              style={{ width: `${pct}%` }}
+                            />
+                          </div>
+                          <span className="text-[10px] text-slate-600">{done}/{total}</span>
+                        </div>
+                      )}
                     </div>
                     <div className="flex items-center gap-1.5">
                       {s.outcome && (
