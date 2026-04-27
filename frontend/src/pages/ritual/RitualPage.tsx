@@ -392,6 +392,7 @@ function StepItem({
               topN={topN ?? 20}
               setTopN={setTopN ?? (() => {})}
               onGenerate={onGenerateWL ?? (() => {})}
+              onPin={onPin}
             />
           )}
 
@@ -458,7 +459,7 @@ function OutcomeSelector({ onSelect }: { onSelect: (o: SessionOutcome) => void }
 
 // ── Smart WL panel ────────────────────────────────────────────────────────────
 function SmartWLPanel({
-  result, loading, downloadUrl, topN, setTopN, onGenerate,
+  result, loading, downloadUrl, topN, setTopN, onGenerate, onPin,
 }: {
   result: SmartWLResult | null
   loading: boolean
@@ -466,6 +467,7 @@ function SmartWLPanel({
   topN: number
   setTopN: (n: number) => void
   onGenerate: () => void
+  onPin?: (pair: string, tf: string) => Promise<void>
 }) {
   const navigate = useNavigate()
   const hasData = result !== null && Object.values(result.timeframes).some(pairs => pairs.length > 0)
@@ -546,12 +548,21 @@ function SmartWLPanel({
               <div className="grid grid-cols-2 gap-1">
                 {pairs.slice(0, 8).map((p) => (
                   <div key={p.pair} className={cn(
-                    'flex items-center gap-1.5 rounded px-1.5 py-1',
+                    'group relative flex items-center gap-1.5 rounded px-1.5 py-1',
                     p.is_pinned ? 'bg-brand-900/30 border border-brand-700/30' : 'bg-surface-800/60',
                   )}>
                     {p.is_pinned && <span className="text-[10px] text-yellow-400">★</span>}
-                    <span className="text-[11px] text-slate-300 font-medium truncate">{p.tv_symbol}</span>
+                    <span className="text-[11px] text-slate-300 font-medium truncate flex-1">{p.tv_symbol}</span>
                     <RegimeBadge regime={p.regime} />
+                    {!p.is_pinned && onPin && (
+                      <button
+                        onClick={() => onPin(p.pair, tf)}
+                        className="opacity-0 group-hover:opacity-100 transition-opacity shrink-0 p-0.5 text-slate-600 hover:text-yellow-400"
+                        title={`Pin ${p.pair} (${tf})`}
+                      >
+                        <Pin size={10} />
+                      </button>
+                    )}
                   </div>
                 ))}
                 {pairs.length > 8 && (
@@ -734,9 +745,10 @@ function AddPinForm({ instruments, onAdd }: AddPinFormProps) {
             <button
               onClick={handleSubmit}
               disabled={!pair}
-              className="px-3 py-1.5 rounded-lg bg-brand-700/30 border border-brand-600/40 text-brand-400 text-xs font-medium hover:bg-brand-700/50 disabled:opacity-40 transition-colors"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-brand-700/30 border border-brand-600/40 text-brand-400 text-xs font-medium hover:bg-brand-700/50 disabled:opacity-40 transition-colors whitespace-nowrap"
             >
               <Pin size={12} />
+              Pin
             </button>
           </div>
         </div>
@@ -864,6 +876,7 @@ export function RitualPage() {
   const [wlResult, setWlResult] = useState<SmartWLResult | null>(null)
   const [wlLoading, setWlLoading] = useState(false)
   const [topN, setTopN] = useState(20)
+  const [pinnedKey, setPinnedKey] = useState(0)
 
   const elapsed = useElapsed(activeSession?.started_at ?? null)
 
@@ -928,6 +941,24 @@ export function RitualPage() {
     setActiveSession(null)
     setWlResult(null)
     await reload()
+  }
+
+  const handlePinFromWL = async (pair: string, tf: string) => {
+    if (!profileId) return
+    await ritualApi.addPinned(profileId, { pair, timeframe: tf as PinnedTF, note: null, source: 'smart_wl' })
+    setPinnedKey(k => k + 1)
+    setWlResult(prev => {
+      if (!prev) return prev
+      return {
+        ...prev,
+        timeframes: Object.fromEntries(
+          Object.entries(prev.timeframes).map(([t, pairs]) => [
+            t,
+            pairs.map(p => p.pair === pair && t === tf ? { ...p, is_pinned: true } : p),
+          ])
+        ),
+      }
+    })
   }
 
   const handleGenerateWL = async () => {
@@ -1071,6 +1102,7 @@ export function RitualPage() {
                       downloadUrl={downloadUrl}
                       topN={topN}
                       setTopN={setTopN}
+                      onPin={handlePinFromWL}
                     />
                   )
                 })}
@@ -1226,8 +1258,8 @@ export function RitualPage() {
         </div>
 
         {/* ── Pinned pairs sidebar ─────────────────────────────────────────── */}
-        <div className="rounded-xl border border-surface-700 bg-surface-800/40 p-4 lg:sticky lg:top-4 min-h-[300px]">
-          <PinnedPanel profileId={profileId} onPinsChanged={reload} />
+        <div className="rounded-xl border border-surface-700 bg-surface-800/40 p-4 lg:sticky lg:top-4 min-h-[300px] overflow-visible">
+          <PinnedPanel key={pinnedKey} profileId={profileId} onPinsChanged={reload} />
         </div>
       </div>
     </div>

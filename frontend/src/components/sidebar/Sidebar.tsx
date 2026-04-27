@@ -127,6 +127,11 @@ const NAV_GROUPS: NavGroup[] = [
         icon: <Bell size={16} />,
       },
       {
+        to: '/settings/ritual',
+        label: 'Ritual',
+        icon: <BookOpen size={16} />,
+      },
+      {
         to: '/settings/automation',
         label: 'Automation',
         icon: <Zap size={16} />,
