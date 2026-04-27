@@ -696,9 +696,11 @@ def generate_smart_watchlist(
     tf_pairs: dict[str, list[str]] = {}
 
     for tf in tfs:
+        # Normalize to lowercase — WatchlistSnapshot stores TFs in lowercase (e.g. "4h", "1h")
+        # but step configs may use uppercase (e.g. "4H", "1H").
         snapshot = (
             db.query(WatchlistSnapshot)
-            .filter(WatchlistSnapshot.timeframe == tf)
+            .filter(WatchlistSnapshot.timeframe == tf.lower())
             .order_by(WatchlistSnapshot.generated_at.desc())
             .first()
         )
