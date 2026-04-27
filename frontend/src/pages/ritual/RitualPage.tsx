@@ -331,11 +331,12 @@ interface StepItemProps {
   downloadUrl?: string
   topN?: number
   setTopN?: (n: number) => void
+  onPin?: (pair: string, tf: string) => Promise<void>
 }
 
 function StepItem({
   log, step, isCurrent, profileId,
-  onComplete, onGenerateWL, wlResult, wlLoading, downloadUrl, topN, setTopN,
+  onComplete, onGenerateWL, wlResult, wlLoading, downloadUrl, topN, setTopN, onPin,
 }: StepItemProps) {
   const navigate = useNavigate()
   const isDone = log.status === 'done'
@@ -974,7 +975,7 @@ export function RitualPage() {
 
   const handlePinFromWL = async (pair: string, tf: string) => {
     if (!profileId) return
-    await ritualApi.addPinned(profileId, { pair, timeframe: tf as PinnedTF, note: null, source: 'smart_wl' })
+    await ritualApi.addPinned(profileId, { pair, timeframe: tf as PinnedTF, note: null, source: 'watchlist' })
     setPinnedKey(k => k + 1)
     setWlResult(prev => {
       if (!prev) return prev
@@ -1138,112 +1139,38 @@ export function RitualPage() {
               </div>
             </div>
           ) : (
-            /* ── Session type picker ─────────────────────────────────────── */
-            <div className="space-y-3">
-              {/* Primary sessions: 3-col grid */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                {SESSION_TYPES.filter(s => !s.secondary).map((st) => (
-                  <button
-                    key={st.type}
-                    onClick={() => handleStart(st.type)}
-                    disabled={starting !== null}
-                    className={cn(
-                      'rounded-xl border p-4 text-left transition-all group',
-                      'border-surface-700 bg-surface-800/40',
-                      'hover:border-brand-600/60 hover:bg-brand-950/20',
-                      'focus:outline-none focus:ring-2 focus:ring-brand-500/40',
-                      starting === st.type && 'opacity-60 cursor-wait',
-                    )}
-                  >
-                    <div className="flex items-start justify-between mb-2">
-                      <span className="text-2xl">{st.emoji}</span>
-                      {starting === st.type && <Loader2 size={14} className="animate-spin text-brand-400 mt-1" />}
-                    </div>
-                    <p className="text-sm font-semibold text-slate-200 group-hover:text-slate-100">
-                      {st.label}
-                    </p>
-                    <p className="mt-1 text-[11px] text-slate-500 leading-relaxed">{st.desc}</p>
-                    <div className="mt-3 flex items-center justify-between">
-                      <span className="flex items-center gap-1 text-[11px] text-slate-500">
-                        <Clock size={10} />
-                        {st.est}
-                      </span>
-                      <ChevronRight size={14} className="text-slate-600 group-hover:text-brand-400 transition-colors" />
-                    </div>
-                  </button>
-                ))}
-              </div>
-
-              {/* Secondary sessions: smaller compact row */}
-              <div>
-                <p className="text-[10px] text-slate-600 uppercase tracking-wider mb-2">Quick option</p>
-                <div className="flex flex-col sm:flex-row gap-2">
-                  {SESSION_TYPES.filter(s => s.secondary).map((st) => (
-                    <button
-                      key={st.type}
-                      onClick={() => handleStart(st.type)}
-                      disabled={starting !== null}
-                      className={cn(
-                        'flex items-center gap-3 rounded-lg border px-4 py-2.5 text-left transition-all group',
-                        'border-surface-700 bg-surface-800/20',
-                        'hover:border-brand-600/40 hover:bg-brand-950/10',
-                        'focus:outline-none focus:ring-2 focus:ring-brand-500/30',
-                        starting === st.type && 'opacity-60 cursor-wait',
-                      )}
-                    >
-                      <span className="text-xl">{st.emoji}</span>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-semibold text-slate-300 group-hover:text-slate-100">{st.label}</p>
-                        <p className="text-[10px] text-slate-500 truncate">{st.desc}</p>
-                      </div>
-                      <div className="flex items-center gap-2 shrink-0">
-                        <span className="text-[11px] text-slate-500">{st.est}</span>
-                        {starting === st.type
-                          ? <Loader2 size={12} className="animate-spin text-brand-400" />
-                          : <ChevronRight size={12} className="text-slate-600 group-hover:text-brand-400 transition-colors" />}
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              </div>
+            /* ── Session type picker ─────────────────────────────────── */
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {SESSION_TYPES.map((st) => (
+                <button
+                  key={st.type}
+                  onClick={() => handleStart(st.type)}
+                  disabled={starting !== null}
+                  className={cn(
+                    'relative rounded-xl border border-surface-700 bg-surface-800/40 p-4 text-left transition-all group overflow-hidden',
+                    'hover:bg-surface-800/70 hover:border-surface-600',
+                    'focus:outline-none',
+                    starting === st.type && 'opacity-60 cursor-wait',
+                  )}
+                >
+                  {/* Accent top bar */}
+                  <div className="absolute top-0 left-0 right-0 h-[3px] rounded-t-xl" style={{ backgroundColor: st.accent }} />
+                  <div className="flex items-start justify-between mb-2 pt-1">
+                    <span className="text-2xl leading-none">{st.emoji}</span>
+                    {starting === st.type
+                      ? <Loader2 size={14} className="animate-spin text-slate-400 mt-0.5" />
+                      : <ChevronRight size={14} className="text-slate-600 group-hover:text-slate-300 transition-colors mt-0.5" />}
+                  </div>
+                  <p className="text-sm font-semibold text-slate-200 group-hover:text-white leading-tight">{st.label}</p>
+                  <p className="text-[10px] font-semibold mt-0.5" style={{ color: st.accent }}>{st.when}</p>
+                  <p className="mt-1.5 text-[11px] text-slate-500 leading-relaxed">{st.desc}</p>
+                  <div className="mt-3 flex items-center gap-1 text-[11px] text-slate-600">
+                    <Clock size={10} />
+                    {st.est}
+                  </div>
+                </button>
+              ))}
             </div>
-          )}
-
-          {/* ── Recent sessions ───────────────────────────────────────────── */}
-          {recentSessions.length > 0 && !activeSession && (
-            <div className="rounded-xl border border-surface-700 bg-surface-800/30 overflow-hidden">
-              <div className="px-4 py-2.5 border-b border-surface-700">
-                <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
-                  <BookOpen size={12} />
-                  Recent Sessions
-                </p>
-              </div>
-              <div className="divide-y divide-surface-700/60">
-                {recentSessions.slice(0, 5).map((s) => {
-                  const visLogs = s.step_logs.filter(l => l.step_type !== 'ai_brief')
-                  const total = visLogs.length
-                  const done = visLogs.filter(l => l.status !== 'pending').length
-                  const pct = total > 0 ? Math.round(done / total * 100) : null
-                  return (
-                  <div key={s.id} className="flex items-center gap-3 px-4 py-2.5">
-                    <span className="text-base">{s.session_emoji}</span>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-xs font-medium text-slate-300">{s.session_label}</p>
-                      <p className="text-[10px] text-slate-500">
-                        {new Date(s.started_at).toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })}
-                        {s.duration_minutes && ` · ${s.duration_minutes}m`}
-                      </p>
-                      {s.status !== 'completed' && pct !== null && (
-                        <div className="mt-1 flex items-center gap-1.5">
-                          <div className="flex-1 h-1 rounded-full bg-surface-700 max-w-[80px]">
-                            <div
-                              className={cn('h-1 rounded-full transition-all', s.status === 'abandoned' ? 'bg-red-500/60' : 'bg-amber-500/60')}
-                              style={{ width: `${pct}%` }}
-                            />
-                          </div>
-                          <span className="text-[10px] text-slate-600">{done}/{total}</span>
-                        </div>
-                      )}
                     </div>
                     <div className="flex items-center gap-1.5">
                       {s.outcome && (
