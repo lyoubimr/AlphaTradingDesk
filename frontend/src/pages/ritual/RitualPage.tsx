@@ -10,7 +10,7 @@ import {
   Star, Pin, PinOff, Plus, Download, RefreshCw,
   ChevronRight, CheckCircle2, SkipForward, Circle,
   Timer, Flame, BookOpen, Clock, XCircle,
-  ExternalLink, Loader2, Settings,
+  ExternalLink, Loader2, Settings, Pencil, Save, X,
   ChevronDown, ChevronUp,
 } from 'lucide-react'
 import { PageHeader } from '../../components/ui/PageHeader'
@@ -27,8 +27,8 @@ import type {
 // Constants & helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
-// inline type for market analysis staleness
-type MAStaleness = { module_name: string; last_session_at: string | null; days_old: number | null; is_stale: boolean }
+// inline type for market analysis staleness (field names match backend StalenessItem)
+type MAStaleness = { module_name: string; last_analyzed_at: string | null; days_old: number | null; is_stale: boolean }
 
 const SESSION_TYPES: { type: SessionType; emoji: string; label: string; desc: string; est: string; secondary?: boolean }[] = [
   {
@@ -191,6 +191,7 @@ function MarketAnalysisPanel({
   onComplete: (logId: number, status: 'done' | 'skipped', output?: Record<string, unknown>) => void
 }) {
   const navigate = useNavigate()
+  const { activeProfile } = useProfile()
   const [staleness, setStaleness] = useState<MAStaleness[] | null>(null)
   const [loading, setLoading] = useState(true)
 
@@ -202,8 +203,13 @@ function MarketAnalysisPanel({
       .finally(() => setLoading(false))
   }, [profileId])
 
-  const staleModules = staleness?.filter(s => s.is_stale) ?? []
-  const allFresh = staleness !== null && staleness.length > 0 && staleModules.length === 0
+  // Modules the profile has actually used before → these matter
+  const relevantStaleness = staleness?.filter(s => s.last_analyzed_at !== null) ?? []
+  // Modules never analyzed → optional, informational only
+  const neverDone = staleness?.filter(s => s.last_analyzed_at === null) ?? []
+  // Only alarming: previously-used modules now stale
+  const trueStale = relevantStaleness.filter(s => s.is_stale)
+  const allFresh = staleness !== null && staleness.length > 0 && trueStale.length === 0
 
   return (
     <div className="mt-2 rounded-lg border border-surface-700 bg-surface-900/60 p-3 space-y-2">
@@ -212,41 +218,62 @@ function MarketAnalysisPanel({
           <Loader2 size={12} className="animate-spin text-slate-500" />
           <span className="text-xs text-slate-500">Checking Market Analysis status…</span>
         </div>
-      ) : allFresh ? (
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-1.5">
-            <CheckCircle2 size={14} className="text-green-500" />
-            <span className="text-xs text-green-400 font-medium">Market Analysis up to date</span>
-          </div>
+      ) : staleness === null || staleness.length === 0 ? (
+        <div className="space-y-2">
+          <p className="text-xs text-slate-400">No Market Analysis modules configured.</p>
           <button
-            onClick={() => onComplete(logId, 'done', { market_analysis: 'fresh' })}
-            className="px-2.5 py-1 rounded-lg bg-green-700/20 border border-green-700/40 text-green-400 text-xs font-medium hover:bg-green-700/30 transition-colors"
+            onClick={() => navigate('/market-analysis')}
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-brand-700/20 border border-brand-600/40 text-brand-400 text-xs font-medium hover:bg-brand-700/30 transition-colors"
           >
-            ✓ Done
+            <ExternalLink size={11} /> Open Market Analysis
           </button>
+        </div>
+      ) : allFresh ? (
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-1.5">
+              <CheckCircle2 size={14} className="text-green-500" />
+              <span className="text-xs text-green-400 font-medium">Market Analysis up to date</span>
+              {activeProfile?.market_type && (
+                <span className="text-[10px] text-slate-600">({activeProfile.market_type})</span>
+              )}
+            </div>
+            <button
+              onClick={() => onComplete(logId, 'done', { market_analysis: 'fresh' })}
+              className="px-2.5 py-1 rounded-lg bg-green-700/20 border border-green-700/40 text-green-400 text-xs font-medium hover:bg-green-700/30 transition-colors"
+            >
+              ✓ Done
+            </button>
+          </div>
+          {neverDone.length > 0 && (
+            <p className="text-[10px] text-slate-600">
+              {neverDone.length} module(s) never analyzed — optional for {activeProfile?.market_type ?? 'your'} profile
+            </p>
+          )}
         </div>
       ) : (
         <div className="space-y-2">
           <div className="flex items-center gap-1.5">
             <span className="text-amber-400 text-sm">⚠</span>
             <span className="text-xs text-amber-400 font-medium">
-              {staleness === null || staleness.length === 0
-                ? 'No analysis found — run Market Analysis first'
-                : `${staleModules.length} module(s) not updated this week`}
+              {trueStale.length} module(s) not updated this week
             </span>
           </div>
-          {staleness && staleness.length > 0 && (
-            <div className="space-y-1 rounded-lg border border-surface-700 bg-surface-900 p-2">
-              {staleness.map(s => (
-                <div key={s.module_name} className="flex items-center justify-between">
-                  <span className="text-xs text-slate-400">{s.module_name}</span>
-                  <span className={cn('text-[10px] font-medium', s.is_stale ? 'text-red-400' : 'text-green-400')}>
-                    {s.is_stale ? (s.last_session_at ? `${s.days_old}d ago` : 'Never') : '✓ OK'}
-                  </span>
-                </div>
-              ))}
-            </div>
-          )}
+          <div className="space-y-1 rounded-lg border border-surface-700 bg-surface-900 p-2">
+            {relevantStaleness.map(s => (
+              <div key={s.module_name} className="flex items-center justify-between">
+                <span className="text-xs text-slate-400">{s.module_name}</span>
+                <span className={cn('text-[10px] font-medium', s.is_stale ? 'text-amber-400' : 'text-green-400')}>
+                  {s.is_stale ? `${s.days_old ?? '?'}d ago` : '✓ OK'}
+                </span>
+              </div>
+            ))}
+            {neverDone.length > 0 && (
+              <p className="text-[10px] text-slate-600 mt-1 pt-1 border-t border-surface-700/50">
+                {neverDone.length} module(s) never used — likely not relevant to {activeProfile?.market_type ?? 'your'} profile
+              </p>
+            )}
+          </div>
           <div className="flex gap-2">
             <button
               onClick={() => navigate('/market-analysis')}
@@ -441,7 +468,7 @@ function SmartWLPanel({
   onGenerate: () => void
 }) {
   const navigate = useNavigate()
-  const hasData = result !== null && Object.keys(result.timeframes).length > 0
+  const hasData = result !== null && Object.values(result.timeframes).some(pairs => pairs.length > 0)
   return (
     <div className="mt-3 space-y-3">
       {/* Controls */}
@@ -508,7 +535,9 @@ function SmartWLPanel({
               </div>
             </div>
           )}
-          {Object.entries(result.timeframes).map(([tf, pairs]) => (
+          {Object.entries(result.timeframes)
+            .filter(([, pairs]) => pairs.length > 0)
+            .map(([tf, pairs]) => (
             <div key={tf} className="px-3 py-2">
               <div className="flex items-center gap-2 mb-1.5">
                 <TFBadge tf={tf} />
@@ -533,6 +562,15 @@ function SmartWLPanel({
               </div>
             </div>
           ))}
+          {Object.entries(result.timeframes).some(([, p]) => p.length === 0) && (
+            <div className="px-3 py-2 flex flex-wrap gap-1.5 items-center border-t border-surface-700/60">
+              <span className="text-[10px] text-slate-500">No snapshot for:</span>
+              {Object.entries(result.timeframes)
+                .filter(([, p]) => p.length === 0)
+                .map(([tf]) => <TFBadge key={tf} tf={tf} />)}
+              <span className="text-[10px] text-slate-500">— run volatility analysis for these TFs first</span>
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -709,6 +747,14 @@ function AddPinForm({ instruments, onAdd }: AddPinFormProps) {
 
 // ── Ritual Settings Panel ─────────────────────────────────────────────────────
 const SETTINGS_SESSION_TYPES = ['weekly_setup', 'trade_session', 'daily_prep', 'weekend_review'] as const
+const AVAILABLE_TFS = ['1W', '1D', '4H', '1H', '15m']
+
+type StepEditDraft = {
+  label: string
+  est_minutes: number | null
+  is_mandatory: boolean
+  timeframes: string[]
+}
 
 function RitualSettingsPanel({ profileId }: { profileId: number }) {
   const [isOpen, setIsOpen] = useState(false)
@@ -719,6 +765,9 @@ function RitualSettingsPanel({ profileId }: { profileId: number }) {
   const [saving, setSaving] = useState(false)
   const [resetting, setResetting] = useState<string | null>(null)
   const [resetDone, setResetDone] = useState<string | null>(null)
+  // Inline step editing state — keyed by step id
+  const [editDrafts, setEditDrafts] = useState<Record<number, StepEditDraft | null>>({})
+  const [savingStep, setSavingStep] = useState<number | null>(null)
 
   const loadAll = useCallback(async () => {
     setLoadingSteps(true)
@@ -747,6 +796,7 @@ function RitualSettingsPanel({ profileId }: { profileId: number }) {
     try {
       const newSteps = await ritualApi.resetSteps(profileId, sessionType)
       setStepsMap(prev => ({ ...prev, [sessionType]: newSteps }))
+      setEditDrafts({})
       setResetDone(sessionType)
       setTimeout(() => setResetDone(null), 2500)
     } finally {
@@ -764,6 +814,46 @@ function RitualSettingsPanel({ profileId }: { profileId: number }) {
       setSettings(updated)
     } finally {
       setSaving(false)
+    }
+  }
+
+  const startEdit = (step: RitualStep) => {
+    setEditDrafts(prev => ({
+      ...prev,
+      [step.id]: {
+        label: step.label,
+        est_minutes: step.est_minutes,
+        is_mandatory: step.is_mandatory,
+        timeframes: (step.config?.timeframes as string[]) ?? [],
+      },
+    }))
+  }
+
+  const cancelEdit = (stepId: number) => {
+    setEditDrafts(prev => { const n = { ...prev }; delete n[stepId]; return n })
+  }
+
+  const saveStep = async (step: RitualStep, sessionType: string) => {
+    const draft = editDrafts[step.id]
+    if (!draft) return
+    setSavingStep(step.id)
+    try {
+      const payload: Partial<RitualStep> = {
+        label: draft.label,
+        est_minutes: draft.est_minutes,
+        is_mandatory: draft.is_mandatory,
+      }
+      if (step.step_type === 'smart_wl') {
+        payload.config = { ...step.config, timeframes: draft.timeframes }
+      }
+      const updated = await ritualApi.updateStep(profileId, step.id, payload)
+      setStepsMap(prev => ({
+        ...prev,
+        [sessionType]: (prev[sessionType] ?? []).map(s => s.id === step.id ? updated : s),
+      }))
+      cancelEdit(step.id)
+    } finally {
+      setSavingStep(null)
     }
   }
 
@@ -789,8 +879,33 @@ function RitualSettingsPanel({ profileId }: { profileId: number }) {
             </div>
           ) : (
             <>
-              {/* ── Step Templates ── */}
+              {/* ── Section A: General Settings ── */}
               <div className="pt-4">
+                <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">General Settings</p>
+                <div className="space-y-2">
+                  {SETTINGS_SESSION_TYPES.map(type => {
+                    const info = SESSION_TYPES.find(s => s.type === type)!
+                    return (
+                      <div key={type} className="flex items-center gap-3 rounded-lg border border-surface-700 bg-surface-900/40 px-3 py-2">
+                        <span className="text-sm shrink-0">{info.emoji}</span>
+                        <span className="text-[11px] text-slate-400 flex-1 truncate">{info.label}</span>
+                        <span className="text-[11px] text-slate-500 whitespace-nowrap">Smart WL top N:</span>
+                        <input
+                          type="range" min={5} max={50} step={5}
+                          value={topNLocal[type] ?? 20}
+                          onChange={e => updateTopN(type, Number(e.target.value))}
+                          className="w-24 accent-brand-500"
+                          disabled={saving}
+                        />
+                        <span className="text-[11px] text-slate-300 w-5 text-right shrink-0">{topNLocal[type] ?? 20}</span>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+
+              {/* ── Section B: Step Templates ── */}
+              <div>
                 <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">Step Templates</p>
                 <div className="space-y-2">
                   {SETTINGS_SESSION_TYPES.map(type => {
@@ -803,7 +918,7 @@ function RitualSettingsPanel({ profileId }: { profileId: number }) {
                         <div className="flex items-center gap-2 px-3 py-2 border-b border-surface-700/50">
                           <span className="text-sm">{info.emoji}</span>
                           <span className="text-xs font-semibold text-slate-300 flex-1">{info.label}</span>
-                          <span className="text-[10px] text-slate-500 mr-1">{steps.length} steps · top {topNLocal[type] ?? 20}</span>
+                          <span className="text-[10px] text-slate-500 mr-1">{steps.length} steps</span>
                           <button
                             onClick={() => handleReset(type)}
                             disabled={resetting !== null}
@@ -826,9 +941,97 @@ function RitualSettingsPanel({ profileId }: { profileId: number }) {
                           {steps.length === 0 ? (
                             <p className="text-[11px] text-slate-500 italic">No steps — click Reset to seed defaults.</p>
                           ) : steps.map(step => {
+                            const draft = editDrafts[step.id]
+                            const isEditing = draft != null
+                            const isSaving = savingStep === step.id
+
+                            if (isEditing) {
+                              return (
+                                <div key={step.id} className="rounded-lg border border-brand-700/40 bg-brand-900/10 p-2 space-y-2">
+                                  {/* Label */}
+                                  <input
+                                    type="text"
+                                    value={draft.label}
+                                    onChange={e => setEditDrafts(prev => ({ ...prev, [step.id]: { ...draft, label: e.target.value } }))}
+                                    className="w-full bg-surface-800 border border-surface-600 rounded px-2 py-1 text-[11px] text-slate-200 focus:outline-none focus:border-brand-500"
+                                  />
+                                  <div className="flex items-center gap-3 flex-wrap">
+                                    {/* Est minutes */}
+                                    <div className="flex items-center gap-1.5">
+                                      <span className="text-[10px] text-slate-500">Minutes:</span>
+                                      <input
+                                        type="number"
+                                        min={0} max={120}
+                                        value={draft.est_minutes ?? ''}
+                                        onChange={e => setEditDrafts(prev => ({ ...prev, [step.id]: { ...draft, est_minutes: e.target.value ? Number(e.target.value) : null } }))}
+                                        className="w-14 bg-surface-800 border border-surface-600 rounded px-1.5 py-0.5 text-[11px] text-slate-200 focus:outline-none focus:border-brand-500"
+                                      />
+                                    </div>
+                                    {/* Mandatory toggle */}
+                                    <button
+                                      onClick={() => setEditDrafts(prev => ({ ...prev, [step.id]: { ...draft, is_mandatory: !draft.is_mandatory } }))}
+                                      className={cn(
+                                        'text-[10px] px-2 py-0.5 rounded border transition-colors',
+                                        draft.is_mandatory
+                                          ? 'border-brand-700/40 text-brand-400 bg-brand-900/30'
+                                          : 'border-surface-600 text-slate-500',
+                                      )}
+                                    >
+                                      {draft.is_mandatory ? 'Required' : 'Optional'}
+                                    </button>
+                                  </div>
+                                  {/* TF checkboxes — only for smart_wl step */}
+                                  {step.step_type === 'smart_wl' && (
+                                    <div className="flex items-center gap-1.5 flex-wrap">
+                                      <span className="text-[10px] text-slate-500">TFs:</span>
+                                      {AVAILABLE_TFS.map(tf => (
+                                        <button
+                                          key={tf}
+                                          onClick={() => setEditDrafts(prev => {
+                                            const cur = prev[step.id]!
+                                            const tfs = cur.timeframes.includes(tf)
+                                              ? cur.timeframes.filter(t => t !== tf)
+                                              : [...cur.timeframes, tf]
+                                            return { ...prev, [step.id]: { ...cur, timeframes: tfs } }
+                                          })}
+                                          className={cn(
+                                            'text-[10px] px-1.5 py-0.5 rounded border transition-colors',
+                                            draft.timeframes.includes(tf)
+                                              ? 'border-brand-700/40 text-brand-400 bg-brand-900/20'
+                                              : 'border-surface-600 text-slate-600',
+                                          )}
+                                        >
+                                          {tf}
+                                        </button>
+                                      ))}
+                                    </div>
+                                  )}
+                                  {/* Save / Cancel */}
+                                  <div className="flex items-center gap-2">
+                                    <button
+                                      onClick={() => saveStep(step, type)}
+                                      disabled={isSaving}
+                                      className="flex items-center gap-1 px-2.5 py-0.5 rounded bg-brand-700/30 border border-brand-600/40 text-brand-400 text-[11px] hover:bg-brand-700/40 transition-colors disabled:opacity-50"
+                                    >
+                                      {isSaving ? <Loader2 size={9} className="animate-spin" /> : <Save size={9} />}
+                                      Save
+                                    </button>
+                                    <button
+                                      onClick={() => cancelEdit(step.id)}
+                                      disabled={isSaving}
+                                      className="flex items-center gap-1 px-2.5 py-0.5 rounded border border-surface-600 text-slate-500 text-[11px] hover:text-slate-300 transition-colors disabled:opacity-50"
+                                    >
+                                      <X size={9} />
+                                      Cancel
+                                    </button>
+                                  </div>
+                                </div>
+                              )
+                            }
+
                             const tfs = (step.config?.timeframes as string[]) ?? []
                             return (
-                              <div key={step.id} className="flex items-center gap-2 min-w-0">
+                              <div key={step.id} className="flex items-center gap-2 min-w-0 group">
                                 <span className="text-[10px] text-slate-600 w-4 text-right shrink-0">{step.position}.</span>
                                 <span className="text-[11px] text-slate-300 flex-1 truncate">{step.label}</span>
                                 {tfs.length > 0 && (
@@ -842,25 +1045,18 @@ function RitualSettingsPanel({ profileId }: { profileId: number }) {
                                 )}>
                                   {step.is_mandatory ? 'req' : 'opt'}
                                 </span>
-                                {step.est_minutes && (
+                                {step.est_minutes != null && (
                                   <span className="text-[10px] text-slate-600 shrink-0">{step.est_minutes}m</span>
                                 )}
+                                <button
+                                  onClick={() => startEdit(step)}
+                                  className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity text-slate-600 hover:text-brand-400"
+                                >
+                                  <Pencil size={11} />
+                                </button>
                               </div>
                             )
                           })}
-                        </div>
-
-                        {/* Top N slider per session */}
-                        <div className="flex items-center gap-3 px-3 py-2 border-t border-surface-700/40 bg-surface-900/20">
-                          <span className="text-[11px] text-slate-500">Smart WL top N:</span>
-                          <input
-                            type="range" min={5} max={50} step={5}
-                            value={topNLocal[type] ?? 20}
-                            onChange={e => updateTopN(type, Number(e.target.value))}
-                            className="flex-1 accent-brand-500"
-                            disabled={saving}
-                          />
-                          <span className="text-[11px] text-slate-300 w-5 text-right">{topNLocal[type] ?? 20}</span>
                         </div>
                       </div>
                     )
@@ -1288,7 +1484,12 @@ export function RitualPage() {
                 </p>
               </div>
               <div className="divide-y divide-surface-700/60">
-                {recentSessions.slice(0, 5).map((s) => (
+                {recentSessions.slice(0, 5).map((s) => {
+                  const visLogs = s.step_logs.filter(l => l.step_type !== 'ai_brief')
+                  const total = visLogs.length
+                  const done = visLogs.filter(l => l.status !== 'pending').length
+                  const pct = total > 0 ? Math.round(done / total * 100) : null
+                  return (
                   <div key={s.id} className="flex items-center gap-3 px-4 py-2.5">
                     <span className="text-base">{s.session_emoji}</span>
                     <div className="flex-1 min-w-0">
@@ -1297,6 +1498,17 @@ export function RitualPage() {
                         {new Date(s.started_at).toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })}
                         {s.duration_minutes && ` · ${s.duration_minutes}m`}
                       </p>
+                      {s.status !== 'completed' && pct !== null && (
+                        <div className="mt-1 flex items-center gap-1.5">
+                          <div className="flex-1 h-1 rounded-full bg-surface-700 max-w-[80px]">
+                            <div
+                              className={cn('h-1 rounded-full transition-all', s.status === 'abandoned' ? 'bg-red-500/60' : 'bg-amber-500/60')}
+                              style={{ width: `${pct}%` }}
+                            />
+                          </div>
+                          <span className="text-[10px] text-slate-600">{done}/{total}</span>
+                        </div>
+                      )}
                     </div>
                     <div className="flex items-center gap-1.5">
                       {s.outcome && (
@@ -1320,7 +1532,8 @@ export function RitualPage() {
                       )}
                     </div>
                   </div>
-                ))}
+                  )
+                })}
               </div>
             </div>
           )}
