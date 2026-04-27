@@ -5,12 +5,12 @@
 // Layout (mobile):  1-col — sections stack vertically
 
 import { useEffect, useState, useCallback } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import {
   Star, Pin, PinOff, Plus, Download, RefreshCw,
   ChevronRight, CheckCircle2, SkipForward, Circle,
   Timer, Flame, BookOpen, Clock, XCircle,
-  ExternalLink, Loader2, Settings, Pencil, Save, X,
+  ExternalLink, Loader2, Settings,
   ChevronDown, ChevronUp,
 } from 'lucide-react'
 import { PageHeader } from '../../components/ui/PageHeader'
@@ -19,7 +19,7 @@ import { ritualApi } from '../../lib/api'
 import { cn } from '../../lib/cn'
 import type {
   RitualSession, RitualStep, PinnedPair,
-  SmartWLResult, WeeklyScore, StepLog, RitualSettings,
+  SmartWLResult, WeeklyScore, StepLog,
   SessionType, SessionOutcome, PinnedTF,
 } from '../../types/api'
 
@@ -745,332 +745,6 @@ function AddPinForm({ instruments, onAdd }: AddPinFormProps) {
   )
 }
 
-// ── Ritual Settings Panel ─────────────────────────────────────────────────────
-const SETTINGS_SESSION_TYPES = ['weekly_setup', 'trade_session', 'daily_prep', 'weekend_review'] as const
-const AVAILABLE_TFS = ['1W', '1D', '4H', '1H', '15m']
-
-type StepEditDraft = {
-  label: string
-  est_minutes: number | null
-  is_mandatory: boolean
-  timeframes: string[]
-}
-
-function RitualSettingsPanel({ profileId }: { profileId: number }) {
-  const [isOpen, setIsOpen] = useState(false)
-  const [stepsMap, setStepsMap] = useState<Record<string, RitualStep[]>>({})
-  const [loadingSteps, setLoadingSteps] = useState(false)
-  const [settings, setSettings] = useState<RitualSettings | null>(null)
-  const [topNLocal, setTopNLocal] = useState<Record<string, number>>({})
-  const [saving, setSaving] = useState(false)
-  const [resetting, setResetting] = useState<string | null>(null)
-  const [resetDone, setResetDone] = useState<string | null>(null)
-  // Inline step editing state — keyed by step id
-  const [editDrafts, setEditDrafts] = useState<Record<number, StepEditDraft | null>>({})
-  const [savingStep, setSavingStep] = useState<number | null>(null)
-
-  const loadAll = useCallback(async () => {
-    setLoadingSteps(true)
-    try {
-      const [settingsData, ...stepsArrays] = await Promise.all([
-        ritualApi.getSettings(profileId),
-        ...SETTINGS_SESSION_TYPES.map(t => ritualApi.getSteps(profileId, t)),
-      ])
-      setSettings(settingsData)
-      const map: Record<string, RitualStep[]> = {}
-      SETTINGS_SESSION_TYPES.forEach((t, i) => { map[t] = stepsArrays[i] })
-      setStepsMap(map)
-      const tnMap = ((settingsData.config?.top_n) as Record<string, number>) ?? {}
-      setTopNLocal(tnMap)
-    } finally {
-      setLoadingSteps(false)
-    }
-  }, [profileId])
-
-  useEffect(() => {
-    if (isOpen) loadAll()
-  }, [isOpen, loadAll])
-
-  const handleReset = async (sessionType: string) => {
-    setResetting(sessionType)
-    try {
-      const newSteps = await ritualApi.resetSteps(profileId, sessionType)
-      setStepsMap(prev => ({ ...prev, [sessionType]: newSteps }))
-      setEditDrafts({})
-      setResetDone(sessionType)
-      setTimeout(() => setResetDone(null), 2500)
-    } finally {
-      setResetting(null)
-    }
-  }
-
-  const updateTopN = async (type: string, value: number) => {
-    const newTopN = { ...topNLocal, [type]: value }
-    setTopNLocal(newTopN)
-    setSaving(true)
-    try {
-      const cfg = settings?.config ?? {}
-      const updated = await ritualApi.updateSettings(profileId, { ...cfg, top_n: newTopN })
-      setSettings(updated)
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  const startEdit = (step: RitualStep) => {
-    setEditDrafts(prev => ({
-      ...prev,
-      [step.id]: {
-        label: step.label,
-        est_minutes: step.est_minutes,
-        is_mandatory: step.is_mandatory,
-        timeframes: (step.config?.timeframes as string[]) ?? [],
-      },
-    }))
-  }
-
-  const cancelEdit = (stepId: number) => {
-    setEditDrafts(prev => { const n = { ...prev }; delete n[stepId]; return n })
-  }
-
-  const saveStep = async (step: RitualStep, sessionType: string) => {
-    const draft = editDrafts[step.id]
-    if (!draft) return
-    setSavingStep(step.id)
-    try {
-      const payload: Partial<RitualStep> = {
-        label: draft.label,
-        est_minutes: draft.est_minutes,
-        is_mandatory: draft.is_mandatory,
-      }
-      if (step.step_type === 'smart_wl') {
-        payload.config = { ...step.config, timeframes: draft.timeframes }
-      }
-      const updated = await ritualApi.updateStep(profileId, step.id, payload)
-      setStepsMap(prev => ({
-        ...prev,
-        [sessionType]: (prev[sessionType] ?? []).map(s => s.id === step.id ? updated : s),
-      }))
-      cancelEdit(step.id)
-    } finally {
-      setSavingStep(null)
-    }
-  }
-
-  return (
-    <div className="rounded-xl border border-surface-700 bg-surface-800/30">
-      <button
-        onClick={() => setIsOpen(o => !o)}
-        className="w-full flex items-center gap-2 px-4 py-3 text-left hover:bg-surface-700/20 rounded-xl transition-colors"
-      >
-        <Settings size={14} className="text-slate-400" />
-        <span className="text-sm font-semibold text-slate-300">Ritual Settings</span>
-        {isOpen
-          ? <ChevronUp size={14} className="ml-auto text-slate-500" />
-          : <ChevronDown size={14} className="ml-auto text-slate-500" />}
-      </button>
-
-      {isOpen && (
-        <div className="px-4 pb-5 space-y-6 border-t border-surface-700">
-          {loadingSteps ? (
-            <div className="flex items-center gap-2 pt-4">
-              <Loader2 size={13} className="animate-spin text-slate-500" />
-              <span className="text-xs text-slate-500">Loading settings…</span>
-            </div>
-          ) : (
-            <>
-              {/* ── Section A: General Settings ── */}
-              <div className="pt-4">
-                <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">General Settings</p>
-                <div className="space-y-2">
-                  {SETTINGS_SESSION_TYPES.map(type => {
-                    const info = SESSION_TYPES.find(s => s.type === type)!
-                    return (
-                      <div key={type} className="flex items-center gap-3 rounded-lg border border-surface-700 bg-surface-900/40 px-3 py-2">
-                        <span className="text-sm shrink-0">{info.emoji}</span>
-                        <span className="text-[11px] text-slate-400 flex-1 truncate">{info.label}</span>
-                        <span className="text-[11px] text-slate-500 whitespace-nowrap">Smart WL top N:</span>
-                        <input
-                          type="range" min={5} max={50} step={5}
-                          value={topNLocal[type] ?? 20}
-                          onChange={e => updateTopN(type, Number(e.target.value))}
-                          className="w-24 accent-brand-500"
-                          disabled={saving}
-                        />
-                        <span className="text-[11px] text-slate-300 w-5 text-right shrink-0">{topNLocal[type] ?? 20}</span>
-                      </div>
-                    )
-                  })}
-                </div>
-              </div>
-
-              {/* ── Section B: Step Templates ── */}
-              <div>
-                <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">Step Templates</p>
-                <div className="space-y-2">
-                  {SETTINGS_SESSION_TYPES.map(type => {
-                    const info = SESSION_TYPES.find(s => s.type === type)!
-                    const steps = (stepsMap[type] ?? []).slice().sort((a, b) => a.position - b.position)
-                    const isDone = resetDone === type
-                    return (
-                      <div key={type} className="rounded-lg border border-surface-700 bg-surface-900/40 overflow-hidden">
-                        {/* Session header */}
-                        <div className="flex items-center gap-2 px-3 py-2 border-b border-surface-700/50">
-                          <span className="text-sm">{info.emoji}</span>
-                          <span className="text-xs font-semibold text-slate-300 flex-1">{info.label}</span>
-                          <span className="text-[10px] text-slate-500 mr-1">{steps.length} steps</span>
-                          <button
-                            onClick={() => handleReset(type)}
-                            disabled={resetting !== null}
-                            className={cn(
-                              'flex items-center gap-1 px-2 py-0.5 rounded text-[11px] border transition-colors disabled:opacity-50',
-                              isDone
-                                ? 'border-green-700/40 text-green-400 bg-green-900/10'
-                                : 'border-surface-600 text-slate-500 hover:border-amber-700/40 hover:text-amber-400',
-                            )}
-                          >
-                            {resetting === type
-                              ? <Loader2 size={9} className="animate-spin" />
-                              : isDone ? <CheckCircle2 size={9} /> : <RefreshCw size={9} />}
-                            Reset
-                          </button>
-                        </div>
-
-                        {/* Steps list */}
-                        <div className="px-3 py-2 space-y-1.5">
-                          {steps.length === 0 ? (
-                            <p className="text-[11px] text-slate-500 italic">No steps — click Reset to seed defaults.</p>
-                          ) : steps.map(step => {
-                            const draft = editDrafts[step.id]
-                            const isEditing = draft != null
-                            const isSaving = savingStep === step.id
-
-                            if (isEditing) {
-                              return (
-                                <div key={step.id} className="rounded-lg border border-brand-700/40 bg-brand-900/10 p-2 space-y-2">
-                                  {/* Label */}
-                                  <input
-                                    type="text"
-                                    value={draft.label}
-                                    onChange={e => setEditDrafts(prev => ({ ...prev, [step.id]: { ...draft, label: e.target.value } }))}
-                                    className="w-full bg-surface-800 border border-surface-600 rounded px-2 py-1 text-[11px] text-slate-200 focus:outline-none focus:border-brand-500"
-                                  />
-                                  <div className="flex items-center gap-3 flex-wrap">
-                                    {/* Est minutes */}
-                                    <div className="flex items-center gap-1.5">
-                                      <span className="text-[10px] text-slate-500">Minutes:</span>
-                                      <input
-                                        type="number"
-                                        min={0} max={120}
-                                        value={draft.est_minutes ?? ''}
-                                        onChange={e => setEditDrafts(prev => ({ ...prev, [step.id]: { ...draft, est_minutes: e.target.value ? Number(e.target.value) : null } }))}
-                                        className="w-14 bg-surface-800 border border-surface-600 rounded px-1.5 py-0.5 text-[11px] text-slate-200 focus:outline-none focus:border-brand-500"
-                                      />
-                                    </div>
-                                    {/* Mandatory toggle */}
-                                    <button
-                                      onClick={() => setEditDrafts(prev => ({ ...prev, [step.id]: { ...draft, is_mandatory: !draft.is_mandatory } }))}
-                                      className={cn(
-                                        'text-[10px] px-2 py-0.5 rounded border transition-colors',
-                                        draft.is_mandatory
-                                          ? 'border-brand-700/40 text-brand-400 bg-brand-900/30'
-                                          : 'border-surface-600 text-slate-500',
-                                      )}
-                                    >
-                                      {draft.is_mandatory ? 'Required' : 'Optional'}
-                                    </button>
-                                  </div>
-                                  {/* TF checkboxes — only for smart_wl step */}
-                                  {step.step_type === 'smart_wl' && (
-                                    <div className="flex items-center gap-1.5 flex-wrap">
-                                      <span className="text-[10px] text-slate-500">TFs:</span>
-                                      {AVAILABLE_TFS.map(tf => (
-                                        <button
-                                          key={tf}
-                                          onClick={() => setEditDrafts(prev => {
-                                            const cur = prev[step.id]!
-                                            const tfs = cur.timeframes.includes(tf)
-                                              ? cur.timeframes.filter(t => t !== tf)
-                                              : [...cur.timeframes, tf]
-                                            return { ...prev, [step.id]: { ...cur, timeframes: tfs } }
-                                          })}
-                                          className={cn(
-                                            'text-[10px] px-1.5 py-0.5 rounded border transition-colors',
-                                            draft.timeframes.includes(tf)
-                                              ? 'border-brand-700/40 text-brand-400 bg-brand-900/20'
-                                              : 'border-surface-600 text-slate-600',
-                                          )}
-                                        >
-                                          {tf}
-                                        </button>
-                                      ))}
-                                    </div>
-                                  )}
-                                  {/* Save / Cancel */}
-                                  <div className="flex items-center gap-2">
-                                    <button
-                                      onClick={() => saveStep(step, type)}
-                                      disabled={isSaving}
-                                      className="flex items-center gap-1 px-2.5 py-0.5 rounded bg-brand-700/30 border border-brand-600/40 text-brand-400 text-[11px] hover:bg-brand-700/40 transition-colors disabled:opacity-50"
-                                    >
-                                      {isSaving ? <Loader2 size={9} className="animate-spin" /> : <Save size={9} />}
-                                      Save
-                                    </button>
-                                    <button
-                                      onClick={() => cancelEdit(step.id)}
-                                      disabled={isSaving}
-                                      className="flex items-center gap-1 px-2.5 py-0.5 rounded border border-surface-600 text-slate-500 text-[11px] hover:text-slate-300 transition-colors disabled:opacity-50"
-                                    >
-                                      <X size={9} />
-                                      Cancel
-                                    </button>
-                                  </div>
-                                </div>
-                              )
-                            }
-
-                            const tfs = (step.config?.timeframes as string[]) ?? []
-                            return (
-                              <div key={step.id} className="flex items-center gap-2 min-w-0 group">
-                                <span className="text-[10px] text-slate-600 w-4 text-right shrink-0">{step.position}.</span>
-                                <span className="text-[11px] text-slate-300 flex-1 truncate">{step.label}</span>
-                                {tfs.length > 0 && (
-                                  <div className="flex gap-0.5 shrink-0">
-                                    {tfs.map(tf => <TFBadge key={tf} tf={tf} />)}
-                                  </div>
-                                )}
-                                <span className={cn(
-                                  'text-[9px] px-1.5 py-0.5 rounded shrink-0',
-                                  step.is_mandatory ? 'text-brand-400 bg-brand-900/30' : 'text-slate-600 bg-surface-700/40',
-                                )}>
-                                  {step.is_mandatory ? 'req' : 'opt'}
-                                </span>
-                                {step.est_minutes != null && (
-                                  <span className="text-[10px] text-slate-600 shrink-0">{step.est_minutes}m</span>
-                                )}
-                                <button
-                                  onClick={() => startEdit(step)}
-                                  className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity text-slate-600 hover:text-brand-400"
-                                >
-                                  <Pencil size={11} />
-                                </button>
-                              </div>
-                            )
-                          })}
-                        </div>
-                      </div>
-                    )
-                  })}
-                </div>
-              </div>
-            </>
-          )}
-        </div>
-      )}
-    </div>
-  )
-}
-
 // ── Pinned pairs sidebar ───────────────────────────────────────────────────────
 interface PinnedPanelProps {
   profileId: number
@@ -1539,7 +1213,16 @@ export function RitualPage() {
           )}
 
           {/* ── Settings ─────────────────────────────────────────────────── */}
-          <RitualSettingsPanel profileId={profileId} />
+          <div className="rounded-xl border border-surface-700 bg-surface-800/30 px-4 py-3 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Settings size={14} className="text-slate-400" />
+              <span className="text-sm font-semibold text-slate-300">Ritual Settings</span>
+            </div>
+            <Link to="/settings/ritual" className="flex items-center gap-1.5 text-xs text-brand-400 hover:text-brand-300 transition-colors">
+              <ExternalLink size={12} />
+              Configure →
+            </Link>
+          </div>
         </div>
 
         {/* ── Pinned pairs sidebar ─────────────────────────────────────────── */}
