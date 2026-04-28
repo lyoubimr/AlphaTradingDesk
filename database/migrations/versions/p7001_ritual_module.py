@@ -13,8 +13,8 @@ Revises:     p6003_positions_tp_hit
 Create Date: 2026-04-26
 """
 
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 from sqlalchemy.dialects.postgresql import JSONB
 
 revision = "p7001_ritual_module"

@@ -218,6 +218,33 @@ def _seed_steps(profile_id: int, db: Session) -> None:
     db.commit()
 
 
+def _sync_step_labels(profile_id: int, session_type: str, rows: list, db: Session) -> None:
+    """Silently update step labels/configs that differ from current DEFAULT_STEPS.
+
+    This handles the case where DB rows were seeded with an old default
+    (e.g. smart_wl label without 1D) and DEFAULT_STEPS has been updated since.
+    Only syncs rows that have NOT been manually customised (label still matches
+    an old pattern we know about, or exactly matches an old default within this
+    session type).
+    """
+    defaults = DEFAULT_STEPS.get(session_type, [])
+    default_by_pos: dict[int, dict] = {d["position"]: d for d in defaults}
+    changed = False
+    for row in rows:
+        default = default_by_pos.get(row.position)
+        if not default:
+            continue
+        if row.label != default["label"]:
+            row.label = default["label"]
+            changed = True
+        default_config = default.get("config", {})
+        if default_config and row.config != default_config:
+            row.config = default_config
+            changed = True
+    if changed:
+        db.commit()
+
+
 def get_steps(
     profile_id: int, session_type: str, db: Session
 ) -> list[StepRead]:
@@ -236,6 +263,7 @@ def get_steps(
             .order_by(RitualStep.position)
             .all()
         )
+    _sync_step_labels(profile_id, session_type, rows, db)
     return [_enrich_step(s) for s in rows]
 
 

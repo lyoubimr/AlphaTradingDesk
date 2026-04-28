@@ -8,7 +8,7 @@ import { useEffect, useState, useCallback } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import {
   Star, Pin, PinOff, Plus, Download, RefreshCw,
-  ChevronRight, CheckCircle2, SkipForward,
+  ChevronRight, ChevronLeft, CheckCircle2, SkipForward,
   Timer, Flame, BookOpen, Clock, XCircle,
   ExternalLink, Loader2, Settings,
   ChevronDown, ChevronUp, Minus, FileText,
@@ -1036,7 +1036,7 @@ export function RitualPage() {
     const [sess, sc, recent] = await Promise.all([
       ritualApi.getActiveSession(profileId).catch(() => null),
       ritualApi.getScore(profileId).catch(() => null),
-      ritualApi.listSessions(profileId, 5).catch(() => []),
+      ritualApi.listSessions(profileId, 20).catch(() => []),
     ])
     setActiveSession(sess)
     setScore(sc)
@@ -1195,6 +1195,13 @@ export function RitualPage() {
             <div className="rounded-xl border border-brand-600/40 bg-brand-950/20 overflow-hidden">
               {/* Session header */}
               <div className="flex items-center gap-3 px-4 py-3 border-b border-brand-700/30 bg-brand-900/20">
+                <button
+                  onClick={() => setActiveSession(null)}
+                  className="shrink-0 p-1 rounded-md text-slate-500 hover:text-slate-300 hover:bg-surface-700/50 transition-colors"
+                  title="Back to session picker (session stays in progress)"
+                >
+                  <ChevronLeft size={16} />
+                </button>
                 <span className="text-xl">{activeSession.session_emoji}</span>
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-semibold text-slate-100 truncate">{activeSession.session_label}</p>
@@ -1261,6 +1268,27 @@ export function RitualPage() {
             </div>
           ) : (
             /* ── Session type picker ─────────────────────────────────── */
+            <div className="space-y-3">
+            {/* Resume banner — shown when a session was minimised via ← */}
+            {recentSessions.find(s => s.status === 'in_progress') && (() => {
+              const pending = recentSessions.find(s => s.status === 'in_progress')!
+              return (
+                <div className="flex items-center gap-3 px-4 py-3 rounded-xl border border-amber-600/40 bg-amber-950/20">
+                  <span className="text-xl shrink-0">{pending.session_emoji}</span>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-semibold text-amber-300">{pending.session_label} — in progress</p>
+                    <p className="text-[10px] text-slate-500 mt-0.5">Your session is paused. Resume or abandon it.</p>
+                  </div>
+                  <button
+                    onClick={() => setActiveSession(pending)}
+                    className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-600/20 border border-amber-600/40 text-amber-300 text-xs font-semibold hover:bg-amber-600/30 transition-colors"
+                  >
+                    <ChevronRight size={13} />
+                    Resume
+                  </button>
+                </div>
+              )
+            })()}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {SESSION_TYPES.map((st) => (
                 <button
@@ -1303,6 +1331,7 @@ export function RitualPage() {
                 </button>
               ))}
             </div>
+            </div>
           )}
 
           {/* ── Recent sessions ───────────────────────────────────────────── */}
@@ -1315,7 +1344,7 @@ export function RitualPage() {
                 </p>
               </div>
               <div className="divide-y divide-surface-700/60">
-                {recentSessions.slice(0, 5).map((s) => {
+                {recentSessions.slice(0, 10).map((s) => {
                   const visLogs = s.step_logs.filter(l => l.step_type !== 'ai_brief')
                   const total = visLogs.length
                   const done = visLogs.filter(l => l.status !== 'pending').length

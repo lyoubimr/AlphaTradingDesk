@@ -16,7 +16,6 @@ Create Date: 2026-04-21
 """
 
 from alembic import op
-import sqlalchemy as sa
 
 revision = "p6003_positions_tp_hit"
 down_revision = "p6002_add_groq_gemini_ai_keys"

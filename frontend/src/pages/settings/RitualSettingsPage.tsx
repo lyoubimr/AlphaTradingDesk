@@ -114,11 +114,14 @@ export function RitualSettingsPage() {
   const [editDrafts, setEditDrafts]   = useState<Record<number, StepEditDraft | null>>({})
   const [savingStep, setSavingStep]   = useState<number | null>(null)
 
-  // Cascade scoring weights
+  // Cascade scoring — smart_filter
   const DEFAULT_WEIGHTS: Record<string, number> = { '1W': 4.0, '1D': 3.0, '4H': 2.0, '1H': 1.0, '15m': 0.5 }
-  const [weights, setWeights]           = useState<Record<string, number>>(DEFAULT_WEIGHTS)
-  const [savingWeights, setSavingWeights] = useState(false)
-  const [weightsSaved, setWeightsSaved]   = useState(false)
+  const [weights, setWeights]                 = useState<Record<string, number>>(DEFAULT_WEIGHTS)
+  const [trendBonus, setTrendBonus]           = useState(1.2)
+  const [emaBonusThreshold, setEmaBonusThreshold] = useState(70)
+  const [emaBonusFactor, setEmaBonusFactor]   = useState(1.1)
+  const [savingWeights, setSavingWeights]     = useState(false)
+  const [weightsSaved, setWeightsSaved]       = useState(false)
 
   // Market context pairs
   const [marketPairs, setMarketPairs]     = useState<string[]>([])
@@ -141,11 +144,11 @@ export function RitualSettingsPage() {
       setStepsMap(map)
       const tnMap = ((settingsData.config?.top_n) as Record<string, number>) ?? {}
       setTopNLocal(tnMap)
-      const wMap = (
-        ((settingsData.config?.smart_filter as Record<string, unknown>)?.weights as Record<string, number>)
-        ?? DEFAULT_WEIGHTS
-      )
-      setWeights(wMap)
+      const sf = (settingsData.config?.smart_filter as Record<string, unknown>) ?? {}
+      setWeights((sf.weights as Record<string, number>) ?? DEFAULT_WEIGHTS)
+      setTrendBonus((sf.trend_bonus as number) ?? 1.2)
+      setEmaBonusThreshold((sf.ema_bonus_threshold as number) ?? 70)
+      setEmaBonusFactor((sf.ema_bonus_factor as number) ?? 1.1)
       setMarketPairs((settingsData.config?.market_analysis_pairs as string[]) ?? [])
     } finally {
       setLoading(false)
@@ -189,7 +192,16 @@ export function RitualSettingsPage() {
     try {
       const cfg = settings?.config ?? {}
       const sf = (cfg.smart_filter as Record<string, unknown>) ?? {}
-      const updated = await ritualApi.updateSettings(profileId, { ...cfg, smart_filter: { ...sf, weights } })
+      const updated = await ritualApi.updateSettings(profileId, {
+        ...cfg,
+        smart_filter: {
+          ...sf,
+          weights,
+          trend_bonus: trendBonus,
+          ema_bonus_threshold: emaBonusThreshold,
+          ema_bonus_factor: emaBonusFactor,
+        },
+      })
       setSettings(updated)
       setWeightsSaved(true)
       setTimeout(() => setWeightsSaved(false), 2000)
@@ -676,35 +688,95 @@ export function RitualSettingsPage() {
                 </div>
               </div>
 
-              {/* Cascade scoring weights */}
+              {/* Cascade scoring — full smart_filter config */}
               <div className="rounded-xl border border-surface-700 bg-surface-800/40 overflow-hidden">
                 <div className="px-4 py-3 border-b border-surface-700 bg-surface-800/60">
-                  <h3 className="text-sm font-semibold text-slate-200">Cascade Scoring — TF Weights</h3>
+                  <h3 className="text-sm font-semibold text-slate-200">Cascade Scoring — Smart Filter</h3>
                   <p className="text-xs text-slate-500 mt-1 leading-relaxed">
-                    Each timeframe contributes to the overall pair ranking via a weighted cascade score.
-                    Higher weight = stronger influence on the final ranking.
-                    <br />
+                    Controls how pairs are ranked in the Smart Watchlist.<br />
                     <span className="font-mono text-[10px] text-slate-400">
                       score(pair) = Σ(TF_weight × vi_score × trend_bonus × ema_bonus)
                     </span>
                   </p>
                 </div>
-                <div className="px-4 py-4 space-y-3">
-                  {AVAILABLE_TFS.map(tf => (
-                    <div key={tf} className="flex items-center gap-3">
-                      <TFBadge tf={tf} />
+                <div className="px-4 py-4 space-y-5">
+
+                  {/* TF weights */}
+                  <div className="space-y-2">
+                    <p className="text-[10px] uppercase tracking-wider text-slate-500">TF Weights</p>
+                    {AVAILABLE_TFS.map(tf => (
+                      <div key={tf} className="flex items-center gap-3">
+                        <TFBadge tf={tf} />
+                        <input
+                          type="range" min={0.1} max={5.0} step={0.1}
+                          value={weights[tf] ?? 1.0}
+                          onChange={e => setWeights(prev => ({ ...prev, [tf]: Number(e.target.value) }))}
+                          className="flex-1 accent-brand-500 max-w-[200px]"
+                        />
+                        <span className="text-sm font-mono text-slate-300 w-8 text-right shrink-0">
+                          {(weights[tf] ?? 1.0).toFixed(1)}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Bonuses */}
+                  <div className="space-y-3 pt-1 border-t border-surface-700/60">
+                    <p className="text-[10px] uppercase tracking-wider text-slate-500 pt-2">Bonuses</p>
+
+                    {/* trend_bonus */}
+                    <div className="flex items-center gap-3">
+                      <span className="text-xs text-slate-400 w-40 shrink-0">
+                        Trend bonus
+                        <span className="ml-1 text-[10px] text-slate-600">(breakout_up / trend_up)</span>
+                      </span>
                       <input
-                        type="range" min={0.1} max={5.0} step={0.1}
-                        value={weights[tf] ?? 1.0}
-                        onChange={e => setWeights(prev => ({ ...prev, [tf]: Number(e.target.value) }))}
+                        type="range" min={1.0} max={2.0} step={0.05}
+                        value={trendBonus}
+                        onChange={e => setTrendBonus(Number(e.target.value))}
                         className="flex-1 accent-brand-500 max-w-[200px]"
                       />
-                      <span className="text-sm font-mono text-slate-300 w-8 text-right shrink-0">
-                        {(weights[tf] ?? 1.0).toFixed(1)}
+                      <span className="text-sm font-mono text-slate-300 w-10 text-right shrink-0">
+                        ×{trendBonus.toFixed(2)}
                       </span>
                     </div>
-                  ))}
-                  <div className="pt-2">
+
+                    {/* ema_bonus_threshold */}
+                    <div className="flex items-center gap-3">
+                      <span className="text-xs text-slate-400 w-40 shrink-0">
+                        EMA bonus threshold
+                        <span className="ml-1 text-[10px] text-slate-600">(ema_score ≥ N)</span>
+                      </span>
+                      <input
+                        type="range" min={40} max={95} step={5}
+                        value={emaBonusThreshold}
+                        onChange={e => setEmaBonusThreshold(Number(e.target.value))}
+                        className="flex-1 accent-brand-500 max-w-[200px]"
+                      />
+                      <span className="text-sm font-mono text-slate-300 w-10 text-right shrink-0">
+                        {emaBonusThreshold}
+                      </span>
+                    </div>
+
+                    {/* ema_bonus_factor */}
+                    <div className="flex items-center gap-3">
+                      <span className="text-xs text-slate-400 w-40 shrink-0">
+                        EMA bonus factor
+                        <span className="ml-1 text-[10px] text-slate-600">(multiplier when ≥ threshold)</span>
+                      </span>
+                      <input
+                        type="range" min={1.0} max={2.0} step={0.05}
+                        value={emaBonusFactor}
+                        onChange={e => setEmaBonusFactor(Number(e.target.value))}
+                        className="flex-1 accent-brand-500 max-w-[200px]"
+                      />
+                      <span className="text-sm font-mono text-slate-300 w-10 text-right shrink-0">
+                        ×{emaBonusFactor.toFixed(2)}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="pt-1">
                     <button
                       onClick={saveWeights}
                       disabled={savingWeights}
@@ -718,7 +790,7 @@ export function RitualSettingsPage() {
                       {savingWeights
                         ? <Loader2 size={12} className="animate-spin" />
                         : weightsSaved ? <CheckCircle2 size={12} /> : <Save size={12} />}
-                      {weightsSaved ? 'Saved' : 'Save weights'}
+                      {weightsSaved ? 'Saved' : 'Save scoring config'}
                     </button>
                   </div>
                 </div>

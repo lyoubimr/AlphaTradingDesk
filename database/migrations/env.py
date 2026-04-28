@@ -18,9 +18,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 # ── Import ALL models so Base.metadata is fully populated ─────────────────────
 # This single import triggers all model registrations.
-from src.core.models import Base  # noqa: E402
 from src.core.config import settings  # noqa: E402
 from src.core.database import _normalise_db_url  # noqa: E402
+from src.core.models import Base  # noqa: E402
 
 # ── Alembic Config object (gives access to alembic.ini values) ────────────────
 config = context.config

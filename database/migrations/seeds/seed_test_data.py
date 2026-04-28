@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import logging
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 from src.core.database import get_session_factory
@@ -823,7 +823,7 @@ def seed_market_analysis(session, profile: Profile, module_name: str) -> None:
     )
     keys = [i.key for i in indicators]
 
-    now = datetime.now(tz=timezone.utc)
+    now = datetime.now(tz=UTC)
 
     # ── Session 1: Fresh — strong bull ────────────────────────────────────────
     _make_session(
@@ -897,7 +897,7 @@ def seed_losing_profile(session) -> Profile:
         session.add(profile)
     session.flush()
 
-    now = datetime.now(tz=timezone.utc)
+    now = datetime.now(tz=UTC)
     strat = Strategy(
         profile_id=profile.id,
         name="Breakout",

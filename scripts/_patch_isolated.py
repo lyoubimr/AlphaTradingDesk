@@ -1,5 +1,5 @@
 """One-shot patch: rewrite service.py pre-flight to use isolated margin via leveragepreferences."""
-import re, sys
+import sys
 from pathlib import Path
 
 svc = Path("src/kraken_execution/service.py")
