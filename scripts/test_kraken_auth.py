@@ -15,7 +15,6 @@ import argparse
 import base64
 import hashlib
 import hmac
-import sys
 import time
 from urllib.parse import urlencode
 

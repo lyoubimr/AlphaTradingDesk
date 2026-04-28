@@ -18,6 +18,7 @@ import {
   Zap,
   Sparkles,
   X,
+  Flame,
 } from 'lucide-react'
 import { cn } from '../../lib/cn'
 import { Badge } from '../ui/Badge'
@@ -57,6 +58,13 @@ const NAV_GROUPS: NavGroup[] = [
         to: '/goals',
         label: 'Goals',
         icon: <Target size={16} />,
+      },
+      {
+        to: '/ritual',
+        label: 'Ritual',
+        icon: <Flame size={16} />,
+        badge: 'NEW',
+        badgeVariant: 'phase',
       },
     ],
   },
@@ -117,6 +125,11 @@ const NAV_GROUPS: NavGroup[] = [
         to: '/settings/notifications',
         label: 'Notifications',
         icon: <Bell size={16} />,
+      },
+      {
+        to: '/settings/ritual',
+        label: 'Ritual',
+        icon: <BookOpen size={16} />,
       },
       {
         to: '/settings/automation',

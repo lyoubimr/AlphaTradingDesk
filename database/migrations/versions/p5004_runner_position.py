@@ -15,7 +15,6 @@ Create Date: 2026-04-12
 
 from __future__ import annotations
 
-import sqlalchemy as sa
 from alembic import op
 
 # revision identifiers, used by Alembic.

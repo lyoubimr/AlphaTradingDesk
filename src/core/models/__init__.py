@@ -20,6 +20,7 @@ from src.core.models import (  # noqa: F401
 )
 from src.kraken_execution import models as _kraken_execution_models  # noqa: F401
 from src.risk_management import models as _risk_models  # noqa: F401
+from src.ritual import models as _ritual_models  # noqa: F401
 from src.trades import review_settings as _review_settings_models  # noqa: F401
 from src.volatility import models as _volatility_models  # noqa: F401
 

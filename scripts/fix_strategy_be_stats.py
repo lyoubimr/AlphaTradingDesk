@@ -66,7 +66,7 @@ def main() -> None:
             linked_ids = [r[0] for r in rows]
 
             if not linked_ids:
-                print(f"    → no strategies linked, nothing to fix")
+                print("    → no strategies linked, nothing to fix")
                 continue
 
             strategies = (

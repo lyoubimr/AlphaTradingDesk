@@ -1,6 +1,6 @@
 // ── Settings page ──────────────────────────────────────────────────────────
 import { useEffect, useState } from 'react'
-import { User, Database, Bell, Shield, Info, Palette, BarChart2, Activity, CheckCircle2, XCircle, Loader2, RefreshCw, Zap } from 'lucide-react'
+import { User, Database, Bell, Shield, Info, Palette, BarChart2, Activity, CheckCircle2, XCircle, Loader2, RefreshCw, Zap, BookOpen } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { PageHeader } from '../../components/ui/PageHeader'
 import { Badge } from '../../components/ui/Badge'
@@ -349,8 +349,25 @@ export function SettingsPage() {
           </div>
         </SettingsSection>
 
-        {/* ── Automation ───────────────────────────────────────────────── */}
+        {/* ── Ritual ──────────────────────────────────────────────────── */}
         <SettingsSection
+          icon={<BookOpen size={16} />}
+          title="Ritual"
+          description="Session step templates, Smart Watchlist configuration, and cascade scoring weights"
+        >
+          <SettingRow label="Session types"    value="4 templates"      info="Weekly Setup, Trade Session, Weekend Review, Daily Prep — each with its own ordered step list." />
+          <SettingRow label="Smart Watchlist"  value="Cascade scoring"  info="Per-timeframe pair ranking using VI score, trend bonus, and EMA alignment. Top N configurable per session type." />
+          <div className="pt-2">
+            <Link
+              to="/settings/ritual"
+              className="inline-flex items-center gap-1.5 text-xs text-brand-400 hover:text-brand-300 transition-colors underline underline-offset-2"
+            >
+              Open Ritual Settings →
+            </Link>
+          </div>
+        </SettingsSection>
+
+        {/* ── Automation ───────────────────────────────────────────────── */}        <SettingsSection
           icon={<Zap size={16} />}
           title="Automation"
           description="Kraken Futures execution — API keys, engine config and connection test"
