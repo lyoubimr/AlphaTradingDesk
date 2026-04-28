@@ -142,8 +142,17 @@ export function RitualSettingsPage() {
       const map: Record<string, RitualStep[]> = {}
       SESSION_TYPES.forEach((t, i) => { map[t.type] = stepsArrays[i] })
       setStepsMap(map)
-      const tnMap = ((settingsData.config?.top_n) as Record<string, number>) ?? {}
+      const TOP_N_MAX = 25
+      const tnRaw = ((settingsData.config?.top_n) as Record<string, number>) ?? {}
+      const tnMap = Object.fromEntries(
+        Object.entries(tnRaw).map(([k, v]) => [k, Math.min(v, TOP_N_MAX)])
+      )
       setTopNLocal(tnMap)
+      // Auto-persist clamped values if any were above the new max
+      const needsClamp = Object.entries(tnRaw).some(([, v]) => v > TOP_N_MAX)
+      if (needsClamp && profileId) {
+        await ritualApi.updateSettings(profileId, { ...settingsData.config, top_n: tnMap })
+      }
       const sf = (settingsData.config?.smart_filter as Record<string, unknown>) ?? {}
       setWeights((sf.weights as Record<string, number>) ?? DEFAULT_WEIGHTS)
       setTrendBonus((sf.trend_bonus as number) ?? 1.2)
@@ -662,9 +671,13 @@ export function RitualSettingsPage() {
               <div className="rounded-xl border border-surface-700 bg-surface-800/40 overflow-hidden">
                 <div className="px-4 py-3 border-b border-surface-700 bg-surface-800/60">
                   <h3 className="text-sm font-semibold text-slate-200">Smart Watchlist — Top N</h3>
-                  <p className="text-xs text-slate-500 mt-0.5">
-                    Maximum pairs included per timeframe section in the generated watchlist file.
+                  <p className="text-xs text-slate-500 mt-0.5 leading-relaxed">
+                    Maximum pairs included <span className="text-slate-400 font-medium">per timeframe section</span> in the generated watchlist file.
                     Pinned pairs are always included on top of this limit.
+                    <br />
+                    <span className="text-[10px] text-slate-600">
+                      TV file is capped at 100 lines total — with 5 active TFs the effective max is ≈ 19 pairs / TF.
+                    </span>
                   </p>
                 </div>
                 <div className="px-4 py-4 space-y-3">
@@ -673,14 +686,14 @@ export function RitualSettingsPage() {
                       <span className="text-base shrink-0">{st.emoji}</span>
                       <span className="text-sm text-slate-400 w-32 shrink-0">{st.label}</span>
                       <input
-                        type="range" min={5} max={50} step={5}
-                        value={topNLocal[st.type] ?? 20}
+                        type="range" min={5} max={25} step={5}
+                        value={Math.min(topNLocal[st.type] ?? 20, 25)}
                         onChange={e => updateTopN(st.type, Number(e.target.value))}
                         className="flex-1 accent-brand-500 max-w-[200px]"
                         disabled={savingTopN}
                       />
                       <span className="text-sm text-slate-300 w-8 text-right shrink-0">
-                        {topNLocal[st.type] ?? 20}
+                        {Math.min(topNLocal[st.type] ?? 20, 25)}
                       </span>
                       <span className="text-xs text-slate-600 shrink-0">pairs</span>
                     </div>

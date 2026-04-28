@@ -284,7 +284,7 @@ DEFAULT_RITUAL_CONFIG: dict[str, Any] = {
         "BINANCE:ETHBTC",
     ],
     "top_n": {
-        "weekly_setup": 35,
+        "weekly_setup": 20,
         "trade_session": 10,
         "weekend_review": 20,
     },
