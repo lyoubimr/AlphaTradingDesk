@@ -947,9 +947,9 @@ def generate_watchlist_file(result: SmartWLResult) -> bytes:
     pinned_seen: set[str] = set()   # track pinned symbols → exclude from WL sections
     if result.pinned_tv:
         by_tf: dict[str, list[str]] = {}
-        for entry in result.pinned_tv:
-            by_tf.setdefault(entry.timeframe, []).append(entry.tv_symbol)
-            pinned_seen.add(entry.tv_symbol)
+        for pin_entry in result.pinned_tv:
+            by_tf.setdefault(pin_entry.timeframe, []).append(pin_entry.tv_symbol)
+            pinned_seen.add(pin_entry.tv_symbol)
         for tf in _CANONICAL:
             if tf not in by_tf:
                 continue
