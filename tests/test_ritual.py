@@ -110,13 +110,13 @@ class TestRitualSettings:
 class TestRitualSteps:
     def test_get_steps_auto_seeds(self, client: TestClient, db_session: Session):
         profile = _make_profile(db_session)
-        resp = client.get(f"{_ritual(profile.id)}/steps/daily_prep")
+        resp = client.get(f"{_ritual(profile.id)}/steps/trade_session")
         assert resp.status_code == 200
         steps = resp.json()
         assert len(steps) > 0
         # All steps belong to correct session type
         for s in steps:
-            assert s["session_type"] == "daily_prep"
+            assert s["session_type"] == "trade_session"
             assert "label" in s
             assert "position" in s
 
@@ -262,11 +262,11 @@ class TestRitualSessions:
         profile = _make_profile(db_session)
         resp = client.post(
             f"{_ritual(profile.id)}/sessions",
-            json={"session_type": "daily_prep"},
+            json={"session_type": "trade_session"},
         )
         assert resp.status_code == 201
         data = resp.json()
-        assert data["session_type"] == "daily_prep"
+        assert data["session_type"] == "trade_session"
         assert data["status"] == "in_progress"
         assert len(data["step_logs"]) > 0
 
@@ -287,13 +287,13 @@ class TestRitualSessions:
         profile = _make_profile(db_session)
         first = client.post(
             f"{_ritual(profile.id)}/sessions",
-            json={"session_type": "daily_prep"},
+            json={"session_type": "trade_session"},
         )
         first_id = first.json()["id"]
 
         client.post(
             f"{_ritual(profile.id)}/sessions",
-            json={"session_type": "trade_session"},
+            json={"session_type": "weekly_setup"},
         )
         # Old session must now be abandoned
         sessions = client.get(f"{_ritual(profile.id)}/sessions").json()
@@ -305,7 +305,7 @@ class TestRitualSessions:
         profile = _make_profile(db_session)
         start_resp = client.post(
             f"{_ritual(profile.id)}/sessions",
-            json={"session_type": "daily_prep"},
+            json={"session_type": "trade_session"},
         )
         session_id = start_resp.json()["id"]
         # First step log
@@ -325,7 +325,7 @@ class TestRitualSessions:
         profile = _make_profile(db_session)
         start_resp = client.post(
             f"{_ritual(profile.id)}/sessions",
-            json={"session_type": "daily_prep"},
+            json={"session_type": "trade_session"},
         )
         session_id = start_resp.json()["id"]
         log_id = start_resp.json()["step_logs"][0]["id"]
@@ -357,7 +357,7 @@ class TestRitualSessions:
         profile = _make_profile(db_session)
         start_resp = client.post(
             f"{_ritual(profile.id)}/sessions",
-            json={"session_type": "daily_prep"},
+            json={"session_type": "trade_session"},
         )
         session_id = start_resp.json()["id"]
         logs = start_resp.json()["step_logs"]
@@ -371,18 +371,18 @@ class TestRitualSessions:
 
         resp = client.post(
             f"{_ritual(profile.id)}/sessions/{session_id}/complete",
-            json={"outcome": None, "notes": None},
+            json={"outcome": "trade_opened", "notes": None},
         )
         assert resp.status_code == 200
         data = resp.json()
         assert data["status"] == "completed"
-        # daily_prep awards +10 points
+        # trade_session awards +10 points
         assert data["discipline_points"] >= 10
 
     def test_list_sessions(self, client: TestClient, db_session: Session):
         profile = _make_profile(db_session)
         # Start and abandon two sessions
-        for st in ["daily_prep", "weekly_setup"]:
+        for st in ["trade_session", "weekly_setup"]:
             r = client.post(f"{_ritual(profile.id)}/sessions", json={"session_type": st})
             client.post(f"{_ritual(profile.id)}/sessions/{r.json()['id']}/abandon")
 
@@ -393,7 +393,7 @@ class TestRitualSessions:
     def test_start_session_unknown_profile(self, client: TestClient):
         resp = client.post(
             f"{BASE}/99999/ritual/sessions",
-            json={"session_type": "daily_prep"},
+            json={"session_type": "trade_session"},
         )
         assert resp.status_code == 404
 
@@ -417,7 +417,7 @@ class TestDisciplineScore:
         profile = _make_profile(db_session)
         start_resp = client.post(
             f"{_ritual(profile.id)}/sessions",
-            json={"session_type": "daily_prep"},
+            json={"session_type": "trade_session"},
         )
         session_id = start_resp.json()["id"]
         logs = start_resp.json()["step_logs"]
@@ -429,7 +429,7 @@ class TestDisciplineScore:
             )
         client.post(
             f"{_ritual(profile.id)}/sessions/{session_id}/complete",
-            json={"outcome": None, "notes": None},
+            json={"outcome": "trade_opened", "notes": None},
         )
 
         resp = client.get(f"{_ritual(profile.id)}/score")

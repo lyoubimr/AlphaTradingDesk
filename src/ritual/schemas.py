@@ -36,11 +36,11 @@ class RitualSettingsPatch(BaseModel):
 TF_LITERAL = Literal["1W", "1D", "4H", "1H", "15m"]
 
 TTL_HOURS: dict[str, int] = {
-    "1W": 24 * 7,
-    "1D": 24,
-    "4H": 4,
-    "1H": 1,
-    "15m": 1,
+    "1W": 24 * 28,   # 4 weeks
+    "1D": 24 * 14,   # 2 weeks
+    "4H": 24 * 7,    # 7 days
+    "1H": 24 * 3,    # 3 days
+    "15m": 26,       # 26 hours
 }
 
 
@@ -71,12 +71,17 @@ class PinnedPairRead(BaseModel):
 
 
 class PinnedPairExtend(BaseModel):
-    hours: int = Field(24, ge=1, le=24 * 14, description="Hours to extend the TTL by")
+    hours: int = Field(
+        24,
+        ge=-(24 * 28),
+        le=24 * 28,
+        description="Hours to add (positive) or subtract (negative) from TTL",
+    )
 
 
 # ── Steps ────────────────────────────────────────────────────────────────────
 
-SessionType = Literal["weekly_setup", "daily_prep", "trade_session", "weekend_review"]
+SessionType = Literal["weekly_setup", "trade_session", "weekend_review"]
 
 SESSION_LABELS: dict[str, str] = {
     "weekly_setup": "Weekly Setup",
@@ -185,7 +190,7 @@ class SessionRead(BaseModel):
 class SessionComplete(BaseModel):
     outcome: str | None = Field(
         None,
-        description="Required for trade_session: trade_opened | no_opportunity | abandoned | vol_too_low",
+        description="Required for trade_session: trade_opened | pairs_pinned | no_opportunity | vol_too_low",
     )
     notes: str | None = None
 
@@ -197,9 +202,16 @@ class StepComplete(BaseModel):
 
 # ── Smart Watchlist ───────────────────────────────────────────────────────────
 
+class PinnedTVEntry(BaseModel):
+    tv_symbol: str
+    display_name: str
+    timeframe: str
+
+
 class SmartWLPairEntry(BaseModel):
     pair: str
     tv_symbol: str
+    display_name: str
     vi_score: float
     regime: str
     ema_signal: str
@@ -216,6 +228,7 @@ class SmartWLResult(BaseModel):
     broker_name: str = ""
     timeframes: dict[str, list[SmartWLPairEntry]]
     market_analysis_pairs: list[str]
+    pinned_tv: list[PinnedTVEntry] = []
 
 
 # ── Weekly Score ──────────────────────────────────────────────────────────────
@@ -247,10 +260,9 @@ DISCIPLINE_POINTS: dict[str, int] = {
 
 MAX_WEEKLY_SCORE = (
     DISCIPLINE_POINTS["weekly_setup_done"]
-    + DISCIPLINE_POINTS["daily_prep_done"] * 5
     + DISCIPLINE_POINTS["trade_session_done"] * 5
     + DISCIPLINE_POINTS["weekend_review_done"]
-)  # = 20 + 50 + 50 + 15 = 135
+)  # = 20 + 50 + 15 = 85
 
 
 # ── Default Config ────────────────────────────────────────────────────────────
@@ -272,8 +284,7 @@ DEFAULT_RITUAL_CONFIG: dict[str, Any] = {
         "BINANCE:ETHBTC",
     ],
     "top_n": {
-        "weekly_setup": 30,
-        "daily_prep": 20,
+        "weekly_setup": 35,
         "trade_session": 10,
         "weekend_review": 20,
     },
@@ -309,44 +320,8 @@ DEFAULT_STEPS: dict[str, list[dict]] = {
             "cadence_hours": None, "config": {},
         },
         {
-            "position": 4, "step_type": "pin_pairs", "label": "Pin retained pairs",
-            "est_minutes": 2, "is_mandatory": False, "linked_module": None,
-            "cadence_hours": None, "config": {},
-        },
-        {
-            "position": 5, "step_type": "goals_review", "label": "Review Weekly Goals",
+            "position": 4, "step_type": "goals_review", "label": "Review Weekly Goals",
             "est_minutes": 5, "is_mandatory": False, "linked_module": "goals",
-            "cadence_hours": None, "config": {},
-        },
-        {
-            "position": 6, "step_type": "weekly_notes",
-            "label": "Write weekly setup notes", "est_minutes": 3,
-            "is_mandatory": False, "linked_module": None,
-            "cadence_hours": None, "config": {},
-        },
-    ],
-    "daily_prep": [
-        {
-            "position": 1, "step_type": "vi_check",
-            "label": "Check Volatility Index", "est_minutes": 1,
-            "is_mandatory": True, "linked_module": "volatility",
-            "cadence_hours": None, "config": {},
-        },
-        {
-            "position": 2, "step_type": "smart_wl",
-            "label": "Generate Smart Watchlist (1D + 4H)",
-            "est_minutes": 1, "is_mandatory": True, "linked_module": None,
-            "cadence_hours": None, "config": {"timeframes": ["1D", "4H"]},
-        },
-        {
-            "position": 3, "step_type": "tv_analysis",
-            "label": "Analyse watchlist in TradingView", "est_minutes": 20,
-            "is_mandatory": True, "linked_module": None,
-            "cadence_hours": None, "config": {},
-        },
-        {
-            "position": 4, "step_type": "pin_pairs", "label": "Pin retained pairs",
-            "est_minutes": 2, "is_mandatory": False, "linked_module": None,
             "cadence_hours": None, "config": {},
         },
     ],
@@ -376,12 +351,7 @@ DEFAULT_STEPS: dict[str, list[dict]] = {
             "cadence_hours": None, "config": {},
         },
         {
-            "position": 5, "step_type": "pin_pairs", "label": "Pin retained pairs",
-            "est_minutes": 2, "is_mandatory": False, "linked_module": None,
-            "cadence_hours": None, "config": {},
-        },
-        {
-            "position": 6, "step_type": "outcome", "label": "Session Outcome",
+            "position": 5, "step_type": "outcome", "label": "Session Outcome",
             "est_minutes": 1, "is_mandatory": True, "linked_module": None,
             "cadence_hours": None, "config": {},
         },

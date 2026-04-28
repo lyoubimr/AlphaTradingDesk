@@ -24,7 +24,7 @@ const SESSION_TYPES = [
     type: 'trade_session',
     emoji: '🎯',
     label: 'Trade Session',
-    desc: 'Trading window — VI check + Pinned pairs + WL (4H/1H/15m) → Log outcome',
+    desc: 'Trading window — VI check + Pinned pairs + WL (1D→15m) → Log outcome',
     est: '~30 min',
   },
   {
@@ -33,13 +33,6 @@ const SESSION_TYPES = [
     label: 'Weekend Review',
     desc: 'Sat/Sun — Analytics + Trade Journal + Goals + Learning note',
     est: '~35 min',
-  },
-  {
-    type: 'daily_prep',
-    emoji: '☀️',
-    label: 'Daily Prep',
-    desc: 'Tue–Fri — Quick VI + WL (1D/4H) when no Weekly Setup was done today',
-    est: '~15 min',
   },
 ] as const
 

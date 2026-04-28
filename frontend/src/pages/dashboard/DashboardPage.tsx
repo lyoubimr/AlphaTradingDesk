@@ -14,18 +14,19 @@ import {
   TrendingUp, TrendingDown, Target, Activity,
   Loader2, RefreshCw, AlertTriangle, ChevronRight,
   CheckCircle2, Minus, Plus, ShieldAlert,
-  Zap,
+  Zap, Calendar,
 } from 'lucide-react'
 import { PageHeader }  from '../../components/ui/PageHeader'
 import { StatCard }    from '../../components/ui/StatCard'
 import { useProfile }  from '../../context/ProfileContext'
 import { MarketVIWidget }  from '../../components/dashboard/MarketVIWidget'
 import {
-  goalsApi, tradesApi, riskApi,
+  goalsApi, tradesApi, riskApi, ritualApi,
 } from '../../lib/api'
 import { RiskAlertBanner } from '../../components/risk/RiskAlertBanner'
 import type {
   GoalProgressItem, TradeListItem, RiskBudgetOut,
+  WeeklyScore, PinnedPair,
 } from '../../types/api'
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -758,6 +759,206 @@ function RiskExceededBanner({ riskPct, maxRiskPct }: { riskPct: number; maxRiskP
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// 6. RITUAL WIDGET — Weekly discipline score + sessions + active pins
+// ─────────────────────────────────────────────────────────────────────────────
+
+const GRADE_COLORS: Record<string, string> = {
+  S: 'text-yellow-300', A: 'text-emerald-400', B: 'text-brand-400',
+  C: 'text-amber-400',  D: 'text-red-400',     '—': 'text-slate-500',
+}
+const GRADE_BG: Record<string, string> = {
+  S: 'bg-yellow-900/30 border-yellow-700/40',
+  A: 'bg-emerald-900/30 border-emerald-700/40',
+  B: 'bg-brand-900/30 border-brand-700/40',
+  C: 'bg-amber-900/30 border-amber-700/40',
+  D: 'bg-red-900/30 border-red-700/40',
+  '—': 'bg-surface-700/30 border-surface-600/40',
+}
+const TF_BADGE: Record<string, string> = {
+  '1W': 'bg-purple-900/50 text-purple-300 border-purple-700/40',
+  '1D': 'bg-blue-900/50 text-blue-300 border-blue-700/40',
+  '4H': 'bg-indigo-900/50 text-indigo-300 border-indigo-700/40',
+  '1H': 'bg-emerald-900/50 text-emerald-300 border-emerald-700/40',
+  '15m': 'bg-amber-900/50 text-amber-300 border-amber-700/40',
+}
+
+function RitualWidget({ profileId }: { profileId: number }) {
+  const [score,   setScore]   = useState<WeeklyScore | null>(null)
+  const [pins,    setPins]    = useState<PinnedPair[]>([])
+  const [loading, setLoading] = useState(true)
+
+  const load = useCallback(async () => {
+    setLoading(true)
+    try {
+      const [s, p] = await Promise.all([
+        ritualApi.getScore(profileId),
+        ritualApi.listPinned(profileId),
+      ])
+      setScore(s)
+      setPins(p.filter((pin) => pin.status === 'active'))
+    } catch { /* non-blocking */ }
+    finally { setLoading(false) }
+  }, [profileId])
+
+  useEffect(() => { void load() }, [load])
+
+  const grade   = score?.grade ?? '—'
+  const details = score?.details as Record<string, Record<string, number>> | undefined
+  const sessions   = details?.sessions ?? {}
+  const bonusCounts = details?.bonuses ?? {}
+  const weeklySetupDone    = (sessions['weekly_setup']   ?? 0) > 0
+  const tradeSessionCount  = sessions['trade_session']  ?? 0
+  const weekendReviewDone  = (sessions['weekend_review'] ?? 0) > 0
+  const disciplineBonuses  = (bonusCounts['no_opportunity'] ?? 0) + (bonusCounts['pairs_pinned'] ?? 0)
+  const barPct = Math.min(100, score?.pct ?? 0)
+  const barColor = barPct >= 90 ? 'bg-yellow-400' : barPct >= 75 ? 'bg-emerald-500' : barPct >= 55 ? 'bg-brand-500' : barPct >= 30 ? 'bg-amber-500' : 'bg-surface-500'
+
+  // Clean pair display name: PF_SOLUSD → SOL
+  const pinName = (pair: string) => pair.replace(/^PF_/, '').replace(/USD$/, '').replace(/USDT$/, '')
+
+  return (
+    <div className="rounded-xl bg-surface-800 border border-surface-700 p-5 flex flex-col gap-4">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Calendar size={14} className="text-brand-400" />
+          <h2 className="text-sm font-semibold text-slate-200">Ritual</h2>
+          {!loading && score && (
+            <span className="text-[10px] text-slate-600">week of {score.week_start}</span>
+          )}
+        </div>
+        <div className="flex items-center gap-2">
+          <button type="button" onClick={() => void load()} className="text-slate-600 hover:text-slate-400 transition-colors" title="Refresh">
+            <RefreshCw size={12} />
+          </button>
+          <Link to="/ritual" className="text-[10px] text-brand-400 hover:text-brand-300 flex items-center gap-0.5">
+            Open <ChevronRight size={10} />
+          </Link>
+        </div>
+      </div>
+
+      {loading ? (
+        <div className="flex items-center justify-center py-5">
+          <Loader2 size={16} className="text-slate-600 animate-spin" />
+        </div>
+      ) : (
+        <div className="grid grid-cols-3 gap-5">
+
+          {/* ── Score column ── */}
+          <div className="flex flex-col gap-3">
+            <div className="flex items-center gap-3">
+              <div className={`w-12 h-12 rounded-xl border flex items-center justify-center shrink-0 ${GRADE_BG[grade] ?? GRADE_BG['—']}`}>
+                <span className={`text-xl font-bold ${GRADE_COLORS[grade] ?? GRADE_COLORS['—']}`}>{grade}</span>
+              </div>
+              <div>
+                <div className="text-sm font-bold text-slate-100 tabular-nums">
+                  {score?.score ?? 0}
+                  <span className="text-[11px] text-slate-600 font-normal"> / {score?.max_score ?? 85} pts</span>
+                </div>
+                <div className="text-[10px] text-slate-500">discipline score</div>
+              </div>
+            </div>
+            <div>
+              <div className="h-1.5 rounded-full bg-surface-700 overflow-hidden">
+                <div className={`h-full rounded-full transition-all duration-700 ${barColor}`} style={{ width: `${barPct}%` }} />
+              </div>
+              <div className="text-[10px] text-slate-600 mt-1 tabular-nums">{barPct.toFixed(0)}%</div>
+            </div>
+          </div>
+
+          {/* ── Sessions column ── */}
+          <div className="flex flex-col gap-2.5">
+            <div className="text-[10px] text-slate-600 uppercase tracking-wide">Sessions</div>
+
+            <div className="flex items-center gap-2">
+              <span className={`text-sm ${weeklySetupDone ? '' : 'opacity-25'}`}>📅</span>
+              <span className={`text-xs flex-1 ${weeklySetupDone ? 'text-slate-300' : 'text-slate-600'}`}>Weekly Setup</span>
+              {weeklySetupDone
+                ? <CheckCircle2 size={13} className="text-emerald-500 shrink-0" />
+                : <div className="w-3 h-3 rounded-full border border-slate-700 shrink-0" />}
+            </div>
+
+            <div className="flex items-center gap-2">
+              <span className={`text-sm ${tradeSessionCount > 0 ? '' : 'opacity-25'}`}>🎯</span>
+              <div className="flex-1">
+                <div className={`text-xs ${tradeSessionCount > 0 ? 'text-slate-300' : 'text-slate-600'}`}>
+                  Trade Sessions
+                </div>
+                {disciplineBonuses > 0 && tradeSessionCount > 0 && (
+                  <div className="text-[10px] text-brand-400">+{disciplineBonuses} discipline 📌</div>
+                )}
+              </div>
+              {tradeSessionCount > 0
+                ? <span className="text-[11px] font-bold text-emerald-400 tabular-nums shrink-0">{tradeSessionCount}×</span>
+                : <div className="w-3 h-3 rounded-full border border-slate-700 shrink-0" />}
+            </div>
+
+            <div className="flex items-center gap-2">
+              <span className={`text-sm ${weekendReviewDone ? '' : 'opacity-25'}`}>📊</span>
+              <span className={`text-xs flex-1 ${weekendReviewDone ? 'text-slate-300' : 'text-slate-600'}`}>Weekend Review</span>
+              {weekendReviewDone
+                ? <CheckCircle2 size={13} className="text-emerald-500 shrink-0" />
+                : <div className="w-3 h-3 rounded-full border border-slate-700 shrink-0" />}
+            </div>
+          </div>
+
+          {/* ── Pins column ── */}
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] text-slate-600 uppercase tracking-wide">Active Pins</span>
+              {pins.length > 0 && (
+                <span className="text-[10px] font-semibold text-brand-400 tabular-nums">{pins.length}</span>
+              )}
+            </div>
+            {pins.length === 0 ? (
+              <div className="text-[11px] text-slate-600 italic pt-1">No active pins</div>
+            ) : (
+              <>
+                {pins.slice(0, 3).map((pin) => (
+                  <div key={pin.id} className="flex items-center gap-2">
+                    <div className="flex-1 min-w-0">
+                      <div className="text-xs text-slate-300 font-medium truncate">{pinName(pin.pair)}</div>
+                      <div className="h-1 rounded-full bg-surface-700 mt-0.5 overflow-hidden">
+                        <div
+                          className="h-full rounded-full bg-brand-600/60 transition-all"
+                          style={{ width: `${Math.max(4, Math.min(100, (pin.ttl_pct ?? 0) * 100))}%` }}
+                        />
+                      </div>
+                    </div>
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded border font-medium shrink-0 ${TF_BADGE[pin.timeframe] ?? 'bg-surface-700 text-slate-400 border-surface-600'}`}>
+                      {pin.timeframe}
+                    </span>
+                  </div>
+                ))}
+                {pins.length > 3 && (
+                  <div className="text-[10px] text-slate-600 mt-0.5">+{pins.length - 3} more</div>
+                )}
+              </>
+            )}
+          </div>
+
+        </div>
+      )}
+
+      {/* Footer CTA */}
+      {!loading && (
+        <div className="flex items-center gap-3 pt-2 border-t border-surface-700/50">
+          <Link
+            to="/ritual"
+            className="flex items-center gap-1.5 text-[11px] text-brand-400 hover:text-brand-300 font-medium transition-colors"
+          >
+            🎯 Start a session <ChevronRight size={10} />
+          </Link>
+          {!weeklySetupDone && (
+            <span className="text-[10px] text-amber-400/60">— Weekly Setup pas encore fait cette semaine</span>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // PAGE
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -826,6 +1027,9 @@ export function DashboardPage() {
 
           {/* ── 2-column widget grid ─────────────────────────────────────────── */}
           <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
+            <div className="xl:col-span-2">
+              <RitualWidget profileId={activeProfile.id} />
+            </div>
             <MarketVIWidget profileId={activeProfile.id} />
             <GoalsWidget    profileId={activeProfile.id} />
             <PositionsWidget  trades={trades} loading={tLoading} error={tError} />

@@ -1105,8 +1105,8 @@ export interface AIGenerateOut {
 
 // ── Ritual (Phase 6B) ──────────────────────────────────────────────────────
 
-export type SessionType = 'weekly_setup' | 'daily_prep' | 'trade_session' | 'weekend_review'
-export type SessionOutcome = 'trade_opened' | 'no_opportunity' | 'abandoned' | 'vol_too_low'
+export type SessionType = 'weekly_setup' | 'trade_session' | 'weekend_review'
+export type SessionOutcome = 'trade_opened' | 'pairs_pinned' | 'no_opportunity' | 'abandoned' | 'vol_too_low'
 export type PinnedTF = '1W' | '1D' | '4H' | '1H' | '15m'
 
 export interface RitualSettings {
@@ -1186,6 +1186,7 @@ export interface RitualSession {
 export interface SmartWLPairEntry {
   pair: string
   tv_symbol: string
+  display_name: string
   vi_score: number
   regime: string
   ema_signal: string
@@ -1195,6 +1196,12 @@ export interface SmartWLPairEntry {
   pin_id: number | null
 }
 
+export interface PinnedTVEntry {
+  tv_symbol: string
+  display_name: string
+  timeframe: string
+}
+
 export interface SmartWLResult {
   generated_at: string
   session_type: string
@@ -1202,6 +1209,7 @@ export interface SmartWLResult {
   broker_name: string
   timeframes: Record<string, SmartWLPairEntry[]>
   market_analysis_pairs: string[]
+  pinned_tv: PinnedTVEntry[]
 }
 
 export interface WeeklyScore {

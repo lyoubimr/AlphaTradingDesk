@@ -829,3 +829,46 @@ def send_execution_event(
     if ok:
         logger.debug("send_execution_event: sent %s to profile (pair=%s)", event, ctx.get("pair"))
     return ok
+
+
+# ── Trading window alert ──────────────────────────────────────────────────────
+
+def send_trading_window_alert(
+    bot_token: str,
+    chat_id: str,
+    label: str,
+    start: str,
+    end: str,
+    active_pins: int,
+) -> bool:
+    """Notify trader that their configured trading window is starting.
+
+    Args:
+        bot_token: Telegram bot token.
+        chat_id:   Telegram chat ID.
+        label:     Window label (e.g. "Evening").
+        start:     Start time string HH:MM.
+        end:       End time string HH:MM.
+        active_pins: Number of currently active pinned pairs.
+    """
+    lines = [
+        "🎯 <b>Trading Window Starting</b>",
+        "",
+        f"⏰ <b>{label}</b> — {start} → {end}",
+    ]
+    if active_pins > 0:
+        lines.append(f"📌 <b>{active_pins}</b> active pinned pair{'s' if active_pins != 1 else ''} ready")
+    else:
+        lines.append("📌 No pinned pairs — run Weekly Setup first")
+    lines += [
+        "",
+        "Run your <b>Trade Session</b> ritual now:",
+        "   1. ✅ VI check",
+        "   2. 📌 Review pins",
+        "   3. 🔍 Smart Watchlist",
+        "   4. 📈 TradingView analysis",
+        "   5. 🏁 Record outcome",
+        "",
+        f"<i>{_now_local().strftime('%a %d %b · %H:%M %Z')}</i>",
+    ]
+    return _send(bot_token, chat_id, "\n".join(lines))

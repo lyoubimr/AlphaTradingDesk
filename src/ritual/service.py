@@ -43,6 +43,7 @@ from src.ritual.schemas import (
     PinnedPairCreate,
     PinnedPairExtend,
     PinnedPairRead,
+    PinnedTVEntry,
     SessionComplete,
     SessionRead,
     SmartWLPairEntry,
@@ -74,13 +75,35 @@ def _deep_merge(base: dict, patch: dict) -> dict:
     return result
 
 
+def _display_name(pair: str) -> str:
+    """Derive a short human-readable label from a Kraken pair symbol.
+
+    'PF_ORCAUSD' → 'ORCA'   'PI_XBTUSD' → 'XBT'
+    'XBT/USD'    → 'XBT'    'ETH/USDT'  → 'ETH'
+    """
+    p = pair.upper()
+    if p.startswith(("PF_", "PI_")):
+        p = p[3:]
+    if "/" in p:
+        return p.split("/")[0]
+    for suffix in ("USDT", "USD", "BTC", "ETH"):
+        if p.endswith(suffix) and len(p) > len(suffix):
+            return p[: -len(suffix)]
+    return p
+
+
 def _to_tv_symbol(pair: str, exchange: str = "KRAKEN") -> str:
     """Convert ATD pair format to TradingView symbol.
 
-    'XBT/USD' → 'KRAKEN:XBTUSD'
-    'ETH/BTC' → 'KRAKEN:ETHBTC'
+    'XBT/USD'    → 'KRAKEN:XBTUSD'
+    'ETH/BTC'    → 'KRAKEN:ETHBTC'
+    'PF_ORCAUSD' → 'KRAKEN:ORCAUSD.PM'  (Kraken perpetual — .PM suffix)
+    'PI_XBTUSD'  → 'KRAKEN:XBTUSD.PM'   (Kraken perpetual — .PM suffix)
     """
-    clean = pair.replace("/", "").replace("-", "").replace(".", "").upper()
+    p = pair.upper()
+    if p.startswith(("PF_", "PI_")):
+        return f"KRAKEN:{p[3:]}.PM"  # strip PF_/PI_ prefix, add .PM suffix
+    clean = p.replace("/", "").replace("-", "").replace(".", "")
     return f"{exchange}:{clean}"
 
 
@@ -337,8 +360,12 @@ def extend_pinned(
     expires = pin.expires_at
     if expires.tzinfo is None:
         expires = expires.replace(tzinfo=UTC)
-    base = max(expires, now)
-    pin.expires_at = base + timedelta(hours=payload.hours)
+    if payload.hours >= 0:
+        base = max(expires, now)
+        pin.expires_at = base + timedelta(hours=payload.hours)
+    else:
+        # Reduce: subtract directly from current expiry, floor at now + 1h
+        pin.expires_at = max(expires + timedelta(hours=payload.hours), now + timedelta(hours=1))
     if pin.status == "expired":
         pin.status = "active"
     db.commit()
@@ -513,11 +540,9 @@ def _compute_discipline_points(
 
     if stype == "weekly_setup":
         return DISCIPLINE_POINTS["weekly_setup_done"]
-    if stype == "daily_prep":
-        return DISCIPLINE_POINTS["daily_prep_done"]
     if stype == "trade_session":
         base = DISCIPLINE_POINTS["trade_session_done"]
-        if outcome == "no_opportunity":
+        if outcome in ("no_opportunity", "pairs_pinned"):
             base += DISCIPLINE_POINTS["no_opportunity"]
         elif outcome == "vol_too_low":
             base += DISCIPLINE_POINTS["vol_too_low_trade"]
@@ -550,11 +575,10 @@ def _update_weekly_score(
             details={
                 "sessions": {
                     "weekly_setup": 0,
-                    "daily_prep": 0,
                     "trade_session": 0,
                     "weekend_review": 0,
                 },
-                "bonuses": {"no_opportunity": 0},
+                "bonuses": {"no_opportunity": 0, "pairs_pinned": 0},
                 "penalties": {"vol_too_low_trade": 0},
                 "points_breakdown": [],
             },
@@ -566,9 +590,10 @@ def _update_weekly_score(
     details["sessions"][session.session_type] = (
         details["sessions"].get(session.session_type, 0) + 1
     )
-    if session.outcome == "no_opportunity":
-        details["bonuses"]["no_opportunity"] = (
-            details["bonuses"].get("no_opportunity", 0) + 1
+    if session.outcome in ("no_opportunity", "pairs_pinned"):
+        key = session.outcome
+        details["bonuses"][key] = (
+            details["bonuses"].get(key, 0) + 1
         )
     if session.outcome == "vol_too_low":
         details["penalties"]["vol_too_low_trade"] = (
@@ -674,9 +699,8 @@ def generate_smart_watchlist(
         tfs: list[str] = smart_step.config["timeframes"]
     else:
         tfs = {
-            "weekly_setup": ["1W", "1D"],
-            "daily_prep": ["1D", "4H"],
-            "trade_session": ["4H", "1H", "15m"],
+            "weekly_setup": ["1W", "1D", "4H", "1H", "15m"],
+            "trade_session": ["1D", "4H", "1H", "15m"],
             "weekend_review": ["1D", "4H"],
         }.get(session_type, ["4H", "1H"])
 
@@ -767,6 +791,7 @@ def generate_smart_watchlist(
                 SmartWLPairEntry(
                     pair=p,
                     tv_symbol=_to_tv_symbol(p),
+                    display_name=_display_name(p),
                     vi_score=round(float(tf_info.get("vi_score", 0)), 3),
                     regime=tf_info.get("regime", ""),
                     ema_signal=tf_info.get("ema_signal", ""),
@@ -780,14 +805,74 @@ def generate_smart_watchlist(
         pinned_entries = [e for e in scored if e.is_pinned]
         rest = sorted(
             [e for e in scored if not e.is_pinned],
-            key=lambda x: x.score,
+            key=lambda x: x.vi_score,  # rank by THIS TF's vi_score, not cascade
             reverse=True,
         )
         result_tfs[tf] = pinned_entries + rest[:top_n]
 
-    market_pairs: list[str] = cfg.get(
-        "market_analysis_pairs", DEFAULT_RITUAL_CONFIG["market_analysis_pairs"]
+    # ── Dedup: each pair appears in exactly one TF section ───────────────────
+    # Strategy: assign each pair to the TF where it ranks best (lowest index
+    # in per-TF vi_score sort).  Ties go to the first TF in `tfs` order
+    # (i.e. the higher timeframe, since tfs is ordered high → low).
+    #
+    # Why NOT "highest TF wins": ALL Kraken pairs appear in ALL TF snapshots,
+    # so "highest TF wins" would send every pair to 1W/1D and leave lower TFs
+    # completely empty.
+    #
+    # Why NOT "argmax(vi_score)": shorter TFs systematically have higher
+    # vi_scores in volatile markets → 1H/15m would monopolise all pairs.
+    #
+    # "Best rank per TF" naturally distributes pairs: a pair that is
+    # particularly hot on 4H (rank #2) vs mediocre on 1D (rank #12) goes to 4H.
+    pair_best_tf: dict[str, str] = {}
+    pair_best_rank: dict[str, int] = {}
+
+    for tf, entries in result_tfs.items():
+        for rank, e in enumerate(entries):
+            if e.pair not in pair_best_rank or rank < pair_best_rank[e.pair]:
+                pair_best_rank[e.pair] = rank
+                pair_best_tf[e.pair] = tf
+
+    result_tfs = {
+        tf: [e for e in entries if pair_best_tf.get(e.pair) == tf]
+        for tf, entries in result_tfs.items()
+    }
+
+    user_pairs: list[str] = cfg.get("market_analysis_pairs", [])
+    default_pairs: list[str] = DEFAULT_RITUAL_CONFIG["market_analysis_pairs"]
+    if not user_pairs:
+        market_pairs = default_pairs
+    else:
+        # Merge: keep user order, append any new default pairs not yet present
+        seen = set(user_pairs)
+        market_pairs = user_pairs + [p for p in default_pairs if p not in seen]
+
+    # Build pinned_tv list for TV file (all active pins, sorted canonical TF order)
+    _TF_ORDER = ["1W", "1D", "4H", "1H", "15m"]
+    pinned_tv: list[PinnedTVEntry] = [
+        PinnedTVEntry(
+            tv_symbol=pin.tv_symbol or _to_tv_symbol(pin.pair),
+            display_name=_display_name(pin.pair),
+            timeframe=pin.timeframe,
+        )
+        for pin in sorted(active_pins, key=lambda p: _TF_ORDER.index(p.timeframe) if p.timeframe in _TF_ORDER else 99)
+    ]
+
+    # Enforce ≤ 100 TV file lines, accounting for all sections:
+    #   market section     : 1 header + len(market_pairs) + 1 blank
+    #   pinned section(s)  : n_pinned_tfs × (1 header + 1 blank) + n_pins
+    #   WL TF sections     : _n_active_tfs × (1 header + 1 blank) + total_WL_pairs
+    n_pins = len(active_pins)
+    n_pinned_tfs = len({p.timeframe for p in active_pins}) if active_pins else 0
+    _n_active_tfs = max(sum(1 for pairs in result_tfs.values() if pairs), 1)
+    _overhead = (
+        2 + len(market_pairs)            # market section
+        + n_pins + n_pinned_tfs * 2      # pinned sections
+        + _n_active_tfs * 2              # WL TF section headers + blanks
     )
+    _tv_cap = max(1, (100 - _overhead) // _n_active_tfs)
+    if _tv_cap < top_n:
+        result_tfs = {tf: pairs[:_tv_cap] for tf, pairs in result_tfs.items()}
 
     return SmartWLResult(
         generated_at=_utcnow().isoformat(),
@@ -796,28 +881,96 @@ def generate_smart_watchlist(
         broker_name=broker_name,
         timeframes=result_tfs,
         market_analysis_pairs=market_pairs,
+        pinned_tv=pinned_tv,
     )
 
 
 def generate_watchlist_file(result: SmartWLResult) -> bytes:
-    """Build the TradingView-importable .txt file content."""
-    now_str = datetime.now().strftime("%Y%m%d_%H%M")
-    buf = io.StringIO()
-    buf.write("# AlphaTradingDesk Smart Watchlist\n")
-    buf.write(f"# Generated: {now_str} | Session: {result.session_type} | Top {result.top_n}\n\n")
+    """Build the TradingView-importable .txt watchlist file.
 
-    # Market analysis section
-    buf.write("###_MARKET_ANALYSIS_###\n")
+    Sections (in order):
+      1. 📊 Market Analysis    — macro context pairs (BTC.D, TOTAL, etc.)
+      2. 📌 Pinned [TF]        — one section per TF for active pinned pairs
+      3. [emoji] [TF]          — deduped WL pairs (pinned symbols excluded)
+
+    Dedup rule for WL sections:
+      • weekly_setup / weekend_review → highest TF wins  (1W > 1D > 4H > 1H > 15m)
+      • trade_session                 → hottest TF wins  argmax(vi_score per TF)
+    """
+    buf = io.StringIO()
+
+    # ── TF metadata ──────────────────────────────────────────────────────────
+    _CANONICAL = ["1W", "1D", "4H", "1H", "15m"]
+    _TF_EMOJI = {
+        "1W":  "🟣",
+        "1D":  "🔵",
+        "4H":  "⏳",
+        "1H":  "🟢",
+        "15m": "⚡",
+    }
+
+    # ── 1. Market Analysis section ───────────────────────────────────────────
+    buf.write("###📊 Market###\n")
     for sym in result.market_analysis_pairs:
         buf.write(f"{sym}\n")
     buf.write("\n")
 
-    # TF sections
-    for tf, pairs in result.timeframes.items():
-        buf.write(f"###_{tf}_###\n")
-        for entry in pairs:
-            pin_mark = "★ " if entry.is_pinned else ""
-            buf.write(f"{pin_mark}{entry.tv_symbol}\n")
+    # ── 2. Pinned sections (one per TF, top of the watchlist) ────────────────
+    pinned_seen: set[str] = set()   # track pinned symbols → exclude from WL sections
+    if result.pinned_tv:
+        by_tf: dict[str, list[str]] = {}
+        for entry in result.pinned_tv:
+            by_tf.setdefault(entry.timeframe, []).append(entry.tv_symbol)
+            pinned_seen.add(entry.tv_symbol)
+        for tf in _CANONICAL:
+            if tf not in by_tf:
+                continue
+            emoji = _TF_EMOJI.get(tf, "📌")
+            buf.write(f"###📌 Pinned {emoji} {tf}###\n")
+            for sym in by_tf[tf]:
+                buf.write(f"{sym}\n")
+            buf.write("\n")
+
+    # ── 3. WL sections — deduped, pinned symbols already excluded ────────────
+    # Build {tv_symbol: {tf: vi_score}} lookup for trade_session argmax
+    sym_tf_vi: dict[str, dict[str, float]] = {}
+    for tf, entries in result.timeframes.items():
+        for entry in entries:
+            sym_tf_vi.setdefault(entry.tv_symbol, {})[tf] = entry.vi_score
+
+    if result.session_type == "trade_session":
+        def _best_tf(sym: str) -> str:
+            tfs = sym_tf_vi.get(sym, {})
+            return max(tfs, key=lambda t: tfs[t]) if tfs else _CANONICAL[-1]
+    else:
+        def _best_tf(sym: str) -> str:  # type: ignore[misc]
+            tfs = sym_tf_vi.get(sym, {})
+            for tf in _CANONICAL:
+                if tf in tfs:
+                    return tf
+            return _CANONICAL[-1]
+
+    seen: set[str] = set(pinned_seen)  # start with pinned already excluded
+    sectioned: dict[str, list[str]] = {tf: [] for tf in _CANONICAL}
+    for tf in _CANONICAL:
+        for entry in result.timeframes.get(tf, []):
+            sym = entry.tv_symbol
+            if sym in seen:
+                continue
+            seen.add(sym)
+            sectioned[_best_tf(sym)].append(sym)
+
+    for tf in _CANONICAL:
+        symbols = sectioned.get(tf, [])
+        if not symbols:
+            continue
+        emoji = _TF_EMOJI.get(tf, "📈")
+        buf.write(f"###{emoji} {tf}###\n")
+        for sym in symbols:
+            buf.write(f"{sym}\n")
         buf.write("\n")
 
     return buf.getvalue().encode("utf-8")
+
+
+

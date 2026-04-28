@@ -11,7 +11,7 @@ import {
   ChevronRight, CheckCircle2, SkipForward,
   Timer, Flame, BookOpen, Clock, XCircle,
   ExternalLink, Loader2, Settings,
-  ChevronDown, ChevronUp,
+  ChevronDown, ChevronUp, Minus, FileText,
 } from 'lucide-react'
 import { PageHeader } from '../../components/ui/PageHeader'
 import { useProfile } from '../../context/ProfileContext'
@@ -30,65 +30,47 @@ import type {
 // inline type for market analysis staleness (field names match backend StalenessItem)
 type MAStaleness = { module_name: string; last_analyzed_at: string | null; days_old: number | null; is_stale: boolean }
 
-const SESSION_TYPES: { type: SessionType; emoji: string; label: string; when: string; desc: string; est: string; accent: string }[] = [
+const SESSION_TYPES: { type: SessionType; emoji: string; label: string; when: string; desc: string; est: string; accent: string; gradient: string; steps: string[] }[] = [
   {
     type: 'weekly_setup',
     emoji: '📅',
     label: 'Weekly Setup',
     when: 'Monday',
-    desc: 'Market Analysis + Full Watchlist (1W → 15m) → Pin key pairs for the week',
+    desc: 'Full market scan + watchlist for the week',
     est: '~45 min',
     accent: '#6366f1',
+    gradient: 'from-indigo-950/60 to-surface-800/40',
+    steps: ['Market Analysis', 'Smart Watchlist', 'TradingView', 'Goals Review'],
   },
   {
     type: 'trade_session',
     emoji: '🎯',
     label: 'Trade Session',
-    when: 'Before entering a position',
-    desc: 'VI check + Pinned pairs + WL (1D → 15m) → Trade decision + Record outcome',
+    when: 'Before each session',
+    desc: 'Quick VI check + pins + trade decision',
     est: '~30 min',
     accent: '#f59e0b',
-  },
-  {
-    type: 'daily_prep',
-    emoji: '☀️',
-    label: 'Daily Prep',
-    when: 'Tue – Fri, no trade planned',
-    desc: 'Quick VI + WL (1D/4H) for daily orientation — no trade required',
-    est: '~15 min',
-    accent: '#22c55e',
+    gradient: 'from-amber-950/60 to-surface-800/40',
+    steps: ['VI Check', 'Pins Review', 'Smart WL', 'Outcome'],
   },
   {
     type: 'weekend_review',
     emoji: '📊',
     label: 'Weekend Review',
-    when: 'Saturday or Sunday',
-    desc: 'Analytics + Trade Journal + Goals + Learning note',
+    when: 'Sat / Sun',
+    desc: 'Analytics + Journal + Goals + Learning',
     est: '~35 min',
     accent: '#2dd4bf',
+    gradient: 'from-teal-950/60 to-surface-800/40',
+    steps: ['Analytics', 'Journal', 'Goals', 'Learning Note'],
   },
 ]
 
-// Step type → accent color for pending indicator ring
-const STEP_ACCENTS: Record<string, string> = {
-  vi_check:        '#f59e0b',
-  smart_wl:        '#6366f1',
-  tv_analysis:     '#22c55e',
-  market_analysis: '#a855f7',
-  pinned_review:   '#eab308',
-  pin_pairs:       '#ec4899',
-  goals_review:    '#f97316',
-  outcome:         '#4ade80',
-  analytics:       '#818cf8',
-  journal:         '#2dd4bf',
-  learning_note:   '#94a3b8',
-  weekly_notes:    '#94a3b8',
-}
-
 const OUTCOME_OPTIONS: { value: SessionOutcome; label: string; emoji: string; color: string }[] = [
-  { value: 'trade_opened',    label: 'Trade Opened',    emoji: '✅', color: 'text-green-400' },
-  { value: 'no_opportunity',  label: 'No Opportunity',  emoji: '🔵', color: 'text-blue-400' },
-  { value: 'vol_too_low',     label: 'Vol Too Low',     emoji: '⚠️', color: 'text-amber-400' },
+  { value: 'trade_opened',   label: 'Trade Opened',   emoji: '✅', color: 'text-green-400' },
+  { value: 'pairs_pinned',   label: 'Pairs Pinned',   emoji: '📌', color: 'text-brand-400' },
+  { value: 'no_opportunity', label: 'No Opportunity', emoji: '🔵', color: 'text-blue-400' },
+  { value: 'vol_too_low',    label: 'Vol Too Low',    emoji: '⚠️', color: 'text-amber-400' },
 ]
 
 const TF_OPTIONS: PinnedTF[] = ['1W', '1D', '4H', '1H', '15m']
@@ -98,15 +80,6 @@ const TF_COLORS: Record<string, string> = {
   '4H': 'text-cyan-400 border-cyan-700/40 bg-cyan-900/20',
   '1H': 'text-green-400 border-green-700/40 bg-green-900/20',
   '15m': 'text-amber-400 border-amber-700/40 bg-amber-900/20',
-}
-
-const REGIME_COLORS: Record<string, string> = {
-  DEAD: 'text-slate-500',
-  CALM: 'text-blue-400',
-  NORMAL: 'text-slate-300',
-  TRENDING: 'text-green-400',
-  ACTIVE: 'text-amber-400',
-  EXTREME: 'text-red-400',
 }
 
 function ttlColor(pct: number | null): string {
@@ -161,14 +134,6 @@ function TFBadge({ tf }: { tf: string }) {
       TF_COLORS[tf] ?? 'text-slate-400 border-slate-700',
     )}>
       {tf}
-    </span>
-  )
-}
-
-function RegimeBadge({ regime }: { regime: string }) {
-  return (
-    <span className={cn('text-[10px] font-medium', REGIME_COLORS[regime.toUpperCase()] ?? 'text-slate-400')}>
-      {regime || '—'}
     </span>
   )
 }
@@ -268,6 +233,12 @@ function MarketAnalysisPanel({
               ✓ Done
             </button>
           </div>
+          <button
+            onClick={() => navigate('/market-analysis')}
+            className="flex items-center gap-1 text-[11px] text-slate-500 hover:text-brand-400 transition-colors"
+          >
+            <ExternalLink size={10} /> Open Market Analysis →
+          </button>
           {neverDone.length > 0 && (
             <p className="text-[10px] text-slate-600">
               {neverDone.length} module(s) never analyzed — optional for {activeProfile?.market_type ?? 'your'} profile
@@ -342,33 +313,45 @@ function StepItem({
   const isDone = log.status === 'done'
   const isSkipped = log.status === 'skipped'
   const isDoneOrSkipped = isDone || isSkipped
+  const [note, setNote] = useState('')
+  const [showNote, setShowNote] = useState(false)
+  const isNoteStep = log.step_type === 'learning_note'
+  const hasOptionalNote = ['vi_check', 'pinned_review', 'goals_review', 'analytics', 'journal'].includes(log.step_type)
+  const handleDone = () => {
+    const out: Record<string, unknown> = {}
+    if (note.trim()) out.note = note.trim()
+    onComplete(log.id, 'done', Object.keys(out).length > 0 ? out : undefined)
+  }
 
   return (
     <div className={cn(
-      'relative rounded-xl border transition-all',
+      'relative rounded-xl border transition-all overflow-hidden',
       isCurrent && !isDoneOrSkipped
-        ? 'border-brand-600/60 bg-brand-950/30 shadow-md shadow-brand-900/20'
+        ? 'border-brand-600/60 bg-brand-950/30 shadow-lg shadow-brand-900/30'
         : isDone
           ? 'border-green-800/30 bg-green-950/10'
           : isSkipped
-            ? 'border-surface-700 bg-surface-800/30 opacity-60'
-            : 'border-surface-700 bg-surface-800/40',
+            ? 'border-surface-700 bg-surface-800/30 opacity-50'
+            : 'border-surface-700/60 bg-surface-800/30',
     )}>
-      <div className="flex items-start gap-3 p-3">
+      {/* Left accent bar for current step */}
+      {isCurrent && !isDoneOrSkipped && (
+        <div className="absolute inset-y-0 left-0 w-[3px] bg-brand-500 rounded-l-xl" />
+      )}
+      <div className="flex items-start gap-3 p-3 pl-4">
         {/* Status icon */}
         <div className="mt-0.5 shrink-0">
           {isDone ? (
-            <CheckCircle2 size={18} className="text-green-500" />
+            <CheckCircle2 size={18} className="text-green-400" />
           ) : isSkipped ? (
             <SkipForward size={18} className="text-slate-500" />
           ) : (
-            <div
-              className="w-[18px] h-[18px] rounded-full border-2 shrink-0"
-              style={{
-                borderColor: STEP_ACCENTS[log.step_type] ?? '#6366f1',
-                backgroundColor: `${STEP_ACCENTS[log.step_type] ?? '#6366f1'}1a`,
-              }}
-            />
+            <div className={cn(
+              'w-[18px] h-[18px] rounded-full border-2 shrink-0',
+              isCurrent
+                ? 'border-brand-400 bg-brand-900/40 shadow-[0_0_6px_rgba(99,102,241,0.4)]'
+                : 'border-slate-700 bg-surface-800/30',
+            )} />
           )}
         </div>
 
@@ -419,10 +402,24 @@ function StepItem({
               result={wlResult ?? null}
               loading={wlLoading ?? false}
               downloadUrl={downloadUrl ?? ''}
-              topN={topN ?? 20}
+              topN={topN ?? 12}
               setTopN={setTopN ?? (() => {})}
               onGenerate={onGenerateWL ?? (() => {})}
               onPin={onPin}
+            />
+          )}
+
+          {/* TV analysis: show WL result with pin buttons, no generate controls */}
+          {log.step_type === 'tv_analysis' && isCurrent && !isDoneOrSkipped && wlResult && (
+            <SmartWLPanel
+              result={wlResult}
+              loading={false}
+              downloadUrl={downloadUrl ?? ''}
+              topN={topN ?? 12}
+              setTopN={setTopN ?? (() => {})}
+              onGenerate={onGenerateWL ?? (() => {})}
+              onPin={onPin}
+              readOnly
             />
           )}
 
@@ -430,13 +427,58 @@ function StepItem({
           {log.step_type === 'outcome' && isCurrent && !isDoneOrSkipped && (
             <OutcomeSelector onSelect={(o) => onComplete(log.id, 'done', { outcome: o })} />
           )}
+
+          {/* Mandatory note textarea for learning_note step */}
+          {isNoteStep && isCurrent && !isDoneOrSkipped && (
+            <div className="mt-3 space-y-2">
+              <textarea
+                value={note}
+                onChange={(e) => setNote(e.target.value)}
+                placeholder="What did you learn this week? Key setups, patterns, market dynamics, personal discipline..."
+                rows={4}
+                className="w-full bg-surface-900 border border-surface-600 rounded-lg px-3 py-2 text-xs text-slate-200 placeholder-slate-600 resize-none focus:outline-none focus:border-brand-600 transition-colors"
+              />
+              <button
+                onClick={handleDone}
+                disabled={!note.trim()}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-green-700/30 border border-green-700/50 text-green-400 text-xs font-medium hover:bg-green-700/40 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                <CheckCircle2 size={12} />
+                Save Note &amp; Done
+              </button>
+            </div>
+          )}
+
+          {/* Optional note for reflective steps */}
+          {hasOptionalNote && isCurrent && !isDoneOrSkipped && (
+            <div className="mt-2">
+              {!showNote ? (
+                <button
+                  onClick={() => setShowNote(true)}
+                  className="text-[11px] text-slate-600 hover:text-slate-400 flex items-center gap-1 transition-colors"
+                >
+                  <FileText size={10} />
+                  Add a note
+                </button>
+              ) : (
+                <textarea
+                  value={note}
+                  onChange={(e) => setNote(e.target.value)}
+                  placeholder="Your observations..."
+                  rows={2}
+                  autoFocus
+                  className="w-full bg-surface-900 border border-surface-600 rounded-lg px-3 py-2 text-xs text-slate-200 placeholder-slate-600 resize-none focus:outline-none focus:border-brand-600 transition-colors"
+                />
+              )}
+            </div>
+          )}
         </div>
 
         {/* Action buttons */}
-        {isCurrent && !isDoneOrSkipped && log.step_type !== 'outcome' && (
+        {isCurrent && !isDoneOrSkipped && log.step_type !== 'outcome' && !isNoteStep && (
           <div className="flex items-center gap-1 shrink-0">
             <button
-              onClick={() => onComplete(log.id, 'done')}
+              onClick={handleDone}
               className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-green-700/20 border border-green-700/40 text-green-400 text-xs font-medium hover:bg-green-700/30 transition-colors"
               title="Mark as done"
             >
@@ -489,7 +531,7 @@ function OutcomeSelector({ onSelect }: { onSelect: (o: SessionOutcome) => void }
 
 // ── Smart WL panel ────────────────────────────────────────────────────────────
 function SmartWLPanel({
-  result, loading, downloadUrl, topN, setTopN, onGenerate, onPin,
+  result, loading, downloadUrl, topN, setTopN, onGenerate, onPin, readOnly,
 }: {
   result: SmartWLResult | null
   loading: boolean
@@ -498,21 +540,32 @@ function SmartWLPanel({
   setTopN: (n: number) => void
   onGenerate: () => void
   onPin?: (pair: string, tf: string) => Promise<void>
+  readOnly?: boolean
 }) {
   const navigate = useNavigate()
+  const [expandedTFs, setExpandedTFs] = useState<Set<string>>(new Set())
   const hasData = result !== null && Object.values(result.timeframes).some(pairs => pairs.length > 0)
+  const PREVIEW = 8
+
+  const toggleTF = (tf: string) => setExpandedTFs(prev => {
+    const next = new Set(prev)
+    next.has(tf) ? next.delete(tf) : next.add(tf)
+    return next
+  })
   return (
     <div className="mt-3 space-y-3">
-      {/* Controls */}
+      {/* Controls — hidden in readOnly (tv_analysis) mode */}
+      {!readOnly && (
       <div className="flex items-center gap-2 flex-wrap">
         <div className="flex items-center gap-2">
           <label className="text-[11px] text-slate-400 whitespace-nowrap">Per TF:</label>
           <input
-            type="range" min={5} max={50} step={5} value={topN}
+            type="range" min={3} max={16} step={1} value={topN}
             onChange={(e) => setTopN(Number(e.target.value))}
             className="w-24 accent-brand-500"
           />
           <span className="text-[12px] text-brand-400 font-semibold w-6 text-right">{topN}</span>
+          <span className="text-[10px] text-slate-600">/TF</span>
         </div>
         <button
           onClick={onGenerate}
@@ -533,6 +586,7 @@ function SmartWLPanel({
           </a>
         )}
       </div>
+      )}
 
       {/* Result preview — no data state */}
       {result && !hasData && (
@@ -569,40 +623,74 @@ function SmartWLPanel({
           )}
           {Object.entries(result.timeframes)
             .filter(([, pairs]) => pairs.length > 0)
-            .map(([tf, pairs]) => (
+            .map(([tf, pairs]) => {
+            const isExpanded = expandedTFs.has(tf)
+            const visible = isExpanded ? pairs : pairs.slice(0, PREVIEW)
+            const hidden = pairs.length - PREVIEW
+            return (
             <div key={tf} className="px-3 py-2">
               <div className="flex items-center gap-2 mb-1.5">
                 <TFBadge tf={tf} />
                 <span className="text-[10px] text-slate-500">{pairs.length} pairs</span>
               </div>
               <div className="grid grid-cols-2 gap-1">
-                {pairs.slice(0, 8).map((p) => (
+                {visible.map((p) => (
                   <div key={p.pair} className={cn(
-                    'group relative flex items-center gap-1.5 rounded px-1.5 py-1',
-                    p.is_pinned ? 'bg-brand-900/30 border border-brand-700/30' : 'bg-surface-800/60',
+                    'group relative flex flex-col rounded-lg overflow-hidden transition-colors',
+                    p.is_pinned
+                      ? 'bg-brand-900/30 border border-brand-700/40 shadow-sm shadow-brand-900/20'
+                      : 'bg-surface-800/50 border border-surface-700/40 hover:bg-surface-700/50',
                   )}>
-                    {p.is_pinned && <span className="text-[10px] text-yellow-400">★</span>}
-                    <span className="text-[11px] text-slate-300 font-medium truncate flex-1">{p.tv_symbol}</span>
-                    <RegimeBadge regime={p.regime} />
-                    {!p.is_pinned && onPin && (
-                      <button
-                        onClick={() => onPin(p.pair, tf)}
-                        className="opacity-0 group-hover:opacity-100 transition-opacity shrink-0 p-0.5 text-slate-600 hover:text-yellow-400"
-                        title={`Pin ${p.pair} (${tf})`}
-                      >
-                        <Pin size={10} />
-                      </button>
-                    )}
+                    <div className="flex items-center gap-1.5 px-1.5 pt-1 pb-0.5">
+                      {p.is_pinned && <span className="text-[9px] text-yellow-400 shrink-0">★</span>}
+                      <span className="text-[11px] text-slate-200 font-semibold truncate flex-1">
+                        {p.display_name}
+                      </span>
+                      <span className="text-[10px] tabular-nums text-slate-500 shrink-0">{p.vi_score.toFixed(2)}</span>
+                      {!p.is_pinned && onPin && (
+                        <button
+                          onClick={() => onPin(p.pair, tf)}
+                          className="opacity-0 group-hover:opacity-100 transition-opacity shrink-0 p-0.5 text-slate-600 hover:text-yellow-400"
+                          title={`Pin ${p.display_name} (${tf})`}
+                        >
+                          <Pin size={9} />
+                        </button>
+                      )}
+                    </div>
+                    {/* vi_score bar */}
+                    <div className="h-[2px] bg-surface-700/60">
+                      <div
+                        className={cn(
+                          'h-full transition-all rounded-sm',
+                          p.vi_score > 0.67 ? 'bg-red-500/70' :
+                          p.vi_score > 0.5  ? 'bg-amber-500/70' :
+                          p.vi_score > 0.33 ? 'bg-green-500/70' : 'bg-blue-500/50',
+                        )}
+                        style={{ width: `${Math.round(p.vi_score * 100)}%` }}
+                      />
+                    </div>
                   </div>
                 ))}
-                {pairs.length > 8 && (
-                  <span className="col-span-2 text-[10px] text-slate-500 pl-1.5">
-                    +{pairs.length - 8} more pairs in file
-                  </span>
+                {hidden > 0 && !isExpanded && (
+                  <button
+                    onClick={() => toggleTF(tf)}
+                    className="col-span-2 text-left text-[10px] text-brand-400 hover:text-brand-300 pl-1.5 py-0.5 transition-colors"
+                  >
+                    + {hidden} more — click to show all
+                  </button>
+                )}
+                {isExpanded && pairs.length > PREVIEW && (
+                  <button
+                    onClick={() => toggleTF(tf)}
+                    className="col-span-2 text-left text-[10px] text-slate-500 hover:text-slate-400 pl-1.5 py-0.5 transition-colors"
+                  >
+                    ↑ Show less
+                  </button>
                 )}
               </div>
             </div>
-          ))}
+          )})}
+
           {Object.entries(result.timeframes).some(([, p]) => p.length === 0) && (
             <div className="px-3 py-2 flex flex-wrap gap-1.5 items-center border-t border-surface-700/60">
               <span className="text-[10px] text-slate-500">No snapshot for:</span>
@@ -626,14 +714,20 @@ interface PinnedCardProps {
 }
 
 function PinnedCard({ pin, onRemove, onExtend }: PinnedCardProps) {
-  const extendHours = pin.timeframe === '1W' ? 24 * 7 : 24
+  const TF_EXTEND_HOURS: Record<string, number> = {
+    '1W': 24 * 7, '1D': 24 * 3, '4H': 24, '1H': 12, '15m': 6,
+  }
+  const extendHours = TF_EXTEND_HOURS[pin.timeframe] ?? 24
   const ttlClass = ttlColor(pin.ttl_pct)
 
   return (
     <div className={cn(
-      'rounded-lg border p-2.5 transition-all',
+      'rounded-lg border p-2.5 transition-all overflow-hidden',
       pin.is_suspended
         ? 'border-blue-700/40 bg-blue-900/10'
+        : ttlColor(pin.ttl_pct).includes('green') ? 'border-green-800/30 bg-surface-800/40'
+        : ttlColor(pin.ttl_pct).includes('amber') ? 'border-amber-800/30 bg-surface-800/40'
+        : ttlColor(pin.ttl_pct).includes('red')   ? 'border-red-800/30 bg-surface-800/40'
         : 'border-surface-700 bg-surface-800/40',
     )}>
       <div className="flex items-start justify-between gap-1">
@@ -658,17 +752,38 @@ function PinnedCard({ pin, onRemove, onExtend }: PinnedCardProps) {
                 Suspended — trade open
               </span>
             ) : (
-              <span className={cn(
-                'inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] font-medium border',
-                ttlClass,
-              )}>
-                <Clock size={8} />
-                {fmtTTL(pin.hours_remaining)}
-              </span>
+              <div className="flex flex-col gap-0.5 flex-1">
+                <span className={cn(
+                  'inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] font-medium border w-fit',
+                  ttlClass,
+                )}>
+                  <Clock size={8} />
+                  {fmtTTL(pin.hours_remaining)}
+                </span>
+                {pin.ttl_pct !== null && (
+                  <div className="h-[2px] rounded-full bg-surface-700/60 w-full max-w-[80px]">
+                    <div
+                      className={cn(
+                        'h-full rounded-full transition-all',
+                        pin.ttl_pct > 0.5 ? 'bg-green-500/70' :
+                        pin.ttl_pct > 0.25 ? 'bg-amber-500/70' : 'bg-red-500/70',
+                      )}
+                      style={{ width: `${Math.round(pin.ttl_pct * 100)}%` }}
+                    />
+                  </div>
+                )}
+              </div>
             )}
           </div>
         </div>
         <div className="flex gap-0.5 shrink-0">
+          <button
+            onClick={() => onExtend(pin.id, -extendHours)}
+            className="p-1 rounded text-slate-500 hover:text-amber-400 transition-colors"
+            title={`Reduce by ${extendHours}h`}
+          >
+            <Minus size={13} />
+          </button>
           <button
             onClick={() => onExtend(pin.id, extendHours)}
             className="p-1 rounded text-slate-500 hover:text-brand-400 transition-colors"
@@ -706,8 +821,9 @@ function AddPinForm({ instruments, onAdd }: AddPinFormProps) {
     .slice(0, 20)
 
   const handleSubmit = () => {
-    if (!pair) return
-    onAdd(pair, tf, note)
+    const value = (pair || query.trim()).toUpperCase()
+    if (!value) return
+    onAdd(value, tf, note)
     setPair('')
     setQuery('')
     setNote('')
@@ -732,7 +848,7 @@ function AddPinForm({ instruments, onAdd }: AddPinFormProps) {
             <input
               value={query}
               onChange={e => { setQuery(e.target.value); setPair('') }}
-              placeholder="Search instruments…"
+              placeholder="Search or type symbol (e.g. ETH/USD)…"
               className={cn(
                 'w-full rounded-lg border border-surface-600 bg-surface-800 px-3 py-1.5 text-sm text-slate-200',
                 'placeholder:text-slate-500 focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500/30',
@@ -754,12 +870,12 @@ function AddPinForm({ instruments, onAdd }: AddPinFormProps) {
             )}
           </div>
 
-          <div className="flex gap-2">
+          <div className="flex gap-1.5 items-center">
             {/* TF select */}
             <select
               value={tf}
               onChange={e => setTf(e.target.value as PinnedTF)}
-              className="rounded-lg border border-surface-600 bg-surface-800 px-2 py-1.5 text-sm text-slate-200 focus:outline-none focus:border-brand-500"
+              className="shrink-0 rounded-lg border border-surface-600 bg-surface-800 px-2 py-1.5 text-sm text-slate-200 focus:outline-none focus:border-brand-500"
             >
               {TF_OPTIONS.map(t => <option key={t} value={t}>{t}</option>)}
             </select>
@@ -769,16 +885,16 @@ function AddPinForm({ instruments, onAdd }: AddPinFormProps) {
               value={note}
               onChange={e => setNote(e.target.value)}
               placeholder="Note (optional)"
-              className="flex-1 rounded-lg border border-surface-600 bg-surface-800 px-2 py-1.5 text-sm text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-brand-500"
+              className="min-w-0 flex-1 rounded-lg border border-surface-600 bg-surface-800 px-2 py-1.5 text-sm text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-brand-500"
             />
 
             <button
               onClick={handleSubmit}
-              disabled={!pair}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-brand-700/30 border border-brand-600/40 text-brand-400 text-xs font-medium hover:bg-brand-700/50 disabled:opacity-40 transition-colors whitespace-nowrap"
+              disabled={!pair && !query.trim()}
+              className="shrink-0 flex items-center justify-center w-8 h-8 rounded-lg bg-brand-700/30 border border-brand-600/40 text-brand-400 hover:bg-brand-700/50 disabled:opacity-40 transition-colors"
+              title="Pin pair"
             >
-              <Pin size={12} />
-              Pin
+              <Pin size={14} />
             </button>
           </div>
         </div>
@@ -794,6 +910,7 @@ interface PinnedPanelProps {
 }
 
 function PinnedPanel({ profileId, onPinsChanged }: PinnedPanelProps) {
+  const { activeProfile } = useProfile()
   const [pins, setPins] = useState<PinnedPair[]>([])
   const [instruments, setInstruments] = useState<{ symbol: string; display_name: string }[]>([])
   const [loading, setLoading] = useState(true)
@@ -810,9 +927,13 @@ function PinnedPanel({ profileId, onPinsChanged }: PinnedPanelProps) {
     void reload().finally(() => setLoading(false))
   }, [reload])
 
-  // Load instruments for add-pin dropdown
+  // Load instruments for add-pin dropdown — via profile's broker
   useEffect(() => {
-    fetch(`/api/brokers/instruments?profile_id=${profileId}`)
+    const brokerId = activeProfile?.broker_id
+    const url = brokerId
+      ? `/api/brokers/${brokerId}/instruments`
+      : `/api/brokers/instruments?profile_id=${profileId}`
+    fetch(url)
       .then(r => r.ok ? r.json() : [])
       .then((data: unknown) => {
         if (Array.isArray(data)) {
@@ -820,7 +941,7 @@ function PinnedPanel({ profileId, onPinsChanged }: PinnedPanelProps) {
         }
       })
       .catch(() => setInstruments([]))
-  }, [profileId])
+  }, [profileId, activeProfile?.broker_id])
 
   const handleRemove = async (id: number) => {
     await ritualApi.removePinned(profileId, id)
@@ -905,7 +1026,7 @@ export function RitualPage() {
   // Smart WL state
   const [wlResult, setWlResult] = useState<SmartWLResult | null>(null)
   const [wlLoading, setWlLoading] = useState(false)
-  const [topN, setTopN] = useState(20)
+  const [topN, setTopN] = useState(12)
   const [pinnedKey, setPinnedKey] = useState(0)
 
   const elapsed = useElapsed(activeSession?.started_at ?? null)
@@ -1053,7 +1174,7 @@ export function RitualPage() {
                     />
                   </div>
                   <div className="grid grid-cols-4 gap-1">
-                    {(['weekly_setup', 'daily_prep', 'trade_session', 'weekend_review'] as SessionType[]).map(st => {
+                    {(['weekly_setup', 'trade_session', 'weekend_review'] as SessionType[]).map(st => {
                       const info = SESSION_TYPES.find(s => s.type === st)!
                       const count = (score.details as Record<string, Record<string, number>>)?.sessions?.[st] ?? 0
                       return (
@@ -1147,26 +1268,37 @@ export function RitualPage() {
                   onClick={() => handleStart(st.type)}
                   disabled={starting !== null}
                   className={cn(
-                    'relative rounded-xl border border-surface-700 bg-surface-800/40 p-4 text-left transition-all group overflow-hidden',
-                    'hover:bg-surface-800/70 hover:border-surface-600',
+                    `relative rounded-xl border border-surface-700/60 bg-gradient-to-br ${st.gradient} p-4 text-left transition-all group overflow-hidden`,
+                    'hover:border-surface-500/70 hover:shadow-lg',
                     'focus:outline-none',
                     starting === st.type && 'opacity-60 cursor-wait',
                   )}
+                  style={{ '--accent': st.accent } as React.CSSProperties}
                 >
                   {/* Accent top bar */}
-                  <div className="absolute top-0 left-0 right-0 h-[3px] rounded-t-xl" style={{ backgroundColor: st.accent }} />
-                  <div className="flex items-start justify-between mb-2 pt-1">
-                    <span className="text-2xl leading-none">{st.emoji}</span>
-                    {starting === st.type
-                      ? <Loader2 size={14} className="animate-spin text-slate-400 mt-0.5" />
-                      : <ChevronRight size={14} className="text-slate-600 group-hover:text-slate-300 transition-colors mt-0.5" />}
-                  </div>
-                  <p className="text-sm font-semibold text-slate-200 group-hover:text-white leading-tight">{st.label}</p>
-                  <p className="text-[10px] font-semibold mt-0.5" style={{ color: st.accent }}>{st.when}</p>
-                  <p className="mt-1.5 text-[11px] text-slate-500 leading-relaxed">{st.desc}</p>
-                  <div className="mt-3 flex items-center gap-1 text-[11px] text-slate-600">
-                    <Clock size={10} />
-                    {st.est}
+                  <div className="absolute top-0 left-0 right-0 h-[3px] rounded-t-xl transition-all group-hover:h-[4px]" style={{ backgroundColor: st.accent }} />
+                  {/* Subtle glow on hover */}
+                  <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity rounded-xl" style={{ background: `radial-gradient(ellipse at 50% 0%, ${st.accent}15 0%, transparent 60%)` }} />
+                  <div className="relative">
+                    <div className="flex items-start justify-between mb-3 pt-1">
+                      <span className="text-3xl leading-none">{st.emoji}</span>
+                      {starting === st.type
+                        ? <Loader2 size={14} className="animate-spin text-slate-400 mt-0.5" />
+                        : <ChevronRight size={14} className="text-slate-600 group-hover:text-slate-300 transition-colors mt-0.5" />}
+                    </div>
+                    <p className="text-sm font-bold text-slate-100 group-hover:text-white leading-tight">{st.label}</p>
+                    <p className="text-[10px] font-semibold mt-0.5" style={{ color: st.accent }}>{st.when}</p>
+                    <p className="mt-1.5 text-[11px] text-slate-400 leading-relaxed">{st.desc}</p>
+                    {/* Step pills */}
+                    <div className="mt-3 flex flex-wrap gap-1">
+                      {st.steps.map(s => (
+                        <span key={s} className="text-[9px] px-1.5 py-0.5 rounded-full border border-slate-700/60 text-slate-500">{s}</span>
+                      ))}
+                    </div>
+                    <div className="mt-2 flex items-center gap-1 text-[11px] text-slate-600">
+                      <Clock size={10} />
+                      {st.est}
+                    </div>
                   </div>
                 </button>
               ))}

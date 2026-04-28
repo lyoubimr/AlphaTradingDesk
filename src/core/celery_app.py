@@ -20,6 +20,7 @@ celery_app = Celery(
     include=[
         "src.volatility.tasks",  # P2-3
         "src.kraken_execution.tasks",  # P5-8
+        "src.ritual.tasks",  # P6B — trading window notifications
     ],
 )
 
@@ -111,6 +112,11 @@ celery_app.conf.update(
         "send-pnl-status": {
             "task": "src.kraken_execution.tasks.send_pnl_status",
             "schedule": 3600.0,  # every 60 min — default; per-profile config not yet dynamic
+        },
+        # ── Phase 6B — Ritual trading window notifications ────────────────
+        "notify-trading-windows": {
+            "task": "src.ritual.tasks.notify_trading_windows",
+            "schedule": crontab(minute="*/15"),  # every 15 min — checks all profile windows
         },
     },
 )
