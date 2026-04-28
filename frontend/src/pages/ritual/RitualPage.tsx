@@ -549,7 +549,7 @@ function SmartWLPanel({
 
   const toggleTF = (tf: string) => setExpandedTFs(prev => {
     const next = new Set(prev)
-    next.has(tf) ? next.delete(tf) : next.add(tf)
+    if (next.has(tf)) { next.delete(tf) } else { next.add(tf) }
     return next
   })
   return (
