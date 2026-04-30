@@ -646,7 +646,12 @@ function SmartWLPanel({
                       <span className="text-[11px] text-slate-200 font-semibold truncate flex-1">
                         {p.display_name}
                       </span>
-                      <span className="text-[10px] tabular-nums text-slate-500 shrink-0">{p.vi_score.toFixed(2)}</span>
+                      <span className={cn(
+                        'text-[10px] tabular-nums shrink-0 font-medium',
+                        p.vi_score > 0.67 ? 'text-green-400' :
+                        p.vi_score > 0.50 ? 'text-emerald-500/80' :
+                        p.vi_score > 0.33 ? 'text-amber-500' : 'text-slate-500',
+                      )}>{Math.round(p.vi_score * 100)}%</span>
                       {!p.is_pinned && onPin && (
                         <button
                           onClick={() => onPin(p.pair, tf)}
@@ -657,14 +662,14 @@ function SmartWLPanel({
                         </button>
                       )}
                     </div>
-                    {/* vi_score bar */}
+                    {/* vi_score bar — green=high, amber=mid, muted=low */}
                     <div className="h-[2px] bg-surface-700/60">
                       <div
                         className={cn(
                           'h-full transition-all rounded-sm',
-                          p.vi_score > 0.67 ? 'bg-red-500/70' :
-                          p.vi_score > 0.5  ? 'bg-amber-500/70' :
-                          p.vi_score > 0.33 ? 'bg-green-500/70' : 'bg-blue-500/50',
+                          p.vi_score > 0.67 ? 'bg-green-500/80' :
+                          p.vi_score > 0.50 ? 'bg-emerald-500/60' :
+                          p.vi_score > 0.33 ? 'bg-amber-500/60' : 'bg-slate-600/50',
                         )}
                         style={{ width: `${Math.round(p.vi_score * 100)}%` }}
                       />
