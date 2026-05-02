@@ -9,7 +9,7 @@ Coverage:
   - InvestmentSettings auto-init + deep-merge
   - Portfolio summary
   - 403 guard: risk module blocked for spot profiles
-  - 403 guard: deposit/spot-trade endpoints blocked for contracts profiles
+  - 403 guard: spot-trade endpoints blocked for contracts profiles (deposits allowed for all)
 """
 
 from __future__ import annotations
@@ -340,14 +340,21 @@ class TestDepositCRUD:
         ids = [d["id"] for d in list_resp.json()]
         assert deposit_id not in ids
 
-    def test_deposit_requires_spot_profile(
-        self, client: TestClient, contracts_profile: Profile
+    def test_deposit_allowed_for_contracts_profile(
+        self, client: TestClient, contracts_profile: Profile, db_session: Session
     ):
+        """Deposits are now available for all profile types.
+        For contracts profiles, capital_current is NOT recomputed (managed by trade-close flow).
+        """
+        initial_capital = float(contracts_profile.capital_current)
         resp = client.post(
             f"/api/investment/deposits/{contracts_profile.id}",
             json=_deposit_payload(),
         )
-        assert resp.status_code == 403
+        assert resp.status_code == 201
+        # capital_current must NOT change for contracts profiles (no recompute)
+        db_session.refresh(contracts_profile)
+        assert float(contracts_profile.capital_current) == pytest.approx(initial_capital, rel=1e-4)
 
 
 # ── Tests: capital_current recompute ─────────────────────────────────────────

@@ -297,7 +297,7 @@ def list_deposits(profile_id: int, db: Session) -> list[Deposit]:
 
 def create_deposit(profile_id: int, data: DepositCreate, db: Session) -> Deposit:
     profile = _get_profile_or_404(db, profile_id)
-    _require_spot_profile(profile)
+    # No spot guard — deposits available for all profile types
 
     deposit = Deposit(
         profile_id=profile_id,
@@ -311,8 +311,9 @@ def create_deposit(profile_id: int, data: DepositCreate, db: Session) -> Deposit
     db.commit()
     db.refresh(deposit)
 
-    # Recompute capital_current atomically after deposit
-    recompute_spot_capital(db, profile_id)
+    # Recompute capital_current — spot only (contracts capital managed by trade-close flow)
+    if profile.account_type == "spot":
+        recompute_spot_capital(db, profile_id)
     return deposit
 
 
@@ -334,8 +335,10 @@ def update_deposit(
     db.commit()
     db.refresh(deposit)
 
-    # Recompute capital_current atomically after update
-    recompute_spot_capital(db, profile_id)
+    # Recompute capital_current — spot only
+    profile = _get_profile_or_404(db, profile_id)
+    if profile.account_type == "spot":
+        recompute_spot_capital(db, profile_id)
     return deposit
 
 
@@ -353,8 +356,10 @@ def delete_deposit(deposit_id: int, profile_id: int, db: Session) -> None:
     db.delete(deposit)
     db.commit()
 
-    # Recompute capital_current atomically after delete
-    recompute_spot_capital(db, profile_id)
+    # Recompute capital_current — spot only
+    profile = _get_profile_or_404(db, profile_id)
+    if profile.account_type == "spot":
+        recompute_spot_capital(db, profile_id)
 
 
 # ── Portfolio summary ─────────────────────────────────────────────────────────

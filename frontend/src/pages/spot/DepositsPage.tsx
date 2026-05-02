@@ -245,14 +245,6 @@ export function DepositsPage() {
     return <div className="p-8 text-center text-slate-600 text-sm">No active profile selected.</div>
   }
 
-  if (activeProfile.account_type !== 'spot') {
-    return (
-      <div className="p-8 text-center text-slate-600 text-sm">
-        This section is only available for Spot profiles.
-      </div>
-    )
-  }
-
   const currency = activeProfile.currency ?? ''
   const totalDeposited = deposits
     .filter((d) => Number(d.amount) > 0)

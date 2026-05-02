@@ -24,6 +24,7 @@ import { PerformancePage } from './pages/analytics/PerformancePage'
 import { RitualPage } from './pages/ritual/RitualPage'
 import { RitualSettingsPage } from './pages/settings/RitualSettingsPage'
 import { PortfolioPage } from './pages/portfolio/PortfolioPage'
+import { DepositsPage } from './pages/spot/DepositsPage'
 import { InvestmentSettingsPage } from './pages/settings/InvestmentSettingsPage'
 
 export default function App() {
@@ -60,6 +61,7 @@ export default function App() {
         <Route path="/settings/ritual" element={<RitualSettingsPage />} />
         {/* Phase 7 — Spot / Portfolio */}
         <Route path="/portfolio" element={<PortfolioPage />} />
+        <Route path="/deposits" element={<DepositsPage />} />
         <Route path="/settings/investment" element={<InvestmentSettingsPage />} />
         {/* Legacy redirects — /spot → /portfolio */}
         <Route path="/spot" element={<Navigate to="/portfolio" replace />} />
