@@ -8,12 +8,13 @@ import { useEffect, useState, useMemo, useCallback, useRef } from 'react'
 import { Link } from 'react-router-dom'
 import {
   RefreshCw, Loader2, AlertTriangle, Download, ArrowUpDown, Play,
-  ChevronDown, ChevronRight, BookOpen,
+  ChevronDown, ChevronRight, BookOpen, Info,
 } from 'lucide-react'
 import { PageHeader } from '../../components/ui/PageHeader'
 import { Tooltip } from '../../components/ui/Tooltip'
 import { VolatilityLegendPanel } from '../../components/volatility/VolatilityLegendPanel'
 import { volatilityApi } from '../../lib/api'
+import { useProfile } from '../../context/ProfileContext'
 import type { WatchlistOut, WatchlistPairOut, WatchlistMetaOut } from '../../types/api'
 
 const TIMEFRAMES = ['15m', '1h', '4h', '1d', '1w'] as const
@@ -157,6 +158,9 @@ function SortTh({
 // ── Main page ─────────────────────────────────────────────────────────────
 
 export function WatchlistsPage() {
+  const { activeProfile } = useProfile()
+  const isSpot = activeProfile?.account_type === 'spot'
+
   const [snapshots, setSnapshots]         = useState<WatchlistMetaOut[]>([])
   const [loading, setLoading]             = useState(true)
   const [selectedId, setSelectedId]       = useState<number | null>(null)
@@ -380,7 +384,8 @@ export function WatchlistsPage() {
   }, [selectedData])
 
   const selectedMeta = snapshots.find((s) => s.id === selectedId) ?? null
-
+  // Reset generateTF default when profile type changes
+  useEffect(() => { setGenerateTF(isSpot ? '4h' : '1h') }, [isSpot])
   // ── Render ────────────────────────────────────────────────────────────────
 
   return (
@@ -446,6 +451,17 @@ export function WatchlistsPage() {
           </div>
         </div>
       </div>
+
+      {/* ── Spot context banner ── */}
+      {isSpot && (
+        <div className="flex items-start gap-2.5 rounded-xl border border-amber-500/20 bg-amber-500/5 px-4 py-3 text-xs text-amber-400/90 shrink-0">
+          <Info size={13} className="mt-0.5 shrink-0" />
+          <div className="space-y-0.5">
+            <p className="font-medium">Spot profile — Kraken Futures pairs</p>
+            <p className="text-amber-400/60">These snapshots cover Kraken Futures instruments. For spot, high VI → pump window / buy opportunity (vs. risk for contracts). Spot instrument catalog planned for Phase 8.</p>
+          </div>
+        </div>
+      )}
 
       {/* ── Status banner ── */}
       {runStatus && (

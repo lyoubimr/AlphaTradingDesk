@@ -20,6 +20,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from src.core.models.broker import Profile
+from src.core.models.trade import Trade
 from src.investment.models import Deposit, InvestmentSettings, SpotTrade
 from src.investment.schemas import (
     DepositCreate,
@@ -365,25 +366,16 @@ def delete_deposit(deposit_id: int, profile_id: int, db: Session) -> None:
 # ── Portfolio summary ─────────────────────────────────────────────────────────
 
 def get_portfolio(profile_id: int, db: Session) -> PortfolioOut:
-    """Return holdings summary.
+    """Return portfolio summary — works for all profile types.
 
-    Prices are not fetched live here — caller uses the price polling endpoint
-    to refresh cached prices. We read last_fetched_at from investment_settings
-    and include it in the response so the UI can show "Last updated X ago".
+    Contracts: open_positions_count + realized_pnl come from the trades table.
+    Spot:      open_positions_count + realized_pnl come from spot_trades table.
+    Deposits are universal (from the deposits table for all profiles).
     """
     profile = _get_profile_or_404(db, profile_id)
-    _require_spot_profile(profile)
+    # No account_type guard — portfolio is available for all profile types
 
-    open_trades = (
-        db.query(SpotTrade)
-        .filter(
-            SpotTrade.profile_id == profile_id,
-            SpotTrade.status.in_(["open", "partial", "runner"]),
-        )
-        .order_by(SpotTrade.entry_date.asc())
-        .all()
-    )
-
+    # Deposits — universal
     total_deposited_raw = (
         db.query(func.sum(Deposit.amount))
         .filter(Deposit.profile_id == profile_id)
@@ -395,29 +387,59 @@ def get_portfolio(profile_id: int, db: Session) -> PortfolioOut:
         else Decimal("0")
     )
 
-    total_pnl_raw = (
-        db.query(func.sum(SpotTrade.realized_pnl))
-        .filter(
-            SpotTrade.profile_id == profile_id,
-            SpotTrade.status == "closed",
-            SpotTrade.realized_pnl.isnot(None),
+    if profile.account_type == "spot":
+        # Spot: use spot_trades
+        open_count: int = (
+            db.query(func.count(SpotTrade.id))
+            .filter(
+                SpotTrade.profile_id == profile_id,
+                SpotTrade.status.in_(["open", "partial", "runner"]),
+            )
+            .scalar() or 0
         )
-        .scalar()
-    )
+        total_pnl_raw = (
+            db.query(func.sum(SpotTrade.realized_pnl))
+            .filter(
+                SpotTrade.profile_id == profile_id,
+                SpotTrade.status == "closed",
+                SpotTrade.realized_pnl.isnot(None),
+            )
+            .scalar()
+        )
+        # Last price refresh from investment_settings (spot only)
+        settings_row = db.query(InvestmentSettings).filter_by(profile_id=profile_id).first()
+        last_price_refresh = None
+        if settings_row:
+            raw_ts = settings_row.config.get("price_tracking", {}).get("last_fetched_at")
+            if raw_ts:
+                try:
+                    last_price_refresh = datetime.datetime.fromisoformat(raw_ts)
+                except (ValueError, TypeError):
+                    pass
+    else:
+        # Contracts: use trades table
+        open_count = (
+            db.query(func.count(Trade.id))
+            .filter(
+                Trade.profile_id == profile_id,
+                Trade.status.in_(["open", "partial", "runner"]),
+            )
+            .scalar() or 0
+        )
+        total_pnl_raw = (
+            db.query(func.sum(Trade.realized_pnl))
+            .filter(
+                Trade.profile_id == profile_id,
+                Trade.status == "closed",
+                Trade.realized_pnl.isnot(None),
+            )
+            .scalar()
+        )
+        last_price_refresh = None
+
     total_pnl = (
         Decimal(str(total_pnl_raw)) if total_pnl_raw is not None else Decimal("0")
     )
-
-    # Last price refresh from investment_settings
-    settings_row = db.query(InvestmentSettings).filter_by(profile_id=profile_id).first()
-    last_price_refresh = None
-    if settings_row:
-        raw_ts = settings_row.config.get("price_tracking", {}).get("last_fetched_at")
-        if raw_ts:
-            try:
-                last_price_refresh = datetime.datetime.fromisoformat(raw_ts)
-            except (ValueError, TypeError):
-                pass
 
     return PortfolioOut(
         profile_id=profile_id,
@@ -425,6 +447,6 @@ def get_portfolio(profile_id: int, db: Session) -> PortfolioOut:
         capital_current=profile.capital_current,
         total_deposited=total_deposited,
         realized_pnl=total_pnl,
-        open_positions_count=len(open_trades),
+        open_positions_count=open_count,
         last_price_refresh=last_price_refresh,
     )

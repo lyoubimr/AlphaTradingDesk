@@ -1,14 +1,15 @@
-// ── PortfolioPage ── Phase 7C — Unified spot portfolio (Holdings + Deposits)
+// ── PortfolioPage ── Phase 7 — Unified portfolio for all profile types (contracts + spot)
 import { useEffect, useState, useCallback } from 'react'
-import { Loader2, Plus, X, TrendingUp, TrendingDown, CheckCircle2, XCircle, Pencil, Trash2 } from 'lucide-react'
+import { Link } from 'react-router-dom'
+import { Loader2, Plus, X, TrendingUp, TrendingDown, CheckCircle2, XCircle, Pencil, Trash2, BookOpen, ChevronRight } from 'lucide-react'
 import { PageHeader } from '../../components/ui/PageHeader'
 import { StatCard } from '../../components/ui/StatCard'
 import { useProfile } from '../../context/ProfileContext'
-import { investmentApi } from '../../lib/api'
+import { investmentApi, strategiesApi } from '../../lib/api'
 import { cn } from '../../lib/cn'
 import type {
   SpotTradeOut, SpotTradeCreate, SpotTradeClose,
-  PortfolioOut, DepositOut, DepositCreate, DepositUpdate,
+  PortfolioOut, DepositOut, DepositCreate, DepositUpdate, Strategy,
 } from '../../types/api'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -43,15 +44,21 @@ const EMPTY_TRADE_FORM: SpotTradeCreate = {
   entry_price: '',
   quantity: '',
   stop_loss: '',
+  strategy_id: null,
   notes: '',
 }
 
 function OpenTradeModal({ profileId, onClose, onSaved }: OpenTradeModalProps) {
   const [form, setForm] = useState<SpotTradeCreate>(EMPTY_TRADE_FORM)
+  const [strategies, setStrategies] = useState<Strategy[]>([])
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const set = (field: keyof SpotTradeCreate, value: string) =>
+  useEffect(() => {
+      strategiesApi.list(profileId).then(setStrategies).catch(() => {})
+  }, [profileId])
+
+  const set = (field: keyof SpotTradeCreate, value: string | number | null) =>
     setForm((f) => ({ ...f, [field]: value }))
 
   const totalCost = form.entry_price && form.quantity
@@ -67,8 +74,9 @@ function OpenTradeModal({ profileId, onClose, onSaved }: OpenTradeModalProps) {
         pair: form.pair.toUpperCase().trim(),
         entry_price: form.entry_price,
         quantity: form.quantity,
-        stop_loss: form.stop_loss || null,
-        notes: form.notes || null,
+        stop_loss: (form.stop_loss as string) || null,
+        strategy_id: form.strategy_id ?? null,
+        notes: (form.notes as string) || null,
       })
       onSaved()
     } catch (err) {
@@ -154,6 +162,22 @@ function OpenTradeModal({ profileId, onClose, onSaved }: OpenTradeModalProps) {
               placeholder="0.00"
               className={inputCls}
             />
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium text-slate-400 mb-1.5">Strategy <span className="text-slate-600">(optional)</span></label>
+            <select
+              value={form.strategy_id ?? ''}
+              onChange={(e) => set('strategy_id', e.target.value ? Number(e.target.value) : null)}
+              className={cn(inputCls, 'cursor-pointer')}
+            >
+              <option value="">No strategy</option>
+              {strategies.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.emoji ? `${s.emoji} ` : ''}{s.name}
+                </option>
+              ))}
+            </select>
           </div>
 
           <div>
@@ -531,7 +555,13 @@ type PortfolioTab = 'holdings' | 'deposits'
 
 export function PortfolioPage() {
   const { activeProfile } = useProfile()
-  const [tab, setTab] = useState<PortfolioTab>('holdings')
+  const isSpot = activeProfile?.account_type === 'spot'
+  const accountType = activeProfile?.account_type ?? 'contracts'
+  const [tab, setTab] = useState<PortfolioTab>(
+    () => activeProfile?.account_type === 'spot' ? 'holdings' : 'deposits',
+  )
+  // Reset tab when switching between profile types
+  useEffect(() => { setTab(isSpot ? 'holdings' : 'deposits') }, [isSpot])
 
   const [portfolio,    setPortfolio]    = useState<PortfolioOut | null>(null)
   const [openTrades,   setOpenTrades]   = useState<SpotTradeOut[]>([])
@@ -556,22 +586,29 @@ export function PortfolioPage() {
     setLoading(true)
     setError(null)
     try {
-      const [port, open, closed, deps] = await Promise.all([
+      const [port, deps] = await Promise.all([
         investmentApi.getPortfolio(profileId),
-        investmentApi.listTrades(profileId, 'open'),
-        investmentApi.listTrades(profileId, 'closed'),
         investmentApi.listDeposits(profileId),
       ])
       setPortfolio(port)
-      setOpenTrades(open)
-      setClosedTrades(closed)
       setDeposits([...deps].sort((a, b) => b.deposit_date.localeCompare(a.deposit_date)))
+      if (accountType === 'spot') {
+        const [open, closed] = await Promise.all([
+          investmentApi.listTrades(profileId, 'open'),
+          investmentApi.listTrades(profileId, 'closed'),
+        ])
+        setOpenTrades(open)
+        setClosedTrades(closed)
+      } else {
+        setOpenTrades([])
+        setClosedTrades([])
+      }
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Failed to load')
     } finally {
       setLoading(false)
     }
-  }, [profileId])
+  }, [profileId, accountType])
 
   useEffect(() => { void load() }, [load])
 
@@ -607,14 +644,6 @@ export function PortfolioPage() {
     return <div className="p-8 text-center text-slate-600 text-sm">No active profile selected.</div>
   }
 
-  if (activeProfile.account_type !== 'spot') {
-    return (
-      <div className="p-8 text-center text-slate-600 text-sm">
-        This section is only available for Spot profiles.
-      </div>
-    )
-  }
-
   const currency = activeProfile.currency ?? ''
   const pnlPositive = portfolio ? Number(portfolio.realized_pnl ?? '0') >= 0 : true
 
@@ -626,11 +655,11 @@ export function PortfolioPage() {
   return (
     <div className="p-6 max-w-6xl mx-auto space-y-6">
       <PageHeader
-        icon="🪙"
+        icon={isSpot ? '🪙' : '💼'}
         title="Portfolio"
         subtitle={activeProfile.name}
         actions={
-          tab === 'holdings'
+          isSpot && tab === 'holdings'
             ? (
               <button
                 type="button"
@@ -640,7 +669,8 @@ export function PortfolioPage() {
                 <Plus size={15} /> Open position
               </button>
             )
-            : (
+            : tab === 'deposits'
+            ? (
               <button
                 type="button"
                 onClick={() => setDepositModal('new')}
@@ -649,12 +679,14 @@ export function PortfolioPage() {
                 <Plus size={15} /> Add entry
               </button>
             )
+            : null
         }
       />
 
       {/* ── Portfolio stats header ── */}
       {portfolio && (
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+        <>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
           <StatCard
             label="Capital"
             value={`${fmt(portfolio.capital_current, 0)} ${currency}`}
@@ -670,10 +702,29 @@ export function PortfolioPage() {
             accent={pnlPositive ? 'bull' : 'bear'}
           />
           <StatCard
-            label="Holdings"
+            label={isSpot ? 'Holdings' : 'Open trades'}
             value={String(portfolio.open_positions_count)}
           />
         </div>
+
+        {/* Contracts: link to Trade Journal */}
+        {!isSpot && (
+          <div className="rounded-xl bg-surface-800/50 border border-surface-700 px-5 py-4 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <BookOpen size={15} className="text-brand-400 shrink-0" />
+              <span className="text-sm text-slate-400">
+                {portfolio.open_positions_count > 0
+                  ? `${portfolio.open_positions_count} open trade${portfolio.open_positions_count > 1 ? 's' : ''} in progress`
+                  : 'Track your trades in the Trade Journal'}
+              </span>
+            </div>
+            <Link to="/trades" className="text-xs text-brand-400 hover:text-brand-300 flex items-center gap-1 shrink-0">
+              Trade Journal <ChevronRight size={12} />
+            </Link>
+          </div>
+        )}
+
+        </>
       )}
 
       {error && (
@@ -682,8 +733,9 @@ export function PortfolioPage() {
         </div>
       )}
 
-      {/* ── Tab switcher ── */}
-      <div className="flex border-b border-surface-700">
+      {/* ── Tab switcher — spot only (contracts goes straight to deposits) ── */}
+      {isSpot && (
+        <div className="flex border-b border-surface-700">
         {(['holdings', 'deposits'] as PortfolioTab[]).map((t) => (
           <button
             key={t}
@@ -705,6 +757,7 @@ export function PortfolioPage() {
           </button>
         ))}
       </div>
+      )}
 
       {loading && (
         <div className="flex items-center justify-center py-12">
@@ -712,8 +765,8 @@ export function PortfolioPage() {
         </div>
       )}
 
-      {/* ── Holdings tab ── */}
-      {!loading && tab === 'holdings' && (
+      {/* ── Holdings tab — spot only ── */}
+      {isSpot && !loading && tab === 'holdings' && (
         <div className="space-y-4">
           {/* Open holdings */}
           <div className="rounded-xl bg-surface-800 border border-surface-700 overflow-hidden">

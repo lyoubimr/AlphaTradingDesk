@@ -536,11 +536,15 @@ class TestPortfolio:
             float(spot_profile.capital_start) + 1500.0, rel=1e-4
         )
 
-    def test_portfolio_requires_spot_profile(
+    def test_portfolio_works_for_contracts_profile(
         self, client: TestClient, contracts_profile: Profile
     ):
         resp = client.get(f"/api/investment/portfolio/{contracts_profile.id}")
-        assert resp.status_code == 403
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["open_positions_count"] == 0
+        assert float(data["realized_pnl"]) == pytest.approx(0.0)
+        assert "open_positions" not in data
 
 
 # ── Tests: Risk module 403 guard for spot profiles ────────────────────────────

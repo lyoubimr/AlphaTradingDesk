@@ -21,9 +21,8 @@ import {
   Flame,
   Wallet,
   Coins,
-  ArrowDownUp,
 } from 'lucide-react'
-// Note: Wallet used for Portfolio (spot), Coins for Investment settings (spot), ArrowDownUp for Deposits (all)
+// Note: Wallet used for Portfolio (contracts+spot), Coins for Investment settings (spot)
 import { cn } from '../../lib/cn'
 import { Badge } from '../ui/Badge'
 import { useProfile } from '../../context/ProfileContext'
@@ -77,9 +76,8 @@ export function Sidebar({ apiStatus, environment, version, isOpen = false, onClo
     : [
         { to: '/dashboard', label: 'Dashboard',    icon: <LayoutDashboard size={16} /> },
         { to: '/trades',    label: 'Trade Journal', icon: <BookOpen size={16} /> },
-        { to: '/risk',      label: 'Risk',          icon: <Shield size={16} /> },
+        { to: '/portfolio', label: 'Portfolio',     icon: <Wallet size={16} /> },
         { to: '/goals',     label: 'Goals',         icon: <Target size={16} /> },
-        { to: '/deposits',  label: 'Deposits',      icon: <ArrowDownUp size={16} /> },
         { to: '/ritual',    label: 'Ritual',        icon: <Flame size={16} />, badge: 'NEW', badgeVariant: 'phase' },
       ]
 
