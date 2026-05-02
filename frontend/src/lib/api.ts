@@ -22,6 +22,9 @@ import type {
   AIKeysStatusOut, AIKeysUpdateIn, AIGenerateOut,
   RitualSettings, PinnedPair, PinnedPairCreate, RitualStep, RitualSession,
   SmartWLResult, WeeklyScore, StepLog,
+  SpotTradeOut, SpotTradeCreate, SpotTradeUpdate, SpotTradeClose,
+  DepositOut, DepositCreate, DepositUpdate,
+  PortfolioOut, InvestmentSettingsOut,
 } from '../types/api'
 
 const BASE = '/api'
@@ -766,4 +769,38 @@ export const ritualApi = {
     request(`${R(pid)}/score`),
   getScoreHistory: (pid: number, weeks = 8): Promise<WeeklyScore[]> =>
     request(`${R(pid)}/score/history?weeks=${weeks}`),
+}
+
+export const investmentApi = {
+  listTrades: (profileId: number, status?: string): Promise<SpotTradeOut[]> => {
+    const qs = status ? `?status=${status}` : ''
+    return request(`/investment/spot-trades/${profileId}${qs}`)
+  },
+  createTrade: (profileId: number, data: SpotTradeCreate): Promise<SpotTradeOut> =>
+    request(`/investment/spot-trades/${profileId}`, { method: 'POST', body: JSON.stringify(data) }),
+  getTrade: (profileId: number, tradeId: number): Promise<SpotTradeOut> =>
+    request(`/investment/spot-trades/${profileId}/${tradeId}`),
+  updateTrade: (profileId: number, tradeId: number, data: SpotTradeUpdate): Promise<SpotTradeOut> =>
+    request(`/investment/spot-trades/${profileId}/${tradeId}`, { method: 'PUT', body: JSON.stringify(data) }),
+  closeTrade: (profileId: number, tradeId: number, data: SpotTradeClose): Promise<SpotTradeOut> =>
+    request(`/investment/spot-trades/${profileId}/${tradeId}/close`, { method: 'POST', body: JSON.stringify(data) }),
+  cancelTrade: (profileId: number, tradeId: number): Promise<SpotTradeOut> =>
+    request(`/investment/spot-trades/${profileId}/${tradeId}/cancel`, { method: 'POST' }),
+
+  listDeposits: (profileId: number): Promise<DepositOut[]> =>
+    request(`/investment/deposits/${profileId}`),
+  createDeposit: (profileId: number, data: DepositCreate): Promise<DepositOut> =>
+    request(`/investment/deposits/${profileId}`, { method: 'POST', body: JSON.stringify(data) }),
+  updateDeposit: (profileId: number, depositId: number, data: DepositUpdate): Promise<DepositOut> =>
+    request(`/investment/deposits/${profileId}/${depositId}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteDeposit: (profileId: number, depositId: number): Promise<void> =>
+    request(`/investment/deposits/${profileId}/${depositId}`, { method: 'DELETE' }),
+
+  getPortfolio: (profileId: number): Promise<PortfolioOut> =>
+    request(`/investment/portfolio/${profileId}`),
+
+  getSettings: (profileId: number): Promise<InvestmentSettingsOut> =>
+    request(`/investment/settings/${profileId}`),
+  updateSettings: (profileId: number, config: Record<string, unknown>): Promise<InvestmentSettingsOut> =>
+    request(`/investment/settings/${profileId}`, { method: 'PUT', body: JSON.stringify({ config }) }),
 }

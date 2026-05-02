@@ -8,6 +8,8 @@ export interface Profile {
   id: number
   name: string
   market_type: 'CFD' | 'Crypto'
+  // Phase 7: 'contracts' (leverage / futures) | 'spot' (quantity-based, no leverage)
+  account_type: 'contracts' | 'spot'
   broker_id: number | null
   currency: string | null
   capital_start: string   // Decimal serialised as string by FastAPI
@@ -28,6 +30,7 @@ export interface Profile {
 export interface ProfileCreate {
   name: string
   market_type: 'CFD' | 'Crypto'
+  account_type?: 'contracts' | 'spot'
   broker_id?: number | null
   currency?: string | null
   capital_start: string
@@ -41,6 +44,7 @@ export interface ProfileCreate {
 export interface ProfileUpdate {
   name?: string
   market_type?: 'CFD' | 'Crypto'
+  account_type?: 'contracts' | 'spot'
   broker_id?: number | null
   currency?: string | null
   capital_start?: string
@@ -51,6 +55,104 @@ export interface ProfileUpdate {
   description?: string | null
   notes?: string | null
   status?: 'active' | 'archived' | 'deleted'
+}
+
+// ── Investment / Spot (Phase 7) ───────────────────────────────────────────
+
+export interface SpotTradeOut {
+  id: number
+  profile_id: number
+  pair: string
+  entry_price: string
+  quantity: string
+  total_cost: string
+  stop_loss: string | null
+  tp_targets: Array<{ price: string; pct_allocation: number }>
+  status: 'open' | 'closed' | 'cancelled'
+  realized_pnl: string | null
+  exit_price: string | null
+  order_type: string
+  notes: string | null
+  opened_at: string
+  closed_at: string | null
+  parent_spot_trade_id: number | null
+}
+
+export interface SpotTradeCreate {
+  pair: string
+  entry_price: string
+  quantity: string
+  stop_loss?: string | null
+  tp_targets?: Array<{ price: string; pct_allocation: number }>
+  order_type?: string
+  notes?: string | null
+}
+
+export interface SpotTradeUpdate {
+  stop_loss?: string | null
+  notes?: string | null
+}
+
+export interface SpotTradeClose {
+  exit_price: string
+  closed_at?: string | null
+}
+
+export interface DepositOut {
+  id: number
+  profile_id: number
+  amount: string
+  deposit_date: string
+  label: string | null
+  is_recurrent: boolean
+  created_at: string
+}
+
+export interface DepositCreate {
+  amount: string
+  deposit_date: string
+  label?: string | null
+  is_recurrent?: boolean
+}
+
+export interface DepositUpdate {
+  amount?: string
+  deposit_date?: string
+  label?: string | null
+  is_recurrent?: boolean
+}
+
+export interface PortfolioOut {
+  profile_id: number
+  capital_current: string
+  capital_start: string
+  total_deposited: string
+  realized_pnl: string
+  open_positions_count: number
+  open_positions: SpotTradeOut[]
+  last_price_refresh: string | null
+}
+
+export interface InvestmentSettingsOut {
+  profile_id: number
+  config: {
+    recurrent_deposit?: {
+      enabled: boolean
+      amount: number
+      currency: string
+      frequency: string
+      day_of_month: number
+      next_due: string | null
+    }
+    price_tracking?: {
+      refresh_frequency_hours: number
+      last_fetched_at: string | null
+    }
+    watchlist_htf?: {
+      timeframes: string[]
+      top_n: number
+    }
+  }
 }
 
 // ── Brokers ───────────────────────────────────────────────────────────────

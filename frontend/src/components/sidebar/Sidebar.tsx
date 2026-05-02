@@ -19,9 +19,12 @@ import {
   Sparkles,
   X,
   Flame,
+  Wallet,
+  Coins,
 } from 'lucide-react'
 import { cn } from '../../lib/cn'
 import { Badge } from '../ui/Badge'
+import { useProfile } from '../../context/ProfileContext'
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -173,6 +176,16 @@ const statusMeta = {
 
 export function Sidebar({ apiStatus, environment, version, isOpen = false, onClose }: SidebarProps) {
   const meta = statusMeta[apiStatus]
+  const { activeProfile } = useProfile()
+  const isSpot = activeProfile?.account_type === 'spot'
+
+  const SPOT_GROUP: NavGroup = {
+    heading: 'Spot',
+    items: [
+      { to: '/spot', label: 'Positions', icon: <Coins size={16} /> },
+      { to: '/spot/deposits', label: 'Deposits', icon: <Wallet size={16} /> },
+    ],
+  }
 
   return (
     <aside className={cn(
@@ -212,15 +225,53 @@ export function Sidebar({ apiStatus, environment, version, isOpen = false, onClo
 
       {/* ── Nav groups ────────────────────────────────────────────────────── */}
       <nav className="flex-1 px-2 py-3 space-y-4">
-        {NAV_GROUPS.map((group, gi) => (
-          <div key={gi}>
-            {group.heading && (
-              <p className="px-2 mb-1 text-[9px] font-semibold uppercase tracking-widest text-slate-600">
-                {group.heading}
-              </p>
-            )}
+        {NAV_GROUPS.map((group, gi) => {
+          // For spot profiles: hide the Risk settings item
+          const items = isSpot
+            ? group.items.filter((item) => item.to !== '/settings/risk')
+            : group.items
+          return (
+            <div key={gi}>
+              {group.heading && (
+                <p className="px-2 mb-1 text-[9px] font-semibold uppercase tracking-widest text-slate-600">
+                  {group.heading}
+                </p>
+              )}
+              <ul className="space-y-0.5">
+                {items.map((item) => (
+                  <li key={item.to}>
+                    <NavLink
+                      to={item.to}
+                      onClick={onClose}
+                      className={({ isActive }) => cn(
+                        'flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-sm transition-colors',
+                        'group relative',
+                        isActive
+                          ? 'bg-brand-600/20 text-brand-300 font-medium'
+                          : 'text-slate-500 hover:text-slate-200 hover:bg-surface-800',
+                      )}
+                    >
+                      <span className="shrink-0">{item.icon}</span>
+                      <span className="flex-1 truncate">{item.label}</span>
+                      {item.badge && (
+                        <Badge label={item.badge} variant={item.badgeVariant} />
+                      )}
+                    </NavLink>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )
+        })}
+
+        {/* Spot section — only for spot profiles */}
+        {isSpot && (
+          <div>
+            <p className="px-2 mb-1 text-[9px] font-semibold uppercase tracking-widest text-slate-600">
+              {SPOT_GROUP.heading}
+            </p>
             <ul className="space-y-0.5">
-              {group.items.map((item) => (
+              {SPOT_GROUP.items.map((item) => (
                 <li key={item.to}>
                   <NavLink
                     to={item.to}
@@ -235,15 +286,12 @@ export function Sidebar({ apiStatus, environment, version, isOpen = false, onClo
                   >
                     <span className="shrink-0">{item.icon}</span>
                     <span className="flex-1 truncate">{item.label}</span>
-                    {item.badge && (
-                      <Badge label={item.badge} variant={item.badgeVariant} />
-                    )}
                   </NavLink>
                 </li>
               ))}
             </ul>
           </div>
-        ))}
+        )}
       </nav>
 
       {/* ── Status bar ────────────────────────────────────────────────────── */}

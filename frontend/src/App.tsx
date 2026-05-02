@@ -23,6 +23,8 @@ import { WatchlistsPage } from './pages/volatility/WatchlistsPage'
 import { PerformancePage } from './pages/analytics/PerformancePage'
 import { RitualPage } from './pages/ritual/RitualPage'
 import { RitualSettingsPage } from './pages/settings/RitualSettingsPage'
+import { SpotPage } from './pages/spot/SpotPage'
+import { DepositsPage } from './pages/spot/DepositsPage'
 
 export default function App() {
   return (
@@ -56,6 +58,9 @@ export default function App() {
         {/* Phase 6B — Ritual */}
         <Route path="/ritual" element={<RitualPage />} />
         <Route path="/settings/ritual" element={<RitualSettingsPage />} />
+        {/* Phase 7 — Spot */}
+        <Route path="/spot" element={<SpotPage />} />
+        <Route path="/spot/deposits" element={<DepositsPage />} />
       </Route>
     </Routes>
   )
