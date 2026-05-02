@@ -23,8 +23,8 @@ import { WatchlistsPage } from './pages/volatility/WatchlistsPage'
 import { PerformancePage } from './pages/analytics/PerformancePage'
 import { RitualPage } from './pages/ritual/RitualPage'
 import { RitualSettingsPage } from './pages/settings/RitualSettingsPage'
-import { SpotPage } from './pages/spot/SpotPage'
-import { DepositsPage } from './pages/spot/DepositsPage'
+import { PortfolioPage } from './pages/portfolio/PortfolioPage'
+import { InvestmentSettingsPage } from './pages/settings/InvestmentSettingsPage'
 
 export default function App() {
   return (
@@ -58,9 +58,12 @@ export default function App() {
         {/* Phase 6B — Ritual */}
         <Route path="/ritual" element={<RitualPage />} />
         <Route path="/settings/ritual" element={<RitualSettingsPage />} />
-        {/* Phase 7 — Spot */}
-        <Route path="/spot" element={<SpotPage />} />
-        <Route path="/spot/deposits" element={<DepositsPage />} />
+        {/* Phase 7 — Spot / Portfolio */}
+        <Route path="/portfolio" element={<PortfolioPage />} />
+        <Route path="/settings/investment" element={<InvestmentSettingsPage />} />
+        {/* Legacy redirects — /spot → /portfolio */}
+        <Route path="/spot" element={<Navigate to="/portfolio" replace />} />
+        <Route path="/spot/deposits" element={<Navigate to="/portfolio" replace />} />
       </Route>
     </Routes>
   )

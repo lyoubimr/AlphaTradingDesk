@@ -1,12 +1,13 @@
 // ── Settings page ──────────────────────────────────────────────────────────
 import { useEffect, useState } from 'react'
-import { User, Database, Bell, Shield, Info, Palette, BarChart2, Activity, CheckCircle2, XCircle, Loader2, RefreshCw, Zap, BookOpen } from 'lucide-react'
+import { User, Database, Bell, Shield, Info, Palette, BarChart2, Activity, CheckCircle2, XCircle, Loader2, RefreshCw, Zap, BookOpen, Coins } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { PageHeader } from '../../components/ui/PageHeader'
 import { Badge } from '../../components/ui/Badge'
 import { ComingSoon } from '../../components/ui/ComingSoon'
 import { InfoBubble } from '../../components/ui/InfoBubble'
 import { useTheme, THEMES, type ThemeId } from '../../context/ThemeContext'
+import { useProfile } from '../../context/ProfileContext'
 import { cn } from '../../lib/cn'
 
 // ── Section card ──────────────────────────────────────────────────────────
@@ -171,6 +172,7 @@ function SystemHealthSection() {
 // ── Page ──────────────────────────────────────────────────────────────────
 export function SettingsPage() {
   const { theme, setTheme } = useTheme()
+  const { activeProfile } = useProfile()
 
   return (
     <div>
@@ -385,6 +387,27 @@ export function SettingsPage() {
             </Link>
           </div>
         </SettingsSection>
+
+        {/* ── Investment (spot profiles only) ─────────────────────── */}
+        {activeProfile?.account_type === 'spot' && (
+          <SettingsSection
+            icon={<Coins size={16} />}
+            title="Investment"
+            description="Recurrent deposit reminders, price tracking frequency and HTF watchlist defaults"
+          >
+            <SettingRow label="Recurrent deposit" value="Configurable" info="Set a monthly or weekly deposit reminder with amount and currency. Shown as a step in the Ritual." />
+            <SettingRow label="Price tracking"    value="Configurable" info="Polling frequency for open spot position prices. Minimum 1h, default 12h." />
+            <SettingRow label="Watchlist HTF"     value="Configurable" info="Active timeframes and top-N pairs for higher timeframe scan in spot ritual sessions." />
+            <div className="pt-2">
+              <Link
+                to="/settings/investment"
+                className="inline-flex items-center gap-1.5 text-xs text-brand-400 hover:text-brand-300 transition-colors underline underline-offset-2"
+              >
+                Open Investment Settings →
+              </Link>
+            </div>
+          </SettingsSection>
+        )}
 
         {/* ── System Health ────────────────────────────────────────────── */}
         <SystemHealthSection />

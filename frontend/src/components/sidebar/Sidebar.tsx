@@ -22,6 +22,7 @@ import {
   Wallet,
   Coins,
 } from 'lucide-react'
+// Note: Wallet used for Portfolio (spot), Coins for Investment settings (spot)
 import { cn } from '../../lib/cn'
 import { Badge } from '../ui/Badge'
 import { useProfile } from '../../context/ProfileContext'
@@ -41,122 +42,7 @@ interface NavGroup {
   items: NavItem[]
 }
 
-// ── Nav structure ──────────────────────────────────────────────────────────
-
-const NAV_GROUPS: NavGroup[] = [
-  {
-    heading: 'Core',
-    items: [
-      {
-        to: '/dashboard',
-        label: 'Dashboard',
-        icon: <LayoutDashboard size={16} />,
-      },
-      {
-        to: '/trades',
-        label: 'Trade Journal',
-        icon: <BookOpen size={16} />,
-      },
-      {
-        to: '/goals',
-        label: 'Goals',
-        icon: <Target size={16} />,
-      },
-      {
-        to: '/ritual',
-        label: 'Ritual',
-        icon: <Flame size={16} />,
-        badge: 'NEW',
-        badgeVariant: 'phase',
-      },
-    ],
-  },
-  {
-    heading: 'Analysis',
-    items: [
-      {
-        to: '/market-analysis',
-        label: 'Market Analysis',
-        icon: <BarChart2 size={16} />,
-      },
-      {
-        to: '/analytics',
-        label: 'Analytics',
-        icon: <LineChart size={16} />,
-      },
-      {
-        to: '/volatility/market',
-        label: 'Volatility',
-        icon: <Activity size={16} />,
-      },
-      {
-        to: '/volatility/pairs',
-        label: 'Watchlist',
-        icon: <Eye size={16} />,
-      },
-    ],
-  },
-  {
-    heading: 'Settings',
-    items: [
-      {
-        to: '/settings/profiles',
-        label: 'Profiles',
-        icon: <Users size={16} />,
-      },
-      {
-        to: '/settings/goals',
-        label: 'Goals',
-        icon: <Target size={16} />,
-      },
-      {
-        to: '/settings/strategies',
-        label: 'Strategies',
-        icon: <Crosshair size={16} />,
-      },
-      {
-        to: '/settings/market-analysis',
-        label: 'Indicators',
-        icon: <SlidersHorizontal size={16} />,
-      },
-      {
-        to: '/settings/volatility',
-        label: 'Volatility',
-        icon: <Activity size={16} />,
-      },
-      {
-        to: '/settings/notifications',
-        label: 'Notifications',
-        icon: <Bell size={16} />,
-      },
-      {
-        to: '/settings/ritual',
-        label: 'Ritual',
-        icon: <BookOpen size={16} />,
-      },
-      {
-        to: '/settings/automation',
-        label: 'Automation',
-        icon: <Zap size={16} />,
-      },
-      {
-        to: '/settings/risk',
-        label: 'Risk',
-        icon: <Shield size={16} />,
-      },
-      {
-        to: '/settings/ai',
-        label: 'AI Settings',
-        icon: <Sparkles size={16} />,
-      },
-      {
-        to: '/settings',
-        label: 'General',
-        icon: <Settings size={16} />,
-      },
-    ],
-  },
-]
+// ── Nav structure is computed dynamically inside Sidebar() based on account_type
 
 // ── Sidebar ────────────────────────────────────────────────────────────────
 
@@ -179,13 +65,51 @@ export function Sidebar({ apiStatus, environment, version, isOpen = false, onClo
   const { activeProfile } = useProfile()
   const isSpot = activeProfile?.account_type === 'spot'
 
-  const SPOT_GROUP: NavGroup = {
-    heading: 'Spot',
-    items: [
-      { to: '/spot', label: 'Positions', icon: <Coins size={16} /> },
-      { to: '/spot/deposits', label: 'Deposits', icon: <Wallet size={16} /> },
-    ],
-  }
+  // ── Core items — account_type-aware ────────────────────────────────────
+  const coreItems: NavItem[] = isSpot
+    ? [
+        { to: '/dashboard', label: 'Dashboard', icon: <LayoutDashboard size={16} /> },
+        { to: '/portfolio',  label: 'Portfolio',  icon: <Wallet size={16} /> },
+        { to: '/goals',      label: 'Goals',       icon: <Target size={16} /> },
+        { to: '/ritual',     label: 'Ritual',      icon: <Flame size={16} />, badge: 'NEW', badgeVariant: 'phase' },
+      ]
+    : [
+        { to: '/dashboard', label: 'Dashboard',    icon: <LayoutDashboard size={16} /> },
+        { to: '/trades',    label: 'Trade Journal', icon: <BookOpen size={16} /> },
+        { to: '/risk',      label: 'Risk',          icon: <Shield size={16} /> },
+        { to: '/goals',     label: 'Goals',         icon: <Target size={16} /> },
+        { to: '/ritual',    label: 'Ritual',        icon: <Flame size={16} />, badge: 'NEW', badgeVariant: 'phase' },
+      ]
+
+  // ── Settings items — hide Risk for spot, add Investment for spot ────────
+  const settingsItems: NavItem[] = [
+    { to: '/settings/profiles',        label: 'Profiles',      icon: <Users size={16} /> },
+    { to: '/settings/goals',           label: 'Goals',         icon: <Target size={16} /> },
+    { to: '/settings/strategies',      label: 'Strategies',    icon: <Crosshair size={16} /> },
+    { to: '/settings/market-analysis', label: 'Indicators',    icon: <SlidersHorizontal size={16} /> },
+    { to: '/settings/volatility',      label: 'Volatility',    icon: <Activity size={16} /> },
+    { to: '/settings/notifications',   label: 'Notifications', icon: <Bell size={16} /> },
+    { to: '/settings/ritual',          label: 'Ritual',        icon: <BookOpen size={16} /> },
+    { to: '/settings/automation',      label: 'Automation',    icon: <Zap size={16} /> },
+    ...(!isSpot ? [{ to: '/settings/risk',       label: 'Risk',       icon: <Shield size={16} /> }] : []),
+    ...(isSpot  ? [{ to: '/settings/investment', label: 'Investment', icon: <Coins size={16} /> }] : []),
+    { to: '/settings/ai',   label: 'AI Settings', icon: <Sparkles size={16} /> },
+    { to: '/settings',      label: 'General',     icon: <Settings size={16} /> },
+  ]
+
+  const navGroups: NavGroup[] = [
+    { heading: 'Core',     items: coreItems },
+    {
+      heading: 'Analysis',
+      items: [
+        { to: '/market-analysis',   label: 'Market Analysis', icon: <BarChart2 size={16} /> },
+        { to: '/analytics',         label: 'Analytics',       icon: <LineChart size={16} /> },
+        { to: '/volatility/market', label: 'Volatility',      icon: <Activity size={16} /> },
+        { to: '/volatility/pairs',  label: 'Watchlist',       icon: <Eye size={16} /> },
+      ],
+    },
+    { heading: 'Settings', items: settingsItems },
+  ]
 
   return (
     <aside className={cn(
@@ -225,53 +149,15 @@ export function Sidebar({ apiStatus, environment, version, isOpen = false, onClo
 
       {/* ── Nav groups ────────────────────────────────────────────────────── */}
       <nav className="flex-1 px-2 py-3 space-y-4">
-        {NAV_GROUPS.map((group, gi) => {
-          // For spot profiles: hide the Risk settings item
-          const items = isSpot
-            ? group.items.filter((item) => item.to !== '/settings/risk')
-            : group.items
-          return (
-            <div key={gi}>
-              {group.heading && (
-                <p className="px-2 mb-1 text-[9px] font-semibold uppercase tracking-widest text-slate-600">
-                  {group.heading}
-                </p>
-              )}
-              <ul className="space-y-0.5">
-                {items.map((item) => (
-                  <li key={item.to}>
-                    <NavLink
-                      to={item.to}
-                      onClick={onClose}
-                      className={({ isActive }) => cn(
-                        'flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-sm transition-colors',
-                        'group relative',
-                        isActive
-                          ? 'bg-brand-600/20 text-brand-300 font-medium'
-                          : 'text-slate-500 hover:text-slate-200 hover:bg-surface-800',
-                      )}
-                    >
-                      <span className="shrink-0">{item.icon}</span>
-                      <span className="flex-1 truncate">{item.label}</span>
-                      {item.badge && (
-                        <Badge label={item.badge} variant={item.badgeVariant} />
-                      )}
-                    </NavLink>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )
-        })}
-
-        {/* Spot section — only for spot profiles */}
-        {isSpot && (
-          <div>
-            <p className="px-2 mb-1 text-[9px] font-semibold uppercase tracking-widest text-slate-600">
-              {SPOT_GROUP.heading}
-            </p>
+        {navGroups.map((group, gi) => (
+          <div key={gi}>
+            {group.heading && (
+              <p className="px-2 mb-1 text-[9px] font-semibold uppercase tracking-widest text-slate-600">
+                {group.heading}
+              </p>
+            )}
             <ul className="space-y-0.5">
-              {SPOT_GROUP.items.map((item) => (
+              {group.items.map((item) => (
                 <li key={item.to}>
                   <NavLink
                     to={item.to}
@@ -286,12 +172,15 @@ export function Sidebar({ apiStatus, environment, version, isOpen = false, onClo
                   >
                     <span className="shrink-0">{item.icon}</span>
                     <span className="flex-1 truncate">{item.label}</span>
+                    {item.badge && (
+                      <Badge label={item.badge} variant={item.badgeVariant} />
+                    )}
                   </NavLink>
                 </li>
               ))}
             </ul>
           </div>
-        )}
+        ))}
       </nav>
 
       {/* ── Status bar ────────────────────────────────────────────────────── */}

@@ -21,12 +21,12 @@ import { StatCard }    from '../../components/ui/StatCard'
 import { useProfile }  from '../../context/ProfileContext'
 import { MarketVIWidget }  from '../../components/dashboard/MarketVIWidget'
 import {
-  goalsApi, tradesApi, riskApi, ritualApi,
+  goalsApi, tradesApi, riskApi, ritualApi, investmentApi,
 } from '../../lib/api'
 import { RiskAlertBanner } from '../../components/risk/RiskAlertBanner'
 import type {
   GoalProgressItem, TradeListItem, RiskBudgetOut,
-  WeeklyScore, PinnedPair,
+  WeeklyScore, PinnedPair, PortfolioOut,
 } from '../../types/api'
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -964,15 +964,17 @@ function RitualWidget({ profileId }: { profileId: number }) {
 
 export function DashboardPage() {
   const { activeProfile } = useProfile()
+  const isSpot = activeProfile?.account_type === 'spot'
 
   const [trades,    setTrades]    = useState<TradeListItem[]>([])
   const [tLoading,  setTLoading]  = useState(false)
   const [tError,    setTError]    = useState<string | null>(null)
 
   const [budget,    setBudget]    = useState<RiskBudgetOut | null>(null)
+  const [portfolio, setPortfolio] = useState<PortfolioOut | null>(null)
 
   const loadTrades = useCallback(async () => {
-    if (!activeProfile) return
+    if (!activeProfile || activeProfile.account_type === 'spot') return
     setTLoading(true); setTError(null)
     try { setTrades(await tradesApi.list(activeProfile.id)) }
     catch (e) { setTError((e as Error).message) }
@@ -980,13 +982,20 @@ export function DashboardPage() {
   }, [activeProfile])
 
   const loadBudget = useCallback(async () => {
-    if (!activeProfile) return
+    if (!activeProfile || activeProfile.account_type === 'spot') return
     try { setBudget(await riskApi.getBudget(activeProfile.id)) }
     catch { /* non-blocking — dashboard still works without budget */ }
   }, [activeProfile])
 
+  const loadPortfolio = useCallback(async () => {
+    if (!activeProfile || activeProfile.account_type !== 'spot') return
+    try { setPortfolio(await investmentApi.getPortfolio(activeProfile.id)) }
+    catch { /* non-blocking */ }
+  }, [activeProfile])
+
   useEffect(() => { void loadTrades() }, [loadTrades])
   useEffect(() => { void loadBudget() }, [loadBudget])
+  useEffect(() => { void loadPortfolio() }, [loadPortfolio])
 
   // Compute risk for the hard-limit banner (local, no API roundtrip needed)
   // Only live (open/partial) trades count — pending LIMITs are not yet capital-at-risk
@@ -997,6 +1006,9 @@ export function DashboardPage() {
   const bannerRisk    = openTrades.reduce((sum, t) =>
     sum + (t.is_be ? 0 : (pct(t.current_risk) || pct(t.risk_amount))), 0)
   const currentRiskPct = capital > 0 ? (bannerRisk / capital) * 100 : 0
+
+  const currency    = activeProfile?.currency ?? 'USD'
+  const pnlPositive = portfolio ? Number(portfolio.realized_pnl) >= 0 : true
 
   return (
     <div>
@@ -1016,24 +1028,113 @@ export function DashboardPage() {
 
       {activeProfile && (
         <>
-          {/* ── Risk alert banner (amber — configurable threshold from budget API) ── */}
-          <RiskAlertBanner budget={budget} />
-
-          {/* ── Risk exceeded banner (red — hard limit exceeded, local computation) ── */}
-          <RiskExceededBanner riskPct={currentRiskPct} maxRiskPct={maxRiskPct} />
+          {/* ── Risk banners: contracts only ── */}
+          {!isSpot && <RiskAlertBanner budget={budget} />}
+          {!isSpot && <RiskExceededBanner riskPct={currentRiskPct} maxRiskPct={maxRiskPct} />}
 
           {/* ── KPI bar ─────────────────────────────────────────────────── */}
-          <KpiBar trades={trades} loading={tLoading} profile={activeProfile} />
+          {isSpot ? (
+            portfolio && (
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+                <StatCard
+                  label="Capital"
+                  value={fmtCurrency(Number(portfolio.capital_current), currency)}
+                  sub={`Start: ${fmtCurrency(Number(portfolio.capital_start), currency)}`}
+                  accent="brand"
+                />
+                <StatCard
+                  label="Total deposited"
+                  value={fmtCurrency(Number(portfolio.total_deposited), currency)}
+                />
+                <StatCard
+                  label="Realized P&L"
+                  value={
+                    <span className={pnlPositive ? 'text-emerald-400' : 'text-red-400'}>
+                      {pnlPositive ? '+' : ''}{fmtCurrency(Number(portfolio.realized_pnl), currency)}
+                    </span> as unknown as string
+                  }
+                  accent={pnlPositive ? 'bull' : 'bear'}
+                />
+                <StatCard
+                  label="Open positions"
+                  value={String(portfolio.open_positions_count)}
+                />
+              </div>
+            )
+          ) : (
+            <KpiBar trades={trades} loading={tLoading} profile={activeProfile} />
+          )}
 
-          {/* ── 2-column widget grid ─────────────────────────────────────────── */}
+          {/* ── Widget grid ─────────────────────────────────────────────── */}
           <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
             <div className="xl:col-span-2">
               <RitualWidget profileId={activeProfile.id} />
             </div>
             <MarketVIWidget profileId={activeProfile.id} />
             <GoalsWidget    profileId={activeProfile.id} />
-            <PositionsWidget  trades={trades} loading={tLoading} error={tError} />
-            <PerformanceWidget trades={trades} loading={tLoading} error={tError} beThreshold={parseFloat(activeProfile.min_pnl_pct_for_stats ?? '0')} />
+
+            {/* Contracts: show risk-based widgets */}
+            {!isSpot && (
+              <PositionsWidget trades={trades} loading={tLoading} error={tError} />
+            )}
+            {!isSpot && (
+              <PerformanceWidget
+                trades={trades}
+                loading={tLoading}
+                error={tError}
+                beThreshold={parseFloat(activeProfile.min_pnl_pct_for_stats ?? '0')}
+              />
+            )}
+
+            {/* Spot: show open positions summary linking to /portfolio */}
+            {isSpot && (
+              <div className="rounded-xl bg-surface-800 border border-surface-700 p-5 flex flex-col gap-4 xl:col-span-2">
+                <div className="flex items-center justify-between">
+                  <h2 className="text-sm font-semibold text-slate-200">🪙 Open Positions</h2>
+                  <Link to="/portfolio" className="text-[10px] text-brand-400 hover:text-brand-300 flex items-center gap-0.5">
+                    View all <ChevronRight size={10} />
+                  </Link>
+                </div>
+                {!portfolio || portfolio.open_positions_count === 0 ? (
+                  <p className="text-xs text-slate-600 py-4 text-center">
+                    No open positions.{' '}
+                    <Link to="/portfolio" className="text-brand-400 hover:text-brand-300">Open your first position →</Link>
+                  </p>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left">
+                      <thead>
+                        <tr className="border-b border-surface-700/50">
+                          {['Pair', 'Entry', 'Qty', 'Cost', 'Opened'].map((h) => (
+                            <th key={h} className="px-3 py-2 text-[10px] font-semibold uppercase tracking-wider text-slate-600">{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {portfolio.open_positions.slice(0, 5).map((t) => (
+                          <tr key={t.id} className="border-b border-surface-700/50 hover:bg-surface-700/30 transition-colors">
+                            <td className="px-3 py-2.5 text-xs font-semibold text-slate-200">{t.pair}</td>
+                            <td className="px-3 py-2.5 text-xs font-mono text-slate-400">{fmt(Number(t.entry_price))}</td>
+                            <td className="px-3 py-2.5 text-xs font-mono text-slate-400">{Number(t.quantity).toFixed(6)}</td>
+                            <td className="px-3 py-2.5 text-xs font-mono text-slate-400">{fmt(Number(t.total_cost))}</td>
+                            <td className="px-3 py-2.5 text-xs text-slate-500">
+                              {t.opened_at
+                                ? new Date(t.opened_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+                                : '—'}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    {portfolio.open_positions.length > 5 && (
+                      <div className="px-3 py-2 text-[10px] text-slate-600">
+                        +{portfolio.open_positions.length - 5} more
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </>
       )}
