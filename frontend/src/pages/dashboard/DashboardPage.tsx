@@ -1008,7 +1008,7 @@ export function DashboardPage() {
   const currentRiskPct = capital > 0 ? (bannerRisk / capital) * 100 : 0
 
   const currency    = activeProfile?.currency ?? 'USD'
-  const pnlPositive = portfolio ? Number(portfolio.realized_pnl) >= 0 : true
+  const pnlPositive = portfolio ? Number(portfolio.realized_pnl ?? '0') >= 0 : true
 
   return (
     <div>
@@ -1050,13 +1050,13 @@ export function DashboardPage() {
                   label="Realized P&L"
                   value={
                     <span className={pnlPositive ? 'text-emerald-400' : 'text-red-400'}>
-                      {pnlPositive ? '+' : ''}{fmtCurrency(Number(portfolio.realized_pnl), currency)}
+                      {pnlPositive ? '+' : ''}{fmtCurrency(Number(portfolio.realized_pnl ?? '0'), currency)}
                     </span> as unknown as string
                   }
                   accent={pnlPositive ? 'bull' : 'bear'}
                 />
                 <StatCard
-                  label="Open positions"
+                  label="Holdings"
                   value={String(portfolio.open_positions_count)}
                 />
               </div>
@@ -1086,53 +1086,23 @@ export function DashboardPage() {
               />
             )}
 
-            {/* Spot: show open positions summary linking to /portfolio */}
+            {/* Spot: holdings CTA card */}
             {isSpot && (
-              <div className="rounded-xl bg-surface-800 border border-surface-700 p-5 flex flex-col gap-4 xl:col-span-2">
-                <div className="flex items-center justify-between">
-                  <h2 className="text-sm font-semibold text-slate-200">🪙 Open Positions</h2>
+              <div className="rounded-xl bg-surface-800 border border-surface-700 p-5 xl:col-span-2">
+                <div className="flex items-center justify-between mb-3">
+                  <h2 className="text-sm font-semibold text-slate-200">🪙 Holdings</h2>
                   <Link to="/portfolio" className="text-[10px] text-brand-400 hover:text-brand-300 flex items-center gap-0.5">
-                    View all <ChevronRight size={10} />
+                    View portfolio <ChevronRight size={10} />
                   </Link>
                 </div>
-                {!portfolio || portfolio.open_positions_count === 0 ? (
-                  <p className="text-xs text-slate-600 py-4 text-center">
-                    No open positions.{' '}
-                    <Link to="/portfolio" className="text-brand-400 hover:text-brand-300">Open your first position →</Link>
-                  </p>
-                ) : (
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left">
-                      <thead>
-                        <tr className="border-b border-surface-700/50">
-                          {['Pair', 'Entry', 'Qty', 'Cost', 'Opened'].map((h) => (
-                            <th key={h} className="px-3 py-2 text-[10px] font-semibold uppercase tracking-wider text-slate-600">{h}</th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {portfolio.open_positions.slice(0, 5).map((t) => (
-                          <tr key={t.id} className="border-b border-surface-700/50 hover:bg-surface-700/30 transition-colors">
-                            <td className="px-3 py-2.5 text-xs font-semibold text-slate-200">{t.pair}</td>
-                            <td className="px-3 py-2.5 text-xs font-mono text-slate-400">{fmt(Number(t.entry_price))}</td>
-                            <td className="px-3 py-2.5 text-xs font-mono text-slate-400">{Number(t.quantity).toFixed(6)}</td>
-                            <td className="px-3 py-2.5 text-xs font-mono text-slate-400">{fmt(Number(t.total_cost))}</td>
-                            <td className="px-3 py-2.5 text-xs text-slate-500">
-                              {t.opened_at
-                                ? new Date(t.opened_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-                                : '—'}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                    {portfolio.open_positions.length > 5 && (
-                      <div className="px-3 py-2 text-[10px] text-slate-600">
-                        +{portfolio.open_positions.length - 5} more
-                      </div>
-                    )}
-                  </div>
-                )}
+                <p className="text-xs text-slate-500">
+                  {portfolio && portfolio.open_positions_count > 0
+                    ? `${portfolio.open_positions_count} open holding${portfolio.open_positions_count > 1 ? 's' : ''} — `
+                    : 'No open holdings — '}
+                  <Link to="/portfolio" className="text-brand-400 hover:text-brand-300">
+                    {portfolio && portfolio.open_positions_count > 0 ? 'view in portfolio →' : 'open your first position →'}
+                  </Link>
+                </p>
               </div>
             )}
           </div>

@@ -107,6 +107,7 @@ class DepositUpdate(BaseModel):
     amount: Decimal | None = None
     deposit_date: datetime.date | None = None
     label: str | None = Field(default=None, max_length=100)
+    is_recurrent: bool | None = None
     notes: str | None = None
 
 
@@ -139,24 +140,11 @@ class InvestmentSettingsUpdateIn(BaseModel):
 
 # ── Portfolio ─────────────────────────────────────────────────────────────────
 
-class PositionSummary(BaseModel):
-    pair: str
-    quantity: Decimal
-    entry_price: Decimal
-    total_cost: Decimal | None
-    current_price: Decimal | None = None
-    unrealized_pnl: Decimal | None = None
-    unrealized_pnl_pct: Decimal | None = None
-    stop_loss: Decimal | None
-    nb_take_profits: int
-
-
 class PortfolioOut(BaseModel):
     profile_id: int
     capital_start: Decimal
     capital_current: Decimal
     total_deposited: Decimal
-    total_realized_pnl: Decimal
+    realized_pnl: Decimal
     open_positions_count: int
-    open_positions: list[PositionSummary]
     last_price_refresh: datetime.datetime | None = None

@@ -501,7 +501,6 @@ class TestPortfolio:
         assert resp.status_code == 200
         data = resp.json()
         assert data["open_positions_count"] == 0
-        assert data["open_positions"] == []
         assert float(data["total_deposited"]) == pytest.approx(0.0, rel=1e-4)
 
     def test_portfolio_shows_open_trades(self, client: TestClient, spot_profile: Profile):
@@ -513,7 +512,7 @@ class TestPortfolio:
         assert resp.status_code == 200
         data = resp.json()
         assert data["open_positions_count"] == 1
-        assert data["open_positions"][0]["pair"] == "BTCUSDT"
+        assert "open_positions" not in data
 
     def test_portfolio_reflects_capital_after_deposit(
         self, client: TestClient, spot_profile: Profile

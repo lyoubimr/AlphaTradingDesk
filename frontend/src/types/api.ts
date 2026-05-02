@@ -129,7 +129,6 @@ export interface PortfolioOut {
   total_deposited: string
   realized_pnl: string
   open_positions_count: number
-  open_positions: SpotTradeOut[]
   last_price_refresh: string | null
 }
 

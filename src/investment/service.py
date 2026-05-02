@@ -25,7 +25,6 @@ from src.investment.schemas import (
     DepositCreate,
     DepositUpdate,
     PortfolioOut,
-    PositionSummary,
     SpotTradeClose,
     SpotTradeCreate,
     SpotTradeUpdate,
@@ -415,25 +414,12 @@ def get_portfolio(profile_id: int, db: Session) -> PortfolioOut:
             except (ValueError, TypeError):
                 pass
 
-    positions = [
-        PositionSummary(
-            pair=t.pair,
-            quantity=t.quantity,
-            entry_price=t.entry_price,
-            total_cost=t.total_cost,
-            stop_loss=t.stop_loss,
-            nb_take_profits=t.nb_take_profits,
-        )
-        for t in open_trades
-    ]
-
     return PortfolioOut(
         profile_id=profile_id,
         capital_start=profile.capital_start,
         capital_current=profile.capital_current,
         total_deposited=total_deposited,
-        total_realized_pnl=total_pnl,
+        realized_pnl=total_pnl,
         open_positions_count=len(open_trades),
-        open_positions=positions,
         last_price_refresh=last_price_refresh,
     )

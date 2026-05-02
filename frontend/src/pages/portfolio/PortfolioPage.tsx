@@ -1,4 +1,4 @@
-// ── PortfolioPage ── Phase 7C — Unified spot portfolio (Positions + Deposits)
+// ── PortfolioPage ── Phase 7C — Unified spot portfolio (Holdings + Deposits)
 import { useEffect, useState, useCallback } from 'react'
 import { Loader2, Plus, X, TrendingUp, TrendingDown, CheckCircle2, XCircle, Pencil, Trash2 } from 'lucide-react'
 import { PageHeader } from '../../components/ui/PageHeader'
@@ -527,11 +527,11 @@ function TradeRow({ trade, onClose, onCancel, cancelling }: TradeRowProps) {
 
 // ── PortfolioPage ─────────────────────────────────────────────────────────────
 
-type PortfolioTab = 'positions' | 'deposits'
+type PortfolioTab = 'holdings' | 'deposits'
 
 export function PortfolioPage() {
   const { activeProfile } = useProfile()
-  const [tab, setTab] = useState<PortfolioTab>('positions')
+  const [tab, setTab] = useState<PortfolioTab>('holdings')
 
   const [portfolio,    setPortfolio]    = useState<PortfolioOut | null>(null)
   const [openTrades,   setOpenTrades]   = useState<SpotTradeOut[]>([])
@@ -616,7 +616,7 @@ export function PortfolioPage() {
   }
 
   const currency = activeProfile.currency ?? ''
-  const pnlPositive = portfolio ? Number(portfolio.realized_pnl) >= 0 : true
+  const pnlPositive = portfolio ? Number(portfolio.realized_pnl ?? '0') >= 0 : true
 
   // Deposit stats
   const totalDeposited  = deposits.filter((d) => Number(d.amount) > 0).reduce((s, d) => s + Number(d.amount), 0)
@@ -630,7 +630,7 @@ export function PortfolioPage() {
         title="Portfolio"
         subtitle={activeProfile.name}
         actions={
-          tab === 'positions'
+          tab === 'holdings'
             ? (
               <button
                 type="button"
@@ -666,11 +666,11 @@ export function PortfolioPage() {
           />
           <StatCard
             label="Realized P&L"
-            value={`${pnlPositive ? '+' : ''}${fmt(portfolio.realized_pnl)} ${currency}`}
+            value={`${pnlPositive ? '+' : ''}${fmt(portfolio.realized_pnl ?? '0')} ${currency}`}
             accent={pnlPositive ? 'bull' : 'bear'}
           />
           <StatCard
-            label="Open positions"
+            label="Holdings"
             value={String(portfolio.open_positions_count)}
           />
         </div>
@@ -684,7 +684,7 @@ export function PortfolioPage() {
 
       {/* ── Tab switcher ── */}
       <div className="flex border-b border-surface-700">
-        {(['positions', 'deposits'] as PortfolioTab[]).map((t) => (
+        {(['holdings', 'deposits'] as PortfolioTab[]).map((t) => (
           <button
             key={t}
             type="button"
@@ -697,7 +697,7 @@ export function PortfolioPage() {
             )}
           >
             {t}
-            {t === 'positions' && openTrades.length > 0 && (
+            {t === 'holdings' && openTrades.length > 0 && (
               <span className="ml-2 text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-sky-500/15 text-sky-300 border border-sky-500/25">
                 {openTrades.length}
               </span>
@@ -712,15 +712,15 @@ export function PortfolioPage() {
         </div>
       )}
 
-      {/* ── Positions tab ── */}
-      {!loading && tab === 'positions' && (
+      {/* ── Holdings tab ── */}
+      {!loading && tab === 'holdings' && (
         <div className="space-y-4">
-          {/* Open positions */}
+          {/* Open holdings */}
           <div className="rounded-xl bg-surface-800 border border-surface-700 overflow-hidden">
             <div className="flex items-center justify-between px-4 py-3 border-b border-surface-700">
               <div className="flex items-center gap-2">
                 <TrendingUp size={14} className="text-sky-400" />
-                <span className="text-sm font-medium text-slate-200">Open positions</span>
+                <span className="text-sm font-medium text-slate-200">Holdings</span>
                 {openTrades.length > 0 && (
                   <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-sky-500/15 text-sky-300 border border-sky-500/25">
                     {openTrades.length}
@@ -731,7 +731,7 @@ export function PortfolioPage() {
 
             {openTrades.length === 0 ? (
               <div className="px-4 py-10 text-center text-xs text-slate-600">
-                No open positions. Click "Open position" to start.
+                No open holdings. Click "Open position" to start.
               </div>
             ) : (
               <div className="overflow-x-auto">
@@ -759,12 +759,12 @@ export function PortfolioPage() {
             )}
           </div>
 
-          {/* Closed positions */}
+          {/* Closed trades */}
           {closedTrades.length > 0 && (
             <div className="rounded-xl bg-surface-800 border border-surface-700 overflow-hidden">
               <div className="flex items-center gap-2 px-4 py-3 border-b border-surface-700">
                 <TrendingDown size={14} className="text-slate-500" />
-                <span className="text-sm font-medium text-slate-200">Closed positions</span>
+                <span className="text-sm font-medium text-slate-200">Closed trades</span>
                 <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-surface-700 text-slate-400 border border-surface-600">
                   {closedTrades.length}
                 </span>
