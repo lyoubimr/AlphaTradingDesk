@@ -18,6 +18,9 @@ from pydantic import BaseModel, ConfigDict, Field
 class ProfileCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
     market_type: str = Field(..., pattern="^(CFD|Crypto)$")
+    # account_type only applies when market_type='Crypto'.
+    # CFD profiles must always be 'contracts'. Crypto profiles can be 'spot'.
+    account_type: str = Field(default="contracts", pattern="^(contracts|spot)$")
     broker_id: int | None = None
     currency: str | None = Field(default=None, max_length=10)
     capital_start: Decimal = Field(..., gt=0)
@@ -38,6 +41,7 @@ class ProfileUpdate(BaseModel):
 
     name: str | None = Field(default=None, min_length=1, max_length=255)
     market_type: str | None = Field(default=None, pattern="^(CFD|Crypto)$")
+    account_type: str | None = Field(default=None, pattern="^(contracts|spot)$")
     broker_id: int | None = None
     currency: str | None = Field(default=None, max_length=10)
     capital_start: Decimal | None = Field(default=None, gt=0)
@@ -56,6 +60,7 @@ class ProfileOut(BaseModel):
     id: int
     name: str
     market_type: str
+    account_type: str
     broker_id: int | None
     currency: str | None
     capital_start: Decimal

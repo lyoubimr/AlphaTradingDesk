@@ -20,6 +20,7 @@ from src.core.config import settings
 from src.core.database import get_engine
 from src.core.logging_config import setup_logging
 from src.goals.router import router as goals_router
+from src.investment.router import router as investment_router
 from src.kraken_execution.router import router as kraken_execution_router
 from src.market_analysis.router import ma_router, profiles_ma_router
 from src.profiles.router import router as profiles_router
@@ -83,6 +84,7 @@ app.include_router(risk_router, prefix=API_PREFIX)
 app.include_router(kraken_execution_router, prefix=API_PREFIX)
 app.include_router(analytics_router, prefix=API_PREFIX)
 app.include_router(ritual_router, prefix=API_PREFIX)
+app.include_router(investment_router, prefix=API_PREFIX)
 
 
 @app.get("/api/health")

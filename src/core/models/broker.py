@@ -114,6 +114,10 @@ class Profile(Base):
             "max_concurrent_risk_pct > 0",
             name="ck_profiles_max_concurrent_risk_positive",
         ),
+        CheckConstraint(
+            "account_type IN ('contracts', 'spot')",
+            name="ck_profiles_account_type",
+        ),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
@@ -121,6 +125,10 @@ class Profile(Base):
     # Basic info
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     market_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    # Phase 7: spot sub-type within Crypto profiles
+    # 'contracts' = leveraged derivatives (default, all existing profiles)
+    # 'spot'      = spot/investment (no leverage, SL optional)
+    account_type: Mapped[str] = mapped_column(String(20), nullable=False, default="contracts")
 
     # Broker link (optional)
     broker_id: Mapped[int | None] = mapped_column(
