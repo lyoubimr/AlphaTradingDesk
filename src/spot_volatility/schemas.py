@@ -8,7 +8,6 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict
 
-
 # ── Watchlist schemas (ISO with contracts WatchlistOut) ───────────────────────
 
 class SpotWatchlistPairOut(BaseModel):
@@ -53,18 +52,24 @@ class SpotWatchlistMetaOut(BaseModel):
 
 # ── Settings schemas ──────────────────────────────────────────────────────────
 
-# Default Kraken Spot pairs — curated top-25 by liquidity in USD
+# Fallback list used only when DB has no synced instruments at all
+# (e.g. first boot before sync-spot-instruments has run)
 DEFAULT_SPOT_PAIRS: list[str] = [
     "XBTUSD", "ETHUSD", "SOLUSD", "AVAXUSD", "XRPUSD",
-    "ADAUSD", "DOTUSD", "LINKUSD", "MATICUSD", "LTCUSD",
-    "BCHUSD", "ATOMUSD", "ALGOUSD", "XLMUSD", "NEARUSD",
-    "INJUSD", "RUNEUSD", "DOGEUSD", "TRXUSD", "UNIUSD",
-    "AAVEUSD", "BNBUSD", "FILUSD", "TIAUSD", "SUIUSD",
+    "ADAUSD", "DOTUSD", "LINKUSD", "LTCUSD", "BCHUSD",
+    "ATOMUSD", "DOGEUSD", "TRXUSD", "UNIUSD", "AAVEUSD",
+    "BNBUSD", "FILUSD", "SUIUSD",
 ]
 
 DEFAULT_SPOT_CONFIG: dict = {
-    "pairs": DEFAULT_SPOT_PAIRS,
-    "top_n": 25,
+    # use_all_synced=True → pairs are resolved dynamically from the instruments
+    # table (all active USD/USDT spot pairs for the Kraken broker).
+    # Set to False and populate "pairs" to pin a custom list instead.
+    "use_all_synced": True,
+    "pairs": [],          # ignored when use_all_synced is True
+    # top_n > 0: keep only top N pairs ranked by 24h USD volume (pre-filter).
+    # 0 = no limit (compute all synced pairs — can be slow).
+    "top_n": 100,
     "enabled": True,
     "indicators": {
         "rvol": True,

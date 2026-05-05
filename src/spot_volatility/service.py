@@ -18,6 +18,7 @@ from datetime import UTC, datetime
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
+from src.core.models.broker import Instrument
 from src.spot_volatility.kraken_spot_client import KrakenSpotClient
 from src.spot_volatility.models import SpotVolatilitySettings, SpotWatchlistSnapshot
 from src.spot_volatility.schemas import DEFAULT_SPOT_CONFIG, DEFAULT_SPOT_PAIRS
@@ -87,6 +88,74 @@ def _deep_merge(base: dict, patch: dict) -> dict:
     return result
 
 
+def _resolve_pairs(cfg: dict, db: Session) -> list[str]:
+    """Return the list of spot pairs to compute VI for.
+
+    When ``use_all_synced`` is True (default), all active USD-quoted Kraken spot
+    instruments are fetched from the instruments table.  When ``top_n > 0``,
+    a single batch Ticker call pre-ranks them by 24h USD volume and the top N
+    are kept — this prevents running OHLCV computation on hundreds of obscure
+    illiquid pairs.
+
+    Falls back to the static ``DEFAULT_SPOT_PAIRS`` list when no instruments
+    are found in the DB (first boot before sync has run) or when
+    ``use_all_synced`` is explicitly False + no custom ``pairs`` list is set.
+    """
+    use_all = cfg.get("use_all_synced", False)
+    top_n: int = cfg.get("top_n", 0)
+
+    if use_all:
+        rows = (
+            db.query(Instrument.symbol)
+            .filter(
+                Instrument.is_active.is_(True),
+                Instrument.asset_class == "Crypto",
+                ~Instrument.symbol.startswith("PF_"),
+                ~Instrument.symbol.startswith("PI_"),
+                ~Instrument.symbol.startswith("FF_"),
+                # USD-only — USDT pairs are a strict subset and cause duplicates
+                Instrument.quote_currency == "USD",
+            )
+            .order_by(Instrument.symbol)
+            .all()
+        )
+        symbols = [r.symbol for r in rows]
+
+        if not symbols:
+            logger.warning("_resolve_pairs: use_all_synced=True but no instruments in DB — using fallback list")
+        elif top_n > 0 and len(symbols) > top_n:
+            # Pre-filter by 24h USD volume: one batch Ticker call, then take top N
+            logger.info(
+                "_resolve_pairs: %d synced pairs, pre-filtering to top %d by 24h volume",
+                len(symbols), top_n,
+            )
+            try:
+                with KrakenSpotClient() as client:
+                    tickers = client.fetch_all_tickers(symbols)
+                symbols_with_vol = [
+                    (sym, tickers.get(sym, {}).get("volume_usd_24h", 0.0))
+                    for sym in symbols
+                ]
+                symbols_with_vol.sort(key=lambda x: x[1], reverse=True)
+                symbols = [sym for sym, _ in symbols_with_vol[:top_n]]
+                logger.info("_resolve_pairs: top %d by volume selected", len(symbols))
+            except Exception as exc:
+                logger.warning(
+                    "_resolve_pairs: volume pre-filter failed (%s) — using first %d alphabetically",
+                    exc, top_n,
+                )
+                symbols = symbols[:top_n]
+
+        if symbols:
+            return symbols
+
+    explicit = cfg.get("pairs") or []
+    if explicit:
+        return explicit
+
+    return list(DEFAULT_SPOT_PAIRS)
+
+
 def _check_tf(timeframe: str) -> None:
     if timeframe not in VALID_SPOT_TFS:
         raise HTTPException(
@@ -137,7 +206,7 @@ def compute_spot_watchlist(timeframe: str, db: Session) -> SpotWatchlistSnapshot
     settings_row = get_settings(db)
     cfg = settings_row.config
 
-    pairs: list[str] = cfg.get("pairs") or DEFAULT_SPOT_PAIRS
+    pairs: list[str] = _resolve_pairs(cfg, db)
     enabled: dict = cfg.get("indicators", {
         "rvol": True, "mfi": True, "atr": True, "bb": True, "ema": True,
     })

@@ -152,7 +152,8 @@ class KrakenSpotClient:
         Sends one request with comma-separated pairs for efficiency.
 
         Returns:
-            {original_symbol: {"last": float, "change_pct_24h": float, ...}}
+            {original_symbol: {"last": float, "change_pct_24h": float,
+                               "volume_24h": float, ...}}
             Keyed by input symbol (not Kraken canonical name).
         """
         if not symbols:
@@ -169,7 +170,7 @@ class KrakenSpotClient:
 
         result: dict = raw.get("result", {})
 
-        # Build a lookup from canonical name → (last, change_pct_24h)
+        # Build a lookup from canonical name → (last, change_pct_24h, volume_24h)
         canonical_data: dict[str, dict] = {}
         for canon_key, ticker in result.items():
             try:
@@ -178,11 +179,17 @@ class KrakenSpotClient:
                 change_pct = ((last - open_price) / open_price * 100) if open_price else 0.0
                 bid = float(ticker["b"][0]) if "b" in ticker else last
                 ask = float(ticker["a"][0]) if "a" in ticker else last
+                # v = [volume today, volume last 24h (rolling)]
+                # p = [VWAP today, VWAP last 24h] — multiply to get ~USD notional
+                vol_24h = float(ticker["v"][1]) if "v" in ticker else 0.0
+                vwap_24h = float(ticker["p"][1]) if "p" in ticker else last
                 canonical_data[canon_key] = {
                     "last": last,
                     "bid": bid,
                     "ask": ask,
                     "change_pct_24h": round(change_pct, 4),
+                    "volume_24h": vol_24h,          # base-asset volume, 24h
+                    "volume_usd_24h": vol_24h * vwap_24h,  # approx USD notional
                 }
             except (KeyError, IndexError, ValueError) as exc:
                 logger.debug("Kraken Spot ticker parse error for %s: %s", canon_key, exc)
