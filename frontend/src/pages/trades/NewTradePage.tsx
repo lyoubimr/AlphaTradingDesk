@@ -1151,21 +1151,18 @@ export function NewTradePage() {
     setInstrLoading(true)
     instrumentsApi.listByBroker(activeProfile.broker_id)
       .then(all => {
-        // Filter instruments by account type:
-        // - Crypto + contracts → futures only (PF_* symbols)
-        // - Spot → spot pairs only (non-PF_*)
-        // - CFD → all (no PF_ instruments exist, no filter needed)
-        if (activeProfile.market_type === 'Crypto' && activeProfile.account_type === 'contracts') {
+        // NewTradePage is contracts-only (spot has its own PortfolioPage/OpenTradeModal).
+        // For Crypto contracts → show PF_* futures only (filter out spot pairs).
+        // For CFD contracts → show all (no PF_ instruments exist).
+        if (activeProfile.market_type === 'Crypto') {
           setInstruments(all.filter(i => i.symbol.startsWith('PF_')))
-        } else if (activeProfile.account_type === 'spot') {
-          setInstruments(all.filter(i => !i.symbol.startsWith('PF_')))
         } else {
           setInstruments(all)
         }
       })
       .catch(() => setInstruments([]))
       .finally(() => setInstrLoading(false))
-  }, [activeProfile?.broker_id, activeProfile?.account_type, activeProfile?.market_type])
+  }, [activeProfile?.broker_id, activeProfile?.market_type])
 
   // ── Load strategies when profile changes ─────────────────────────────────
   useEffect(() => {
