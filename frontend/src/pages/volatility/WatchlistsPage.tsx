@@ -214,9 +214,10 @@ export function WatchlistsPage() {
   const [sortKey, setSortKey]             = useState<SortKey>('vi_score')
   const [sortDesc, setSortDesc]           = useState(true)
   const [showGenerateModal, setShowGenerateModal] = useState(false)
-  const [modalViMin, setModalViMin]   = useState(0)
-  const [modalViMax, setModalViMax]   = useState(100)
-  const [viRange, setViRange]         = useState<[number, number]>([0, 100])
+  const [modalViMin, setModalViMin]       = useState(0)
+  const [modalViMax, setModalViMax]       = useState(100)
+  const [modalRegimes, setModalRegimes]   = useState<Set<string>>(new Set(['ALL']))
+  const [viRange, setViRange]             = useState<[number, number]>([0, 100])
   const [showLegend, setShowLegend]   = useState(false)
   const [supRegimeFilters, setSupRegimeFilters]     = useState<Set<string>>(new Set(['ALL']))
   // Track whether the initial auto-selection has already been done.
@@ -286,8 +287,8 @@ export function WatchlistsPage() {
 
   // Called when user confirms in the Generate modal
   const handleGenerateConfirm = useCallback(async () => {
-    // Apply VI range display filter from modal — regime filter is always ALL (backend computes all pairs)
-    setRegimeFilters(new Set(['ALL']))
+    // Apply VI range + regime display filters from modal — takes effect once the new snapshot is loaded
+    setRegimeFilters(new Set(modalRegimes))
     setViRange([modalViMin, modalViMax])
 
     const tfBefore    = generateTF
@@ -356,7 +357,7 @@ export function WatchlistsPage() {
     } finally {
       setIsRunning(false)
     }
-  }, [generateTF, marketMode, modalViMin, modalViMax, snapshots, handleSelectSnapshot])
+  }, [generateTF, marketMode, modalViMin, modalViMax, modalRegimes, snapshots, handleSelectSnapshot])
 
   // ── Tree grouping ─────────────────────────────────────────────────────────
 
@@ -651,11 +652,44 @@ export function WatchlistsPage() {
               </div>
             </div>
 
-            {/* Note: backend always computes ALL pairs regardless of filters */}
-            <p className="text-[11px] text-zinc-600 bg-zinc-800/60 rounded-lg px-3 py-2 leading-relaxed">
-              ℹ️ The backend always computes <span className="text-zinc-400">all</span> pairs.
-              VI range and regime filters apply to the <span className="text-zinc-400">display table</span> after generation.
-            </p>
+            {/* Regime filter — applied to display table after generation */}
+            <div className="space-y-1.5">
+              <label className="text-xs text-zinc-500">Regime filter <span className="text-zinc-700">(applied to display after compute)</span></label>
+              <div className="flex flex-wrap gap-1">
+                {REGIMES.map((r) => {
+                  const active = modalRegimes.has(r)
+                  return (
+                    <button
+                      key={r}
+                      onClick={() => {
+                        if (r === 'ALL') {
+                          setModalRegimes(new Set(['ALL']))
+                        } else {
+                          setModalRegimes((prev) => {
+                            const next = new Set(prev)
+                            next.delete('ALL')
+                            if (next.has(r)) {
+                              next.delete(r)
+                              if (next.size === 0) { next.add('ALL') }
+                            } else {
+                              next.add(r)
+                            }
+                            return next
+                          })
+                        }
+                      }}
+                      className={`px-2 py-0.5 text-[10px] font-mono rounded border transition-colors ${
+                        active
+                          ? 'bg-emerald-950 text-emerald-300 border-emerald-700'
+                          : 'bg-zinc-800 text-zinc-500 border-zinc-700 hover:border-zinc-500'
+                      }`}
+                    >
+                      {r}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
 
             {/* Actions */}
             <div className="flex gap-2 pt-1">
