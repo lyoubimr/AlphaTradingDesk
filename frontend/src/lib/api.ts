@@ -802,6 +802,9 @@ export const investmentApi = {
   syncSpotInstruments: (): Promise<{ synced: number }> =>
     request('/investment/instruments/sync-spot', { method: 'POST' }),
 
+  listInstruments: (profileId: number): Promise<Instrument[]> =>
+    request(`/investment/instruments/${profileId}`),
+
   getSettings: (profileId: number): Promise<InvestmentSettingsOut> =>
     request(`/investment/settings/${profileId}`),
   updateSettings: (profileId: number, config: Record<string, unknown>): Promise<InvestmentSettingsOut> =>

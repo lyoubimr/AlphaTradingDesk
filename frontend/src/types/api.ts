@@ -83,8 +83,12 @@ export interface SpotTradeCreate {
   entry_price: string
   quantity: string
   stop_loss?: string | null
+  nb_take_profits?: number
   tp_targets?: Array<{ price: string; pct_allocation: number }>
   order_type?: string
+  analyzed_timeframe?: string | null
+  confidence_score?: string | null
+  session_tag?: string | null
   strategy_id?: number | null
   instrument_id?: number | null
   notes?: string | null

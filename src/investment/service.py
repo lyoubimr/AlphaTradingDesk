@@ -13,10 +13,9 @@ from __future__ import annotations
 
 import copy
 import datetime
-import json
-import urllib.request as _urllib
 from decimal import Decimal
 
+import httpx as _httpx
 from fastapi import HTTPException, status
 from sqlalchemy import func
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -454,6 +453,30 @@ def get_portfolio(profile_id: int, db: Session) -> PortfolioOut:
     )
 
 
+# ── Spot instruments catalog ────────────────────────────────────────────────
+
+def list_spot_instruments(profile_id: int, db: Session) -> list[Instrument]:
+    """Return active non-futures instruments for the given profile's broker.
+
+    Spot instruments are distinguished from Kraken Futures by having a symbol
+    that does NOT start with 'PF_'.
+    """
+    profile = db.query(Profile).filter(Profile.id == profile_id).first()
+    if not profile or not profile.broker_id:
+        return []
+    return (
+        db.query(Instrument)
+        .filter(
+            Instrument.broker_id == profile.broker_id,
+            Instrument.is_active.is_(True),
+            ~Instrument.symbol.startswith("PF_"),
+            ~Instrument.symbol.startswith("PI_"),
+        )
+        .order_by(Instrument.symbol)
+        .all()
+    )
+
+
 # ── Spot instruments catalog sync ──────────────────────────────────────────────────────────────────────────
 
 def sync_spot_instruments(db: Session) -> dict[str, int]:
@@ -474,13 +497,14 @@ def sync_spot_instruments(db: Session) -> dict[str, int]:
             detail="Kraken broker not found in DB. Cannot sync spot instruments.",
         )
 
-    req = _urllib.Request(
-        "https://api.kraken.com/0/public/AssetPairs",
-        headers={"User-Agent": "AlphaTradingDesk/7.0"},
-    )
     try:
-        with _urllib.urlopen(req, timeout=15) as resp:
-            data = json.loads(resp.read())
+        r = _httpx.get(
+            "https://api.kraken.com/0/public/AssetPairs",
+            headers={"User-Agent": "AlphaTradingDesk/7.0"},
+            timeout=20,
+        )
+        r.raise_for_status()
+        data = r.json()
     except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,

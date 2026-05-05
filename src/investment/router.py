@@ -32,6 +32,7 @@ from fastapi import APIRouter, Depends, Query, status
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
+from src.brokers.schemas import InstrumentOut
 from src.core.deps import get_db
 from src.investment import service
 from src.investment.schemas import (
@@ -204,3 +205,12 @@ def sync_spot_instruments(
 ) -> dict:
     """Sync Kraken spot instrument catalog from the public REST API."""
     return service.sync_spot_instruments(db)
+
+
+@router.get("/instruments/{profile_id}", response_model=list[InstrumentOut])
+def list_spot_instruments(
+    profile_id: int,
+    db: Session = Depends(get_db),
+) -> list:
+    """List active spot (non-futures) instruments for a profile's broker."""
+    return service.list_spot_instruments(profile_id, db)

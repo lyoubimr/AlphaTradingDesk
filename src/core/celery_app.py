@@ -21,6 +21,7 @@ celery_app = Celery(
         "src.volatility.tasks",  # P2-3
         "src.kraken_execution.tasks",  # P5-8
         "src.ritual.tasks",  # P6B — trading window notifications
+        "src.investment.tasks",  # P7 — spot instrument sync
     ],
 )
 
@@ -94,6 +95,11 @@ celery_app.conf.update(
         "sync-instruments": {
             "task": "src.volatility.tasks.sync_instruments",
             "schedule": crontab(minute=0, hour=2),  # daily at 02:00 UTC
+        },
+        # P7 — Kraken spot pairs upsert (AssetPairs public API)
+        "sync-spot-instruments": {
+            "task": "src.investment.tasks.sync_spot_instruments",
+            "schedule": crontab(minute=30, hour=2),  # daily at 02:30 UTC
         },
         # ── Stale snapshot cleanup ────────────────────────────────────────
         "cleanup-snapshots": {

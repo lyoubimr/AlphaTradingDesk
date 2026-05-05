@@ -3,6 +3,7 @@ import { AppLayout } from './layouts/AppLayout'
 import { DashboardPage } from './pages/dashboard/DashboardPage'
 import { TradesPage } from './pages/trades/TradesPage'
 import { NewTradePage } from './pages/trades/NewTradePage'
+import { NewSpotTradePage } from './pages/trades/NewSpotTradePage'
 import { TradeDetailPage } from './pages/trades/TradeDetailPage'
 import { MarketAnalysisPage } from './pages/market-analysis/MarketAnalysisPage'
 import { NewAnalysisPage } from './pages/market-analysis/NewAnalysisPage'
@@ -34,6 +35,7 @@ export default function App() {
         <Route path="/dashboard" element={<DashboardPage />} />
         <Route path="/trades" element={<TradesPage />} />
         <Route path="/trades/new" element={<NewTradePage />} />
+        <Route path="/trades/new-spot" element={<NewSpotTradePage />} />
         <Route path="/trades/:id" element={<TradeDetailPage />} />
         <Route path="/market-analysis" element={<MarketAnalysisPage />} />
         <Route path="/market-analysis/new" element={<NewAnalysisPage />} />

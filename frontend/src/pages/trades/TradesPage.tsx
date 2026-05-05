@@ -6,9 +6,9 @@ import { PageHeader } from '../../components/ui/PageHeader'
 import { Badge } from '../../components/ui/Badge'
 import { StatCard } from '../../components/ui/StatCard'
 import { useProfile } from '../../context/ProfileContext'
-import { tradesApi, strategiesApi, investmentApi, instrumentsApi } from '../../lib/api'
+import { tradesApi, strategiesApi, investmentApi } from '../../lib/api'
 import { cn } from '../../lib/cn'
-import type { TradeListItem, Strategy, SpotTradeOut, SpotTradeCreate, SpotTradeClose, Instrument } from '../../types/api'
+import type { TradeListItem, Strategy, SpotTradeOut, SpotTradeClose } from '../../types/api'
 
 // ── Status badge ──────────────────────────────────────────────────────────
 function StatusBadge({
@@ -63,165 +63,8 @@ function fmtDate(iso: string | null | undefined): string {
   return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: '2-digit' })
 }
 
-// ── Spot trade modals ─────────────────────────────────────────────────────────
-
-interface SpotOpenModalProps {
-  profileId: number
-  brokerId: number | null
-  onClose: () => void
-  onSaved: () => void
-}
-
-const EMPTY_SPOT_FORM: SpotTradeCreate = {
-  pair: '',
-  entry_price: '',
-  quantity: '',
-  stop_loss: '',
-  strategy_id: null,
-  instrument_id: null,
-  notes: '',
-}
-
-function SpotOpenModal({ profileId, brokerId, onClose, onSaved }: SpotOpenModalProps) {
-  const [form, setForm] = useState<SpotTradeCreate>(EMPTY_SPOT_FORM)
-  const [strategies, setStrategies] = useState<Strategy[]>([])
-  const [instruments, setInstruments] = useState<Instrument[]>([])
-  const [saving, setSaving] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-
-  useEffect(() => {
-    strategiesApi.list(profileId).then(setStrategies).catch(() => {})
-    if (brokerId) {
-      instrumentsApi.listByBroker(brokerId)
-        .then(all => setInstruments(all.filter(i => !i.symbol.startsWith('PF_'))))
-        .catch(() => {})
-    }
-  }, [profileId, brokerId])
-
-  const set = (field: keyof SpotTradeCreate, value: string | number | null) =>
-    setForm((f) => ({ ...f, [field]: value }))
-
-  const totalCost = form.entry_price && form.quantity
-    ? (Number(form.entry_price) * Number(form.quantity)).toFixed(2)
-    : null
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setSaving(true)
-    setError(null)
-    try {
-      await investmentApi.createTrade(profileId, {
-        pair: form.pair.toUpperCase().trim(),
-        entry_price: form.entry_price,
-        quantity: form.quantity,
-        stop_loss: (form.stop_loss as string) || null,
-        strategy_id: form.strategy_id ?? null,
-        instrument_id: form.instrument_id ?? null,
-        notes: (form.notes as string) || null,
-      })
-      onSaved()
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unknown error')
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  const inputCls = 'w-full bg-surface-700 border border-surface-600 rounded-lg px-3 py-2 text-sm text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-brand-500/50'
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative w-full max-w-md bg-surface-800 rounded-2xl border border-surface-700 shadow-2xl overflow-hidden">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-surface-700">
-          <h2 className="text-sm font-semibold text-slate-100">Open spot position</h2>
-          <button type="button" onClick={onClose} className="text-slate-500 hover:text-slate-200 transition-colors p-1 rounded">
-            <X size={16} />
-          </button>
-        </div>
-        <form onSubmit={handleSubmit} className="p-6 space-y-4">
-          {error && (
-            <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-2 text-xs text-red-400">{error}</div>
-          )}
-          <div>
-            <label className="block text-xs font-medium text-slate-400 mb-1.5">Pair *</label>
-            <input
-              required
-              list="spot-pairs-datalist-journal"
-              value={form.pair}
-              onChange={(e) => {
-                const val = e.target.value
-                set('pair', val)
-                const match = instruments.find(i => i.symbol === val.toUpperCase().trim())
-                set('instrument_id', match ? match.id : null)
-              }}
-              placeholder="XBTUSD, ETHUSD, SOLUSD…"
-              className={inputCls}
-            />
-            <datalist id="spot-pairs-datalist-journal">
-              {instruments.map(i => (
-                <option key={i.id} value={i.symbol}>{i.display_name}</option>
-              ))}
-            </datalist>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-medium text-slate-400 mb-1.5">Entry price *</label>
-              <input required type="number" step="any" min="0.000001"
-                value={form.entry_price} onChange={(e) => set('entry_price', e.target.value)}
-                placeholder="0.00" className={inputCls} />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-slate-400 mb-1.5">Quantity *</label>
-              <input required type="number" step="any" min="0.000001"
-                value={form.quantity} onChange={(e) => set('quantity', e.target.value)}
-                placeholder="0.00" className={inputCls} />
-            </div>
-          </div>
-          {totalCost && (
-            <div className="rounded-lg bg-surface-700/50 border border-surface-600 px-3 py-2 flex items-center justify-between">
-              <span className="text-xs text-slate-500">Total cost</span>
-              <span className="text-sm font-mono font-semibold text-slate-200">{fmt(totalCost)}</span>
-            </div>
-          )}
-          <div>
-            <label className="block text-xs font-medium text-slate-400 mb-1.5">Stop loss <span className="text-slate-600">(optional)</span></label>
-            <input type="number" step="any" min="0"
-              value={form.stop_loss as string} onChange={(e) => set('stop_loss', e.target.value)}
-              placeholder="0.00" className={inputCls} />
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-slate-400 mb-1.5">Strategy <span className="text-slate-600">(optional)</span></label>
-            <select value={form.strategy_id ?? ''}
-              onChange={(e) => set('strategy_id', e.target.value ? Number(e.target.value) : null)}
-              className={cn(inputCls, 'cursor-pointer')}>
-              <option value="">No strategy</option>
-              {strategies.map((s) => (
-                <option key={s.id} value={s.id}>{s.emoji ? `${s.emoji} ` : ''}{s.name}</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-slate-400 mb-1.5">Notes <span className="text-slate-600">(optional)</span></label>
-            <textarea rows={2} value={form.notes as string} onChange={(e) => set('notes', e.target.value)}
-              placeholder="Entry rationale, strategy…" className={cn(inputCls, 'resize-none')} />
-          </div>
-          <div className="flex items-center gap-3 pt-1">
-            <button type="button" onClick={onClose}
-              className="flex-1 py-2.5 rounded-xl border border-surface-600 bg-surface-700 text-sm text-slate-400 hover:text-slate-200 transition-colors">
-              Cancel
-            </button>
-            <button type="submit" disabled={saving}
-              className="flex-1 py-2.5 rounded-xl bg-brand-600 hover:bg-brand-500 text-white text-sm font-medium transition-colors disabled:opacity-50 flex items-center justify-center gap-2">
-              {saving ? <Loader2 size={14} className="animate-spin" /> : null}
-              Open position
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
-  )
-}
+// ── Spot close modal ──────────────────────────────────────────────────────────
+// NewSpotTradeModal removed — replaced by /trades/new-spot (NewSpotTradePage)
 
 interface SpotCloseModalProps {
   trade: SpotTradeOut
@@ -378,7 +221,6 @@ export function TradesPage() {
   const [activating, setActivating] = useState<number | null>(null)
   const [strategies,       setStrategies]       = useState<Strategy[]>([])
   const [spotTrades,        setSpotTrades]        = useState<SpotTradeOut[]>([])
-  const [showOpenSpot,      setShowOpenSpot]      = useState(false)
   const [closingSpotTrade,  setClosingSpotTrade]  = useState<SpotTradeOut | null>(null)
   const [cancellingSpot,    setCancellingSpot]    = useState<number | null>(null)
 
@@ -493,23 +335,13 @@ export function TradesPage() {
             <button type="button" className="atd-btn-ghost hidden sm:inline-flex" disabled>
               <Download size={14} /> Export
             </button>
-            {isSpot ? (
-              <button
-                type="button"
-                className="atd-btn-primary"
-                onClick={() => setShowOpenSpot(true)}
-              >
-                <Plus size={14} /> Open position
-              </button>
-            ) : (
-              <button
-                type="button"
-                className="atd-btn-primary"
-                onClick={() => navigate('/trades/new')}
-              >
-                <Plus size={14} /> New Trade
-              </button>
-            )}
+            <button
+              type="button"
+              className="atd-btn-primary"
+              onClick={() => navigate(isSpot ? '/trades/new-spot' : '/trades/new')}
+            >
+              <Plus size={14} /> New Trade
+            </button>
           </>
         }
       />
@@ -608,10 +440,10 @@ export function TradesPage() {
 
           {!loading && spotTrades.length === 0 && (
             <div className="px-5 py-12 text-center text-slate-600 text-sm">
-              No spot positions yet.{' '}
+              No trades yet.{' '}
               <button type="button" className="text-brand-400 hover:text-brand-300 underline underline-offset-2"
-                onClick={() => setShowOpenSpot(true)}>
-                Open your first position →
+                onClick={() => navigate('/trades/new-spot')}>
+                Log your first trade →
               </button>
             </div>
           )}
@@ -1060,14 +892,6 @@ export function TradesPage() {
       )}
 
       {/* ── Spot modals ───────────────────────────────────────────────────── */}
-      {isSpot && showOpenSpot && activeProfile && (
-        <SpotOpenModal
-          profileId={activeProfile.id}
-          brokerId={activeProfile.broker_id ?? null}
-          onClose={() => setShowOpenSpot(false)}
-          onSaved={() => { setShowOpenSpot(false); fetchTrades() }}
-        />
-      )}
       {isSpot && closingSpotTrade && activeProfile && (
         <SpotCloseModal
           trade={closingSpotTrade}
