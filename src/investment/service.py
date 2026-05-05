@@ -577,3 +577,60 @@ def sync_spot_instruments(db: Session) -> dict[str, int]:
 
     db.commit()
     return {"synced": synced}
+
+
+# ── Real-time Spot price (Kraken public Ticker) ───────────────────────────────
+
+def get_spot_price(symbol: str) -> dict:
+    """Fetch current ask/bid/last price for a Kraken Spot pair.
+
+    Calls: GET https://api.kraken.com/0/public/Ticker?pair=<symbol>
+    Returns: { symbol, ask_price, bid_price, last_price }
+    """
+    try:
+        r = _httpx.get(
+            "https://api.kraken.com/0/public/Ticker",
+            params={"pair": symbol},
+            headers={"User-Agent": "AlphaTradingDesk/7.0"},
+            timeout=10,
+        )
+        r.raise_for_status()
+        data = r.json()
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Kraken price API unreachable: {exc}",
+        ) from exc
+
+    errors = data.get("error", [])
+    if errors:
+        raise HTTPException(status_code=502, detail=f"Kraken API error: {errors}")
+
+    result = data.get("result", {})
+    if not result:
+        raise HTTPException(status_code=404, detail=f"No price data for symbol '{symbol}'")
+
+    ticker = next(iter(result.values()))
+    return {
+        "symbol": symbol,
+        "ask_price": float(ticker["a"][0]),
+        "bid_price": float(ticker["b"][0]),
+        "last_price": float(ticker["c"][0]),
+    }
+
+
+# ── Screenshot upload helper ──────────────────────────────────────────────────
+
+def append_spot_screenshot(trade_id: int, profile_id: int, url: str, db: Session) -> SpotTrade:
+    """Append a screenshot URL to spot_trade.screenshot_urls."""
+    trade = (
+        db.query(SpotTrade)
+        .filter(SpotTrade.id == trade_id, SpotTrade.profile_id == profile_id)
+        .first()
+    )
+    if trade is None:
+        raise HTTPException(status_code=404, detail="Spot trade not found")
+    trade.screenshot_urls = list(trade.screenshot_urls or []) + [url]
+    db.commit()
+    db.refresh(trade)
+    return trade

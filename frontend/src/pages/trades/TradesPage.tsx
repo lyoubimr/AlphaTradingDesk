@@ -473,7 +473,7 @@ export function TradesPage() {
                     return (
                       <tr key={t.id} className="border-b border-surface-700/50 hover:bg-surface-700/30 transition-colors">
                         <td className="px-4 py-2.5 font-semibold text-slate-200">{t.pair}</td>
-                        <td className="px-4 py-2.5 font-mono text-slate-500">{fmtDate(t.opened_at)}</td>
+                        <td className="px-4 py-2.5 font-mono text-slate-500">{fmtDate(t.created_at)}</td>
                         <td className="px-4 py-2.5 font-mono text-slate-400">{fmt(t.entry_price)}</td>
                         <td className="px-4 py-2.5 font-mono text-slate-400">{fmt(t.quantity, 4)}</td>
                         <td className="px-4 py-2.5 font-mono text-slate-400">{fmt(t.total_cost)}</td>

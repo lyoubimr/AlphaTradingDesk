@@ -65,17 +65,27 @@ export interface SpotTradeOut {
   pair: string
   entry_price: string
   quantity: string
-  total_cost: string
+  total_cost: string | null
   stop_loss: string | null
+  trailing_stop_pct: string | null
+  nb_take_profits: number
   tp_targets: Array<{ price: string; pct_allocation: number }>
-  status: 'open' | 'closed' | 'cancelled'
+  status: 'pending' | 'open' | 'partial' | 'runner' | 'closed' | 'cancelled'
   realized_pnl: string | null
   exit_price: string | null
   order_type: string
+  analyzed_timeframe: string | null
+  confidence_score: string | null
+  session_tag: string | null
   notes: string | null
-  opened_at: string
-  closed_at: string | null
+  screenshot_urls: string[]
+  strategy_id: number | null
+  instrument_id: number | null
   parent_spot_trade_id: number | null
+  asset_class: string | null
+  created_at: string
+  updated_at: string
+  closed_at: string | null
 }
 
 export interface SpotTradeCreate {

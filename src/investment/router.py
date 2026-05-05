@@ -28,9 +28,14 @@ Endpoints:
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Query, status
+import os
+import uuid
+
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, status
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
+
+from src.core.config import settings
 
 from src.brokers.schemas import InstrumentOut
 from src.core.deps import get_db
@@ -214,3 +219,59 @@ def list_spot_instruments(
 ) -> list:
     """List active spot (non-futures) instruments for a profile's broker."""
     return service.list_spot_instruments(profile_id, db)
+
+
+# ── Real-time Spot price ──────────────────────────────────────────────────────────
+
+@router.get("/price/{symbol}")
+def get_spot_price(symbol: str) -> dict:
+    """Fetch current ask/bid/last price from Kraken public Ticker API."""
+    return service.get_spot_price(symbol)
+
+
+# ── Spot trade screenshots ──────────────────────────────────────────────────────
+
+_ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif"}
+_MAX_IMAGE_MB = 10
+_SPOT_UPLOAD_DIR = os.path.join(settings.uploads_dir, "spot_trades")
+
+
+def _save_spot_screenshot(file: UploadFile, trade_id: int) -> str:
+    """Save uploaded image to disk, return relative URL path."""
+    if file.content_type not in _ALLOWED_IMAGE_TYPES:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Unsupported image type: {file.content_type}",
+        )
+    ext = (file.filename or "image.jpg").rsplit(".", 1)[-1].lower()
+    if ext not in ("jpg", "jpeg", "png", "webp", "gif"):
+        ext = "jpg"
+    dest_dir = os.path.join(_SPOT_UPLOAD_DIR, str(trade_id))
+    os.makedirs(dest_dir, exist_ok=True)
+    filename = f"{uuid.uuid4().hex}.{ext}"
+    dest_path = os.path.join(dest_dir, filename)
+    content = file.file.read()
+    if len(content) > _MAX_IMAGE_MB * 1024 * 1024:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=f"Image too large (max {_MAX_IMAGE_MB} MB).",
+        )
+    with open(dest_path, "wb") as f:
+        f.write(content)
+    return f"/uploads/spot_trades/{trade_id}/{filename}"
+
+
+@router.post(
+    "/spot-trades/{profile_id}/{trade_id}/screenshots",
+    response_model=SpotTradeOut,
+    status_code=200,
+)
+def upload_spot_screenshot(
+    profile_id: int,
+    trade_id: int,
+    file: UploadFile,
+    db: Session = Depends(get_db),
+) -> SpotTradeOut:
+    """Upload a screenshot image and append its URL to spot_trade.screenshot_urls."""
+    url = _save_spot_screenshot(file, trade_id)
+    return service.append_spot_screenshot(trade_id, profile_id, url, db)

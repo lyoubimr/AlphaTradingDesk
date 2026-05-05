@@ -324,7 +324,7 @@ function TradeRow({ trade, onClose, onCancel, cancelling }: TradeRowProps) {
       </td>
       <td className="px-4 py-3 text-xs font-mono">
         {isOpen ? (
-          <span className="text-sky-400 font-mono">{fmtDate(trade.opened_at)}</span>
+          <span className="text-sky-400 font-mono">{fmtDate(trade.created_at)}</span>
         ) : (
           <span className={cn('font-mono', pnl != null && pnl >= 0 ? 'text-emerald-400' : 'text-red-400')}>
             {pnl != null ? `${pnl >= 0 ? '+' : ''}${fmt(pnl)}` : '—'}

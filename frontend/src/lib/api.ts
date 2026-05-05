@@ -809,4 +809,23 @@ export const investmentApi = {
     request(`/investment/settings/${profileId}`),
   updateSettings: (profileId: number, config: Record<string, unknown>): Promise<InvestmentSettingsOut> =>
     request(`/investment/settings/${profileId}`, { method: 'PUT', body: JSON.stringify({ config }) }),
+
+  /** GET /api/investment/price/{symbol} — real-time ask/bid/last from Kraken Spot */
+  getSpotPrice: (symbol: string): Promise<{ symbol: string; ask_price: number; bid_price: number; last_price: number }> =>
+    request(`/investment/price/${encodeURIComponent(symbol)}`),
+
+  /** POST /api/investment/spot-trades/{profileId}/{tradeId}/screenshots — upload screenshot */
+  uploadSnapshot: async (profileId: number, tradeId: number, file: File): Promise<SpotTradeOut> => {
+    const form = new FormData()
+    form.append('file', file)
+    const res = await fetch(`${BASE}/investment/spot-trades/${profileId}/${tradeId}/screenshots`, {
+      method: 'POST',
+      body: form,
+    })
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({ detail: res.statusText }))
+      throw new Error(typeof body.detail === 'string' ? body.detail : JSON.stringify(body.detail))
+    }
+    return res.json() as Promise<SpotTradeOut>
+  },
 }
