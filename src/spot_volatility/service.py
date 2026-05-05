@@ -327,6 +327,59 @@ def compute_spot_watchlist(timeframe: str, db: Session) -> SpotWatchlistSnapshot
 
 # ── Watchlist reads ───────────────────────────────────────────────────────────
 
+def _enrich_sup_tf(snapshot: SpotWatchlistSnapshot, db: Session) -> SpotWatchlistSnapshot:
+    """Back-fill tf_sup_regime / tf_sup_vi from the latest superior-TF snapshot.
+
+    Called on read when existing snapshot was computed before the superior-TF
+    snapshot existed (pairs[i].tf_sup_regime == None).  Enrichment is in-memory
+    only — the DB row is NOT updated (avoiding unnecessary writes on every GET).
+
+    Only enriches if at least one pair has tf_sup_regime = None. If the snapshot
+    already has full TF+1 data, this is a no-op.
+    """
+    if not snapshot.pairs:
+        return snapshot
+
+    # Check if enrichment is needed
+    needs_enrich = any(p.get("tf_sup_regime") is None for p in snapshot.pairs)
+    if not needs_enrich:
+        return snapshot
+
+    sup_tf = _TF_SUPERIOR.get(snapshot.timeframe)
+    if not sup_tf:
+        return snapshot  # 1W has no superior
+
+    sup_snapshot = (
+        db.query(SpotWatchlistSnapshot)
+        .filter(SpotWatchlistSnapshot.timeframe == sup_tf)
+        .order_by(SpotWatchlistSnapshot.generated_at.desc())
+        .first()
+    )
+    if sup_snapshot is None:
+        return snapshot
+
+    sup_map: dict[str, dict] = {
+        entry["pair"]: {"regime": entry.get("regime"), "vi_score": entry.get("vi_score")}
+        for entry in sup_snapshot.pairs
+        if entry.get("pair")
+    }
+
+    enriched = []
+    for p in snapshot.pairs:
+        sup = sup_map.get(p.get("pair", ""), {})
+        enriched.append({
+            **p,
+            "tf_sup_regime": p.get("tf_sup_regime") or sup.get("regime"),
+            "tf_sup_vi": p.get("tf_sup_vi") if p.get("tf_sup_vi") is not None else (
+                round(float(sup["vi_score"]), 3) if sup.get("vi_score") is not None else None
+            ),
+        })
+
+    # Replace pairs list in-memory only (SQLAlchemy ORM — no flush/commit)
+    snapshot.pairs = enriched
+    return snapshot
+
+
 def get_latest_watchlist(timeframe: str, db: Session) -> SpotWatchlistSnapshot:
     """Return the latest snapshot for `timeframe`, or 404 if none exists."""
     _check_tf(timeframe)
@@ -341,7 +394,7 @@ def get_latest_watchlist(timeframe: str, db: Session) -> SpotWatchlistSnapshot:
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"No spot watchlist snapshot yet for timeframe '{timeframe}' — run Generate first",
         )
-    return row
+    return _enrich_sup_tf(row, db)
 
 
 def list_watchlists(days: int, db: Session) -> list[SpotWatchlistSnapshot]:
@@ -363,4 +416,4 @@ def get_watchlist_by_id(snapshot_id: int, db: Session) -> SpotWatchlistSnapshot:
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Spot watchlist snapshot {snapshot_id} not found",
         )
-    return row
+    return _enrich_sup_tf(row, db)

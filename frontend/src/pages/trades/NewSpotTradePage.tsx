@@ -474,7 +474,7 @@ const MIN_PROFILE_TRADES = 5
 // ─────────────────────────────────────────────────────────────────────────────
 
 function SpotExpectancyPanel({
-  totalCost, potentialProfit, stopLossAmount, selectedStrategy, globalWrStats, confidence, ccy,
+  totalCost, potentialProfit, stopLossAmount, selectedStrategy, globalWrStats, confidence, ccy, pairVi,
 }: {
   totalCost: number | null
   potentialProfit: number | null
@@ -483,6 +483,7 @@ function SpotExpectancyPanel({
   globalWrStats: WinRateStats | null
   confidence: number   // 1–10, 0 = not set
   ccy: string
+  pairVi: SpotWatchlistPairOut | null
 }) {
   const globalWr: number | null = useMemo(() => {
     if (!globalWrStats) return null
@@ -507,6 +508,15 @@ function SpotExpectancyPanel({
       ? `Global average`
       : `Default 60% fallback`
 
+  // Regime adjustment: for spot, high VI = pump window (buy edge ↑)
+  // EXTREME/ACTIVE → +5%; TRENDING → +3%; CALM → −3%; DEAD → −5%
+  const viRegimeAdj = pairVi?.regime === 'EXTREME' ? 0.05
+    : pairVi?.regime === 'ACTIVE'   ? 0.05
+    : pairVi?.regime === 'TRENDING' ? 0.03
+    : pairVi?.regime === 'CALM'     ? -0.03
+    : pairVi?.regime === 'DEAD'     ? -0.05
+    : 0  // NORMAL or no data
+
   // ── "Form incomplete" mini mode — show just WR when entry/qty/TP not filled ─
   if (potentialProfit == null || totalCost == null) {
     if (!selectedStrategy && !globalWrStats) return null
@@ -524,17 +534,25 @@ function SpotExpectancyPanel({
           )}
         </div>
         <p className="text-[10px] text-slate-600 truncate">{wrSourceLabel}</p>
+        {pairVi && (
+          <p className="text-[10px] leading-relaxed"
+            style={{ color: viRegimeAdj > 0 ? '#34d399' : viRegimeAdj < 0 ? '#f87171' : '#64748b' }}>
+            VI {(pairVi.vi_score * 100).toFixed(0)} · {pairVi.regime}
+            {viRegimeAdj !== 0 && ` → ${viRegimeAdj > 0 ? '+' : ''}${(viRegimeAdj * 100).toFixed(0)}% edge adj`}
+          </p>
+        )}
         <p className="text-[11px] text-slate-600 border-t border-surface-700/50 pt-2">
           Fill entry, quantity &amp; TP to see full expectancy analysis.
         </p>
       </div>
     )
   }
+  const rawWrAdj = Math.max(0.05, Math.min(0.95, rawWr + viRegimeAdj))
 
   // Confidence adjustment: scale ±10% around raw WR based on confidence (1–10)
   // confidence=5 → no adjustment; 1 → −10%; 10 → +10%
   const confAdj = confidence > 0 ? ((confidence - 5) / 5) * 0.10 : 0
-  const winRate = Math.max(0.05, Math.min(0.95, rawWr + confAdj))
+  const winRate = Math.max(0.05, Math.min(0.95, rawWrAdj + confAdj))
   const lossRate = 1 - winRate
 
   // R:R  (only when SL exists)
@@ -592,7 +610,11 @@ function SpotExpectancyPanel({
             {confidence > 0 ? `${confidence}/10` : '—'}
           </p>
           <p className="text-[9px] text-slate-600 mt-0.5">
-            {confAdj > 0 ? `+${(confAdj * 100).toFixed(0)}% adj` : confAdj < 0 ? `${(confAdj * 100).toFixed(0)}% adj` : 'no adj'}
+            {(confAdj + viRegimeAdj) > 0
+              ? `+${((confAdj + viRegimeAdj) * 100).toFixed(0)}% adj`
+              : (confAdj + viRegimeAdj) < 0
+              ? `${((confAdj + viRegimeAdj) * 100).toFixed(0)}% adj`
+              : 'no adj'}
           </p>
         </div>
         <div className="text-[10px]">
@@ -608,6 +630,15 @@ function SpotExpectancyPanel({
 
       <p className={cn('text-[11px] font-medium', grade.text, 'opacity-90')}>{grade.sub}</p>
 
+      {pairVi && viRegimeAdj !== 0 && (
+        <p className="text-[10px] border-t border-surface-700/40 pt-2 leading-relaxed"
+          style={{ color: viRegimeAdj > 0 ? '#34d399' : '#f87171' }}>
+          {viRegimeAdj > 0
+            ? `🚀 ${pairVi.regime} regime — high VI = pump window detected (+${(viRegimeAdj * 100).toFixed(0)}% edge)`
+            : `⚠️ ${pairVi.regime} regime — low volatility reduces edge (${(viRegimeAdj * 100).toFixed(0)}%)`
+          }
+        </p>
+      )}
       {wrSource !== 'strategy' && (
         <p className="text-[10px] text-slate-600 border-t border-surface-700/40 pt-2 leading-relaxed">
           {wrSource === 'global'
@@ -1512,6 +1543,7 @@ export function NewSpotTradePage() {
               globalWrStats={globalWrStats}
               confidence={confidence}
               ccy={ccy}
+              pairVi={pairVi}
             />
 
             {/* ── Automation toggle — Kraken Spot ──────────────────────── */}

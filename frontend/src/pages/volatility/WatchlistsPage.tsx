@@ -216,7 +216,6 @@ export function WatchlistsPage() {
   const [showGenerateModal, setShowGenerateModal] = useState(false)
   const [modalViMin, setModalViMin]   = useState(0)
   const [modalViMax, setModalViMax]   = useState(100)
-  const [modalRegimes, setModalRegimes]   = useState<Set<string>>(new Set(['ALL']))
   const [viRange, setViRange]         = useState<[number, number]>([0, 100])
   const [showLegend, setShowLegend]   = useState(false)
   const [supRegimeFilters, setSupRegimeFilters]     = useState<Set<string>>(new Set(['ALL']))
@@ -287,8 +286,8 @@ export function WatchlistsPage() {
 
   // Called when user confirms in the Generate modal
   const handleGenerateConfirm = useCallback(async () => {
-    // Apply modal filters to the live display
-    setRegimeFilters(new Set(modalRegimes))
+    // Apply VI range display filter from modal — regime filter is always ALL (backend computes all pairs)
+    setRegimeFilters(new Set(['ALL']))
     setViRange([modalViMin, modalViMax])
 
     const tfBefore    = generateTF
@@ -357,7 +356,7 @@ export function WatchlistsPage() {
     } finally {
       setIsRunning(false)
     }
-  }, [generateTF, marketMode, modalViMin, modalViMax, modalRegimes, snapshots, handleSelectSnapshot])
+  }, [generateTF, marketMode, modalViMin, modalViMax, snapshots, handleSelectSnapshot])
 
   // ── Tree grouping ─────────────────────────────────────────────────────────
 
@@ -606,7 +605,7 @@ export function WatchlistsPage() {
             {/* VI score range */}
             <div className="space-y-2">
               <div className="flex items-center justify-between">
-                <label className="text-xs text-zinc-500">VI score range (display filter)</label>
+                <label className="text-xs text-zinc-500">VI score range <span className="text-zinc-700">(display filter — applied after compute)</span></label>
                 <span className="text-xs font-mono text-zinc-300 tabular-nums">{modalViMin}–{modalViMax}</span>
               </div>
               <div className="space-y-2">
@@ -652,45 +651,11 @@ export function WatchlistsPage() {
               </div>
             </div>
 
-            {/* Regime filter */}
-            <div className="space-y-1.5">
-              <label className="text-xs text-zinc-500">Regime filter (display only)</label>
-              <div className="flex flex-wrap gap-1">
-                {(['ALL', 'CALM', 'NORMAL', 'TRENDING', 'ACTIVE', 'EXTREME'] as const).map((r) => {
-                  const isActive = modalRegimes.has(r)
-                  const rColor   = r !== 'ALL' ? REGIME_COLOR_HEX[r] : undefined
-                  return (
-                    <button
-                      key={r}
-                      title={REGIME_DESCRIPTION[r] ?? 'Show all regimes'}
-                      onClick={() => {
-                        setModalRegimes((prev) => {
-                          if (r === 'ALL') return new Set(['ALL'])
-                          const next = new Set(prev)
-                          next.delete('ALL')
-                          if (next.has(r)) { next.delete(r); if (next.size === 0) next.add('ALL') }
-                          else next.add(r)
-                          return next
-                        })
-                      }}
-                      style={
-                        isActive && rColor
-                          ? { color: rColor, borderColor: `${rColor}60`, background: `${rColor}14` }
-                          : undefined
-                      }
-                      className={`px-2 py-0.5 text-xs font-mono rounded border transition-colors ${
-                        isActive
-                          ? 'border-zinc-600 text-zinc-200'
-                          : 'border-zinc-800 text-zinc-600 bg-transparent hover:border-zinc-600'
-                      }`}
-                    >
-                      {r !== 'ALL' && REGIME_EMOJI[r]} {r}
-                    </button>
-                  )
-                })}
-              </div>
-              <p className="text-xs text-zinc-700">Filters apply to the table after generation. The backend always computes all pairs.</p>
-            </div>
+            {/* Note: backend always computes ALL pairs regardless of filters */}
+            <p className="text-[11px] text-zinc-600 bg-zinc-800/60 rounded-lg px-3 py-2 leading-relaxed">
+              ℹ️ The backend always computes <span className="text-zinc-400">all</span> pairs.
+              VI range and regime filters apply to the <span className="text-zinc-400">display table</span> after generation.
+            </p>
 
             {/* Actions */}
             <div className="flex gap-2 pt-1">
@@ -956,7 +921,13 @@ export function WatchlistsPage() {
                   <span className="text-xs text-zinc-600 font-mono mr-1 shrink-0">
                     TF+1{selectedData && (marketMode === 'spot' ? SPOT_TF_NEXT : TF_NEXT)[selectedData.timeframe] ? ` (${(marketMode === 'spot' ? SPOT_TF_NEXT : TF_NEXT)[selectedData.timeframe]}):` : ':'}
                   </span>
-                  {REGIMES.map((r) => {
+                  {Object.keys(supRegimeCounts).length === 0 ? (
+                    <span className="text-xs text-zinc-700 italic">
+                      {selectedData && (marketMode === 'spot' ? SPOT_TF_NEXT : TF_NEXT)[selectedData.timeframe]
+                        ? `No ${(marketMode === 'spot' ? SPOT_TF_NEXT : TF_NEXT)[selectedData.timeframe]} snapshot — generate it first`
+                        : 'No superior timeframe (1W is the highest)'}
+                    </span>
+                  ) : REGIMES.map((r) => {
                     const count   = r === 'ALL' ? Object.values(supRegimeCounts).reduce((s, n) => s + n, 0) : (supRegimeCounts[r] ?? 0)
                     const rColor  = r !== 'ALL' ? REGIME_COLOR_HEX[r] : undefined
                     const isActive = supRegimeFilters.has('ALL') ? r === 'ALL' : supRegimeFilters.has(r)
