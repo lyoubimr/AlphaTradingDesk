@@ -115,8 +115,9 @@ function downloadKraken(pairs: WatchlistPairOut[], tf: string, dateStr: string) 
 }
 
 function downloadKrakenSpot(pairs: WatchlistPairOut[], tf: string, dateStr: string) {
-  // TradingView Kraken Spot format: KRAKEN:XBTUSD (no .PM, no PF_/PI_ prefix)
-  const toTV = (sym: string) => `KRAKEN:${sym}`
+  // TradingView Kraken Spot format: KRAKEN:BTCUSD (no .PM, no PF_/PI_ prefix)
+  // XBT is Kraken's internal ticker; TradingView uses the standard BTC symbol
+  const toTV = (sym: string) => `KRAKEN:${sym.replace(/^XBT/, 'BTC')}`
   const lines = pairs.map((p) => toTV(p.pair)).join('\n')
 
   const firstSym = pairs[0]?.pair ?? ''
@@ -553,7 +554,7 @@ export function WatchlistsPage() {
         <div className="flex items-start gap-2.5 rounded-xl border border-amber-500/20 bg-amber-500/5 px-4 py-3 text-xs text-amber-400/90 shrink-0">
           <Info size={13} className="mt-0.5 shrink-0" />
           <div className="space-y-0.5">
-            <p className="font-medium">🪙 Spot Watchlist — Kraken Spot pairs · TV format: KRAKEN:XBTUSD (no .PM)</p>
+            <p className="font-medium">🪙 Spot Watchlist — Kraken Spot pairs · TV format: KRAKEN:BTCUSD (no .PM)</p>
             <p className="text-amber-400/60">High VI → pump window / buy opportunity for spot. Timeframes: 4H, 1D, 1W.</p>
           </div>
         </div>

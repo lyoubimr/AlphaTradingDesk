@@ -19,9 +19,9 @@ import {
 } from 'lucide-react'
 import { PageHeader } from '../../components/ui/PageHeader'
 import { useProfile } from '../../context/ProfileContext'
-import { investmentApi, strategiesApi, statsApi, automationApi } from '../../lib/api'
+import { investmentApi, strategiesApi, statsApi, automationApi, spotVolatilityApi } from '../../lib/api'
 import { cn } from '../../lib/cn'
-import type { Instrument, Strategy, WinRateStats, PortfolioOut } from '../../types/api'
+import type { Instrument, Strategy, WinRateStats, PortfolioOut, SpotWatchlistPairOut } from '../../types/api'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Shared styles
@@ -432,7 +432,7 @@ const ALL_TAGS = [
   '📈 Breakout',  '📉 Breakdown', '🔄 Range',       '🌊 Trend',
 ]
 
-const TIMEFRAMES = ['1W', '3D', '1D', '4H'] as const
+const TIMEFRAMES = ['1W', '1D', '4H'] as const
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -491,15 +491,45 @@ function SpotExpectancyPanel({
     return withData.reduce((s, p) => s + (p.win_rate_pct ?? 0), 0) / withData.length / 100
   }, [globalWrStats])
 
-  if (potentialProfit == null || totalCost == null) return null
-
-  // ── Win-rate source ────────────────────────────────────────────────────────
+  // ── Win-rate source ─────────────────────────────────────────────────────────
   const hasStratStats = selectedStrategy != null
     && selectedStrategy.trades_count >= selectedStrategy.min_trades_for_stats
 
   const rawWr: number = hasStratStats
     ? selectedStrategy!.win_count / selectedStrategy!.trades_count
     : globalWr ?? DEFAULT_WIN_RATE
+
+  const wrSource = hasStratStats ? 'strategy' : globalWr != null ? 'global' : 'fallback'
+  const wrBadgeCls = wrSource === 'strategy' ? 'text-emerald-400' : wrSource === 'global' ? 'text-amber-300' : 'text-slate-400'
+  const wrSourceLabel = wrSource === 'strategy'
+    ? `${selectedStrategy!.name} (${selectedStrategy!.trades_count} trades)`
+    : wrSource === 'global'
+      ? `Global average`
+      : `Default 60% fallback`
+
+  // ── "Form incomplete" mini mode — show just WR when entry/qty/TP not filled ─
+  if (potentialProfit == null || totalCost == null) {
+    if (!selectedStrategy && !globalWrStats) return null
+    return (
+      <div className="rounded-xl border border-surface-700 bg-surface-800/60 p-4 space-y-2">
+        <p className="text-[10px] text-slate-500 uppercase tracking-wider font-medium">Win Rate preview</p>
+        <div className="flex items-end gap-2">
+          <p className={cn('text-2xl font-mono font-bold leading-none', wrBadgeCls)}>
+            {(rawWr * 100).toFixed(0)}%
+          </p>
+          {hasStratStats && (
+            <p className="text-[10px] text-slate-500 mb-0.5">
+              {selectedStrategy!.trades_count} trades · {selectedStrategy!.win_count} wins
+            </p>
+          )}
+        </div>
+        <p className="text-[10px] text-slate-600 truncate">{wrSourceLabel}</p>
+        <p className="text-[11px] text-slate-600 border-t border-surface-700/50 pt-2">
+          Fill entry, quantity &amp; TP to see full expectancy analysis.
+        </p>
+      </div>
+    )
+  }
 
   // Confidence adjustment: scale ±10% around raw WR based on confidence (1–10)
   // confidence=5 → no adjustment; 1 → −10%; 10 → +10%
@@ -517,14 +547,6 @@ function SpotExpectancyPanel({
 
   // Potential ROI %
   const roiPct = (potentialProfit / totalCost) * 100
-
-  const wrSource = hasStratStats ? 'strategy' : globalWr != null ? 'global' : 'fallback'
-  const wrBadgeCls = wrSource === 'strategy' ? 'text-emerald-400' : wrSource === 'global' ? 'text-amber-300' : 'text-slate-400'
-  const wrSourceLabel = wrSource === 'strategy'
-    ? `${selectedStrategy!.name} (${selectedStrategy!.trades_count} trades)`
-    : wrSource === 'global'
-      ? `Global average`
-      : `Default 60% fallback`
 
   const grade = expectedValue == null
     ? { emoji: '📊', label: 'No SL', text: 'text-slate-300', bg: 'bg-surface-700/40', border: 'border-surface-600', sub: 'Add a stop loss for full expectancy.' }
@@ -642,8 +664,7 @@ export function NewSpotTradePage() {
   const [timeframe, setTimeframe]       = useState('')
   const [confidence, setConfidence]     = useState(0)   // 0 = not set, 1–10
   const [tradeTags, setTradeTags]       = useState<string[]>([])
-  const [openingNotes, setOpeningNotes] = useState('')
-  const [postNotes, setPostNotes]       = useState('')   // filled when closing
+  const [notes, setNotes]               = useState('')
 
   // ── Automation ────────────────────────────────────────────────────────────
   const [automateOnCreate,         setAutomateOnCreate]         = useState(false)
@@ -652,6 +673,9 @@ export function NewSpotTradePage() {
   // ── Screenshots ───────────────────────────────────────────────────────────
   const [entryScreenshots, setEntryScreenshots] = useState<File[]>([])
   const [screenshotUrls, setScreenshotUrls]     = useState<{ file: File; url: string }[]>([])
+
+  // ── Pair VI data — fetched from latest spot watchlist when pair changes ───
+  const [pairVi, setPairVi] = useState<SpotWatchlistPairOut | null>(null)
 
   // ── Submit ────────────────────────────────────────────────────────────────
   const [submitting, setSubmitting] = useState(false)
@@ -688,6 +712,17 @@ export function NewSpotTradePage() {
       })
       .catch(() => {})
       .finally(() => setPriceLoading(false))
+  }, [instrument?.symbol])
+
+  // ── Auto-fetch pair VI from spot watchlist when instrument selected ─────────
+  useEffect(() => {
+    if (!instrument?.symbol) { setPairVi(null); return }
+    spotVolatilityApi.getWatchlist('4h')
+      .then((wl) => {
+        const found = wl.pairs.find((p) => p.pair === instrument.symbol)
+        setPairVi(found ?? null)
+      })
+      .catch(() => setPairVi(null))
   }, [instrument?.symbol])
 
   // ── Stable screenshot URLs (avoid scroll-jump on add) ─────────────────────
@@ -890,7 +925,7 @@ export function NewSpotTradePage() {
         confidence_score:   confidence > 0 ? String(confidence) : null,
         strategy_id:        strategyIds[0] ?? null,
         instrument_id:      instrument?.id ?? null,
-        notes:              openingNotes || null,
+        notes:              notes || null,
       })
 
       // Upload entry screenshots (non-blocking — trade already created)
@@ -977,6 +1012,27 @@ export function NewSpotTradePage() {
                   }
                 </div>
               )}
+
+              {/* VI score badge from latest 4h spot watchlist */}
+              {pairVi && (
+                <div className="flex items-center gap-2">
+                  <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-[10px] font-medium bg-surface-700/60 border border-surface-600">
+                    <span className="text-slate-500">VI</span>
+                    <span className="font-mono font-bold text-brand-300">{(pairVi.vi_score * 100).toFixed(0)}</span>
+                    <span className={cn('font-semibold',
+                      pairVi.regime === 'EXTREME'  ? 'text-red-400'    :
+                      pairVi.regime === 'ACTIVE'   ? 'text-orange-400' :
+                      pairVi.regime === 'TRENDING' ? 'text-amber-400'  :
+                      pairVi.regime === 'NORMAL'   ? 'text-brand-300'  :
+                      pairVi.regime === 'CALM'     ? 'text-blue-400'   : 'text-slate-500')}>
+                      {pairVi.regime}
+                    </span>
+                    {pairVi.ema_signal && pairVi.ema_signal !== 'mixed' && (
+                      <span className="text-slate-600">· {pairVi.ema_signal.replace(/_/g, ' ')}</span>
+                    )}
+                  </span>
+                </div>
+              )}
             </Section>
 
             {/* ── 2. STRATEGY & SETUP INTENT ───────────────────────────── */}
@@ -994,7 +1050,7 @@ export function NewSpotTradePage() {
                 </Field>
 
                 <Field label="Timeframe analysed">
-                  <div className="grid grid-cols-4 gap-1">
+                  <div className="grid grid-cols-3 gap-1">
                     {TIMEFRAMES.map((tf) => (
                       <button key={tf} type="button" onClick={() => setTimeframe((p) => p === tf ? '' : tf)}
                         className={cn('py-2 rounded-lg border text-[11px] font-mono font-medium transition-all',
@@ -1317,53 +1373,14 @@ export function NewSpotTradePage() {
               </div>
             </Section>
 
-            {/* ── 5. ANALYSIS & NOTES ───────────────────────────────────── */}
-            <Section icon="📝" title="Analysis & notes">
-              {/* Opening — pre-entry rationale */}
-              <Field label={
-                <span className="flex items-center gap-1.5">
-                  📖 Opening analysis
-                  <span className="text-slate-600 font-normal text-[10px]">(before entry)</span>
+            {/* ── 5. SETUP TAGS, NOTES & SCREENSHOTS ───────────────────── */}
+            <Section icon="📝" title="Setup tags, notes & screenshots">
+              {/* Chart patterns / setup tags */}
+              <div>
+                <span className="flex items-center gap-1 text-xs font-medium text-slate-400 mb-1.5">
+                  Chart patterns / setup tags
+                  <Tip text="Technical confluences visible on the chart. These describe what you saw — strategy describes how you trade it." />
                 </span>
-              }>
-                <textarea
-                  value={openingNotes}
-                  onChange={(e) => setOpeningNotes(e.target.value)}
-                  rows={5}
-                  placeholder={
-                    `Entry rationale:\n` +
-                    `• HTF context (weekly/daily bias):\n` +
-                    `• Key levels (support, resistance, FVG, OB):\n` +
-                    `• Trigger / signal:\n` +
-                    `• Macro context or catalyst:`
-                  }
-                  className={cn(inputCls, 'resize-none font-mono text-xs')}
-                />
-              </Field>
-
-              {/* Post-trade — filled after closing */}
-              <Field label={
-                <span className="flex items-center gap-1.5">
-                  📌 Post-trade review
-                  <span className="text-slate-600 font-normal text-[10px]">(after close)</span>
-                </span>
-              }>
-                <textarea
-                  value={postNotes}
-                  onChange={(e) => setPostNotes(e.target.value)}
-                  rows={3}
-                  placeholder={
-                    `Post-trade review:\n` +
-                    `• What worked / what missed:\n` +
-                    `• Emotions / discipline notes:\n` +
-                    `• Adjustments for next time:`
-                  }
-                  className={cn(inputCls, 'resize-none font-mono text-xs text-slate-400')}
-                />
-              </Field>
-
-              {/* Chart patterns — at the end of section */}
-              <Field label="Chart patterns">
                 <div className="flex flex-wrap gap-1.5">
                   {ALL_TAGS.map((tag) => (
                     <button key={tag} type="button"
@@ -1380,19 +1397,15 @@ export function NewSpotTradePage() {
                     </button>
                   ))}
                 </div>
-              </Field>
-            </Section>
+              </div>
 
-            {/* ── 6. SCREENSHOTS ────────────────────────────────────────── */}
-            <Section icon="📸" title="Screenshots">
-              {/* Entry screenshots (before — analysis setup) */}
+              {/* Screenshots */}
               <div className="[overflow-anchor:none]">
-                <div className="flex items-center gap-2 mb-1.5">
+                <span className="flex items-center gap-1.5 text-xs font-medium text-slate-400 mb-1.5">
                   <ImagePlus size={12} className="text-slate-500" />
-                  <span className="text-xs font-medium text-slate-400">Before — Entry setup</span>
-                  <span className="text-[10px] text-slate-600 font-normal">(chart analysis, confluences)</span>
-                </div>
-
+                  Screenshots
+                  <span className="text-[10px] text-slate-600 font-normal">(chart setup, confluences)</span>
+                </span>
                 {screenshotUrls.length > 0 && (
                   <div className="flex flex-wrap gap-2 mb-2">
                     {screenshotUrls.map(({ file, url }, idx) => (
@@ -1408,7 +1421,6 @@ export function NewSpotTradePage() {
                     ))}
                   </div>
                 )}
-
                 <label className="flex items-center gap-2 px-3 py-2 rounded-lg border border-dashed border-surface-500
                   bg-surface-700/30 text-xs text-slate-500 hover:text-slate-300 hover:border-brand-500/50 cursor-pointer transition-colors w-fit">
                   <ImagePlus size={13} />
@@ -1423,17 +1435,16 @@ export function NewSpotTradePage() {
                 <p className="text-[10px] text-slate-600 mt-1">⌘V / Ctrl+V to paste a screenshot</p>
               </div>
 
-              {/* After screenshots — locked until trade is closed */}
-              <div className="opacity-50 pointer-events-none">
-                <div className="flex items-center gap-2 mb-1.5">
-                  <ImagePlus size={12} className="text-slate-500" />
-                  <span className="text-xs font-medium text-slate-400">After — Exit result</span>
-                  <span className="text-[10px] text-slate-600 font-normal">(available when closing the trade)</span>
-                </div>
-                <div className="flex items-center gap-2 px-3 py-2 rounded-lg border border-dashed border-surface-600 bg-surface-700/20 w-fit">
-                  <span className="text-[10px] text-slate-600">🔒 Upload after closing the trade</span>
-                </div>
-              </div>
+              {/* Notes */}
+              <Field label="Notes (optional)">
+                <textarea
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  rows={3}
+                  placeholder="Setup rationale, confluences, key levels, market context…"
+                  className={cn(inputCls, 'resize-none')}
+                />
+              </Field>
             </Section>
 
           </div>{/* end left column */}
