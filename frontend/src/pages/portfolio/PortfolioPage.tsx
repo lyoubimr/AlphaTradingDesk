@@ -721,10 +721,12 @@ export function PortfolioPage() {
             value={`${pnlPositive ? '+' : ''}${fmt(portfolio.realized_pnl ?? '0')} ${currency}`}
             accent={pnlPositive ? 'bull' : 'bear'}
           />
-          <StatCard
-            label={isSpot ? 'Holdings' : 'Open trades'}
-            value={String(portfolio.open_positions_count)}
-          />
+          {isSpot && (
+            <StatCard
+              label="Holdings"
+              value={String(portfolio.open_positions_count)}
+            />
+          )}
         </div>
 
         {/* Contracts: link to Trade Journal */}
@@ -732,11 +734,7 @@ export function PortfolioPage() {
           <div className="rounded-xl bg-surface-800/50 border border-surface-700 px-5 py-4 flex items-center justify-between">
             <div className="flex items-center gap-3">
               <BookOpen size={15} className="text-brand-400 shrink-0" />
-              <span className="text-sm text-slate-400">
-                {portfolio.open_positions_count > 0
-                  ? `${portfolio.open_positions_count} open trade${portfolio.open_positions_count > 1 ? 's' : ''} in progress`
-                  : 'Track your trades in the Trade Journal'}
-              </span>
+              <span className="text-sm text-slate-400">Manage and review your trades</span>
             </div>
             <Link to="/trades" className="text-xs text-brand-400 hover:text-brand-300 flex items-center gap-1 shrink-0">
               Trade Journal <ChevronRight size={12} />

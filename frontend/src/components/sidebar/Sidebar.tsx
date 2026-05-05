@@ -68,10 +68,11 @@ export function Sidebar({ apiStatus, environment, version, isOpen = false, onClo
   // ── Core items — account_type-aware ────────────────────────────────────
   const coreItems: NavItem[] = isSpot
     ? [
-        { to: '/dashboard', label: 'Dashboard', icon: <LayoutDashboard size={16} /> },
-        { to: '/portfolio',  label: 'Portfolio',  icon: <Wallet size={16} /> },
-        { to: '/goals',      label: 'Goals',       icon: <Target size={16} /> },
-        { to: '/ritual',     label: 'Ritual',      icon: <Flame size={16} />, badge: 'NEW', badgeVariant: 'phase' },
+        { to: '/dashboard', label: 'Dashboard',    icon: <LayoutDashboard size={16} /> },
+        { to: '/portfolio',  label: 'Trade Journal', icon: <BookOpen size={16} /> },
+        { to: '/portfolio',  label: 'Portfolio',     icon: <Wallet size={16} /> },
+        { to: '/goals',      label: 'Goals',         icon: <Target size={16} /> },
+        { to: '/ritual',     label: 'Ritual',        icon: <Flame size={16} />, badge: 'NEW', badgeVariant: 'phase' },
       ]
     : [
         { to: '/dashboard', label: 'Dashboard',    icon: <LayoutDashboard size={16} /> },
