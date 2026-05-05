@@ -836,6 +836,51 @@ export interface WatchlistMetaOut {
   generated_at: string
 }
 
+// ── Spot Volatility (Phase 7) ─────────────────────────────────────────────
+
+export interface SpotWatchlistPairOut {
+  pair: string
+  vi_score: number
+  regime: VIRegime
+  alert: string | null
+  change_24h: number | null
+  ema_score: number
+  ema_signal: string
+  tf_sup_regime: VIRegime | null
+  tf_sup_vi: number | null
+}
+
+export interface SpotWatchlistOut {
+  id: number | null
+  timeframe: string
+  regime: VIRegime
+  pairs_count: number
+  pairs: SpotWatchlistPairOut[]
+  generated_at: string
+}
+
+export interface SpotWatchlistMetaOut {
+  id: number
+  timeframe: string
+  name: string
+  regime: VIRegime
+  pairs_count: number
+  generated_at: string
+}
+
+export interface SpotVolatilitySettingsOut {
+  key: string
+  config: Record<string, unknown>
+  updated_at: string
+}
+
+export interface SpotRunResponse {
+  status: string
+  timeframe: string
+  pairs_computed: number
+  snapshot_id: number | null
+}
+
 export interface LivePricesResponse {
   btc: number | null
   eth: number | null
@@ -1223,7 +1268,7 @@ export interface AIGenerateOut {
 
 // ── Ritual (Phase 6B) ──────────────────────────────────────────────────────
 
-export type SessionType = 'weekly_setup' | 'trade_session' | 'weekend_review'
+export type SessionType = 'weekly_setup' | 'trade_session' | 'weekend_review' | 'spot_monthly' | 'spot_weekly'
 export type SessionOutcome = 'trade_opened' | 'pairs_pinned' | 'no_opportunity' | 'abandoned' | 'vol_too_low'
 export type PinnedTF = '1W' | '1D' | '4H' | '1H' | '15m'
 

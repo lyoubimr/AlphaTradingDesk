@@ -81,13 +81,15 @@ class PinnedPairExtend(BaseModel):
 
 # ── Steps ────────────────────────────────────────────────────────────────────
 
-SessionType = Literal["weekly_setup", "trade_session", "weekend_review"]
+SessionType = Literal["weekly_setup", "trade_session", "weekend_review", "spot_monthly", "spot_weekly"]
 
 SESSION_LABELS: dict[str, str] = {
     "weekly_setup": "Weekly Setup",
     "daily_prep": "Daily Prep",
     "trade_session": "Trade Session",
     "weekend_review": "Weekend Review",
+    "spot_monthly": "Spot Monthly Review",
+    "spot_weekly": "Spot Weekly Check",
 }
 
 SESSION_EMOJIS: dict[str, str] = {
@@ -95,6 +97,8 @@ SESSION_EMOJIS: dict[str, str] = {
     "daily_prep": "☀️",
     "trade_session": "🎯",
     "weekend_review": "📊",
+    "spot_monthly": "🪙",
+    "spot_weekly": "📊",
 }
 
 STEP_EMOJIS: dict[str, str] = {
@@ -112,6 +116,11 @@ STEP_EMOJIS: dict[str, str] = {
     "learning_note": "📝",
     "custom": "🔷",
     "weekly_notes": "🗒️",
+    # Spot-only steps
+    "deposit_check": "💰",
+    "holdings_summary": "📦",
+    "price_targets": "🎯",
+    "watchlist_htf_spot": "🔍",
 }
 
 MODULE_PATHS: dict[str, str] = {
@@ -120,6 +129,8 @@ MODULE_PATHS: dict[str, str] = {
     "goals": "/goals",
     "analytics": "/analytics",
     "trades": "/trades",
+    "spot": "/spot",
+    "investments": "/spot",
 }
 
 
@@ -256,13 +267,16 @@ DISCIPLINE_POINTS: dict[str, int] = {
     "weekend_review_done": 15,
     "vol_too_low_trade": -20,  # penalty
     "trade_outside_session": -15,  # penalty (future — Phase 5)
+    # Spot session discipline points
+    "spot_monthly_done": 20,
+    "spot_weekly_done": 15,
 }
 
 MAX_WEEKLY_SCORE = (
     DISCIPLINE_POINTS["weekly_setup_done"]
     + DISCIPLINE_POINTS["trade_session_done"] * 5
     + DISCIPLINE_POINTS["weekend_review_done"]
-)  # = 20 + 50 + 15 = 85
+)  # = 20 + 50 + 15 = 85 (spot sessions are additive — no need to cap)
 
 
 # ── Default Config ────────────────────────────────────────────────────────────
@@ -287,6 +301,8 @@ DEFAULT_RITUAL_CONFIG: dict[str, Any] = {
         "weekly_setup": 20,
         "trade_session": 10,
         "weekend_review": 20,
+        "spot_monthly": 25,
+        "spot_weekly": 15,
     },
     "smart_filter": {
         "weights": {"1W": 4.0, "1D": 3.0, "4H": 2.0, "1H": 1.0, "15m": 0.5},
@@ -379,6 +395,65 @@ DEFAULT_STEPS: dict[str, list[dict]] = {
             "position": 4, "step_type": "learning_note",
             "label": "Write learning note", "est_minutes": 5,
             "is_mandatory": False, "linked_module": None,
+            "cadence_hours": None, "config": {},
+        },
+    ],
+    # ── Spot session templates ────────────────────────────────────────────────
+    "spot_monthly": [
+        {
+            "position": 1, "step_type": "deposit_check",
+            "label": "Monthly Deposit Check", "est_minutes": 3,
+            "is_mandatory": False, "linked_module": "investments",
+            "cadence_hours": None, "config": {},
+        },
+        {
+            "position": 2, "step_type": "holdings_summary",
+            "label": "Review Holdings Summary", "est_minutes": 5,
+            "is_mandatory": True, "linked_module": "spot",
+            "cadence_hours": None, "config": {},
+        },
+        {
+            "position": 3, "step_type": "watchlist_htf_spot",
+            "label": "Spot HTF Watchlist (1W + 1D + 4H)", "est_minutes": 3,
+            "is_mandatory": True, "linked_module": None,
+            "cadence_hours": None, "config": {"timeframes": ["1W", "1D", "4H"]},
+        },
+        {
+            "position": 4, "step_type": "tv_analysis",
+            "label": "Analyse Spot Pairs in TradingView", "est_minutes": 20,
+            "is_mandatory": True, "linked_module": None,
+            "cadence_hours": None, "config": {},
+        },
+        {
+            "position": 5, "step_type": "goals_review",
+            "label": "Review Investment Goals", "est_minutes": 5,
+            "is_mandatory": False, "linked_module": "goals",
+            "cadence_hours": None, "config": {},
+        },
+    ],
+    "spot_weekly": [
+        {
+            "position": 1, "step_type": "holdings_summary",
+            "label": "Open Positions Check", "est_minutes": 5,
+            "is_mandatory": True, "linked_module": "spot",
+            "cadence_hours": None, "config": {},
+        },
+        {
+            "position": 2, "step_type": "watchlist_htf_spot",
+            "label": "Spot HTF Watchlist Scan (1D + 4H)", "est_minutes": 3,
+            "is_mandatory": True, "linked_module": None,
+            "cadence_hours": None, "config": {"timeframes": ["1D", "4H"]},
+        },
+        {
+            "position": 3, "step_type": "tv_analysis",
+            "label": "Analyse Spot Pairs in TradingView", "est_minutes": 15,
+            "is_mandatory": True, "linked_module": None,
+            "cadence_hours": None, "config": {},
+        },
+        {
+            "position": 4, "step_type": "outcome",
+            "label": "Session Outcome", "est_minutes": 1,
+            "is_mandatory": True, "linked_module": None,
             "cadence_hours": None, "config": {},
         },
     ],

@@ -13,12 +13,15 @@ import {
 import { PageHeader } from '../../components/ui/PageHeader'
 import { Tooltip } from '../../components/ui/Tooltip'
 import { VolatilityLegendPanel } from '../../components/volatility/VolatilityLegendPanel'
-import { volatilityApi } from '../../lib/api'
+import { volatilityApi, spotVolatilityApi } from '../../lib/api'
 import { useProfile } from '../../context/ProfileContext'
-import type { WatchlistOut, WatchlistPairOut, WatchlistMetaOut } from '../../types/api'
+import type { WatchlistOut, WatchlistPairOut, WatchlistMetaOut, SpotWatchlistOut, SpotWatchlistMetaOut, SpotWatchlistPairOut } from '../../types/api'
 
 const TIMEFRAMES = ['15m', '1h', '4h', '1d', '1w'] as const
 type TF = typeof TIMEFRAMES[number]
+
+// Spot-only timeframes (Kraken Spot supports 4h/1d/1w — no 15m/1h)
+const SPOT_TFS = ['4h', '1d', '1w'] as const
 
 const REGIMES = ['ALL', 'DEAD', 'CALM', 'NORMAL', 'TRENDING', 'ACTIVE', 'EXTREME'] as const
 
@@ -26,6 +29,8 @@ const REGIMES = ['ALL', 'DEAD', 'CALM', 'NORMAL', 'TRENDING', 'ACTIVE', 'EXTREME
 const TF_EMA_REF: Record<string, number> = { '15m': 55, '1h': 99, '4h': 200, '1d': 99, '1w': 55 }
 // Superior TF mapping for TF+1 column header label
 const TF_NEXT: Record<string, string> = { '15m': '1h', '1h': '4h', '4h': '1d', '1d': '1w' }
+// Spot has no 15m/1h — superior chain is: 4h→1d, 1d→1w, 1w has none
+const SPOT_TF_NEXT: Record<string, string> = { '4h': '1d', '1d': '1w' }
 
 const REGIME_COLOR_HEX: Record<string, string> = {
   DEAD:     '#a1a1aa',
@@ -109,6 +114,27 @@ function downloadKraken(pairs: WatchlistPairOut[], tf: string, dateStr: string) 
   URL.revokeObjectURL(url)
 }
 
+function downloadKrakenSpot(pairs: WatchlistPairOut[], tf: string, dateStr: string) {
+  // TradingView Kraken Spot format: KRAKEN:XBTUSD (no .PM, no PF_/PI_ prefix)
+  const toTV = (sym: string) => `KRAKEN:${sym}`
+  const lines = pairs.map((p) => toTV(p.pair)).join('\n')
+
+  const firstSym = pairs[0]?.pair ?? ''
+  const quoteMatch = firstSym.match(/(USDT|USDC|USD|EUR|GBP)$/)
+  const devise = quoteMatch ? quoteMatch[1] : 'USD'
+
+  const now = new Date()
+  const hhmm = `${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}`
+
+  const blob  = new Blob([lines], { type: 'text/plain' })
+  const url   = URL.createObjectURL(blob)
+  const a     = document.createElement('a')
+  a.href      = url
+  a.download  = `kraken_spot_${tf}_${dateStr}_${hhmm}_${devise}.txt`
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
 function toDateKey(iso: string): string {
   // Use local timezone so midnight UTC doesn't shift the displayed date
   const d = new Date(iso)
@@ -159,12 +185,21 @@ function SortTh({
 
 export function WatchlistsPage() {
   const { activeProfile } = useProfile()
-  const isSpot = activeProfile?.account_type === 'spot'
 
-  const [snapshots, setSnapshots]         = useState<WatchlistMetaOut[]>([])
+  // marketMode: defaults to 'spot' for spot profiles, else 'contracts'.
+  // User can switch manually via the toggle buttons.
+  const [marketMode, setMarketMode] = useState<'contracts' | 'spot'>(
+    activeProfile?.account_type === 'spot' ? 'spot' : 'contracts',
+  )
+  // Sync marketMode when the active profile changes (e.g. profile switch)
+  useEffect(() => {
+    setMarketMode(activeProfile?.account_type === 'spot' ? 'spot' : 'contracts')
+  }, [activeProfile?.id, activeProfile?.account_type])
+
+  const [snapshots, setSnapshots]         = useState<(WatchlistMetaOut | SpotWatchlistMetaOut)[]>([])
   const [loading, setLoading]             = useState(true)
   const [selectedId, setSelectedId]       = useState<number | null>(null)
-  const [selectedData, setSelectedData]   = useState<WatchlistOut | null>(null)
+  const [selectedData, setSelectedData]   = useState<WatchlistOut | SpotWatchlistOut | null>(null)
   const [loadingDetail, setLoadingDetail] = useState(false)
   const [isRunning, setIsRunning]         = useState(false)
   const [runStatus, setRunStatus]         = useState<string | null>(null)
@@ -201,17 +236,21 @@ export function WatchlistsPage() {
     setLoadingDetail(true)
     setMobileView('detail')  // auto-switch to detail panel on mobile after selecting
     try {
-      const data = await volatilityApi.getWatchlistById(id)
+      const data = marketMode === 'spot'
+        ? await spotVolatilityApi.getWatchlistById(id)
+        : await volatilityApi.getWatchlistById(id)
       setSelectedData(data)
     } finally {
       setLoadingDetail(false)
     }
-  }, [])
+  }, [marketMode])
 
   const fetchSnapshots = useCallback(async () => {
     setLoading(true)
     try {
-      const data = await volatilityApi.listWatchlists(30)
+      const data = marketMode === 'spot'
+        ? await spotVolatilityApi.listWatchlists(30)
+        : await volatilityApi.listWatchlists(30)
       setSnapshots(data)
       // Auto-select the newest snapshot only on the very first load.
       // Manual refreshes keep the current selection intact.
@@ -226,7 +265,15 @@ export function WatchlistsPage() {
     } finally {
       setLoading(false)
     }
-  }, [handleSelectSnapshot])
+  }, [marketMode, handleSelectSnapshot])
+
+  // Re-fetch (and reset selection) when marketMode changes
+  useEffect(() => {
+    setSnapshots([])
+    setSelectedId(null)
+    setSelectedData(null)
+    initialLoadedRef.current = false
+  }, [marketMode])
 
   useEffect(() => { fetchSnapshots() }, [fetchSnapshots])
 
@@ -251,47 +298,70 @@ export function WatchlistsPage() {
     setIsRunning(true)
     setRunStatus(null)
     try {
-      await volatilityApi.runTask('pairs', generateTF)
-      setRunStatus(`⏳ Computing ${generateTF.toUpperCase()} watchlist — data ready in ~30 s`)
-
-      // Poll at 25 s then 45 s to check if a new snapshot landed
-      const checkResult = async (attempt: number): Promise<void> => {
-        try {
-          const newData = await volatilityApi.listWatchlists(30)
-          setSnapshots(newData)
-          const newer = newData.filter((s) => s.timeframe === tfBefore)
-          if (newer.length > countBefore) {
-            const newest = newer[0]
+      if (marketMode === 'spot') {
+        // Spot: synchronous compute — response arrives when done (~5–15 s)
+        setRunStatus(`⏳ Computing Spot ${generateTF.toUpperCase()} watchlist…`)
+        const res = await spotVolatilityApi.runTask(generateTF)
+        const newData = await spotVolatilityApi.listWatchlists(30)
+        setSnapshots(newData)
+        const newer = newData.filter((s) => s.timeframe === tfBefore)
+        if (newer.length > countBefore || res.snapshot_id) {
+          const newest = newer[0] ?? newData.find((s) => s.id === res.snapshot_id)
+          if (newest) {
             const dk = toDateKey(newest.generated_at)
             setExpandedDates((prev) => new Set([...prev, dk]))
             setExpandedTFs((prev) => new Set([...prev, `${dk}:${newest.timeframe}`]))
             handleSelectSnapshot(newest.id, true /* keepFilters */)
-            setRunStatus(
-              `✅ ${tfBefore.toUpperCase()} watchlist ready — ${newest.pairs_count} pairs · regime: ${newest.regime}`,
-            )
-          } else if (attempt < 6) {
-            setTimeout(() => checkResult(attempt + 1), 30_000)
-          } else {
-            setRunStatus(
-              '⚠️ No new snapshot detected after ~3 min — Celery worker may be down or still computing',
-            )
           }
-        } catch {
-          setRunStatus('⚠️ Could not verify result — try refreshing manually')
+          setRunStatus(
+            `✅ Spot ${tfBefore.toUpperCase()} watchlist ready — ${res.pairs_computed} pairs`,
+          )
+        } else {
+          setRunStatus('⚠️ Spot compute returned no data — check backend logs')
         }
+      } else {
+        // Contracts: async via Celery — poll for new snapshot
+        await volatilityApi.runTask('pairs', generateTF)
+        setRunStatus(`⏳ Computing ${generateTF.toUpperCase()} watchlist — data ready in ~30 s`)
+
+        const checkResult = async (attempt: number): Promise<void> => {
+          try {
+            const newData = await volatilityApi.listWatchlists(30)
+            setSnapshots(newData)
+            const newer = newData.filter((s) => s.timeframe === tfBefore)
+            if (newer.length > countBefore) {
+              const newest = newer[0]
+              const dk = toDateKey(newest.generated_at)
+              setExpandedDates((prev) => new Set([...prev, dk]))
+              setExpandedTFs((prev) => new Set([...prev, `${dk}:${newest.timeframe}`]))
+              handleSelectSnapshot(newest.id, true /* keepFilters */)
+              setRunStatus(
+                `✅ ${tfBefore.toUpperCase()} watchlist ready — ${newest.pairs_count} pairs · regime: ${newest.regime}`,
+              )
+            } else if (attempt < 6) {
+              setTimeout(() => checkResult(attempt + 1), 30_000)
+            } else {
+              setRunStatus(
+                '⚠️ No new snapshot detected after ~3 min — Celery worker may be down or still computing',
+              )
+            }
+          } catch {
+            setRunStatus('⚠️ Could not verify result — try refreshing manually')
+          }
+        }
+        setTimeout(() => checkResult(1), 30_000)
       }
-      setTimeout(() => checkResult(1), 30_000)
     } catch {
-      setRunStatus('❌ Failed to queue task — check backend logs')
+      setRunStatus('❌ Failed to run task — check backend logs')
     } finally {
       setIsRunning(false)
     }
-  }, [generateTF, modalViMin, modalViMax, modalRegimes, snapshots, handleSelectSnapshot])
+  }, [generateTF, marketMode, modalViMin, modalViMax, modalRegimes, snapshots, handleSelectSnapshot])
 
   // ── Tree grouping ─────────────────────────────────────────────────────────
 
   const tree = useMemo(() => {
-    const out: Record<string, Record<string, WatchlistMetaOut[]>> = {}
+    const out: Record<string, Record<string, (WatchlistMetaOut | SpotWatchlistMetaOut)[]>> = {}
     for (const s of snapshots) {
       const dk = toDateKey(s.generated_at)
       if (!out[dk]) out[dk] = {}
@@ -327,7 +397,7 @@ export function WatchlistsPage() {
 
   // ── Detail data ───────────────────────────────────────────────────────────
 
-  const filteredPairs = useMemo<WatchlistPairOut[]>(() => {
+  const filteredPairs = useMemo<(WatchlistPairOut | SpotWatchlistPairOut)[]>(() => {
     if (!selectedData) return []
     let rows = [...selectedData.pairs]
     if (!regimeFilters.has('ALL')) rows = rows.filter((p) => regimeFilters.has(p.regime))
@@ -384,8 +454,10 @@ export function WatchlistsPage() {
   }, [selectedData])
 
   const selectedMeta = snapshots.find((s) => s.id === selectedId) ?? null
-  // Reset generateTF default when profile type changes
-  useEffect(() => { setGenerateTF(isSpot ? '4h' : '1h') }, [isSpot])
+  // Reset generateTF default when market mode changes
+  useEffect(() => {
+    setGenerateTF(marketMode === 'spot' ? '4h' : '1h')
+  }, [marketMode])
   // ── Render ────────────────────────────────────────────────────────────────
 
   return (
@@ -406,6 +478,30 @@ export function WatchlistsPage() {
             ← Market VI
           </Link>
 
+          {/* ── Market mode toggle (Contracts / Spot) ── */}
+          <div className="flex items-center rounded-lg border border-zinc-700 overflow-hidden text-xs font-mono">
+            <button
+              onClick={() => setMarketMode('contracts')}
+              className={`px-2.5 py-1.5 transition-colors ${
+                marketMode === 'contracts'
+                  ? 'bg-indigo-950 text-indigo-300 border-r border-indigo-800'
+                  : 'bg-zinc-900 text-zinc-500 hover:text-zinc-300 border-r border-zinc-700'
+              }`}
+            >
+              Contracts
+            </button>
+            <button
+              onClick={() => setMarketMode('spot')}
+              className={`px-2.5 py-1.5 transition-colors ${
+                marketMode === 'spot'
+                  ? 'bg-amber-950 text-amber-300'
+                  : 'bg-zinc-900 text-zinc-500 hover:text-zinc-300'
+              }`}
+            >
+              🪙 Spot
+            </button>
+          </div>
+
           {/* ── TF selector + Generate ── */}
           <div className="flex items-center rounded-lg border border-emerald-800 overflow-hidden">
             <select
@@ -413,7 +509,7 @@ export function WatchlistsPage() {
               onChange={(e) => setGenerateTF(e.target.value as TF)}
               className="bg-zinc-950 text-emerald-400 text-xs font-mono px-2 py-1.5 border-r border-emerald-800 focus:outline-none cursor-pointer"
             >
-              {TIMEFRAMES.map((tf) => (
+              {(marketMode === 'spot' ? SPOT_TFS : TIMEFRAMES).map((tf) => (
                 <option key={tf} value={tf} className="bg-zinc-900">{tf.toUpperCase()}</option>
               ))}
             </select>
@@ -453,12 +549,12 @@ export function WatchlistsPage() {
       </div>
 
       {/* ── Spot context banner ── */}
-      {isSpot && (
+      {marketMode === 'spot' && (
         <div className="flex items-start gap-2.5 rounded-xl border border-amber-500/20 bg-amber-500/5 px-4 py-3 text-xs text-amber-400/90 shrink-0">
           <Info size={13} className="mt-0.5 shrink-0" />
           <div className="space-y-0.5">
-            <p className="font-medium">Spot profile — Kraken Futures pairs</p>
-            <p className="text-amber-400/60">These snapshots cover Kraken Futures instruments. For spot, high VI → pump window / buy opportunity (vs. risk for contracts). Spot instrument catalog planned for Phase 8.</p>
+            <p className="font-medium">🪙 Spot Watchlist — Kraken Spot pairs · TV format: KRAKEN:XBTUSD (no .PM)</p>
+            <p className="text-amber-400/60">High VI → pump window / buy opportunity for spot. Timeframes: 4H, 1D, 1W.</p>
           </div>
         </div>
       )}
@@ -490,7 +586,7 @@ export function WatchlistsPage() {
             <div className="space-y-1.5">
               <label className="text-xs text-zinc-500">Timeframe</label>
               <div className="flex gap-1">
-                {TIMEFRAMES.map((tf) => (
+                {(marketMode === 'spot' ? SPOT_TFS : TIMEFRAMES).map((tf) => (
                   <button
                     key={tf}
                     onClick={() => setGenerateTF(tf)}
@@ -800,16 +896,25 @@ export function WatchlistsPage() {
                     </span>
                   )}
                   <button
-                    onClick={() => downloadKraken(
-                      filteredPairs,
-                      selectedData.timeframe,
-                      toDateKey(selectedData.generated_at),
-                    )}
+                    onClick={() => marketMode === 'spot'
+                      ? downloadKrakenSpot(
+                          filteredPairs as WatchlistPairOut[],
+                          selectedData.timeframe,
+                          toDateKey(selectedData.generated_at),
+                        )
+                      : downloadKraken(
+                          filteredPairs as WatchlistPairOut[],
+                          selectedData.timeframe,
+                          toDateKey(selectedData.generated_at),
+                        )
+                    }
                     className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-mono rounded border border-zinc-700 text-zinc-400 hover:text-zinc-200 hover:border-zinc-500 transition-colors"
-                    title="Download TradingView watchlist — active filters applied — KRAKEN:PAIR format (.txt)"
+                    title={marketMode === 'spot'
+                      ? 'Download TradingView spot watchlist — KRAKEN:PAIR format (no .PM)'
+                      : 'Download TradingView watchlist — active filters applied — KRAKEN:PAIR format (.txt)'}
                   >
                     <Download size={11} />
-                    Kraken Export
+                    {marketMode === 'spot' ? 'Spot Export' : 'Kraken Export'}
                   </button>
                 </div>
 
@@ -848,7 +953,7 @@ export function WatchlistsPage() {
                 {/* Row 4: TF+1 regime filter */}
                 <div className="flex gap-1 flex-wrap items-center">
                   <span className="text-xs text-zinc-600 font-mono mr-1 shrink-0">
-                    TF+1{selectedData && TF_NEXT[selectedData.timeframe] ? ` (${TF_NEXT[selectedData.timeframe]}):` : ':'}
+                    TF+1{selectedData && (marketMode === 'spot' ? SPOT_TF_NEXT : TF_NEXT)[selectedData.timeframe] ? ` (${(marketMode === 'spot' ? SPOT_TF_NEXT : TF_NEXT)[selectedData.timeframe]}):` : ':'}
                   </span>
                   {REGIMES.map((r) => {
                     const count   = r === 'ALL' ? Object.values(supRegimeCounts).reduce((s, n) => s + n, 0) : (supRegimeCounts[r] ?? 0)
@@ -908,7 +1013,7 @@ export function WatchlistsPage() {
                       <SortTh label="24H%" col="change_24h" active={sortKey === 'change_24h'} desc={sortDesc} onClick={() => handleSort('change_24h')} className="w-20" />
                       <th className="px-3 py-2.5 text-left text-zinc-500 font-mono">
                         <span className="flex items-center gap-1">
-                          TF+1{selectedData && TF_NEXT[selectedData.timeframe] ? ` (${TF_NEXT[selectedData.timeframe]})` : ''}
+                          TF+1{selectedData && (marketMode === 'spot' ? SPOT_TF_NEXT : TF_NEXT)[selectedData.timeframe] ? ` (${(marketMode === 'spot' ? SPOT_TF_NEXT : TF_NEXT)[selectedData.timeframe]})` : ''}
                           <Tooltip text="Regime at the next-higher timeframe — confirms or contradicts the signal." />
                         </span>
                       </th>

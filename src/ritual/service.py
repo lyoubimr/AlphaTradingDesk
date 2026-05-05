@@ -53,6 +53,7 @@ from src.ritual.schemas import (
     StepRead,
     WeeklyScoreRead,
 )
+from src.spot_volatility.models import SpotWatchlistSnapshot
 from src.volatility.models import WatchlistSnapshot
 
 # ── Internal helpers ──────────────────────────────────────────────────────────
@@ -577,6 +578,10 @@ def _compute_discipline_points(
         return base
     if stype == "weekend_review":
         return DISCIPLINE_POINTS["weekend_review_done"]
+    if stype == "spot_monthly":
+        return DISCIPLINE_POINTS["spot_monthly_done"]
+    if stype == "spot_weekly":
+        return DISCIPLINE_POINTS["spot_weekly_done"]
     return 0
 
 
@@ -605,6 +610,8 @@ def _update_weekly_score(
                     "weekly_setup": 0,
                     "trade_session": 0,
                     "weekend_review": 0,
+                    "spot_monthly": 0,
+                    "spot_weekly": 0,
                 },
                 "bonuses": {"no_opportunity": 0, "pairs_pinned": 0},
                 "penalties": {"vol_too_low_trade": 0},
@@ -722,7 +729,9 @@ def generate_smart_watchlist(
         .filter_by(profile_id=profile_id, session_type=session_type)
         .all()
     )
-    smart_step = next((s for s in steps if s.step_type == "smart_wl"), None)
+    smart_step = next(
+        (s for s in steps if s.step_type in ("smart_wl", "watchlist_htf_spot")), None
+    )
     if smart_step and smart_step.config.get("timeframes"):
         tfs: list[str] = smart_step.config["timeframes"]
     else:
@@ -730,6 +739,8 @@ def generate_smart_watchlist(
             "weekly_setup": ["1W", "1D", "4H", "1H", "15m"],
             "trade_session": ["1D", "4H", "1H", "15m"],
             "weekend_review": ["1D", "4H"],
+            "spot_monthly": ["1W", "1D", "4H"],
+            "spot_weekly": ["1D", "4H"],
         }.get(session_type, ["4H", "1H"])
 
     if top_n is None:
@@ -747,15 +758,25 @@ def generate_smart_watchlist(
     pair_tf_data: dict[str, dict[str, dict]] = {}
     tf_pairs: dict[str, list[str]] = {}
 
+    _is_spot_session = session_type in ("spot_monthly", "spot_weekly")
+
     for tf in tfs:
-        # Normalize to lowercase — WatchlistSnapshot stores TFs in lowercase (e.g. "4h", "1h")
+        # Normalize to lowercase — snapshots store TFs in lowercase (e.g. "4h", "1h")
         # but step configs may use uppercase (e.g. "4H", "1H").
-        snapshot = (
-            db.query(WatchlistSnapshot)
-            .filter(WatchlistSnapshot.timeframe == tf.lower())
-            .order_by(WatchlistSnapshot.generated_at.desc())
-            .first()
-        )
+        if _is_spot_session:
+            snapshot = (
+                db.query(SpotWatchlistSnapshot)
+                .filter(SpotWatchlistSnapshot.timeframe == tf.lower())
+                .order_by(SpotWatchlistSnapshot.generated_at.desc())
+                .first()
+            )
+        else:
+            snapshot = (
+                db.query(WatchlistSnapshot)
+                .filter(WatchlistSnapshot.timeframe == tf.lower())
+                .order_by(WatchlistSnapshot.generated_at.desc())
+                .first()
+            )
         if not snapshot:
             continue
 

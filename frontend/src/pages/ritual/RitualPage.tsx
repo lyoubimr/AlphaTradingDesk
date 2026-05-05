@@ -64,6 +64,29 @@ const SESSION_TYPES: { type: SessionType; emoji: string; label: string; when: st
     gradient: 'from-teal-950/60 to-surface-800/40',
     steps: ['Analytics', 'Journal', 'Goals', 'Learning Note'],
   },
+  // ── Spot sessions (shown for spot profiles) ──────────────────────────────
+  {
+    type: 'spot_monthly',
+    emoji: '🪙',
+    label: 'Spot Monthly Review',
+    when: 'Monthly',
+    desc: 'Deposit check + holdings + HTF spot watchlist',
+    est: '~35 min',
+    accent: '#f59e0b',
+    gradient: 'from-amber-950/60 to-surface-800/40',
+    steps: ['Deposit Check', 'Holdings', 'HTF Watchlist', 'TradingView', 'Goals'],
+  },
+  {
+    type: 'spot_weekly',
+    emoji: '📊',
+    label: 'Spot Weekly Check',
+    when: 'Weekly',
+    desc: 'Open positions + HTF scan + analysis',
+    est: '~25 min',
+    accent: '#0ea5e9',
+    gradient: 'from-sky-950/60 to-surface-800/40',
+    steps: ['Holdings Check', 'HTF Scan', 'TradingView', 'Outcome'],
+  },
 ]
 
 const OUTCOME_OPTIONS: { value: SessionOutcome; label: string; emoji: string; color: string }[] = [
@@ -1021,6 +1044,12 @@ function PinnedPanel({ profileId, onPinsChanged }: PinnedPanelProps) {
 export function RitualPage() {
   const { activeProfile } = useProfile()
   const profileId = activeProfile?.id
+  const isSpot = activeProfile?.account_type === 'spot'
+
+  // Show spot sessions for spot profiles; contracts + weekend_review for others
+  const visibleSessionTypes = isSpot
+    ? SESSION_TYPES.filter((s) => s.type === 'weekend_review' || s.type === 'spot_monthly' || s.type === 'spot_weekly')
+    : SESSION_TYPES.filter((s) => s.type !== 'spot_monthly' && s.type !== 'spot_weekly')
 
   const [activeSession, setActiveSession] = useState<RitualSession | null>(null)
   const [steps, setSteps] = useState<RitualStep[]>([])
@@ -1179,7 +1208,10 @@ export function RitualPage() {
                     />
                   </div>
                   <div className="grid grid-cols-4 gap-1">
-                    {(['weekly_setup', 'trade_session', 'weekend_review'] as SessionType[]).map(st => {
+                    {(isSpot
+                      ? (['spot_monthly', 'spot_weekly', 'weekend_review'] as SessionType[])
+                      : (['weekly_setup', 'trade_session', 'weekend_review'] as SessionType[])
+                    ).map(st => {
                       const info = SESSION_TYPES.find(s => s.type === st)!
                       const count = (score.details as Record<string, Record<string, number>>)?.sessions?.[st] ?? 0
                       return (
@@ -1295,7 +1327,7 @@ export function RitualPage() {
               )
             })()}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              {SESSION_TYPES.map((st) => (
+              {visibleSessionTypes.map((st) => (
                 <button
                   key={st.type}
                   onClick={() => handleStart(st.type)}

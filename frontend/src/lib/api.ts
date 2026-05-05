@@ -25,6 +25,7 @@ import type {
   SpotTradeOut, SpotTradeCreate, SpotTradeUpdate, SpotTradeClose,
   DepositOut, DepositCreate, DepositUpdate,
   PortfolioOut, InvestmentSettingsOut,
+  SpotWatchlistOut, SpotWatchlistMetaOut, SpotVolatilitySettingsOut, SpotRunResponse,
 } from '../types/api'
 
 const BASE = '/api'
@@ -828,4 +829,38 @@ export const investmentApi = {
     }
     return res.json() as Promise<SpotTradeOut>
   },
+}
+
+// ── Spot Volatility Engine (Phase 7) ──────────────────────────────────────────
+
+export const spotVolatilityApi = {
+  /** GET /api/spot-volatility/watchlist/{timeframe} — latest snapshot (404 if none) */
+  getWatchlist: (timeframe: string): Promise<SpotWatchlistOut> =>
+    request(`/spot-volatility/watchlist/${timeframe}`),
+
+  /** GET /api/spot-volatility/watchlists?days=N — metadata list */
+  listWatchlists: (days = 30): Promise<SpotWatchlistMetaOut[]> =>
+    request(`/spot-volatility/watchlists?days=${days}`),
+
+  /** GET /api/spot-volatility/watchlist-by-id/{id} — full snapshot by PK */
+  getWatchlistById: (snapshotId: number): Promise<SpotWatchlistOut> =>
+    request(`/spot-volatility/watchlist-by-id/${snapshotId}`),
+
+  /** POST /api/spot-volatility/run — synchronous compute (5–15 s) */
+  runTask: (timeframe: string): Promise<SpotRunResponse> =>
+    request('/spot-volatility/run', {
+      method: 'POST',
+      body: JSON.stringify({ timeframe }),
+    }),
+
+  /** GET /api/spot-volatility/settings — global settings (auto-init) */
+  getSettings: (): Promise<SpotVolatilitySettingsOut> =>
+    request('/spot-volatility/settings'),
+
+  /** PUT /api/spot-volatility/settings — deep-merge patch */
+  updateSettings: (config: Record<string, unknown>): Promise<SpotVolatilitySettingsOut> =>
+    request('/spot-volatility/settings', {
+      method: 'PUT',
+      body: JSON.stringify({ config }),
+    }),
 }
