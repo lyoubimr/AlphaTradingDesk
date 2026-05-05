@@ -525,7 +525,7 @@ function SpotExpectancyPanel({
         <p className="text-[10px] text-slate-500 uppercase tracking-wider font-medium">Win Rate preview</p>
         <div className="flex items-end gap-2">
           <p className={cn('text-2xl font-mono font-bold leading-none', wrBadgeCls)}>
-            {(rawWr * 100).toFixed(0)}%
+            {(Math.max(0.05, Math.min(0.95, rawWr + viRegimeAdj)) * 100).toFixed(0)}%
           </p>
           {hasStratStats && (
             <p className="text-[10px] text-slate-500 mb-0.5">
@@ -745,16 +745,17 @@ export function NewSpotTradePage() {
       .finally(() => setPriceLoading(false))
   }, [instrument?.symbol])
 
-  // ── Auto-fetch pair VI from spot watchlist when instrument selected ─────────
+  // ── Auto-fetch pair VI from spot watchlist when instrument or TF changes ────
   useEffect(() => {
     if (!instrument?.symbol) { setPairVi(null); return }
-    spotVolatilityApi.getWatchlist('4h')
+    const tf = timeframe ? timeframe.toLowerCase() : '4h'
+    spotVolatilityApi.getWatchlist(tf)
       .then((wl) => {
         const found = wl.pairs.find((p) => p.pair === instrument.symbol)
         setPairVi(found ?? null)
       })
       .catch(() => setPairVi(null))
-  }, [instrument?.symbol])
+  }, [instrument?.symbol, timeframe])
 
   // ── Stable screenshot URLs (avoid scroll-jump on add) ─────────────────────
   useEffect(() => {
