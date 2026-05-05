@@ -86,6 +86,7 @@ export interface SpotTradeCreate {
   tp_targets?: Array<{ price: string; pct_allocation: number }>
   order_type?: string
   strategy_id?: number | null
+  instrument_id?: number | null
   notes?: string | null
 }
 

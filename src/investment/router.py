@@ -194,3 +194,13 @@ def get_portfolio(
     db: Session = Depends(get_db),
 ) -> PortfolioOut:
     return service.get_portfolio(profile_id, db)
+
+
+# ── Instruments sync ──────────────────────────────────────────────────────────
+
+@router.post("/instruments/sync-spot", status_code=200)
+def sync_spot_instruments(
+    db: Session = Depends(get_db),
+) -> dict:
+    """Sync Kraken spot instrument catalog from the public REST API."""
+    return service.sync_spot_instruments(db)

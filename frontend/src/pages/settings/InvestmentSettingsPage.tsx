@@ -1,7 +1,7 @@
 // ── Investment Settings Page ── Phase 7C
 import { useState, useEffect, useCallback } from 'react'
 import { Link } from 'react-router-dom'
-import { ArrowLeft, Loader2, Save, TrendingUp, RefreshCw, Clock, DollarSign } from 'lucide-react'
+import { ArrowLeft, Database, Loader2, Save, TrendingUp, RefreshCw, Clock, DollarSign } from 'lucide-react'
 import { PageHeader } from '../../components/ui/PageHeader'
 import { useProfile } from '../../context/ProfileContext'
 import { investmentApi } from '../../lib/api'
@@ -55,11 +55,13 @@ export function InvestmentSettingsPage() {
   const { activeProfile } = useProfile()
   const profileId = activeProfile?.id ?? null
 
-  const [config,  setConfig]  = useState<Config>(DEFAULT_CONFIG)
-  const [loading, setLoading] = useState(false)
-  const [saving,  setSaving]  = useState(false)
-  const [error,   setError]   = useState<string | null>(null)
-  const [saved,   setSaved]   = useState(false)
+  const [config,   setConfig]  = useState<Config>(DEFAULT_CONFIG)
+  const [loading,  setLoading] = useState(false)
+  const [saving,   setSaving]  = useState(false)
+  const [error,    setError]   = useState<string | null>(null)
+  const [saved,    setSaved]   = useState(false)
+  const [syncing,  setSyncing] = useState(false)
+  const [syncDone, setSyncDone] = useState<number | null>(null)
 
   type DepositKey  = keyof Config['recurrent_deposit']
   type TrackingKey = keyof Config['price_tracking']
@@ -101,6 +103,20 @@ export function InvestmentSettingsPage() {
   }, [profileId])
 
   useEffect(() => { void load() }, [load])
+
+  const handleSyncInstruments = async () => {
+    setSyncing(true)
+    setSyncDone(null)
+    setError(null)
+    try {
+      const result = await investmentApi.syncSpotInstruments()
+      setSyncDone(result.synced)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Sync failed')
+    } finally {
+      setSyncing(false)
+    }
+  }
 
   const handleSave = async () => {
     if (!profileId) return
@@ -306,6 +322,33 @@ export function InvestmentSettingsPage() {
                   className={cn(inputCls, 'w-24')}
                 />
               </div>
+            </div>
+          </div>
+
+          {/* ── Spot instruments catalog ── */}
+          <div className="rounded-xl bg-surface-800 border border-surface-700 overflow-hidden">
+            <div className="flex items-center gap-3 px-5 py-4 border-b border-surface-700">
+              <Database size={16} className="text-slate-500 shrink-0" />
+              <div>
+                <h2 className="text-sm font-semibold text-slate-300">Spot instruments catalog</h2>
+                <p className="text-xs text-slate-600 mt-0.5">Sync Kraken USD/USDT pairs for autocomplete in the trade form</p>
+              </div>
+            </div>
+            <div className="px-5 py-4 flex items-center gap-4">
+              <button
+                type="button"
+                onClick={() => void handleSyncInstruments()}
+                disabled={syncing}
+                className="flex items-center gap-2 px-4 py-2 rounded-lg bg-surface-700 hover:bg-surface-600 border border-surface-600 text-slate-300 text-sm font-medium transition-colors disabled:opacity-50"
+              >
+                {syncing
+                  ? <Loader2 size={13} className="animate-spin" />
+                  : <RefreshCw size={13} />}
+                {syncing ? 'Syncing…' : 'Sync catalog'}
+              </button>
+              {syncDone !== null && (
+                <span className="text-xs text-emerald-400">✓ {syncDone} pairs synced</span>
+              )}
             </div>
           </div>
 

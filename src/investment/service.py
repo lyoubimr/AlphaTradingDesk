@@ -13,13 +13,16 @@ from __future__ import annotations
 
 import copy
 import datetime
+import json
+import urllib.request as _urllib
 from decimal import Decimal
 
 from fastapi import HTTPException, status
 from sqlalchemy import func
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
-from src.core.models.broker import Profile
+from src.core.models.broker import Broker, Instrument, Profile
 from src.core.models.trade import Trade
 from src.investment.models import Deposit, InvestmentSettings, SpotTrade
 from src.investment.schemas import (
@@ -101,7 +104,6 @@ def recompute_spot_capital(db: Session, profile_id: int) -> Profile:
     Called atomically after each deposit mutation and each trade close.
     """
     profile = _get_profile_or_404(db, profile_id)
-    _require_spot_profile(profile)
 
     total_deposits_raw = (
         db.query(func.sum(Deposit.amount))
@@ -450,3 +452,104 @@ def get_portfolio(profile_id: int, db: Session) -> PortfolioOut:
         open_positions_count=open_count,
         last_price_refresh=last_price_refresh,
     )
+
+
+# ── Spot instruments catalog sync ──────────────────────────────────────────────────────────────────────────
+
+def sync_spot_instruments(db: Session) -> dict[str, int]:
+    """Fetch Kraken spot pairs from the public API and upsert into instruments.
+
+    Filters: USD and USDT quoted pairs with status 'online'.
+    Symbol used: altname (e.g. 'XBTUSD'). display_name: wsname (e.g. 'XBT/USD').
+    Idempotent via ON CONFLICT DO UPDATE on (broker_id, symbol).
+    """
+    kraken_broker = (
+        db.query(Broker)
+        .filter(Broker.name.ilike("%kraken%"), Broker.status == "active")
+        .first()
+    )
+    if kraken_broker is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Kraken broker not found in DB. Cannot sync spot instruments.",
+        )
+
+    req = _urllib.Request(
+        "https://api.kraken.com/0/public/AssetPairs",
+        headers={"User-Agent": "AlphaTradingDesk/7.0"},
+    )
+    try:
+        with _urllib.urlopen(req, timeout=15) as resp:
+            data = json.loads(resp.read())
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Kraken API unreachable: {exc}",
+        ) from exc
+
+    api_errors = data.get("error", [])
+    if api_errors:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Kraken API returned errors: {api_errors}",
+        )
+
+    pairs = data.get("result", {})
+    synced = 0
+
+    for _pair_name, info in pairs.items():
+        # Skip dark/index entries and futures
+        if _pair_name.startswith(".") or _pair_name.startswith("PF_"):
+            continue
+        # Only USD and USDT quoted
+        quote = info.get("quote", "")
+        if quote not in ("ZUSD", "USDT"):
+            continue
+        # Must have a websocket name
+        wsname: str = info.get("wsname", "")
+        if not wsname:
+            continue
+        # Skip pairs not online
+        pair_status = info.get("status")
+        if pair_status is not None and pair_status != "online":
+            continue
+
+        altname: str = info.get("altname", _pair_name)
+        base_raw: str = info.get("base", "")
+        # Kraken uses X/Z prefixes for ISO 4217 currencies (e.g. XXBT, ZUSD)
+        clean_base = base_raw[1:] if len(base_raw) == 4 and base_raw[0] in ("X", "Z") else base_raw
+        clean_quote = "USD" if quote == "ZUSD" else "USDT"
+        ordermin_raw = info.get("ordermin")
+        ordermin = Decimal(str(ordermin_raw)) if ordermin_raw else None
+
+        stmt = (
+            pg_insert(Instrument)
+            .values(
+                broker_id=kraken_broker.id,
+                symbol=altname,
+                display_name=wsname,
+                asset_class="Crypto",
+                base_currency=clean_base,
+                quote_currency=clean_quote,
+                is_predefined=True,
+                is_active=True,
+                max_leverage=None,
+                contract_value_precision=None,
+                min_lot=ordermin,
+            )
+            .on_conflict_do_update(
+                index_elements=["broker_id", "symbol"],
+                set_={
+                    "is_active": True,
+                    "display_name": wsname,
+                    "base_currency": clean_base,
+                    "quote_currency": clean_quote,
+                    "min_lot": ordermin,
+                },
+            )
+        )
+        db.execute(stmt)
+        synced += 1
+
+    db.commit()
+    return {"synced": synced}

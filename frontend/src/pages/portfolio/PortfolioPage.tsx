@@ -5,11 +5,11 @@ import { Loader2, Plus, X, TrendingUp, TrendingDown, CheckCircle2, XCircle, Penc
 import { PageHeader } from '../../components/ui/PageHeader'
 import { StatCard } from '../../components/ui/StatCard'
 import { useProfile } from '../../context/ProfileContext'
-import { investmentApi, strategiesApi } from '../../lib/api'
+import { investmentApi, strategiesApi, instrumentsApi } from '../../lib/api'
 import { cn } from '../../lib/cn'
 import type {
   SpotTradeOut, SpotTradeCreate, SpotTradeClose,
-  PortfolioOut, DepositOut, DepositCreate, DepositUpdate, Strategy,
+  PortfolioOut, DepositOut, DepositCreate, DepositUpdate, Strategy, Instrument,
 } from '../../types/api'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -45,18 +45,26 @@ const EMPTY_TRADE_FORM: SpotTradeCreate = {
   quantity: '',
   stop_loss: '',
   strategy_id: null,
+  instrument_id: null,
   notes: '',
 }
 
 function OpenTradeModal({ profileId, onClose, onSaved }: OpenTradeModalProps) {
+  const { activeProfile } = useProfile()
   const [form, setForm] = useState<SpotTradeCreate>(EMPTY_TRADE_FORM)
   const [strategies, setStrategies] = useState<Strategy[]>([])
+  const [instruments, setInstruments] = useState<Instrument[]>([])
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
       strategiesApi.list(profileId).then(setStrategies).catch(() => {})
-  }, [profileId])
+      if (activeProfile?.broker_id) {
+        instrumentsApi.listByBroker(activeProfile.broker_id)
+          .then(all => setInstruments(all.filter(i => !i.symbol.startsWith('PF_'))))
+          .catch(() => {})
+      }
+  }, [profileId, activeProfile?.broker_id])
 
   const set = (field: keyof SpotTradeCreate, value: string | number | null) =>
     setForm((f) => ({ ...f, [field]: value }))
@@ -76,6 +84,7 @@ function OpenTradeModal({ profileId, onClose, onSaved }: OpenTradeModalProps) {
         quantity: form.quantity,
         stop_loss: (form.stop_loss as string) || null,
         strategy_id: form.strategy_id ?? null,
+        instrument_id: form.instrument_id ?? null,
         notes: (form.notes as string) || null,
       })
       onSaved()
@@ -108,11 +117,22 @@ function OpenTradeModal({ profileId, onClose, onSaved }: OpenTradeModalProps) {
             <label className="block text-xs font-medium text-slate-400 mb-1.5">Pair *</label>
             <input
               required
+              list="spot-pairs-datalist"
               value={form.pair}
-              onChange={(e) => set('pair', e.target.value)}
-              placeholder="BTC, ETH, SOL…"
+              onChange={(e) => {
+                const val = e.target.value
+                set('pair', val)
+                const match = instruments.find(i => i.symbol === val.toUpperCase().trim())
+                set('instrument_id', match ? match.id : null)
+              }}
+              placeholder="XBTUSD, ETHUSD, SOLUSD…"
               className={inputCls}
             />
+            <datalist id="spot-pairs-datalist">
+              {instruments.map(i => (
+                <option key={i.id} value={i.symbol}>{i.display_name}</option>
+              ))}
+            </datalist>
           </div>
 
           <div className="grid grid-cols-2 gap-3">
