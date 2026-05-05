@@ -19,7 +19,7 @@ import {
 } from 'lucide-react'
 import { PageHeader } from '../../components/ui/PageHeader'
 import { useProfile } from '../../context/ProfileContext'
-import { investmentApi, strategiesApi, statsApi } from '../../lib/api'
+import { investmentApi, strategiesApi, statsApi, automationApi } from '../../lib/api'
 import { cn } from '../../lib/cn'
 import type { Instrument, Strategy, WinRateStats, PortfolioOut } from '../../types/api'
 
@@ -432,7 +432,7 @@ const ALL_TAGS = [
   '📈 Breakout',  '📉 Breakdown', '🔄 Range',       '🌊 Trend',
 ]
 
-const TIMEFRAMES = ['1W', '3D', '1D', '4H', '1H', '15m', '5m'] as const
+const TIMEFRAMES = ['1W', '3D', '1D', '4H'] as const
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -639,10 +639,15 @@ export function NewSpotTradePage() {
   const [tps, setTps]                   = useState<TpRow[]>([{ price: '', pct: '100' }])
 
   // ── Analysis ─────────────────────────────────────────────────────────────
-  const [timeframe, setTimeframe]     = useState('')
-  const [confidence, setConfidence]   = useState(0)   // 0 = not set, 1–10
-  const [tradeTags, setTradeTags]     = useState<string[]>([])
-  const [notes, setNotes]             = useState('')
+  const [timeframe, setTimeframe]       = useState('')
+  const [confidence, setConfidence]     = useState(0)   // 0 = not set, 1–10
+  const [tradeTags, setTradeTags]       = useState<string[]>([])
+  const [openingNotes, setOpeningNotes] = useState('')
+  const [postNotes, setPostNotes]       = useState('')   // filled when closing
+
+  // ── Automation ────────────────────────────────────────────────────────────
+  const [automateOnCreate,         setAutomateOnCreate]         = useState(false)
+  const [profileAutomationEnabled, setProfileAutomationEnabled] = useState(false)
 
   // ── Screenshots ───────────────────────────────────────────────────────────
   const [entryScreenshots, setEntryScreenshots] = useState<File[]>([])
@@ -663,6 +668,9 @@ export function NewSpotTradePage() {
     strategiesApi.list(profileId).then(setStrategies).catch(() => setStrategies([])).finally(() => setStratLoading(false))
     investmentApi.getPortfolio(profileId).then(setPortfolio).catch(() => {})
     statsApi.winrate().then(setGlobalWrStats).catch(() => {})
+    automationApi.getSettings(profileId)
+      .then((s) => { const en = s.config.enabled; setProfileAutomationEnabled(en); setAutomateOnCreate(en) })
+      .catch(() => {})
   }, [profileId])
 
   // ── Auto-fetch market price when instrument selected ───────────────────────
@@ -882,7 +890,7 @@ export function NewSpotTradePage() {
         confidence_score:   confidence > 0 ? String(confidence) : null,
         strategy_id:        strategyIds[0] ?? null,
         instrument_id:      instrument?.id ?? null,
-        notes:              notes || null,
+        notes:              openingNotes || null,
       })
 
       // Upload entry screenshots (non-blocking — trade already created)
@@ -1027,26 +1035,6 @@ export function NewSpotTradePage() {
                   )}
                 </div>
               </div>
-
-              {/* Chart patterns */}
-              <Field label="Chart patterns">
-                <div className="flex flex-wrap gap-1.5">
-                  {ALL_TAGS.map((tag) => (
-                    <button key={tag} type="button"
-                      onClick={() => setTradeTags((prev) =>
-                        prev.includes(tag) ? prev.filter((t) => t !== tag) : [...prev, tag]
-                      )}
-                      className={cn(
-                        'px-2.5 py-1.5 rounded-lg border text-[11px] font-medium transition-all',
-                        tradeTags.includes(tag)
-                          ? 'bg-brand-600/25 border-brand-500/50 text-brand-300'
-                          : 'bg-surface-700 border-surface-600 text-slate-400 hover:text-slate-200'
-                      )}>
-                      {tag}
-                    </button>
-                  ))}
-                </div>
-              </Field>
             </Section>
 
             {/* ── 3. ORDER & ENTRY ──────────────────────────────────────── */}
@@ -1331,20 +1319,67 @@ export function NewSpotTradePage() {
 
             {/* ── 5. ANALYSIS & NOTES ───────────────────────────────────── */}
             <Section icon="📝" title="Analysis & notes">
-              <Field label="Notes — entry rationale">
+              {/* Opening — pre-entry rationale */}
+              <Field label={
+                <span className="flex items-center gap-1.5">
+                  📖 Opening analysis
+                  <span className="text-slate-600 font-normal text-[10px]">(before entry)</span>
+                </span>
+              }>
                 <textarea
-                  value={notes}
-                  onChange={(e) => setNotes(e.target.value)}
-                  rows={4}
+                  value={openingNotes}
+                  onChange={(e) => setOpeningNotes(e.target.value)}
+                  rows={5}
                   placeholder={
                     `Entry rationale:\n` +
-                    `• HTF context (weekly/daily trend):\n` +
-                    `• Key levels (support, resistance, FVG):\n` +
+                    `• HTF context (weekly/daily bias):\n` +
+                    `• Key levels (support, resistance, FVG, OB):\n` +
                     `• Trigger / signal:\n` +
                     `• Macro context or catalyst:`
                   }
                   className={cn(inputCls, 'resize-none font-mono text-xs')}
                 />
+              </Field>
+
+              {/* Post-trade — filled after closing */}
+              <Field label={
+                <span className="flex items-center gap-1.5">
+                  📌 Post-trade review
+                  <span className="text-slate-600 font-normal text-[10px]">(after close)</span>
+                </span>
+              }>
+                <textarea
+                  value={postNotes}
+                  onChange={(e) => setPostNotes(e.target.value)}
+                  rows={3}
+                  placeholder={
+                    `Post-trade review:\n` +
+                    `• What worked / what missed:\n` +
+                    `• Emotions / discipline notes:\n` +
+                    `• Adjustments for next time:`
+                  }
+                  className={cn(inputCls, 'resize-none font-mono text-xs text-slate-400')}
+                />
+              </Field>
+
+              {/* Chart patterns — at the end of section */}
+              <Field label="Chart patterns">
+                <div className="flex flex-wrap gap-1.5">
+                  {ALL_TAGS.map((tag) => (
+                    <button key={tag} type="button"
+                      onClick={() => setTradeTags((prev) =>
+                        prev.includes(tag) ? prev.filter((t) => t !== tag) : [...prev, tag]
+                      )}
+                      className={cn(
+                        'px-2.5 py-1.5 rounded-lg border text-[11px] font-medium transition-all',
+                        tradeTags.includes(tag)
+                          ? 'bg-brand-600/25 border-brand-500/50 text-brand-300'
+                          : 'bg-surface-700 border-surface-600 text-slate-400 hover:text-slate-200'
+                      )}>
+                      {tag}
+                    </button>
+                  ))}
+                </div>
               </Field>
             </Section>
 
@@ -1467,6 +1502,53 @@ export function NewSpotTradePage() {
               confidence={confidence}
               ccy={ccy}
             />
+
+            {/* ── Automation toggle — Kraken Spot ──────────────────────── */}
+            <div className={cn(
+              'flex items-center justify-between gap-4 rounded-xl border p-4',
+              automateOnCreate
+                ? 'bg-brand-500/10 border-brand-500/30'
+                : 'bg-surface-800 border-surface-700',
+            )}>
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <Zap size={14} className={automateOnCreate ? 'text-brand-400' : 'text-slate-500'} />
+                  <p className="text-sm font-semibold text-slate-200">Enable automation</p>
+                </div>
+                {profileAutomationEnabled ? (
+                  <p className="text-[11px] text-slate-500 mt-0.5">
+                    Places an order on Kraken Spot immediately after creation.
+                  </p>
+                ) : (
+                  <p className="text-[11px] text-amber-400/80 mt-0.5 flex items-center gap-1">
+                    <AlertTriangle size={10} className="shrink-0" />
+                    Profile automation disabled —{' '}
+                    <a href="/settings/automation" className="underline text-amber-400 hover:text-amber-300">
+                      Settings → Automation
+                    </a>
+                  </p>
+                )}
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={automateOnCreate}
+                disabled={!profileAutomationEnabled}
+                onClick={() => setAutomateOnCreate((v) => !v)}
+                className={cn(
+                  'relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent',
+                  'transition-colors duration-200 focus:outline-none',
+                  'disabled:opacity-40 disabled:cursor-not-allowed',
+                  automateOnCreate ? 'bg-brand-500' : 'bg-surface-500',
+                )}
+              >
+                <span className={cn(
+                  'pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow',
+                  'transition-transform duration-200',
+                  automateOnCreate ? 'translate-x-5' : 'translate-x-0',
+                )} />
+              </button>
+            </div>
 
             {/* ── Submit ────────────────────────────────────────────────── */}
             <button
