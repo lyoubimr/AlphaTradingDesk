@@ -204,7 +204,9 @@ export function WatchlistsPage() {
   const [loadingDetail, setLoadingDetail] = useState(false)
   const [isRunning, setIsRunning]         = useState(false)
   const [runStatus, setRunStatus]         = useState<string | null>(null)
-  const [generateTF, setGenerateTF]       = useState<TF>('1h')
+  const [generateTF, setGenerateTF]       = useState<TF>(
+    activeProfile?.account_type === 'spot' ? '1w' : '1h'
+  )
   const [expandedDates, setExpandedDates] = useState<Set<string>>(new Set())
   // Mobile: 'tree' = show snapshot list, 'detail' = show pair table
   const [mobileView, setMobileView]       = useState<'tree' | 'detail'>('tree')
@@ -657,7 +659,8 @@ export function WatchlistsPage() {
               <label className="text-xs text-zinc-500">Regime filter <span className="text-zinc-700">(applied to display after compute)</span></label>
               <div className="flex flex-wrap gap-1">
                 {REGIMES.map((r) => {
-                  const active = modalRegimes.has(r)
+                  const active  = modalRegimes.has(r)
+                  const rColor  = r !== 'ALL' ? REGIME_COLOR_HEX[r] : undefined
                   return (
                     <button
                       key={r}
@@ -678,13 +681,12 @@ export function WatchlistsPage() {
                           })
                         }
                       }}
-                      className={`px-2 py-0.5 text-[10px] font-mono rounded border transition-colors ${
-                        active
-                          ? 'bg-emerald-950 text-emerald-300 border-emerald-700'
-                          : 'bg-zinc-800 text-zinc-500 border-zinc-700 hover:border-zinc-500'
+                      className={`px-2 py-0.5 rounded text-xs font-mono transition-colors ${
+                        active ? 'bg-zinc-700 text-zinc-100' : 'text-zinc-500 hover:text-zinc-300'
                       }`}
+                      style={active && rColor ? { color: rColor } : {}}
                     >
-                      {r}
+                      {r !== 'ALL' && REGIME_EMOJI[r]} {r}
                     </button>
                   )
                 })}
