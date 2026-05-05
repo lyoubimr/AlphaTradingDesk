@@ -35,9 +35,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, status
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
-from src.core.config import settings
-
 from src.brokers.schemas import InstrumentOut
+from src.core.config import settings
 from src.core.deps import get_db
 from src.investment import service
 from src.investment.schemas import (

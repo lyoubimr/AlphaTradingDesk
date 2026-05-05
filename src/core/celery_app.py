@@ -22,6 +22,7 @@ celery_app = Celery(
         "src.kraken_execution.tasks",  # P5-8
         "src.ritual.tasks",  # P6B — trading window notifications
         "src.investment.tasks",  # P7 — spot instrument sync
+        "src.spot_volatility.tasks",  # P7 — spot VI daily/weekly watchlist
     ],
 )
 
@@ -105,6 +106,22 @@ celery_app.conf.update(
         "cleanup-snapshots": {
             "task": "src.volatility.tasks.cleanup_old_snapshots",
             "schedule": crontab(minute=0, hour=3),  # daily at 03:00 UTC
+        },
+        "cleanup-spot-snapshots": {
+            "task": "src.spot_volatility.tasks.cleanup_old_spot_snapshots",
+            "schedule": crontab(minute=30, hour=3),  # daily at 03:30 UTC (staggered after contracts)
+        },
+        # ── Phase 7 — Spot Volatility VI watchlist ────────────────────────
+        # 4h is intentionally excluded — on-demand only (user triggers via POST /run)
+        "spot-vi-1d": {
+            "task": "src.spot_volatility.tasks.compute_spot_watchlist",
+            "schedule": crontab(minute=0, hour=1),  # daily at 01:00 UTC (after pair-vi-1d at 00:00)
+            "kwargs": {"timeframe": "1d"},
+        },
+        "spot-vi-1w": {
+            "task": "src.spot_volatility.tasks.compute_spot_watchlist",
+            "schedule": crontab(minute=0, hour=2, day_of_week="mon"),  # Monday 02:00 UTC
+            "kwargs": {"timeframe": "1w"},
         },
         # ── Phase 5 — Kraken Execution automation ─────────────────────────
         "poll-pending-orders": {
