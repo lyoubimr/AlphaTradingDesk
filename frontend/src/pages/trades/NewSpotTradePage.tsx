@@ -298,12 +298,6 @@ const ALL_TAGS = [
 ]
 
 const TIMEFRAMES = ['1W', '3D', '1D', '4H', '1H', '15m', '5m'] as const
-const SESSIONS   = [
-  { label: 'Asian',     emoji: '🌏' },
-  { label: 'London',    emoji: '🇬🇧' },
-  { label: 'New York',  emoji: '🗽' },
-  { label: 'Overlap',   emoji: '⚡' },
-] as const
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -340,22 +334,25 @@ export function NewSpotTradePage() {
   const [instruments, setInstruments]   = useState<Instrument[]>([])
   const [strategies, setStrategies]     = useState<Strategy[]>([])
 
-  const [instrument, setInstrument]   = useState<Instrument | null>(null)
-  const [orderType, setOrderType]     = useState<'MARKET' | 'LIMIT'>('MARKET')
-  const [entry, setEntry]             = useState('')
-  const [quantity, setQuantity]       = useState('')
-  const [stopLoss, setStopLoss]       = useState('')
+  const [instrument, setInstrument]       = useState<Instrument | null>(null)
+  const [orderType, setOrderType]         = useState<'MARKET' | 'LIMIT'>('MARKET')
+  const [entry, setEntry]                 = useState('')
+  // Qty: two synced fields — costInput (USD) ⇔ quantity (base units)
+  const [quantity, setQuantity]           = useState('') // base units (e.g. BTC)
+  const [costInput, setCostInput]         = useState('') // investment in account ccy
+  const lastQtyField                      = useRef<'qty' | 'cost'>('qty')
+  const [stopLoss, setStopLoss]           = useState('')
+  const [trailingStopPct, setTrailingStopPct] = useState('')
 
-  const [tpCount, setTpCount]         = useState<0 | 1 | 2 | 3>(1)
+  const [tpCount, setTpCount]           = useState<0 | 1 | 2 | 3>(1)
   const [activePreset, setActivePreset] = useState('Smart Scale')
-  const [tps, setTps]                 = useState<TpRow[]>([{ price: '', pct: '' }])
+  const [tps, setTps]                   = useState<TpRow[]>([{ price: '', pct: '' }])
 
-  const [timeframe, setTimeframe]     = useState('')
-  const [confidence, setConfidence]   = useState(5)
-  const [tradeTags, setTradeTags]     = useState<string[]>([])
-  const [sessionTag, setSessionTag]   = useState('')
-  const [strategyId, setStrategyId]   = useState<number | string>('')
-  const [notes, setNotes]             = useState('')
+  const [timeframe, setTimeframe]   = useState('')
+  const [confidence, setConfidence] = useState(5)
+  const [tradeTags, setTradeTags]   = useState<string[]>([])
+  const [strategyId, setStrategyId] = useState<number | string>('')
+  const [notes, setNotes]           = useState('')
 
   const [submitting, setSubmitting]   = useState(false)
   const [error, setError]             = useState<string | null>(null)
@@ -379,7 +376,38 @@ export function NewSpotTradePage() {
     if (entryNum == null || quantityNum == null) return null
     return entryNum * quantityNum
   }, [entryNum, quantityNum])
+  // ── Qty ⇔ Cost bidirectional sync ──────────────────────────────
+  const handleQtyChange = useCallback((v: string) => {
+    lastQtyField.current = 'qty'
+    setQuantity(v)
+    const e = entryNum
+    if (e && v) setCostInput((e * Number(v)).toFixed(2))
+    else if (!v) setCostInput('')
+  }, [entryNum])
 
+  const handleCostChange = useCallback((v: string) => {
+    lastQtyField.current = 'cost'
+    setCostInput(v)
+    const e = entryNum
+    if (e && v) {
+      const raw = (Number(v) / e).toFixed(8)
+      setQuantity(raw.replace(/\.?0+$/, '') || '0')
+    } else if (!v) {
+      setQuantity('')
+    }
+  }, [entryNum])
+
+  // Re-sync qty ↔ cost when entry price changes
+  useEffect(() => {
+    if (!entryNum) return
+    if (lastQtyField.current === 'cost' && costInput) {
+      const raw = (Number(costInput) / entryNum).toFixed(8)
+      setQuantity(raw.replace(/\.?0+$/, '') || '0')
+    } else if (lastQtyField.current === 'qty' && quantity) {
+      setCostInput((entryNum * Number(quantity)).toFixed(2))
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [entryNum])
   // ── TP management ──────────────────────────────────────────────────────────
 
   const applyPreset = useCallback((presetLabel: string, count: number) => {
@@ -499,6 +527,7 @@ export function NewSpotTradePage() {
         entry_price:        entry,
         quantity,
         stop_loss:          stopLoss || null,
+        trailing_stop_pct:  trailingStopPct || null,
         order_type:         orderType,
         nb_take_profits:    tpCount,
         tp_targets:         tps.filter((t) => t.price).map((t) => ({
@@ -507,7 +536,6 @@ export function NewSpotTradePage() {
         })),
         analyzed_timeframe: timeframe || null,
         confidence_score:   String(confidence),
-        session_tag:        sessionTag || null,
         strategy_id:        strategyId ? Number(strategyId) : null,
         instrument_id:      instrument?.id ?? null,
         notes:              notes || null,
@@ -600,50 +628,79 @@ export function NewSpotTradePage() {
                     ccy={ccy}
                   />
                 </Field>
-                <Field label={<>Quantity <span className="text-red-400">*</span></>}
-                  hint={instrument?.base_currency ? `Units of ${instrument.base_currency}` : 'Units to buy'}
-                >
-                  <PriceInput
-                    required
-                    value={quantity}
-                    onChange={setQuantity}
-                    placeholder="0.001"
-                    ccy={instrument?.base_currency ?? undefined}
-                  />
-                </Field>
               </div>
 
-              {/* Total cost */}
-              {totalCost != null && (
-                <div className="grid grid-cols-2 gap-2">
-                  <CalcPill
-                    label="Total cost"
-                    value={`${fmt(totalCost)} ${ccy}`}
-                    color="blue"
-                    sub={`${fmt(entryNum)} × ${fmt(quantityNum, 6)}`}
-                  />
-                  {instrument?.min_lot && quantityNum != null && Number(instrument.min_lot) > quantityNum && (
-                    <CalcPill
-                      label="⚠ Below min lot"
-                      value={`Min: ${instrument.min_lot}`}
-                      color="amber"
-                    />
+              {/* Qty ⇔ Cost — dual synced fields */}
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between mb-0.5">
+                  <span className="text-xs font-medium text-slate-400">
+                    Quantity <span className="text-red-400">*</span>
+                  </span>
+                  {quantityNum != null && entryNum != null && (
+                    <span className="text-[10px] text-slate-500 font-mono">
+                      {fmt(quantityNum, 6)} × {fmt(entryNum)} = <span className="text-brand-300 font-semibold">{fmt(totalCost)} {ccy}</span>
+                    </span>
                   )}
                 </div>
-              )}
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <p className="text-[10px] text-slate-500 mb-1">Invest ({ccy})</p>
+                    <PriceInput
+                      value={costInput}
+                      onChange={handleCostChange}
+                      placeholder="500.00"
+                      ccy={ccy}
+                    />
+                  </div>
+                  <div>
+                    <p className="text-[10px] text-slate-500 mb-1">
+                      {instrument?.base_currency ? `Units (${instrument.base_currency})` : 'Units'}
+                    </p>
+                    <PriceInput
+                      required
+                      value={quantity}
+                      onChange={handleQtyChange}
+                      placeholder="0.00487"
+                      ccy={instrument?.base_currency ?? undefined}
+                    />
+                  </div>
+                </div>
+                {instrument?.min_lot && quantityNum != null && Number(instrument.min_lot) > quantityNum && (
+                  <p className="text-[10px] text-amber-400 flex items-center gap-1">
+                    <AlertTriangle size={10} /> Below minimum lot ({instrument.min_lot} {instrument.base_currency})
+                  </p>
+                )}
+              </div>
             </Section>
 
             {/* ── Risk management ─────────────────────────────────────────── */}
             <Section icon="🛡️" title="Risk management">
-              <Field label="Stop loss (optional)"
-                hint={stopLossAmount != null ? `Potential loss: ${fmt(Math.abs(stopLossAmount))} ${ccy} (${fmtPct(-(stopLossPct ?? 0))})` : 'Leave empty if you manage risk manually'}>
-                <PriceInput
-                  value={stopLoss}
-                  onChange={setStopLoss}
-                  placeholder="Optional guard"
-                  ccy={ccy}
-                />
-              </Field>
+              <div className="grid grid-cols-[1fr_140px] gap-3">
+                <Field label="Stop loss (optional)"
+                  hint={stopLossAmount != null ? `Potential loss: −${fmt(Math.abs(stopLossAmount))} ${ccy} (${fmtPct(-(stopLossPct ?? 0))})` : 'Leave empty if you manage risk manually'}>
+                  <PriceInput
+                    value={stopLoss}
+                    onChange={setStopLoss}
+                    placeholder="Optional guard"
+                    ccy={ccy}
+                  />
+                </Field>
+                <Field label="Trailing stop"
+                  hint={trailingStopPct && entryNum
+                    ? `Init. at ${fmt(entryNum * (1 - Number(trailingStopPct) / 100))} ${ccy}`
+                    : 'Optional %'}>
+                  <div className="flex">
+                    <input
+                      type="number" step="0.5" min="0.5" max="50"
+                      value={trailingStopPct}
+                      onChange={(e) => setTrailingStopPct(e.target.value)}
+                      placeholder="5"
+                      className={cn(inputCls, 'rounded-r-none border-r-0')}
+                    />
+                    <span className="shrink-0 px-2.5 py-2 rounded-r-lg border border-surface-600 bg-surface-700/60 text-xs text-slate-500">%</span>
+                  </div>
+                </Field>
+              </div>
 
               {/* SL warning: SL above entry */}
               {entryNum != null && slNum != null && slNum >= entryNum && (
@@ -799,23 +856,6 @@ export function NewSpotTradePage() {
                 </div>
               </Field>
 
-              {/* Session */}
-              <Field label="Session">
-                <div className="flex flex-wrap gap-1.5">
-                  {SESSIONS.map((s) => (
-                    <button key={s.label} type="button"
-                      onClick={() => setSessionTag(sessionTag === s.label ? '' : s.label)}
-                      className={cn(
-                        'px-2.5 py-1 rounded-md text-[10px] font-medium transition-colors border flex items-center gap-1',
-                        sessionTag === s.label
-                          ? 'bg-brand-600/30 border-brand-500/40 text-brand-200'
-                          : 'bg-surface-700 border-surface-600 text-slate-500 hover:text-slate-300'
-                      )}>
-                      <span>{s.emoji}</span> {s.label}
-                    </button>
-                  ))}
-                </div>
-              </Field>
             </Section>
           </div>
 

@@ -85,6 +85,8 @@ class SpotTrade(Base):
 
     # Optional SL guard (not required for spot — no forced liquidation risk)
     stop_loss: Mapped[Decimal | None] = mapped_column(Numeric(20, 8))
+    # Trailing stop as percentage distance (e.g. 5.0 = 5% trail below peak)
+    trailing_stop_pct: Mapped[Decimal | None] = mapped_column(Numeric(6, 4))
 
     # Take Profits: [{price: float, pct_allocation: float}]
     nb_take_profits: Mapped[int] = mapped_column(Integer, nullable=False, default=1)

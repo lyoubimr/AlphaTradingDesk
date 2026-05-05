@@ -157,6 +157,14 @@ def upgrade() -> None:
             sa.PrimaryKeyConstraint("id"),
         )
 
+    # ── spot_trades → ADD COLUMN trailing_stop_pct (added post-initial design) ─
+    _st_cols = {c["name"] for c in inspector.get_columns("spot_trades")} if "spot_trades" in existing_tables else set()
+    if "trailing_stop_pct" not in _st_cols:
+        op.add_column(
+            "spot_trades",
+            sa.Column("trailing_stop_pct", sa.Numeric(6, 4), nullable=True),
+        )
+
     _st_idx = _existing_indexes("spot_trades")
     if "ix_spot_trades_profile_id" not in _st_idx:
         op.create_index("ix_spot_trades_profile_id", "spot_trades", ["profile_id"])

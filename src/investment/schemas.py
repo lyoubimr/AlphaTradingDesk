@@ -26,6 +26,8 @@ class SpotTradeCreate(BaseModel):
     entry_date: datetime.datetime | None = None
     # SL is optional — an optional guard, not required
     stop_loss: Decimal | None = None
+    # Trailing stop as percentage distance (e.g. 5.0 = 5% trail below peak price)
+    trailing_stop_pct: Decimal | None = None
     nb_take_profits: int = Field(default=1, ge=0, le=3)
     tp_targets: list[TpTarget] = Field(default_factory=list)
     market_vi_at_entry: Decimal | None = None
@@ -41,6 +43,7 @@ class SpotTradeCreate(BaseModel):
 class SpotTradeUpdate(BaseModel):
     """All fields optional — PATCH semantics."""
     stop_loss: Decimal | None = None
+    trailing_stop_pct: Decimal | None = None
     nb_take_profits: int | None = Field(default=None, ge=0, le=3)
     tp_targets: list[TpTarget] | None = None
     notes: str | None = None
@@ -76,6 +79,7 @@ class SpotTradeOut(BaseModel):
     total_cost: Decimal | None
     entry_date: datetime.datetime | None
     stop_loss: Decimal | None
+    trailing_stop_pct: Decimal | None
     nb_take_profits: int
     tp_targets: list
     exit_price: Decimal | None

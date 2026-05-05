@@ -83,6 +83,7 @@ export interface SpotTradeCreate {
   entry_price: string
   quantity: string
   stop_loss?: string | null
+  trailing_stop_pct?: string | null
   nb_take_profits?: number
   tp_targets?: Array<{ price: string; pct_allocation: number }>
   order_type?: string
