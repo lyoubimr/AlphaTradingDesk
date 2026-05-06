@@ -309,8 +309,8 @@ export function WatchlistsPage() {
     setRunStatus(null)
     try {
       if (marketMode === 'spot') {
-        // Spot: synchronous compute — response arrives when done (~5–15 s)
-        setRunStatus(`⏳ Computing Spot ${generateTF.toUpperCase()} watchlist…`)
+        // Spot: synchronous compute — response arrives when done (~30–90 s for 600+ pairs)
+        setRunStatus(`⏳ Computing Spot ${generateTF.toUpperCase()} watchlist — all pairs, may take ~1 min…`)
         const res = await spotVolatilityApi.runTask(generateTF)
         const newData = await spotVolatilityApi.listWatchlists(30)
         setSnapshots(newData)
@@ -564,7 +564,7 @@ export function WatchlistsPage() {
           <Info size={13} className="mt-0.5 shrink-0" />
           <div className="space-y-0.5">
             <p className="font-medium">🪙 Spot Watchlist — Kraken Spot pairs · TV format: KRAKEN:BTCUSD (no .PM)</p>
-            <p className="text-amber-400/60">High VI → pump window / buy opportunity for spot. Timeframes: 4H, 1D, 1W.</p>
+            <p className="text-amber-400/60">High VI → pump window / buy opportunity for spot. Timeframes: 4H, 1D, 1W. Computes all synced pairs (~60 s).</p>
           </div>
         </div>
       )}

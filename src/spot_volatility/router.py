@@ -60,12 +60,12 @@ def get_watchlist_by_id(snapshot_id: int, db: Db) -> schemas.SpotWatchlistOut:
 
 @router.post("/run", response_model=schemas.SpotRunResponse)
 def run_compute(body: schemas.SpotRunRequest, db: Db) -> schemas.SpotRunResponse:
-    """Compute spot VI scores for all configured pairs at *timeframe* and store.
+    """Compute spot VI scores for ALL synced pairs at *timeframe* and store.
 
-    This is a synchronous operation (~5–15 s depending on pair count and network).
-    The frontend should poll /watchlist/{timeframe} after the response is received.
+    ignore_top_n=True — same behaviour as Celery scheduled tasks.
+    This is a synchronous operation (~30–90 s for 600+ pairs).
     """
-    snapshot = service.compute_spot_watchlist(body.timeframe.lower(), db)
+    snapshot = service.compute_spot_watchlist(body.timeframe.lower(), db, ignore_top_n=True)
     return schemas.SpotRunResponse(
         status="ok",
         timeframe=snapshot.timeframe,
