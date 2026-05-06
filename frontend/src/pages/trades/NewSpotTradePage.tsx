@@ -139,11 +139,13 @@ function SpotInstrumentPicker({
   }, [])
 
   const { favList, otherList } = useMemo(() => {
-    const q = query.trim().toLowerCase()
+    // Normalize BTC ↔ XBT so searching "btc" finds "XBTUSD" and vice-versa
+    const normalize = (s: string) => s.toLowerCase().replace(/xbt/g, 'btc').replace(/xxbt/g, 'btc')
+    const q = normalize(query.trim())
     const pool = q
       ? instruments.filter((i) =>
-          i.symbol.toLowerCase().includes(q) ||
-          i.display_name.toLowerCase().includes(q)
+          normalize(i.symbol).includes(q) ||
+          normalize(i.display_name).includes(q)
         )
       : instruments
     if (q) return { favList: [] as Instrument[], otherList: pool.slice(0, 50) }
@@ -746,15 +748,27 @@ export function NewSpotTradePage() {
   }, [instrument?.symbol])
 
   // ── Auto-fetch pair VI from spot watchlist when instrument or TF changes ────
+  // Tries the selected TF first, then falls back to other TFs if pair not found
   useEffect(() => {
     if (!instrument?.symbol) { setPairVi(null); return }
-    const tf = timeframe ? timeframe.toLowerCase() : '4h'
-    spotVolatilityApi.getWatchlist(tf)
-      .then((wl) => {
-        const found = wl.pairs.find((p) => p.pair === instrument.symbol)
-        setPairVi(found ?? null)
-      })
-      .catch(() => setPairVi(null))
+    const primary = timeframe ? timeframe.toLowerCase() : '1w'
+    const allTfs  = ['1w', '1d', '4h']
+    const ordered = [primary, ...allTfs.filter((t) => t !== primary)]
+    let cancelled = false
+
+    const tryTfs = async () => {
+      for (const tf of ordered) {
+        if (cancelled) return
+        try {
+          const wl    = await spotVolatilityApi.getWatchlist(tf)
+          const found = wl.pairs.find((p) => p.pair === instrument!.symbol)
+          if (found) { if (!cancelled) setPairVi(found); return }
+        } catch { /* TF snapshot may not exist yet */ }
+      }
+      if (!cancelled) setPairVi(null)
+    }
+    tryTfs()
+    return () => { cancelled = true }
   }, [instrument?.symbol, timeframe])
 
   // ── Stable screenshot URLs (avoid scroll-jump on add) ─────────────────────

@@ -228,13 +228,20 @@ export function WatchlistsPage() {
 
   // ── Load snapshot list ───────────────────────────────────────────────────
 
-  const handleSelectSnapshot = useCallback(async (id: number, keepFilters = false) => {
+  const handleSelectSnapshot = useCallback(async (
+    id: number,
+    keepFilters = false,
+    applyRegimes?: Set<string>,
+  ) => {
     setSelectedId(id)
     setSelectedData(null)
     if (!keepFilters) {
       setRegimeFilters(new Set(['ALL']))
       setEmaFilters(new Set(['ALL']))
       setSupRegimeFilters(new Set(['ALL']))
+    } else if (applyRegimes) {
+      // Apply regime filter atomically with snapshot selection (avoids React state race)
+      setRegimeFilters(applyRegimes)
     }
     setLoadingDetail(true)
     setMobileView('detail')  // auto-switch to detail panel on mobile after selecting
@@ -314,7 +321,7 @@ export function WatchlistsPage() {
             const dk = toDateKey(newest.generated_at)
             setExpandedDates((prev) => new Set([...prev, dk]))
             setExpandedTFs((prev) => new Set([...prev, `${dk}:${newest.timeframe}`]))
-            handleSelectSnapshot(newest.id, true /* keepFilters */)
+            handleSelectSnapshot(newest.id, true /* keepFilters */, new Set(modalRegimes))
           }
           setRunStatus(
             `✅ Spot ${tfBefore.toUpperCase()} watchlist ready — ${res.pairs_computed} pairs`,
