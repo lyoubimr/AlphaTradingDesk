@@ -18,7 +18,7 @@ from datetime import UTC, datetime
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
-from src.core.models.broker import Instrument
+from src.core.models.broker import Broker, Instrument
 from src.spot_volatility.kraken_spot_client import KrakenSpotClient
 from src.spot_volatility.models import SpotVolatilitySettings, SpotWatchlistSnapshot
 from src.spot_volatility.schemas import DEFAULT_SPOT_CONFIG, DEFAULT_SPOT_PAIRS
@@ -108,6 +108,21 @@ def _resolve_pairs(cfg: dict, db: Session, *, ignore_top_n: bool = False) -> lis
     top_n: int = 0 if ignore_top_n else cfg.get("top_n", 0)
 
     if use_all:
+        # Resolve Kraken broker_id to exclude Vantage/other broker instruments
+        # that share the same symbol format (e.g. AAVEUSD, ETHUSD Vantage CFDs).
+        kraken_broker = (
+            db.query(Broker)
+            .filter(Broker.name.ilike("%kraken%"), Broker.market_type == "Crypto")
+            .first()
+        )
+        broker_filter = (
+            [Instrument.broker_id == kraken_broker.id] if kraken_broker else []
+        )
+        if not kraken_broker:
+            logger.warning(
+                "_resolve_pairs: Kraken broker not found — instrument query may include other brokers"
+            )
+
         rows = (
             db.query(Instrument.symbol)
             .filter(
@@ -118,6 +133,7 @@ def _resolve_pairs(cfg: dict, db: Session, *, ignore_top_n: bool = False) -> lis
                 ~Instrument.symbol.startswith("FF_"),
                 # USD-only — USDT pairs are a strict subset and cause duplicates
                 Instrument.quote_currency == "USD",
+                *broker_filter,
             )
             .order_by(Instrument.symbol)
             .all()
