@@ -112,7 +112,12 @@ celery_app.conf.update(
             "schedule": crontab(minute=30, hour=3),  # daily at 03:30 UTC (staggered after contracts)
         },
         # ── Phase 7 — Spot Volatility VI watchlist ────────────────────────
-        # 4h is intentionally excluded — on-demand only (user triggers via POST /run)
+        # All 3 TFs are scheduled — Celery computes ALL pairs (ignore_top_n=True)
+        "spot-vi-4h": {
+            "task": "src.spot_volatility.tasks.compute_spot_watchlist",
+            "schedule": crontab(minute=30, hour="*/4"),  # every 4h at :30 (staggered from candle close)
+            "kwargs": {"timeframe": "4h"},
+        },
         "spot-vi-1d": {
             "task": "src.spot_volatility.tasks.compute_spot_watchlist",
             "schedule": crontab(minute=0, hour=1),  # daily at 01:00 UTC (after pair-vi-1d at 00:00)

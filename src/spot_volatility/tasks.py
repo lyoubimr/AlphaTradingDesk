@@ -1,16 +1,13 @@
 """
 Phase 7 — Spot Volatility Celery tasks.
 
-Scheduled tasks:
-  spot-vi-1d  : daily at 01:00 UTC  (timeframe='1d')
-  spot-vi-1w  : weekly Mon at 02:00 UTC (timeframe='1w')
-  spot-vi-4h  : on-demand only — triggered via POST /api/spot-volatility/run
+Scheduled tasks (ALL compute with ignore_top_n=True — every synced pair):
+  spot-vi-4h  : every 4h at :30 UTC  (timeframe='4h')
+  spot-vi-1d  : daily at 01:00 UTC   (timeframe='1d')
+  spot-vi-1w  : weekly Mon 02:00 UTC (timeframe='1w')
 
-The 4h timeframe is kept on-demand because:
-  - Closing events happen every 4h.
-  - User controls exactly when to refresh (before a session).
-  - Background compute is only useful for always-fresh snapshots needed
-    by daily/weekly HTF ritual steps.
+On-demand /run (POST /api/spot-volatility/run) still respects top_n for
+speed — useful for quick manual refreshes during a trading session.
 
 cleanup-spot-snapshots: daily at 03:30 UTC — removes old spot_watchlist_snapshots
   rows older than `retention_days` (default 60).
@@ -52,13 +49,13 @@ def compute_spot_watchlist(self, timeframe: str) -> dict:  # type: ignore[overri
 
     Pipeline (delegates to service.compute_spot_watchlist):
       1. Load global spot_volatility_settings — check `enabled` gate
-      2. _resolve_pairs: query instruments DB (use_all_synced) + volume pre-filter (top_n)
+      2. _resolve_pairs: ALL synced USD pairs (ignore_top_n=True — no volume cap)
       3. KrakenSpotClient.fetch_ohlcv() per pair + compute_vi_score()
       4. KrakenSpotClient.fetch_all_tickers() — 24h change + superior TF snapshot
       5. INSERT spot_watchlist_snapshots row
 
     Args:
-        timeframe: '1d' | '1w'  (4h is intentionally excluded from beat schedule)
+        timeframe: '4h' | '1d' | '1w'
     """
     db = _get_db()
     try:
@@ -71,7 +68,7 @@ def compute_spot_watchlist(self, timeframe: str) -> dict:  # type: ignore[overri
 
         # ── 2-5. Delegate to service ──────────────────────────────────────
         start = datetime.now(tz=UTC)
-        snapshot = service.compute_spot_watchlist(timeframe, db)
+        snapshot = service.compute_spot_watchlist(timeframe, db, ignore_top_n=True)
         elapsed = (datetime.now(tz=UTC) - start).total_seconds()
 
         logger.info(

@@ -88,7 +88,7 @@ def _deep_merge(base: dict, patch: dict) -> dict:
     return result
 
 
-def _resolve_pairs(cfg: dict, db: Session) -> list[str]:
+def _resolve_pairs(cfg: dict, db: Session, *, ignore_top_n: bool = False) -> list[str]:
     """Return the list of spot pairs to compute VI for.
 
     When ``use_all_synced`` is True (default), all active USD-quoted Kraken spot
@@ -97,12 +97,15 @@ def _resolve_pairs(cfg: dict, db: Session) -> list[str]:
     are kept — this prevents running OHLCV computation on hundreds of obscure
     illiquid pairs.
 
+    Pass ``ignore_top_n=True`` (Celery scheduled tasks) to compute ALL synced
+    pairs regardless of top_n — ensures every pair has a stored VI snapshot.
+
     Falls back to the static ``DEFAULT_SPOT_PAIRS`` list when no instruments
     are found in the DB (first boot before sync has run) or when
     ``use_all_synced`` is explicitly False + no custom ``pairs`` list is set.
     """
     use_all = cfg.get("use_all_synced", False)
-    top_n: int = cfg.get("top_n", 0)
+    top_n: int = 0 if ignore_top_n else cfg.get("top_n", 0)
 
     if use_all:
         rows = (
@@ -191,8 +194,13 @@ def update_settings(patch: dict, db: Session) -> SpotVolatilitySettings:
 
 # ── Watchlist compute ─────────────────────────────────────────────────────────
 
-def compute_spot_watchlist(timeframe: str, db: Session) -> SpotWatchlistSnapshot:
-    """On-demand VI compute for all configured Kraken Spot pairs at `timeframe`.
+def compute_spot_watchlist(
+    timeframe: str,
+    db: Session,
+    *,
+    ignore_top_n: bool = False,
+) -> SpotWatchlistSnapshot:
+    """VI compute for all configured Kraken Spot pairs at `timeframe`.
 
     Pipeline:
       1. Load global settings → pairs list, enabled indicators
@@ -201,12 +209,17 @@ def compute_spot_watchlist(timeframe: str, db: Session) -> SpotWatchlistSnapshot
       4. Load latest superior-TF spot snapshot → tf_sup_* columns
       5. Build sorted pairs list (vi_score DESC + EMA boost)
       6. INSERT spot_watchlist_snapshots row
+
+    Args:
+        ignore_top_n: pass True from Celery scheduled tasks to compute ALL
+                      synced pairs (no volume pre-filter). On-demand /run
+                      keeps top_n for speed.
     """
     _check_tf(timeframe)
     settings_row = get_settings(db)
     cfg = settings_row.config
 
-    pairs: list[str] = _resolve_pairs(cfg, db)
+    pairs: list[str] = _resolve_pairs(cfg, db, ignore_top_n=ignore_top_n)
     enabled: dict = cfg.get("indicators", {
         "rvol": True, "mfi": True, "atr": True, "bb": True, "ema": True,
     })
