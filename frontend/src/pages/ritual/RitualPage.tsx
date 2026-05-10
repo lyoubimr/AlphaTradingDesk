@@ -419,8 +419,8 @@ function StepItem({
             />
           )}
 
-          {/* Smart WL panel */}
-          {log.step_type === 'smart_wl' && isCurrent && !isDoneOrSkipped && (
+          {/* Smart WL panel — for both contracts (smart_wl) and spot (watchlist_htf_spot) */}
+          {(log.step_type === 'smart_wl' || log.step_type === 'watchlist_htf_spot') && isCurrent && !isDoneOrSkipped && (
             <SmartWLPanel
               result={wlResult ?? null}
               loading={wlLoading ?? false}
@@ -1048,7 +1048,7 @@ export function RitualPage() {
 
   // Show spot sessions for spot profiles; contracts sessions for others
   const visibleSessionTypes = isSpot
-    ? SESSION_TYPES.filter((s) => s.type === 'spot_weekly' || s.type === 'spot_monthly' || s.type === 'weekend_review')
+    ? SESSION_TYPES.filter((s) => s.type === 'spot_weekly' || s.type === 'spot_monthly')
     : SESSION_TYPES.filter((s) => s.type !== 'spot_monthly' && s.type !== 'spot_weekly')
 
   const [activeSession, setActiveSession] = useState<RitualSession | null>(null)
