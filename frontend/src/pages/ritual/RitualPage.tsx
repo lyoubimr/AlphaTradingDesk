@@ -1046,9 +1046,9 @@ export function RitualPage() {
   const profileId = activeProfile?.id
   const isSpot = activeProfile?.account_type === 'spot'
 
-  // Show spot sessions for spot profiles; contracts + weekend_review for others
+  // Show spot sessions for spot profiles; contracts sessions for others
   const visibleSessionTypes = isSpot
-    ? SESSION_TYPES.filter((s) => s.type === 'weekend_review' || s.type === 'spot_monthly' || s.type === 'spot_weekly')
+    ? SESSION_TYPES.filter((s) => s.type === 'spot_weekly' || s.type === 'spot_monthly')
     : SESSION_TYPES.filter((s) => s.type !== 'spot_monthly' && s.type !== 'spot_weekly')
 
   const [activeSession, setActiveSession] = useState<RitualSession | null>(null)
@@ -1056,6 +1056,7 @@ export function RitualPage() {
   const [score, setScore] = useState<WeeklyScore | null>(null)
   const [recentSessions, setRecentSessions] = useState<RitualSession[]>([])
   const [starting, setStarting] = useState<SessionType | null>(null)
+  const [completeError, setCompleteError] = useState<string | null>(null)
 
   // Smart WL state
   const [wlResult, setWlResult] = useState<SmartWLResult | null>(null)
@@ -1107,6 +1108,7 @@ export function RitualPage() {
   const handleCompleteStep = async (logId: number, status: 'done' | 'skipped', stepOutput?: Record<string, unknown>) => {
     if (!profileId || !activeSession) return
     const output = stepOutput ?? {}
+    setCompleteError(null)
     await ritualApi.completeStep(profileId, activeSession.id, logId, status, output)
     // If last mandatory step done → auto-prompt to complete session
     await reload()
@@ -1114,10 +1116,15 @@ export function RitualPage() {
 
   const handleCompleteSession = async (outcome?: SessionOutcome | null) => {
     if (!profileId || !activeSession) return
-    await ritualApi.completeSession(profileId, activeSession.id, outcome, null)
-    setActiveSession(null)
-    setWlResult(null)
-    await reload()
+    setCompleteError(null)
+    try {
+      await ritualApi.completeSession(profileId, activeSession.id, outcome, null)
+      setActiveSession(null)
+      setWlResult(null)
+      await reload()
+    } catch {
+      setCompleteError('Session completion failed. Please retry.')
+    }
   }
 
   const handleAbandon = async () => {
@@ -1259,6 +1266,9 @@ export function RitualPage() {
                   </div>
                 </div>
                 <div className="flex items-center gap-1.5">
+                  {completeError && (
+                    <span className="text-[10px] text-red-400 max-w-[140px] leading-tight">{completeError}</span>
+                  )}
                   {allDone && (
                     <button
                       onClick={() => handleCompleteSession(sessionOutcome ?? null)}

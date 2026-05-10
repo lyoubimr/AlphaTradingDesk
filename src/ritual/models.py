@@ -179,7 +179,7 @@ class RitualSession(Base):
             name="ck_ritual_sessions_status",
         ),
         CheckConstraint(
-            "outcome IS NULL OR outcome IN ('trade_opened', 'no_opportunity', 'abandoned', 'vol_too_low')",
+            "outcome IS NULL OR outcome IN ('trade_opened', 'pairs_pinned', 'no_opportunity', 'abandoned', 'vol_too_low')",
             name="ck_ritual_sessions_outcome",
         ),
         Index("ix_ritual_sessions_profile_started", "profile_id", "started_at"),
