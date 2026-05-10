@@ -207,15 +207,19 @@ def update_ritual_settings(
 # ── Step templates ────────────────────────────────────────────────────────────
 
 def _seed_steps(profile_id: int, db: Session) -> None:
-    """Seed default step templates for a new profile — called on first access."""
+    """Seed default step templates for a profile — skips positions that already exist."""
+    # Build set of (session_type, position) already in DB for this profile
+    existing = {
+        (r.session_type, r.position)
+        for r in db.query(RitualStep.session_type, RitualStep.position)
+        .filter_by(profile_id=profile_id)
+        .all()
+    }
     for session_type, steps in DEFAULT_STEPS.items():
         for step_dict in steps:
-            step = RitualStep(
-                profile_id=profile_id,
-                session_type=session_type,
-                **step_dict,
-            )
-            db.add(step)
+            if (session_type, step_dict["position"]) in existing:
+                continue  # already seeded, skip to avoid UniqueViolation
+            db.add(RitualStep(profile_id=profile_id, session_type=session_type, **step_dict))
     db.commit()
 
 
