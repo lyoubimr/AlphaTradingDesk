@@ -26,6 +26,18 @@ import { RitualPage } from './pages/ritual/RitualPage'
 import { RitualSettingsPage } from './pages/settings/RitualSettingsPage'
 import { PortfolioPage } from './pages/portfolio/PortfolioPage'
 import { InvestmentSettingsPage } from './pages/settings/InvestmentSettingsPage'
+import { useProfile } from './context/ProfileContext'
+
+// Route guard — /trades/new-spot is only for spot profiles.
+// Contracts profiles are redirected to /trades/new.
+function SpotRouteGuard() {
+  const { activeProfile, loading } = useProfile()
+  if (loading) return null
+  if (activeProfile?.account_type !== 'spot') {
+    return <Navigate to="/trades/new" replace />
+  }
+  return <NewSpotTradePage />
+}
 
 export default function App() {
   return (
@@ -35,7 +47,7 @@ export default function App() {
         <Route path="/dashboard" element={<DashboardPage />} />
         <Route path="/trades" element={<TradesPage />} />
         <Route path="/trades/new" element={<NewTradePage />} />
-        <Route path="/trades/new-spot" element={<NewSpotTradePage />} />
+        <Route path="/trades/new-spot" element={<SpotRouteGuard />} />
         <Route path="/trades/:id" element={<TradeDetailPage />} />
         <Route path="/market-analysis" element={<MarketAnalysisPage />} />
         <Route path="/market-analysis/new" element={<NewAnalysisPage />} />

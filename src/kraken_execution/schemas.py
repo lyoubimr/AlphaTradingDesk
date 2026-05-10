@@ -16,12 +16,22 @@ from pydantic import BaseModel, Field
 
 # ── Automation Settings ───────────────────────────────────────────────────────
 
+class MaxLossGuardConfigOut(BaseModel):
+    """Read-only view of the max loss guard sub-config."""
+
+    enabled: bool = False
+    multiplier: float = 2.0
+
+
 class AutomationConfigOut(BaseModel):
     """Safe view of automation config — never includes encrypted key fields."""
 
     enabled: bool = False
     pnl_status_interval_minutes: int = 60
     max_leverage_override: int | None = None
+    sl_order_type: str = "stop_limit"
+    sl_limit_offset_pct: float = 1.5
+    max_loss_guard: MaxLossGuardConfigOut = Field(default_factory=MaxLossGuardConfigOut)
 
 
 class AutomationSettingsOut(BaseModel):
@@ -37,6 +47,24 @@ class AutomationSettingsOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class OpenTradeIn(BaseModel):
+    """Optional per-trade SL overrides for POST /trades/{id}/open.
+
+    When provided, these override the profile-level automation settings
+    for this specific trade only.  Omit to use the profile defaults.
+    """
+
+    sl_order_type: str | None = Field(None, pattern="^(stop_limit|stop_market)$")
+    sl_limit_offset_pct: float | None = Field(None, ge=0.1, le=10.0)
+
+
+class MaxLossGuardConfigIn(BaseModel):
+    """Patch payload for the max loss guard sub-config."""
+
+    enabled: bool | None = None
+    multiplier: float | None = Field(None, ge=1.0, le=10.0)
+
+
 class AutomationSettingsUpdateIn(BaseModel):
     """Request body for PUT /settings/{profile_id}.
 
@@ -48,6 +76,9 @@ class AutomationSettingsUpdateIn(BaseModel):
     enabled: bool | None = None
     pnl_status_interval_minutes: int | None = Field(None, ge=1, le=1440)
     max_leverage_override: int | None = Field(None, ge=1, le=100)
+    sl_order_type: str | None = Field(None, pattern="^(stop_limit|stop_market)$")
+    sl_limit_offset_pct: float | None = Field(None, ge=0.1, le=10.0)
+    max_loss_guard: MaxLossGuardConfigIn | None = None
     # Write-only — never returned in responses
     kraken_api_key: str | None = Field(None, description="Plaintext API key (write-only).")
     kraken_api_secret: str | None = Field(

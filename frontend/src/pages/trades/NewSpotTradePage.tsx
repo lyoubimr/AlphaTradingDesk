@@ -19,9 +19,9 @@ import {
 } from 'lucide-react'
 import { PageHeader } from '../../components/ui/PageHeader'
 import { useProfile } from '../../context/ProfileContext'
-import { investmentApi, strategiesApi, statsApi, automationApi, spotVolatilityApi } from '../../lib/api'
+import { investmentApi, strategiesApi, automationApi, spotVolatilityApi } from '../../lib/api'
 import { cn } from '../../lib/cn'
-import type { Instrument, Strategy, WinRateStats, PortfolioOut, SpotWatchlistPairOut } from '../../types/api'
+import type { Instrument, Strategy, PortfolioOut, SpotWatchlistPairOut } from '../../types/api'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Shared styles
@@ -476,82 +476,142 @@ const MIN_PROFILE_TRADES = 5
 // ─────────────────────────────────────────────────────────────────────────────
 
 function SpotExpectancyPanel({
-  totalCost, potentialProfit, stopLossAmount, selectedStrategy, globalWrStats, confidence, ccy, pairVi,
+  totalCost, potentialProfit, stopLossAmount, selectedStrategy, confidence, ccy, pairVi,
 }: {
   totalCost: number | null
   potentialProfit: number | null
   stopLossAmount: number | null
   selectedStrategy: Strategy | null
-  globalWrStats: WinRateStats | null
   confidence: number   // 1–10, 0 = not set
   ccy: string
   pairVi: SpotWatchlistPairOut | null
 }) {
-  const globalWr: number | null = useMemo(() => {
-    if (!globalWrStats) return null
-    const withData = globalWrStats.profiles.filter((p) => p.has_data && p.win_rate_pct != null)
-    if (withData.length === 0) return null
-    return withData.reduce((s, p) => s + (p.win_rate_pct ?? 0), 0) / withData.length / 100
-  }, [globalWrStats])
-
-  // ── Win-rate source ─────────────────────────────────────────────────────────
+  // ── Win-rate source — strategy only (global WR = contracts trades, not spot) ─
   const hasStratStats = selectedStrategy != null
     && selectedStrategy.trades_count >= selectedStrategy.min_trades_for_stats
 
-  const rawWr: number = hasStratStats
+  // Strategy WR (null when strategy has insufficient data)
+  const stratWrNum: number | null = hasStratStats
     ? selectedStrategy!.win_count / selectedStrategy!.trades_count
-    : globalWr ?? DEFAULT_WIN_RATE
+    : null
 
-  const wrSource = hasStratStats ? 'strategy' : globalWr != null ? 'global' : 'fallback'
-  const wrBadgeCls = wrSource === 'strategy' ? 'text-emerald-400' : wrSource === 'global' ? 'text-amber-300' : 'text-slate-400'
-  const wrSourceLabel = wrSource === 'strategy'
+  // Base WR: strategy if valid, DEFAULT estimate otherwise (no global WR)
+  const rawWr: number = stratWrNum ?? DEFAULT_WIN_RATE
+  const wrSource = hasStratStats ? 'strategy' : 'fallback'
+  const wrBadgeCls = hasStratStats ? 'text-emerald-400' : 'text-slate-400'
+  const wrSourceLabel = hasStratStats
     ? `${selectedStrategy!.name} (${selectedStrategy!.trades_count} trades)`
-    : wrSource === 'global'
-      ? `Global average`
-      : `Default 60% fallback`
+    : `Default ${(DEFAULT_WIN_RATE * 100).toFixed(0)}% estimate`
 
   // Regime adjustment: for spot, high VI = pump window (buy edge ↑)
   // EXTREME/ACTIVE → +5%; TRENDING → +3%; CALM → −3%; DEAD → −5%
+  // viRegimeAdj = 0 when no TF selected (pairVi is null)
   const viRegimeAdj = pairVi?.regime === 'EXTREME' ? 0.05
     : pairVi?.regime === 'ACTIVE'   ? 0.05
     : pairVi?.regime === 'TRENDING' ? 0.03
     : pairVi?.regime === 'CALM'     ? -0.03
     : pairVi?.regime === 'DEAD'     ? -0.05
-    : 0  // NORMAL or no data
+    : 0
 
-  // ── "Form incomplete" mini mode — show just WR when entry/qty/TP not filled ─
+  // Regime-adjusted WR — computed before mini mode so both modes share it
+  const rawWrAdj = Math.max(0.05, Math.min(0.95, rawWr + viRegimeAdj))
+
+  // Regime badge colour
+  const regimeCls = pairVi?.regime === 'EXTREME'  ? 'text-red-400'
+    : pairVi?.regime === 'ACTIVE'   ? 'text-orange-400'
+    : pairVi?.regime === 'TRENDING' ? 'text-amber-400'
+    : pairVi?.regime === 'NORMAL'   ? 'text-brand-300'
+    : pairVi?.regime === 'CALM'     ? 'text-blue-400'
+    : 'text-slate-500'
+
+  // ── Mini mode: show setup score before form is filled ──────────────────────
   if (potentialProfit == null || totalCost == null) {
-    if (!selectedStrategy && !globalWrStats) return null
+    if (!selectedStrategy && !pairVi && confidence === 0) return null
+
+    // Compute all 3 adjustments now (same formula used in full mode)
+    const confAdjMini = confidence > 0 ? ((confidence - 5) / 5) * 0.10 : 0
+    const combinedScore = Math.max(
+      0.05, Math.min(0.95, rawWr + viRegimeAdj + confAdjMini),
+    )
+    const scoreColor = combinedScore >= 0.6 ? 'text-emerald-400'
+      : combinedScore >= 0.45 ? 'text-amber-400' : 'text-red-400'
+
     return (
-      <div className="rounded-xl border border-surface-700 bg-surface-800/60 p-4 space-y-2">
-        <p className="text-[10px] text-slate-500 uppercase tracking-wider font-medium">Win Rate preview</p>
-        <div className="flex items-end gap-2">
-          <p className={cn('text-2xl font-mono font-bold leading-none', wrBadgeCls)}>
-            {(Math.max(0.05, Math.min(0.95, rawWr + viRegimeAdj)) * 100).toFixed(0)}%
+      <div className="rounded-xl border border-surface-700 bg-surface-800/60 p-4 space-y-3">
+        <p className="text-[10px] text-slate-500 uppercase tracking-wider font-medium">Setup score</p>
+
+        {/* Combined score — big number, all 3 criteria */}
+        <div className="flex items-baseline gap-2">
+          <p className={cn('text-3xl font-mono font-bold leading-none', scoreColor)}>
+            {(combinedScore * 100).toFixed(0)}%
           </p>
-          {hasStratStats && (
-            <p className="text-[10px] text-slate-500 mb-0.5">
-              {selectedStrategy!.trades_count} trades · {selectedStrategy!.win_count} wins
-            </p>
-          )}
+          <p className="text-[10px] text-slate-500">combined WR estimate</p>
         </div>
-        <p className="text-[10px] text-slate-600 truncate">{wrSourceLabel}</p>
-        {pairVi && (
-          <p className="text-[10px] leading-relaxed"
-            style={{ color: viRegimeAdj > 0 ? '#34d399' : viRegimeAdj < 0 ? '#f87171' : '#64748b' }}>
-            VI {(pairVi.vi_score * 100).toFixed(0)} · {pairVi.regime}
-            {viRegimeAdj !== 0 && ` → ${viRegimeAdj > 0 ? '+' : ''}${(viRegimeAdj * 100).toFixed(0)}% edge adj`}
-          </p>
-        )}
+
+        {/* 3 criteria breakdown */}
+        <div className="grid grid-cols-3 gap-1.5 text-[10px]">
+          {/* 1. Strategy WR */}
+          <div className="rounded-lg bg-surface-700/60 border border-surface-600 px-2 py-1.5 space-y-0.5">
+            <p className="text-slate-600 text-[9px] uppercase tracking-wider">Strategy</p>
+            <p className={cn('font-mono font-semibold text-sm', hasStratStats ? 'text-emerald-400' : 'text-slate-500')}>
+              {(rawWr * 100).toFixed(0)}%
+            </p>
+            <p className="text-[9px] text-slate-600 truncate leading-tight">
+              {hasStratStats
+                ? `${selectedStrategy!.trades_count}t`
+                : selectedStrategy
+                  ? `${selectedStrategy.trades_count}/${selectedStrategy.min_trades_for_stats}t`
+                  : 'est.'}
+            </p>
+          </div>
+
+          {/* 2. VI regime adj */}
+          <div className="rounded-lg bg-surface-700/60 border border-surface-600 px-2 py-1.5 space-y-0.5">
+            <p className="text-slate-600 text-[9px] uppercase tracking-wider">VI regime</p>
+            {pairVi ? (
+              <>
+                <p className={cn('font-mono font-semibold text-sm', viRegimeAdj > 0 ? 'text-emerald-400' : viRegimeAdj < 0 ? 'text-red-400' : regimeCls)}>
+                  {viRegimeAdj !== 0
+                    ? `${viRegimeAdj > 0 ? '+' : ''}${(viRegimeAdj * 100).toFixed(0)}%`
+                    : '—'}
+                </p>
+                <p className={cn('text-[9px] truncate leading-tight', regimeCls)}>{pairVi.regime}</p>
+              </>
+            ) : (
+              <>
+                <p className="font-mono font-semibold text-sm text-slate-600">—</p>
+                <p className="text-[9px] text-slate-600 leading-tight">pick TF</p>
+              </>
+            )}
+          </div>
+
+          {/* 3. Confidence adj */}
+          <div className="rounded-lg bg-surface-700/60 border border-surface-600 px-2 py-1.5 space-y-0.5">
+            <p className="text-slate-600 text-[9px] uppercase tracking-wider">Confidence</p>
+            {confidence > 0 ? (
+              <>
+                <p className={cn('font-mono font-semibold text-sm',
+                  confidence >= 8 ? 'text-emerald-400' : confidence >= 5 ? 'text-amber-400' : 'text-red-400')}>
+                  {confAdjMini > 0 ? '+' : ''}{(confAdjMini * 100).toFixed(0)}%
+                </p>
+                <p className="text-[9px] text-slate-600 leading-tight">{confidence}/10</p>
+              </>
+            ) : (
+              <>
+                <p className="font-mono font-semibold text-sm text-slate-600">—</p>
+                <p className="text-[9px] text-slate-600 leading-tight">not set</p>
+              </>
+            )}
+          </div>
+        </div>
+
         <p className="text-[11px] text-slate-600 border-t border-surface-700/50 pt-2">
           Fill entry, quantity &amp; TP to see full expectancy analysis.
         </p>
       </div>
     )
   }
-  const rawWrAdj = Math.max(0.05, Math.min(0.95, rawWr + viRegimeAdj))
-
-  // Confidence adjustment: scale ±10% around raw WR based on confidence (1–10)
+  // Confidence adjustment: strategy+VI WR scaled ±10% by confidence (1–10)
   // confidence=5 → no adjustment; 1 → −10%; 10 → +10%
   const confAdj = confidence > 0 ? ((confidence - 5) / 5) * 0.10 : 0
   const winRate = Math.max(0.05, Math.min(0.95, rawWrAdj + confAdj))
@@ -593,6 +653,46 @@ function SpotExpectancyPanel({
           <p className="text-[10px] text-slate-400 font-mono">{fmtPct(roiPct)} ROI</p>
           {rMultiple != null && (
             <p className="text-[10px] text-slate-500 font-mono">{rMultiple.toFixed(2)}R ratio</p>
+          )}
+        </div>
+      </div>
+
+      {/* WR context — strategy WR + VI adjustment */}
+      <div className="grid grid-cols-2 gap-2 rounded-lg bg-surface-800/70 px-3 py-2 border border-surface-700/50 text-[10px]">
+        <div>
+          <span className="text-slate-600">Strategy WR</span>
+          {hasStratStats ? (
+            <>
+              <p className="font-semibold font-mono text-emerald-400">{Math.round(stratWrNum! * 100)}%</p>
+              <p className="text-[9px] text-slate-600 mt-0.5 truncate">{selectedStrategy!.name}</p>
+            </>
+          ) : (
+            <>
+              <p className="font-semibold text-slate-500">{(DEFAULT_WIN_RATE * 100).toFixed(0)}% est.</p>
+              <p className="text-[9px] text-slate-600 mt-0.5">
+                {selectedStrategy
+                  ? `${selectedStrategy.trades_count}/${selectedStrategy.min_trades_for_stats} trades`
+                  : 'no strategy'}
+              </p>
+            </>
+          )}
+        </div>
+        <div>
+          <span className="text-slate-600">VI {pairVi ? `(${pairVi.regime})` : ''}</span>
+          {pairVi ? (
+            <>
+              <p className={cn('font-semibold', regimeCls)}>
+                {viRegimeAdj !== 0
+                  ? `${viRegimeAdj > 0 ? '+' : ''}${(viRegimeAdj * 100).toFixed(0)}% edge`
+                  : 'NORMAL'}
+              </p>
+              <p className="text-[9px] text-slate-600 mt-0.5">score {(pairVi.vi_score * 100).toFixed(0)}</p>
+            </>
+          ) : (
+            <>
+              <p className="font-semibold text-slate-500">—</p>
+              <p className="text-[9px] text-slate-600 mt-0.5">select TF</p>
+            </>
           )}
         </div>
       </div>
@@ -643,10 +743,7 @@ function SpotExpectancyPanel({
       )}
       {wrSource !== 'strategy' && (
         <p className="text-[10px] text-slate-600 border-t border-surface-700/40 pt-2 leading-relaxed">
-          {wrSource === 'global'
-            ? <>🌐 Global win rate — select a strategy with ≥5 trades for specific data.</>
-            : <>📊 Using {(DEFAULT_WIN_RATE * 100).toFixed(0)}% default — close {MIN_PROFILE_TRADES}+ trades to unlock real WR.</>
-          }
+          📊 Using {(DEFAULT_WIN_RATE * 100).toFixed(0)}% estimate — select a strategy with ≥{MIN_PROFILE_TRADES} trades for real WR.
         </p>
       )}
     </div>
@@ -667,7 +764,6 @@ export function NewSpotTradePage() {
   const [stratLoading, setStratLoading] = useState(false)
   const [strategyIds, setStrategyIds]   = useState<number[]>([])
   const [portfolio, setPortfolio]       = useState<PortfolioOut | null>(null)
-  const [globalWrStats, setGlobalWrStats] = useState<WinRateStats | null>(null)
 
   // ── Instrument + market price ──────────────────────────────────────────────
   const [instrument, setInstrument]   = useState<Instrument | null>(null)
@@ -717,14 +813,13 @@ export function NewSpotTradePage() {
   const profileId = activeProfile?.id ?? 0
   const ccy       = activeProfile?.currency ?? 'USD'
 
-  // ── Load instruments + strategies + portfolio + WR stats ──────────────────
+  // ── Load instruments + strategies + portfolio ─────────────────────────────
   useEffect(() => {
     if (!profileId) return
     investmentApi.listInstruments(profileId).then(setInstruments).catch(() => {})
     setStratLoading(true)
     strategiesApi.list(profileId).then(setStrategies).catch(() => setStrategies([])).finally(() => setStratLoading(false))
     investmentApi.getPortfolio(profileId).then(setPortfolio).catch(() => {})
-    statsApi.winrate().then(setGlobalWrStats).catch(() => {})
     automationApi.getSettings(profileId)
       .then((s) => { const en = s.config.enabled; setProfileAutomationEnabled(en); setAutomateOnCreate(en) })
       .catch(() => {})
@@ -747,27 +842,20 @@ export function NewSpotTradePage() {
       .finally(() => setPriceLoading(false))
   }, [instrument?.symbol])
 
-  // ── Auto-fetch pair VI from spot watchlist when instrument or TF changes ────
-  // Tries the selected TF first, then falls back to other TFs if pair not found
+  // ── Auto-fetch pair VI — only when TF explicitly selected (VI is per-TF) ───
   useEffect(() => {
-    if (!instrument?.symbol) { setPairVi(null); return }
-    const primary = timeframe ? timeframe.toLowerCase() : '1w'
-    const allTfs  = ['1w', '1d', '4h']
-    const ordered = [primary, ...allTfs.filter((t) => t !== primary)]
+    if (!instrument?.symbol || !timeframe) { setPairVi(null); return }
+    const tf = timeframe.toLowerCase()
     let cancelled = false
 
-    const tryTfs = async () => {
-      for (const tf of ordered) {
-        if (cancelled) return
-        try {
-          const wl    = await spotVolatilityApi.getWatchlist(tf)
-          const found = wl.pairs.find((p) => p.pair === instrument!.symbol)
-          if (found) { if (!cancelled) setPairVi(found); return }
-        } catch { /* TF snapshot may not exist yet */ }
-      }
-      if (!cancelled) setPairVi(null)
+    const fetchVi = async () => {
+      try {
+        const wl    = await spotVolatilityApi.getWatchlist(tf)
+        const found = wl.pairs.find((p) => p.pair === instrument!.symbol)
+        if (!cancelled) setPairVi(found ?? null)
+      } catch { if (!cancelled) setPairVi(null) }
     }
-    tryTfs()
+    fetchVi()
     return () => { cancelled = true }
   }, [instrument?.symbol, timeframe])
 
@@ -1555,7 +1643,6 @@ export function NewSpotTradePage() {
               potentialProfit={potentialProfit}
               stopLossAmount={stopLossAmount}
               selectedStrategy={selectedStrategy}
-              globalWrStats={globalWrStats}
               confidence={confidence}
               ccy={ccy}
               pairVi={pairVi}

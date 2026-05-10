@@ -26,7 +26,7 @@ import type React from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   TrendingUp, TrendingDown, Loader2,
-  AlertTriangle, ChevronDown, ChevronUp, Search, X, Info, Clock, Plus, ShieldAlert, ImagePlus, Trash2, Star, Zap,
+  AlertTriangle, ChevronDown, ChevronUp, Search, X, Info, Clock, Plus, ShieldAlert, ImagePlus, Trash2, Star, Zap, Shield,
 } from 'lucide-react'
 import { PageHeader } from '../../components/ui/PageHeader'
 import { useProfile } from '../../context/ProfileContext'
@@ -1057,6 +1057,8 @@ export function NewTradePage() {
   const [beOnTp1,                 setBeOnTp1]                 = useState(false)
   const [runnerEnabled,           setRunnerEnabled]           = useState(false)
   const [runnerTrailingPct,       setRunnerTrailingPct]       = useState('5')
+  const [slOrderType,             setSlOrderType]             = useState<'stop_limit' | 'stop_market'>('stop_limit')
+  const [slOffsetPct,             setSlOffsetPct]             = useState('1.5')
   const [krakenMargin, setKrakenMargin] = useState<{ available: number | null; loading: boolean }>({ available: null, loading: false })
 
   // Latest Market Analysis session — auto-fetched for ma_direction in Risk Advisor
@@ -1573,8 +1575,12 @@ export function NewTradePage() {
       // If the Kraken order fails we roll back the trade entry so the user can
       // fix the error and retry cleanly — preventing orphan trade accumulation.
       if (automateOnCreate && profileAutomationEnabled) {
+        const slOpts = automateOnCreate ? {
+          sl_order_type: slOrderType,
+          ...(slOrderType === 'stop_limit' ? { sl_limit_offset_pct: Number(slOffsetPct) || 1.5 } : {}),
+        } : undefined
         try {
-          await automationApi.openTrade(newTrade.id)
+          await automationApi.openTrade(newTrade.id, slOpts)
         } catch (autoErr) {
           const autoMsg = autoErr instanceof Error ? autoErr.message : 'Unknown automation error'
           try {
@@ -1807,6 +1813,8 @@ export function NewTradePage() {
               </div>
             )}
 
+
+
             {/* Kraken available margin — shown when automation is ON */}
             {automateOnCreate && profileAutomationEnabled && (
               <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-surface-800/60 border border-surface-700/60 text-xs">
@@ -1980,6 +1988,101 @@ export function NewTradePage() {
                 className={slSideError ? 'border-amber-500/50' : sl && !slSideError ? 'border-red-500/30' : ''} />
             </Field>
           </div>
+
+          {/* 🛡️ SL execution protection — only for automated crypto trades */}
+          {isCrypto && automateOnCreate && profileAutomationEnabled && (
+            <div className={cn(
+              'rounded-xl border px-4 py-3 space-y-3 transition-all',
+              slOrderType === 'stop_limit'
+                ? 'bg-emerald-500/5 border-emerald-500/25'
+                : 'bg-amber-500/5 border-amber-500/25',
+            )}>
+              <div className="flex items-center gap-2">
+                <Shield size={13} className={slOrderType === 'stop_limit' ? 'text-emerald-400' : 'text-amber-400'} />
+                <p className="text-xs font-semibold text-slate-200">🛡️ Stop-loss execution</p>
+                <span className={cn(
+                  'ml-auto text-[10px] font-medium px-2 py-0.5 rounded-full border',
+                  slOrderType === 'stop_limit'
+                    ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
+                    : 'bg-amber-500/10 border-amber-500/30 text-amber-300',
+                )}>
+                  {slOrderType === 'stop_limit' ? '⚡ Limit — slippage capped' : '⚠️ Market — any price'}
+                </span>
+              </div>
+
+              {/* SL type toggle */}
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <p className="text-xs font-medium text-slate-300">Order type</p>
+                  <p className="text-[11px] text-slate-500 mt-0.5">
+                    {slOrderType === 'stop_limit'
+                      ? 'Stop-limit guarantees a worst-case fill price — protects against wicks & spikes.'
+                      : 'Stop-market fills immediately at any price — fast but exposed to slippage.'}
+                  </p>
+                </div>
+                <div className="flex rounded-lg border border-surface-600 overflow-hidden shrink-0">
+                  {(['stop_limit', 'stop_market'] as const).map((t) => (
+                    <button
+                      key={t}
+                      type="button"
+                      onClick={() => setSlOrderType(t)}
+                      className={cn(
+                        'px-3 py-1.5 text-[11px] font-semibold transition-colors',
+                        slOrderType === t
+                          ? t === 'stop_limit'
+                            ? 'bg-emerald-500 text-white'
+                            : 'bg-amber-500 text-white'
+                          : 'bg-surface-700 text-slate-400 hover:text-slate-200',
+                      )}
+                    >
+                      {t === 'stop_limit' ? '🔒 Limit' : '🌀 Market'}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Offset — only when stop_limit */}
+              {slOrderType === 'stop_limit' && (
+                <div className="flex items-center justify-between gap-4">
+                  <div>
+                    <p className="text-xs font-medium text-slate-300">Limit offset</p>
+                    <p className="text-[11px] text-slate-500 mt-0.5">
+                      Worst fill = SL ± <span className="font-mono text-emerald-300">{slOffsetPct || '1.5'}%</span>
+                      {' '}({direction === 'LONG' ? 'below' : 'above'} trigger)
+                      {(() => {
+                        const offset = Number(slOffsetPct) || 1.5
+                        const lotSize = calc.lot_size
+                        const riskAmount = calc.risk_amount
+                        if (lotSize == null || riskAmount == null || slNum == null) return null
+                        const extraLoss = lotSize * slNum * (offset / 100)
+                        const worstLoss = riskAmount + extraLoss
+                        return (
+                          <> — <span className="font-mono text-red-400 font-semibold">
+                            max loss {fmt(worstLoss, 2)} {ccy}
+                          </span>
+                          {' '}<span className="text-slate-600">(+{fmt(extraLoss, 2)} slippage)</span></>
+                        )
+                      })()}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <input
+                      type="number"
+                      min={0.1}
+                      max={10}
+                      step={0.1}
+                      value={slOffsetPct}
+                      onChange={(e) => setSlOffsetPct(e.target.value)}
+                      className="w-16 rounded-lg bg-surface-700/80 border border-surface-600 px-2 py-1.5
+                        text-right text-xs text-slate-200 font-mono
+                        focus:outline-none focus:border-emerald-500/50 transition-colors"
+                    />
+                    <span className="text-[11px] text-slate-500 font-medium">%</span>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Risk % ↔ Max loss (bidirectional) */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">

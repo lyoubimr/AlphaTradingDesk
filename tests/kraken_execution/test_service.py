@@ -1,6 +1,5 @@
 """
 tests/kraken_execution/test_service.py
-
 Integration tests for the AutomationService layer.
 
 Tests use the real Postgres transactional fixture (db_session) — no network calls.
@@ -325,3 +324,240 @@ class _MockClient:
 
     def __exit__(self, *_):
         self.close()
+
+
+# ── Spy client for place_sl_tp_orders tests ───────────────────────────────────
+
+class _SpyClient:
+    """Records send_order calls — no network, returns a valid 'placed' response."""
+
+    def __init__(self):
+        self.orders_sent: list[dict] = []
+
+    def send_order(self, order_type: str, symbol: str, side: str, size: str, **kwargs) -> dict:
+        call = {"order_type": order_type, "symbol": symbol, "side": side, "size": size, **kwargs}
+        self.orders_sent.append(call)
+        return {"sendStatus": {"order_id": f"TEST-{len(self.orders_sent)}", "status": "placed"}}
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_):
+        pass
+
+
+# ── place_sl_tp_orders — stop-limit / stop-market ────────────────────────────
+
+def _setup_trade_for_sl_test(
+    db: Session,
+    *,
+    name_suffix: str,
+    direction: str = "long",
+    entry_price: str = "40000",
+    stop_loss: str = "39000",
+    tp_price: str = "42000",
+) -> tuple:
+    """Create Profile → Broker → Instrument → Trade → Position for SL tests."""
+    from datetime import datetime  # noqa: PLC0415
+
+    from src.core.models.broker import Broker, Instrument  # noqa: PLC0415
+    from src.core.models.trade import Position, Trade  # noqa: PLC0415
+
+    profile = _make_profile(db, name=f"SL-{name_suffix}")
+
+    broker = Broker(
+        name=f"Broker-{name_suffix}",
+        market_type="Crypto",
+        default_currency="USD",
+        is_predefined=True,
+        status="active",
+    )
+    db.add(broker)
+    db.flush()
+
+    instr = Instrument(
+        broker_id=broker.id,
+        symbol="PF_XBTUSD",
+        display_name="BTC/USD Perp",
+        asset_class="Crypto",
+        contract_value_precision=4,
+        is_active=True,
+    )
+    db.add(instr)
+    db.flush()
+
+    from decimal import Decimal as D  # noqa: PLC0415
+    trade = Trade(
+        profile_id=profile.id,
+        instrument_id=instr.id,
+        pair="XBTUSD",
+        direction=direction,
+        entry_price=D(entry_price),
+        stop_loss=D(stop_loss),
+        initial_stop_loss=D(stop_loss),
+        risk_amount=D("15.00"),
+        potential_profit=D("45.00"),
+        entry_date=datetime.utcnow(),
+        status="open",
+        order_type="MARKET",
+        automation_enabled=True,
+    )
+    db.add(trade)
+    db.flush()
+
+    pos = Position(
+        trade_id=trade.id,
+        position_number=1,
+        lot_percentage=D("100"),
+        take_profit_price=D(tp_price),
+        status="open",
+        is_runner=False,
+    )
+    db.add(pos)
+    db.flush()
+
+    # Reload trade with relationships
+    db.refresh(trade)
+    return profile, instr, trade
+
+
+class TestPlaceSlTpOrders:
+    """Unit tests for place_sl_tp_orders — no network calls, spy client only."""
+
+    def test_default_config_has_new_sl_keys(self):
+        """DEFAULT_AUTOMATION_CONFIG must include sl_order_type, sl_limit_offset_pct, max_loss_guard."""
+        assert DEFAULT_AUTOMATION_CONFIG["sl_order_type"] == "stop_limit"
+        assert DEFAULT_AUTOMATION_CONFIG["sl_limit_offset_pct"] == 1.5
+        assert isinstance(DEFAULT_AUTOMATION_CONFIG["max_loss_guard"], dict)
+        assert DEFAULT_AUTOMATION_CONFIG["max_loss_guard"]["enabled"] is False
+        assert DEFAULT_AUTOMATION_CONFIG["max_loss_guard"]["multiplier"] == 2.0
+
+    def test_stop_limit_sends_limit_price_to_kraken(self, db_session: Session):
+        """stop_limit: send_order must receive a limit_price kwarg for the SL call."""
+        from src.kraken_execution.service import place_sl_tp_orders  # noqa: PLC0415
+
+        profile, _instr, trade = _setup_trade_for_sl_test(db_session, name_suffix="SL-Limit")
+        update_automation_settings(
+            profile.id,
+            {"sl_order_type": "stop_limit", "sl_limit_offset_pct": 1.5},
+            db_session,
+        )
+        settings = get_automation_settings(profile.id, db_session)
+
+        spy = _SpyClient()
+        from decimal import Decimal  # noqa: PLC0415
+        place_sl_tp_orders(trade, Decimal("0.001"), spy, db_session, settings_row=settings)
+
+        sl_call = next(c for c in spy.orders_sent if c["order_type"] == "stp")
+        assert sl_call.get("limit_price") is not None
+
+    def test_stop_market_does_not_send_limit_price(self, db_session: Session):
+        """stop_market: send_order must NOT receive a limit_price for the SL call."""
+        from src.kraken_execution.service import place_sl_tp_orders  # noqa: PLC0415
+
+        profile, _instr, trade = _setup_trade_for_sl_test(db_session, name_suffix="SL-Market")
+        update_automation_settings(
+            profile.id,
+            {"sl_order_type": "stop_market"},
+            db_session,
+        )
+        settings = get_automation_settings(profile.id, db_session)
+
+        spy = _SpyClient()
+        from decimal import Decimal  # noqa: PLC0415
+        place_sl_tp_orders(trade, Decimal("0.001"), spy, db_session, settings_row=settings)
+
+        sl_call = next(c for c in spy.orders_sent if c["order_type"] == "stp")
+        assert sl_call.get("limit_price") is None
+
+    def test_stop_limit_long_limit_is_below_trigger(self, db_session: Session):
+        """Long stop-limit: limit_price must be BELOW the stop_price (slippage protection)."""
+        from decimal import Decimal  # noqa: PLC0415
+
+        from src.kraken_execution.service import place_sl_tp_orders  # noqa: PLC0415
+
+        profile, _instr, trade = _setup_trade_for_sl_test(
+            db_session,
+            name_suffix="SL-LongDir",
+            direction="long",
+            stop_loss="39000",
+        )
+        update_automation_settings(profile.id, {"sl_order_type": "stop_limit", "sl_limit_offset_pct": 1.5}, db_session)
+        settings = get_automation_settings(profile.id, db_session)
+
+        spy = _SpyClient()
+        place_sl_tp_orders(trade, Decimal("0.001"), spy, db_session, settings_row=settings)
+
+        sl_call = next(c for c in spy.orders_sent if c["order_type"] == "stp")
+        limit = Decimal(sl_call["limit_price"])
+        stop = Decimal(sl_call["stop_price"])
+        assert limit < stop  # limit must be below trigger for long
+
+    def test_stop_limit_short_limit_is_above_trigger(self, db_session: Session):
+        """Short stop-limit: limit_price must be ABOVE the stop_price."""
+        from decimal import Decimal  # noqa: PLC0415
+
+        from src.kraken_execution.service import place_sl_tp_orders  # noqa: PLC0415
+
+        profile, _instr, trade = _setup_trade_for_sl_test(
+            db_session,
+            name_suffix="SL-ShortDir",
+            direction="short",
+            entry_price="40000",
+            stop_loss="41000",
+            tp_price="38000",
+        )
+        update_automation_settings(profile.id, {"sl_order_type": "stop_limit", "sl_limit_offset_pct": 1.5}, db_session)
+        settings = get_automation_settings(profile.id, db_session)
+
+        spy = _SpyClient()
+        place_sl_tp_orders(trade, Decimal("0.001"), spy, db_session, settings_row=settings)
+
+        sl_call = next(c for c in spy.orders_sent if c["order_type"] == "stp")
+        limit = Decimal(sl_call["limit_price"])
+        stop = Decimal(sl_call["stop_price"])
+        assert limit > stop  # limit must be above trigger for short
+
+    def test_stop_limit_stores_limit_price_in_kraken_order(self, db_session: Session):
+        """KrakenOrder.limit_price must be non-null when sl_order_type=stop_limit."""
+        from decimal import Decimal  # noqa: PLC0415
+
+        from src.kraken_execution.models import KrakenOrder  # noqa: PLC0415
+        from src.kraken_execution.service import place_sl_tp_orders  # noqa: PLC0415
+
+        profile, _instr, trade = _setup_trade_for_sl_test(db_session, name_suffix="SL-DBLimit")
+        update_automation_settings(profile.id, {"sl_order_type": "stop_limit", "sl_limit_offset_pct": 2.0}, db_session)
+        settings = get_automation_settings(profile.id, db_session)
+
+        spy = _SpyClient()
+        place_sl_tp_orders(trade, Decimal("0.001"), spy, db_session, settings_row=settings)
+
+        sl_row = (
+            db_session.query(KrakenOrder)
+            .filter(KrakenOrder.trade_id == trade.id, KrakenOrder.role == "sl")
+            .first()
+        )
+        assert sl_row is not None
+        assert sl_row.limit_price is not None
+
+    def test_stop_market_stores_null_limit_price_in_kraken_order(self, db_session: Session):
+        """KrakenOrder.limit_price must be NULL when sl_order_type=stop_market."""
+        from decimal import Decimal  # noqa: PLC0415
+
+        from src.kraken_execution.models import KrakenOrder  # noqa: PLC0415
+        from src.kraken_execution.service import place_sl_tp_orders  # noqa: PLC0415
+
+        profile, _instr, trade = _setup_trade_for_sl_test(db_session, name_suffix="SL-DBMkt")
+        update_automation_settings(profile.id, {"sl_order_type": "stop_market"}, db_session)
+        settings = get_automation_settings(profile.id, db_session)
+
+        spy = _SpyClient()
+        place_sl_tp_orders(trade, Decimal("0.001"), spy, db_session, settings_row=settings)
+
+        sl_row = (
+            db_session.query(KrakenOrder)
+            .filter(KrakenOrder.trade_id == trade.id, KrakenOrder.role == "sl")
+            .first()
+        )
+        assert sl_row is not None
+        assert sl_row.limit_price is None

@@ -996,10 +996,18 @@ export interface PairVIOut {
 
 // ── Kraken Execution (Phase 5) ────────────────────────────────────────────
 
+export interface MaxLossGuardConfig {
+  enabled: boolean
+  multiplier: number
+}
+
 export interface AutomationConfig {
   enabled: boolean
   pnl_status_interval_minutes: number
   max_leverage_override: number | null
+  sl_order_type: 'stop_limit' | 'stop_market'
+  sl_limit_offset_pct: number
+  max_loss_guard: MaxLossGuardConfig
 }
 
 export interface AutomationSettingsOut {
@@ -1013,10 +1021,17 @@ export interface AutomationSettingsUpdateIn {
   enabled?: boolean
   pnl_status_interval_minutes?: number
   max_leverage_override?: number | null
+  max_loss_guard?: { enabled?: boolean; multiplier?: number }
   /** Write-only: plaintext API key — encrypted server-side, never returned */
   kraken_api_key?: string
   /** Write-only: plaintext API secret — encrypted server-side, never returned */
   kraken_api_secret?: string
+}
+
+/** Per-trade SL overrides sent alongside POST /kraken-execution/trades/{id}/open */
+export interface OpenTradeIn {
+  sl_order_type?: 'stop_limit' | 'stop_market'
+  sl_limit_offset_pct?: number
 }
 
 export interface ConnectionTestOut {

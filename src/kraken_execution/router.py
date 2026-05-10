@@ -37,6 +37,8 @@ from src.kraken_execution.schemas import (
     AutomationSettingsUpdateIn,
     ConnectionTestOut,
     KrakenOrderOut,
+    MaxLossGuardConfigOut,
+    OpenTradeIn,
 )
 from src.kraken_execution.service import (
     activate_runner_trailing,
@@ -61,10 +63,17 @@ router = APIRouter(prefix="/kraken-execution", tags=["kraken-execution"])
 # ── Helper ────────────────────────────────────────────────────────────────────
 
 def _settings_to_out(row: AutomationSettings) -> AutomationSettingsOut:
+    guard_raw = row.config.get("max_loss_guard", {})
     safe_config = AutomationConfigOut(
         enabled=row.config.get("enabled", False),
         pnl_status_interval_minutes=row.config.get("pnl_status_interval_minutes", 60),
         max_leverage_override=row.config.get("max_leverage_override"),
+        sl_order_type=row.config.get("sl_order_type", "stop_limit"),
+        sl_limit_offset_pct=row.config.get("sl_limit_offset_pct", 1.5),
+        max_loss_guard=MaxLossGuardConfigOut(
+            enabled=guard_raw.get("enabled", False),
+            multiplier=guard_raw.get("multiplier", 2.0),
+        ),
     )
     return AutomationSettingsOut(
         profile_id=row.profile_id,
@@ -200,10 +209,12 @@ def _map_exc(exc: Exception) -> HTTPException:
 @router.post("/trades/{trade_id}/open", response_model=KrakenOrderOut)
 def trigger_open(
     trade_id: int,
+    body: OpenTradeIn | None = None,
     db: Session = Depends(get_db),
 ) -> KrakenOrderOut:
+    overrides = body.model_dump(exclude_none=True) if body else {}
     try:
-        order = open_automated_trade(trade_id, db)
+        order = open_automated_trade(trade_id, db, sl_overrides=overrides)
     except Exception as exc:
         raise _map_exc(exc) from exc
     return KrakenOrderOut.model_validate(order)

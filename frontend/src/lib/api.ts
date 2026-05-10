@@ -17,7 +17,7 @@ import type {
   MarketVIOut, AggregatedMarketVIOut, PairsVIOut, WatchlistOut, WatchlistMetaOut, LivePricesResponse,
   VolatilitySettingsOut, NotificationSettingsOut,
   RiskBudgetOut, RiskAdvisorOut, RiskSettingsOut, PairVIOut,
-  AutomationSettingsOut, AutomationSettingsUpdateIn, ConnectionTestOut, KrakenOrderOut,
+  AutomationSettingsOut, AutomationSettingsUpdateIn, ConnectionTestOut, KrakenOrderOut, OpenTradeIn,
   PerformanceReport, AnalyticsSettingsOut, AnalyticsSettingsUpdateIn,
   AIKeysStatusOut, AIKeysUpdateIn, AIGenerateOut,
   RitualSettings, PinnedPair, PinnedPairCreate, RitualStep, RitualSession,
@@ -633,8 +633,11 @@ export const automationApi = {
     request(`/kraken-execution/orders/${tradeId}`),
 
   /** POST /api/kraken-execution/trades/{tradeId}/open */
-  openTrade: (tradeId: number): Promise<KrakenOrderOut> =>
-    request(`/kraken-execution/trades/${tradeId}/open`, { method: 'POST' }),
+  openTrade: (tradeId: number, opts?: OpenTradeIn): Promise<KrakenOrderOut> =>
+    request(`/kraken-execution/trades/${tradeId}/open`, {
+      method: 'POST',
+      body: opts ? JSON.stringify(opts) : undefined,
+    }),
 
   /** POST /api/kraken-execution/trades/{tradeId}/close */
   closeTrade: (tradeId: number): Promise<KrakenOrderOut> =>

@@ -340,21 +340,15 @@ class TestDepositCRUD:
         ids = [d["id"] for d in list_resp.json()]
         assert deposit_id not in ids
 
-    def test_deposit_allowed_for_contracts_profile(
+    def test_deposit_forbidden_for_contracts_profile(
         self, client: TestClient, contracts_profile: Profile, db_session: Session
     ):
-        """Deposits are now available for all profile types.
-        For contracts profiles, capital_current is NOT recomputed (managed by trade-close flow).
-        """
-        initial_capital = float(contracts_profile.capital_current)
+        """Deposits are a spot-only concept — contracts profiles must get 403."""
         resp = client.post(
             f"/api/investment/deposits/{contracts_profile.id}",
             json=_deposit_payload(),
         )
-        assert resp.status_code == 201
-        # capital_current must NOT change for contracts profiles (no recompute)
-        db_session.refresh(contracts_profile)
-        assert float(contracts_profile.capital_current) == pytest.approx(initial_capital, rel=1e-4)
+        assert resp.status_code == 403
 
 
 # ── Tests: capital_current recompute ─────────────────────────────────────────

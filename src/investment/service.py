@@ -232,6 +232,8 @@ def create_spot_trade(profile_id: int, data: SpotTradeCreate, db: Session) -> Sp
 def update_spot_trade(
     trade_id: int, profile_id: int, data: SpotTradeUpdate, db: Session
 ) -> SpotTrade:
+    profile = _get_profile_or_404(db, profile_id)
+    _require_spot_profile(profile)
     trade = get_spot_trade(trade_id, profile_id, db)
     for field, value in data.model_dump(exclude_unset=True).items():
         if field == "tp_targets" and value is not None:
@@ -247,6 +249,8 @@ def update_spot_trade(
 def close_spot_trade(
     trade_id: int, profile_id: int, data: SpotTradeClose, db: Session
 ) -> SpotTrade:
+    profile = _get_profile_or_404(db, profile_id)
+    _require_spot_profile(profile)
     trade = get_spot_trade(trade_id, profile_id, db)
     if trade.status == "closed":
         raise HTTPException(
@@ -272,6 +276,8 @@ def close_spot_trade(
 
 
 def cancel_spot_trade(trade_id: int, profile_id: int, db: Session) -> SpotTrade:
+    profile = _get_profile_or_404(db, profile_id)
+    _require_spot_profile(profile)
     trade = get_spot_trade(trade_id, profile_id, db)
     if trade.status == "closed":
         raise HTTPException(
@@ -299,7 +305,7 @@ def list_deposits(profile_id: int, db: Session) -> list[Deposit]:
 
 def create_deposit(profile_id: int, data: DepositCreate, db: Session) -> Deposit:
     profile = _get_profile_or_404(db, profile_id)
-    # No spot guard — deposits available for all profile types
+    _require_spot_profile(profile)  # Deposits are a spot-only concept
 
     deposit = Deposit(
         profile_id=profile_id,
@@ -313,15 +319,15 @@ def create_deposit(profile_id: int, data: DepositCreate, db: Session) -> Deposit
     db.commit()
     db.refresh(deposit)
 
-    # Recompute capital_current — spot only (contracts capital managed by trade-close flow)
-    if profile.account_type == "spot":
-        recompute_spot_capital(db, profile_id)
+    recompute_spot_capital(db, profile_id)
     return deposit
 
 
 def update_deposit(
     deposit_id: int, profile_id: int, data: DepositUpdate, db: Session
 ) -> Deposit:
+    profile = _get_profile_or_404(db, profile_id)
+    _require_spot_profile(profile)
     deposit = (
         db.query(Deposit)
         .filter(Deposit.id == deposit_id, Deposit.profile_id == profile_id)
@@ -336,15 +342,13 @@ def update_deposit(
         setattr(deposit, field, value)
     db.commit()
     db.refresh(deposit)
-
-    # Recompute capital_current — spot only
-    profile = _get_profile_or_404(db, profile_id)
-    if profile.account_type == "spot":
-        recompute_spot_capital(db, profile_id)
+    recompute_spot_capital(db, profile_id)
     return deposit
 
 
 def delete_deposit(deposit_id: int, profile_id: int, db: Session) -> None:
+    profile = _get_profile_or_404(db, profile_id)
+    _require_spot_profile(profile)
     deposit = (
         db.query(Deposit)
         .filter(Deposit.id == deposit_id, Deposit.profile_id == profile_id)
@@ -357,11 +361,7 @@ def delete_deposit(deposit_id: int, profile_id: int, db: Session) -> None:
         )
     db.delete(deposit)
     db.commit()
-
-    # Recompute capital_current — spot only
-    profile = _get_profile_or_404(db, profile_id)
-    if profile.account_type == "spot":
-        recompute_spot_capital(db, profile_id)
+    recompute_spot_capital(db, profile_id)
 
 
 # ── Portfolio summary ─────────────────────────────────────────────────────────
@@ -623,6 +623,8 @@ def get_spot_price(symbol: str) -> dict:
 
 def append_spot_screenshot(trade_id: int, profile_id: int, url: str, db: Session) -> SpotTrade:
     """Append a screenshot URL to spot_trade.screenshot_urls."""
+    profile = _get_profile_or_404(db, profile_id)
+    _require_spot_profile(profile)
     trade = (
         db.query(SpotTrade)
         .filter(SpotTrade.id == trade_id, SpotTrade.profile_id == profile_id)

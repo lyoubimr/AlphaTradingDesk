@@ -40,6 +40,9 @@ DEFAULT_AUTOMATION_CONFIG: dict = {
     "enabled": False,
     "pnl_status_interval_minutes": 60,
     "max_leverage_override": None,  # None = use instrument max_leverage from DB
+    "sl_order_type": "stop_limit",  # "stop_limit" (default) | "stop_market"
+    "sl_limit_offset_pct": 1.5,     # max slippage % accepted when SL triggers
+    "max_loss_guard": {"enabled": False, "multiplier": 2.0},  # force-close at N×risk_amount loss
 }
 
 
@@ -57,6 +60,9 @@ class AutomationSettings(Base):
         "enabled": bool,
         "pnl_status_interval_minutes": int,
         "max_leverage_override": int | null,
+        "sl_order_type": "stop_limit" | "stop_market",
+        "sl_limit_offset_pct": float,            # max slippage % for stop-limit fallback price
+        "max_loss_guard": {"enabled": bool, "multiplier": float},
         "kraken_api_key_enc": "<fernet-ciphertext>",     # encrypted — never returned by API
         "kraken_api_secret_enc": "<fernet-ciphertext>",  # encrypted — never returned by API
       }
