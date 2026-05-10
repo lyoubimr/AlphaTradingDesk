@@ -222,15 +222,15 @@ def _seed_steps(profile_id: int, db: Session) -> None:
 def _sync_step_labels(profile_id: int, session_type: str, rows: list, db: Session) -> None:
     """Silently update step labels/configs that differ from current DEFAULT_STEPS.
 
-    This handles the case where DB rows were seeded with an old default
-    (e.g. smart_wl label without 1D) and DEFAULT_STEPS has been updated since.
-    Only syncs rows that have NOT been manually customised (label still matches
-    an old pattern we know about, or exactly matches an old default within this
-    session type).
+    Also inserts any new step positions that exist in DEFAULT_STEPS but not yet
+    in the DB (e.g. when a new step is added to an existing session template).
     """
     defaults = DEFAULT_STEPS.get(session_type, [])
     default_by_pos: dict[int, dict] = {d["position"]: d for d in defaults}
+    existing_positions = {row.position for row in rows}
     changed = False
+
+    # Update labels/configs of existing rows
     for row in rows:
         default = default_by_pos.get(row.position)
         if not default:
@@ -242,6 +242,13 @@ def _sync_step_labels(profile_id: int, session_type: str, rows: list, db: Sessio
         if default_config and row.config != default_config:
             row.config = default_config
             changed = True
+
+    # Insert new steps for positions not yet in DB
+    for pos, default in default_by_pos.items():
+        if pos not in existing_positions:
+            db.add(RitualStep(profile_id=profile_id, session_type=session_type, **default))
+            changed = True
+
     if changed:
         db.commit()
 
@@ -719,7 +726,7 @@ def generate_smart_watchlist(
 
     Pinned pairs are injected at the top of their TF section regardless of score.
     """
-    _get_profile_or_404(db, profile_id)
+    _profile = _get_profile_or_404(db, profile_id)
     settings_row = get_ritual_settings(profile_id, db)
     cfg = settings_row.config
 
@@ -758,7 +765,9 @@ def generate_smart_watchlist(
     pair_tf_data: dict[str, dict[str, dict]] = {}
     tf_pairs: dict[str, list[str]] = {}
 
-    _is_spot_session = session_type in ("spot_monthly", "spot_weekly")
+    # Determine data source from profile account_type — not session_type.
+    # This allows weekend_review to use spot data for spot profiles.
+    _is_spot_session = getattr(_profile, "account_type", "contracts") == "spot"
 
     for tf in tfs:
         # Normalize to lowercase — snapshots store TFs in lowercase (e.g. "4h", "1h")
@@ -820,10 +829,9 @@ def generate_smart_watchlist(
     pinned_map: dict[str, RitualPinnedPair] = {p.pair: p for p in active_pins}
 
     # Get broker name for filename
-    profile = db.query(Profile).filter_by(id=profile_id).first()
     broker_name = "Kraken"
-    if profile and profile.broker_id:
-        broker = db.query(Broker).filter_by(id=profile.broker_id).first()
+    if _profile and _profile.broker_id:
+        broker = db.query(Broker).filter_by(id=_profile.broker_id).first()
         if broker:
             broker_name = broker.name.replace(" ", "")
 

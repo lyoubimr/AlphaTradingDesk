@@ -58,11 +58,11 @@ const SESSION_TYPES: { type: SessionType; emoji: string; label: string; when: st
     emoji: '📊',
     label: 'Weekend Review',
     when: 'Sat / Sun',
-    desc: 'Analytics + Journal + Goals + Learning',
-    est: '~35 min',
+    desc: 'Analytics + Journal + Goals + Watchlist + Learning',
+    est: '~40 min',
     accent: '#2dd4bf',
     gradient: 'from-teal-950/60 to-surface-800/40',
-    steps: ['Analytics', 'Journal', 'Goals', 'Learning Note'],
+    steps: ['Analytics', 'Journal', 'Goals', 'Learning Note', 'Smart Watchlist'],
   },
   // ── Spot sessions (shown for spot profiles) ──────────────────────────────
   {
@@ -1048,7 +1048,7 @@ export function RitualPage() {
 
   // Show spot sessions for spot profiles; contracts sessions for others
   const visibleSessionTypes = isSpot
-    ? SESSION_TYPES.filter((s) => s.type === 'spot_weekly' || s.type === 'spot_monthly')
+    ? SESSION_TYPES.filter((s) => s.type === 'spot_weekly' || s.type === 'spot_monthly' || s.type === 'weekend_review')
     : SESSION_TYPES.filter((s) => s.type !== 'spot_monthly' && s.type !== 'spot_weekly')
 
   const [activeSession, setActiveSession] = useState<RitualSession | null>(null)

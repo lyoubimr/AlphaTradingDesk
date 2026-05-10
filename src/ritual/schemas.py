@@ -397,6 +397,12 @@ DEFAULT_STEPS: dict[str, list[dict]] = {
             "is_mandatory": False, "linked_module": None,
             "cadence_hours": None, "config": {},
         },
+        {
+            "position": 5, "step_type": "smart_wl",
+            "label": "Generate Watchlist (1W + 1D + 4H)", "est_minutes": 1,
+            "is_mandatory": False, "linked_module": None,
+            "cadence_hours": None, "config": {"timeframes": ["1W", "1D", "4H"]},
+        },
     ],
     # ── Spot session templates ────────────────────────────────────────────────
     "spot_monthly": [
