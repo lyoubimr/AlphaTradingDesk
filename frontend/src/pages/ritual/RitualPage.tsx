@@ -78,7 +78,7 @@ const SESSION_TYPES: { type: SessionType; emoji: string; label: string; when: st
   },
   {
     type: 'spot_weekly',
-    emoji: '�',
+    emoji: '🔍',
     label: 'Spot Weekly Check',
     when: 'Weekly',
     desc: 'Open positions + HTF scan + analysis',
