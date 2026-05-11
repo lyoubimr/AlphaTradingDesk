@@ -796,6 +796,7 @@ def generate_smart_watchlist(
     for tf in tfs:
         # Normalize to lowercase — snapshots store TFs in lowercase (e.g. "4h", "1h")
         # but step configs may use uppercase (e.g. "4H", "1H").
+        snapshot: SpotWatchlistSnapshot | WatchlistSnapshot | None
         if _is_spot_session:
             snapshot = (
                 db.query(SpotWatchlistSnapshot)

@@ -270,7 +270,7 @@ def upload_spot_screenshot(
     trade_id: int,
     file: UploadFile,
     db: Session = Depends(get_db),
-) -> SpotTradeOut:
+) -> object:
     """Upload a screenshot image and append its URL to spot_trade.screenshot_urls."""
     url = _save_spot_screenshot(file, trade_id)
     return service.append_spot_screenshot(trade_id, profile_id, url, db)
