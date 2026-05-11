@@ -98,7 +98,7 @@ SESSION_EMOJIS: dict[str, str] = {
     "trade_session": "🎯",
     "weekend_review": "📊",
     "spot_monthly": "🪙",
-    "spot_weekly": "📊",
+    "spot_weekly": "�",
 }
 
 STEP_EMOJIS: dict[str, str] = {

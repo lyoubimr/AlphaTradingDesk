@@ -78,7 +78,7 @@ const SESSION_TYPES: { type: SessionType; emoji: string; label: string; when: st
   },
   {
     type: 'spot_weekly',
-    emoji: '📊',
+    emoji: '�',
     label: 'Spot Weekly Check',
     when: 'Weekly',
     desc: 'Open positions + HTF scan + analysis',
@@ -1214,9 +1214,9 @@ export function RitualPage() {
                       }}
                     />
                   </div>
-                  <div className="grid grid-cols-4 gap-1">
+                  <div className={`grid gap-1 ${isSpot ? 'grid-cols-2' : 'grid-cols-4'}`}>
                     {(isSpot
-                      ? (['spot_monthly', 'spot_weekly', 'weekend_review'] as SessionType[])
+                      ? (['spot_monthly', 'spot_weekly'] as SessionType[])
                       : (['weekly_setup', 'trade_session', 'weekend_review'] as SessionType[])
                     ).map(st => {
                       const info = SESSION_TYPES.find(s => s.type === st)!
