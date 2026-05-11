@@ -269,7 +269,7 @@ DISCIPLINE_POINTS: dict[str, int] = {
     "trade_outside_session": -15,  # penalty (future — Phase 5)
     # Spot session discipline points
     "spot_monthly_done": 20,
-    "spot_weekly_done": 15,
+    "spot_weekly_done": 20,  # 1W+1D+4H = same effort as weekly_setup
 }
 
 MAX_WEEKLY_SCORE = (
@@ -302,7 +302,7 @@ DEFAULT_RITUAL_CONFIG: dict[str, Any] = {
         "trade_session": 10,
         "weekend_review": 20,
         "spot_monthly": 25,
-        "spot_weekly": 15,
+        "spot_weekly": 20,  # 3 timeframes now, same as weekly_setup
     },
     "smart_filter": {
         "weights": {"1W": 4.0, "1D": 3.0, "4H": 2.0, "1H": 1.0, "15m": 0.5},
