@@ -133,6 +133,10 @@ def _monday_of(dt: date) -> date:
     return dt - timedelta(days=dt.weekday())
 
 
+def _month_start(dt: date) -> date:
+    return dt.replace(day=1)
+
+
 def _enrich_step(step: RitualStep) -> StepRead:
     data = StepRead.model_validate(step)
     data.emoji = STEP_EMOJIS.get(step.step_type, "🔷")
@@ -611,18 +615,18 @@ def _update_weekly_score(
     is_spot: bool = False,
 ) -> None:
     today = session.started_at.date() if hasattr(session.started_at, "date") else date.today()
-    monday = _monday_of(today)
+    period_start = _month_start(today) if is_spot else _monday_of(today)
     max_score = MAX_WEEKLY_SCORE_SPOT if is_spot else MAX_WEEKLY_SCORE
 
     row = (
         db.query(RitualWeeklyScore)
-        .filter_by(profile_id=profile_id, week_start=monday)
+        .filter_by(profile_id=profile_id, week_start=period_start)
         .first()
     )
     if not row:
         row = RitualWeeklyScore(
             profile_id=profile_id,
-            week_start=monday,
+            week_start=period_start,
             score=0,
             max_score=max_score,
             details={
@@ -667,34 +671,40 @@ def _update_weekly_score(
 
 
 def get_weekly_score(profile_id: int, db: Session) -> WeeklyScoreRead:
-    _get_profile_or_404(db, profile_id)
-    monday = _monday_of(date.today())
+    profile = _get_profile_or_404(db, profile_id)
+    is_spot = getattr(profile, "account_type", "contracts") == "spot"
+    period_start = _month_start(date.today()) if is_spot else _monday_of(date.today())
+    period = "month" if is_spot else "week"
     row = (
         db.query(RitualWeeklyScore)
-        .filter_by(profile_id=profile_id, week_start=monday)
+        .filter_by(profile_id=profile_id, week_start=period_start)
         .first()
     )
     if not row:
         return WeeklyScoreRead(
             id=0,
             profile_id=profile_id,
-            week_start=monday,
+            week_start=period_start,
             score=0,
-            max_score=MAX_WEEKLY_SCORE,
+            max_score=MAX_WEEKLY_SCORE_SPOT if is_spot else MAX_WEEKLY_SCORE,
             details={},
             pct=0.0,
             grade="—",
+            period=period,
         )
     data = WeeklyScoreRead.model_validate(row)
     data.pct = round(row.score / row.max_score * 100, 1) if row.max_score > 0 else 0.0
     data.grade = _grade(data.pct)
+    data.period = period
     return data
 
 
 def get_weekly_score_history(
     profile_id: int, db: Session, weeks: int = 8
 ) -> list[WeeklyScoreRead]:
-    _get_profile_or_404(db, profile_id)
+    profile = _get_profile_or_404(db, profile_id)
+    is_spot = getattr(profile, "account_type", "contracts") == "spot"
+    period = "month" if is_spot else "week"
     rows = (
         db.query(RitualWeeklyScore)
         .filter_by(profile_id=profile_id)
@@ -707,6 +717,7 @@ def get_weekly_score_history(
         data = WeeklyScoreRead.model_validate(row)
         data.pct = round(row.score / row.max_score * 100, 1) if row.max_score > 0 else 0.0
         data.grade = _grade(data.pct)
+        data.period = period
         result.append(data)
     return result
 

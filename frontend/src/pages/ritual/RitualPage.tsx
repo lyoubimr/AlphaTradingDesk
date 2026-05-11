@@ -162,7 +162,7 @@ function TFBadge({ tf }: { tf: string }) {
 }
 
 // ── Score ring ────────────────────────────────────────────────────────────────
-function ScoreRing({ score, maxScore, pct, grade }: { score: number; maxScore: number; pct: number; grade: string }) {
+function ScoreRing({ score, maxScore, pct, grade, period = 'week' }: { score: number; maxScore: number; pct: number; grade: string; period?: string }) {
   const radius = 28
   const circumference = 2 * Math.PI * radius
   const strokeDash = circumference * (pct / 100)
@@ -187,7 +187,7 @@ function ScoreRing({ score, maxScore, pct, grade }: { score: number; maxScore: n
       </div>
       <div className="text-center">
         <p className="text-sm font-semibold text-slate-200">{score} <span className="text-slate-500 text-xs">/ {maxScore}</span></p>
-        <p className="text-[10px] text-slate-500">This week</p>
+        <p className="text-[10px] text-slate-500">{period === 'month' ? 'This month' : 'This week'}</p>
       </div>
     </div>
   )
@@ -1202,7 +1202,7 @@ export function RitualPage() {
           {score && (
             <div className="rounded-xl border border-surface-700 bg-surface-800/50 p-4">
               <div className="flex items-center gap-4">
-                <ScoreRing score={score.score} maxScore={score.max_score} pct={score.pct} grade={score.grade} />
+                <ScoreRing score={score.score} maxScore={score.max_score} pct={score.pct} grade={score.grade} period={score.period} />
                 <div className="flex-1 space-y-2">
                   <p className="text-sm font-semibold text-slate-200">Discipline Score</p>
                   <div className="w-full bg-surface-700 rounded-full h-1.5">

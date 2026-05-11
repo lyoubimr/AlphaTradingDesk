@@ -1399,4 +1399,5 @@ export interface WeeklyScore {
   details: Record<string, unknown>
   pct: number
   grade: string
+  period: string  // "week" | "month"
 }

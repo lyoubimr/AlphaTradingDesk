@@ -255,6 +255,7 @@ class WeeklyScoreRead(BaseModel):
     # computed
     pct: float = 0.0
     grade: str = ""
+    period: str = "week"  # "week" for contracts, "month" for spot
 
 
 # ── Discipline event types (internal) ────────────────────────────────────────
@@ -278,8 +279,13 @@ MAX_WEEKLY_SCORE = (
     + DISCIPLINE_POINTS["weekend_review_done"]
 )  # = 20 + 50 + 15 = 85  (contracts profiles)
 
-# Spot: one spot_weekly per week (20 pts). spot_monthly is a monthly bonus — not counted in weekly max.
-MAX_WEEKLY_SCORE_SPOT = DISCIPLINE_POINTS["spot_weekly_done"]  # = 20
+# Spot: monthly period — 4 spot_weekly sessions + 1 spot_monthly review = 100 pts/month
+MAX_MONTHLY_SCORE_SPOT = (
+    DISCIPLINE_POINTS["spot_weekly_done"] * 4
+    + DISCIPLINE_POINTS["spot_monthly_done"]
+)  # = 4×20 + 20 = 100
+# Keep old name as alias for import compatibility
+MAX_WEEKLY_SCORE_SPOT = MAX_MONTHLY_SCORE_SPOT
 
 
 # ── Default Config ────────────────────────────────────────────────────────────
