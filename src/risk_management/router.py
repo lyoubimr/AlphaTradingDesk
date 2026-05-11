@@ -13,10 +13,11 @@ P3-6   GET /risk/advisor                    — Full Risk Advisor calculation
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from src.core.deps import get_db
+from src.core.models.broker import Profile
 from src.risk_management.schemas import (
     PairVIOut,
     RiskAdvisorOut,
@@ -33,6 +34,20 @@ from src.risk_management.service import (
 )
 
 router = APIRouter(prefix="/risk", tags=["risk"])
+
+
+def _require_contracts_profile(profile_id: int, db: Session) -> None:
+    """Raise 403 when called for a spot profile.
+
+    The risk module (dynamic risk, budget, advisor) is not applicable to
+    spot profiles — no leverage means no dynamic risk sizing.
+    """
+    profile = db.query(Profile).filter(Profile.id == profile_id).first()
+    if profile and getattr(profile, "account_type", "contracts") == "spot":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Risk module is not available for spot profiles.",
+        )
 
 
 # ── P3-3: Live Pair VI ────────────────────────────────────────────────────────
@@ -72,6 +87,7 @@ def read_risk_settings(
     created automatically with sensible defaults (DEFAULT_RISK_CONFIG) so the
     caller always receives a valid config without any prior setup step.
     """
+    _require_contracts_profile(profile_id, db)
     row = get_risk_settings(profile_id, db)
     return RiskSettingsOut(profile_id=row.profile_id, config=row.config)
 
@@ -89,6 +105,7 @@ def write_risk_settings(
     the changed section (e.g. just ``criteria.market_vi``) without resetting
     unrelated settings.
     """
+    _require_contracts_profile(profile_id, db)
     row = update_risk_settings(profile_id, body.config, db)
     return RiskSettingsOut(profile_id=row.profile_id, config=row.config)
 
@@ -109,6 +126,7 @@ def read_risk_budget(
     crossed the configurable alert threshold while a pending trade is waiting),
     and ``force_allowed`` so the UI can decide whether to surface a hard block.
     """
+    _require_contracts_profile(profile_id, db)
     data = get_risk_budget(profile_id, db)
     return RiskBudgetOut(**data)
 
@@ -136,6 +154,7 @@ def read_risk_advisor(
     All optional inputs default to neutral (factor = 1.0) when absent.
     Never fails on Redis/Kraken unavailability — degrades gracefully.
     """
+    _require_contracts_profile(profile_id, db)
     data = orchestrate_risk_advisor(
         profile_id=profile_id,
         pair=pair,

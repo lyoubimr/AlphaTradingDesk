@@ -1,14 +1,14 @@
 // ── Trade Journal page ─────────────────────────────────────────────────────
 import { useEffect, useState, useCallback, useMemo } from 'react'
-import { Plus, Filter, Download, X, Loader2, RefreshCw } from 'lucide-react'
+import { Plus, Filter, Download, X, Loader2, RefreshCw, CheckCircle2, XCircle } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { PageHeader } from '../../components/ui/PageHeader'
 import { Badge } from '../../components/ui/Badge'
 import { StatCard } from '../../components/ui/StatCard'
 import { useProfile } from '../../context/ProfileContext'
-import { tradesApi, strategiesApi } from '../../lib/api'
+import { tradesApi, strategiesApi, investmentApi } from '../../lib/api'
 import { cn } from '../../lib/cn'
-import type { TradeListItem, Strategy } from '../../types/api'
+import type { TradeListItem, Strategy, SpotTradeOut, SpotTradeClose } from '../../types/api'
 
 // ── Status badge ──────────────────────────────────────────────────────────
 function StatusBadge({
@@ -48,7 +48,113 @@ function StatusBadge({
     </span>
   )
 }
+// ── Spot trade helpers ────────────────────────────────────────────────────────
 
+function fmt(n: string | number | null | undefined, decimals = 2): string {
+  if (n == null) return '—'
+  return Number(n).toLocaleString('en-US', {
+    minimumFractionDigits: decimals,
+    maximumFractionDigits: decimals,
+  })
+}
+
+function fmtDate(iso: string | null | undefined): string {
+  if (!iso) return '—'
+  return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: '2-digit' })
+}
+
+// ── Spot close modal ──────────────────────────────────────────────────────────
+// NewSpotTradeModal removed — replaced by /trades/new-spot (NewSpotTradePage)
+
+interface SpotCloseModalProps {
+  trade: SpotTradeOut
+  profileId: number
+  onClose: () => void
+  onSaved: () => void
+}
+
+function SpotCloseModal({ trade, profileId, onClose, onSaved }: SpotCloseModalProps) {
+  const [exitPrice, setExitPrice] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const pnl = exitPrice
+    ? (Number(exitPrice) - Number(trade.entry_price)) * Number(trade.quantity)
+    : null
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setSaving(true)
+    setError(null)
+    try {
+      const payload: SpotTradeClose = { exit_price: exitPrice }
+      await investmentApi.closeTrade(profileId, trade.id, payload)
+      onSaved()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unknown error')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative w-full max-w-sm bg-surface-800 rounded-2xl border border-surface-700 shadow-2xl overflow-hidden">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-surface-700">
+          <h2 className="text-sm font-semibold text-slate-100">Close {trade.pair}</h2>
+          <button type="button" onClick={onClose} className="text-slate-500 hover:text-slate-200 transition-colors p-1 rounded">
+            <X size={16} />
+          </button>
+        </div>
+        <form onSubmit={handleSubmit} className="p-6 space-y-4">
+          {error && (
+            <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-2 text-xs text-red-400">{error}</div>
+          )}
+          <div className="rounded-lg bg-surface-700/50 border border-surface-600 px-3 py-2 space-y-1">
+            <div className="flex justify-between text-xs">
+              <span className="text-slate-500">Entry price</span>
+              <span className="font-mono text-slate-300">{fmt(trade.entry_price)}</span>
+            </div>
+            <div className="flex justify-between text-xs">
+              <span className="text-slate-500">Quantity</span>
+              <span className="font-mono text-slate-300">{fmt(trade.quantity, 6)}</span>
+            </div>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-slate-400 mb-1.5">Exit price *</label>
+            <input required type="number" step="any" min="0.000001"
+              value={exitPrice} onChange={(e) => setExitPrice(e.target.value)}
+              placeholder="0.00" autoFocus
+              className="w-full bg-surface-700 border border-surface-600 rounded-lg px-3 py-2 text-sm text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-brand-500/50" />
+          </div>
+          {pnl != null && (
+            <div className={cn(
+              'rounded-lg border px-3 py-2 flex items-center justify-between',
+              pnl >= 0 ? 'bg-emerald-500/10 border-emerald-500/30' : 'bg-red-500/10 border-red-500/30',
+            )}>
+              <span className="text-xs text-slate-500">Estimated P&L</span>
+              <span className={cn('text-sm font-mono font-semibold', pnl >= 0 ? 'text-emerald-400' : 'text-red-400')}>
+                {pnl >= 0 ? '+' : ''}{fmt(pnl)}
+              </span>
+            </div>
+          )}
+          <div className="flex items-center gap-3 pt-1">
+            <button type="button" onClick={onClose}
+              className="flex-1 py-2.5 rounded-xl border border-surface-600 bg-surface-700 text-sm text-slate-400 hover:text-slate-200 transition-colors">
+              Cancel
+            </button>
+            <button type="submit" disabled={saving}
+              className="flex-1 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-medium transition-colors disabled:opacity-50 flex items-center justify-center gap-2">
+              {saving ? <Loader2 size={14} className="animate-spin" /> : null}
+              Close position
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  )
+}
 // ── Derived KPIs ──────────────────────────────────────────────────────────
 function deriveKPIs(trades: TradeListItem[], beThreshold: number) {
   const closed   = trades.filter((t) => t.status === 'closed')
@@ -106,13 +212,17 @@ function deriveKPIs(trades: TradeListItem[], beThreshold: number) {
 export function TradesPage() {
   const navigate = useNavigate()
   const { activeProfile } = useProfile()
+  const isSpot = activeProfile?.account_type === 'spot'
 
   const [trades, setTrades]         = useState<TradeListItem[]>([])
   const [loading, setLoading]       = useState(false)
   const [error, setError]           = useState<string | null>(null)
   const [cancelling, setCancelling] = useState<number | null>(null)
   const [activating, setActivating] = useState<number | null>(null)
-  const [strategies, setStrategies] = useState<Strategy[]>([])
+  const [strategies,       setStrategies]       = useState<Strategy[]>([])
+  const [spotTrades,        setSpotTrades]        = useState<SpotTradeOut[]>([])
+  const [closingSpotTrade,  setClosingSpotTrade]  = useState<SpotTradeOut | null>(null)
+  const [cancellingSpot,    setCancellingSpot]    = useState<number | null>(null)
 
   const strategyMap = useMemo(
     () => new Map(strategies.map((s) => [s.id, s])),
@@ -120,14 +230,24 @@ export function TradesPage() {
   )
 
   const fetchTrades = useCallback(() => {
-    if (!activeProfile) { setTrades([]); return }
+    if (!activeProfile) { setTrades([]); setSpotTrades([]); return }
     setLoading(true)
     setError(null)
-    tradesApi
-      .list(activeProfile.id)
-      .then(setTrades)
-      .catch((e: Error) => setError(e.message))
-      .finally(() => setLoading(false))
+    if (activeProfile.account_type === 'spot') {
+      Promise.all([
+        investmentApi.listTrades(activeProfile.id, 'open'),
+        investmentApi.listTrades(activeProfile.id, 'closed'),
+      ])
+        .then(([open, closed]) => setSpotTrades([...open, ...closed]))
+        .catch((e: Error) => setError(e.message))
+        .finally(() => setLoading(false))
+    } else {
+      tradesApi
+        .list(activeProfile.id)
+        .then(setTrades)
+        .catch((e: Error) => setError(e.message))
+        .finally(() => setLoading(false))
+    }
   }, [activeProfile])
 
   useEffect(() => { fetchTrades() }, [fetchTrades])
@@ -171,6 +291,26 @@ export function TradesPage() {
   const beThreshold = parseFloat(activeProfile?.min_pnl_pct_for_stats ?? '0')
   const kpis = deriveKPIs(trades, beThreshold)
 
+  // Spot KPIs
+  const spotOpen     = spotTrades.filter(t => t.status === 'open').length
+  const spotClosed   = spotTrades.filter(t => t.status === 'closed').length
+  const spotPnl      = spotTrades.filter(t => t.status === 'closed').reduce((s, t) => s + parseFloat(t.realized_pnl ?? '0'), 0)
+  const spotDeployed = spotTrades.filter(t => t.status === 'open').reduce((s, t) => s + parseFloat(t.total_cost ?? '0'), 0)
+
+  async function handleSpotCancel(tradeId: number) {
+    if (!activeProfile) return
+    if (!confirm('Cancel this spot position? This cannot be undone.')) return
+    setCancellingSpot(tradeId)
+    try {
+      await investmentApi.cancelTrade(activeProfile.id, tradeId)
+      setSpotTrades((prev) => prev.filter((t) => t.id !== tradeId))
+    } catch (e: unknown) {
+      alert(`Cancel failed: ${(e as Error).message}`)
+    } finally {
+      setCancellingSpot(null)
+    }
+  }
+
   return (
     <div>
       <PageHeader
@@ -198,7 +338,7 @@ export function TradesPage() {
             <button
               type="button"
               className="atd-btn-primary"
-              onClick={() => navigate('/trades/new')}
+              onClick={() => navigate(isSpot ? '/trades/new-spot' : '/trades/new')}
             >
               <Plus size={14} /> New Trade
             </button>
@@ -207,44 +347,64 @@ export function TradesPage() {
       />
 
       {/* ── KPIs ──────────────────────────────────────────────────────── */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-        <StatCard
-          label="Total Trades"
-          value={loading ? '…' : String(kpis.total)}
-          sub={loading ? '' : `${kpis.openCount} open`}
-          accent="brand"
-          info="Total trades in your journal (open + partial + closed)."
-        />
-        <StatCard
-          label="Win Rate"
-          value={loading ? '…' : kpis.winRate}
-          sub={loading ? '' : kpis.winRateSub}
-          accent="bull"
-          info="Win rate across closed trades. Requires at least 5 closed trades to be meaningful."
-        />
-        <StatCard
-          label="Avg R:R"
-          value={
-            loading ? '…' : kpis.avgRR != null
-              ? <span className={kpis.avgRRPos ? 'text-emerald-400' : 'text-red-400'}>{kpis.avgRRStr}</span>
-              : '—'
-          }
-          sub={loading ? '' : kpis.avgRRSub}
-          accent={kpis.avgRRPos === true ? 'bull' : kpis.avgRRPos === false ? 'bear' : 'neutral'}
-          info="Average realised R:R across closed trades. Computed as realized P&L ÷ initial risk per trade."
-        />
-        <StatCard
-          label="Total P&L"
-          value={loading ? '…' : kpis.totalPnl === '—' ? '—' : (
-            <span className={kpis.totalPnlPos ? 'text-emerald-400' : 'text-red-400'}>
-              {kpis.totalPnl}
-            </span>
-          )}
-          sub={trades.some((t) => t.booked_pnl) ? 'Closed + partial profits' : 'Closed trades only'}
-          accent={kpis.totalPnl.startsWith('-') ? 'bear' : kpis.totalPnl === '—' ? 'neutral' : 'bull'}
-          info="Sum of P&L for all closed trades + booked profits from partially closed trades (TP1 hit). Win Rate and Avg R:R update only on full close."
-        />
-      </div>
+      {isSpot ? (
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+          <StatCard label="Open Holdings" value={loading ? '…' : String(spotOpen)} accent="brand"
+            info="Number of currently open spot positions." />
+          <StatCard label="Closed Trades" value={loading ? '…' : String(spotClosed)}
+            info="Total number of closed spot trades." />
+          <StatCard
+            label="Realized P&L"
+            value={loading ? '…' : spotClosed > 0
+              ? <span className={spotPnl >= 0 ? 'text-emerald-400' : 'text-red-400'}>{spotPnl >= 0 ? '+' : ''}${spotPnl.toFixed(2)}</span>
+              : '—'}
+            accent={spotPnl > 0 ? 'bull' : spotPnl < 0 ? 'bear' : 'neutral'}
+            info="Total realized P&L across all closed spot trades."
+          />
+          <StatCard label="Deployed" value={loading ? '…' : spotDeployed > 0 ? `$${spotDeployed.toFixed(0)}` : '—'}
+            sub="Open positions cost"
+            info="Total capital deployed in currently open spot positions." />
+        </div>
+      ) : (
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+          <StatCard
+            label="Total Trades"
+            value={loading ? '…' : String(kpis.total)}
+            sub={loading ? '' : `${kpis.openCount} open`}
+            accent="brand"
+            info="Total trades in your journal (open + partial + closed)."
+          />
+          <StatCard
+            label="Win Rate"
+            value={loading ? '…' : kpis.winRate}
+            sub={loading ? '' : kpis.winRateSub}
+            accent="bull"
+            info="Win rate across closed trades. Requires at least 5 closed trades to be meaningful."
+          />
+          <StatCard
+            label="Avg R:R"
+            value={
+              loading ? '…' : kpis.avgRR != null
+                ? <span className={kpis.avgRRPos ? 'text-emerald-400' : 'text-red-400'}>{kpis.avgRRStr}</span>
+                : '—'
+            }
+            sub={loading ? '' : kpis.avgRRSub}
+            accent={kpis.avgRRPos === true ? 'bull' : kpis.avgRRPos === false ? 'bear' : 'neutral'}
+            info="Average realised R:R across closed trades. Computed as realized P&L ÷ initial risk per trade."
+          />
+          <StatCard
+            label="Total P&L"
+            value={loading ? '…' : kpis.totalPnl === '—' ? '—' : (
+              <span className={kpis.totalPnlPos ? 'text-emerald-400' : 'text-red-400'}>
+                {kpis.totalPnl}
+              </span>
+            )}
+            sub={trades.some((t) => t.booked_pnl) ? 'Closed + partial profits' : 'Closed trades only'}
+            accent={kpis.totalPnl.startsWith('-') ? 'bear' : kpis.totalPnl === '—' ? 'neutral' : 'bull'}
+            info="Sum of P&L for all closed trades + booked profits from partially closed trades (TP1 hit). Win Rate and Avg R:R update only on full close."
+          />
+        </div>
+      )}
 
       {/* ── Error state ───────────────────────────────────────────────── */}
       {error && (
@@ -260,8 +420,108 @@ export function TradesPage() {
         </div>
       )}
 
-      {/* ── Trades table ──────────────────────────────────────────────── */}
-      {activeProfile && (
+      {/* ── Spot trade table ──────────────────────────────────────────── */}
+      {isSpot && activeProfile && (
+        <div className="rounded-xl bg-surface-800 border border-surface-700 overflow-hidden mb-6">
+          <div className="flex items-center justify-between px-5 py-3 border-b border-surface-700">
+            <span className="text-sm font-medium text-slate-400">
+              Spot positions
+              {!loading && spotTrades.length > 0 && (
+                <span className="ml-2 text-xs text-slate-600">({spotTrades.length})</span>
+              )}
+            </span>
+            {loading
+              ? <Loader2 size={14} className="animate-spin text-slate-600" />
+              : spotTrades.length === 0
+                ? <Badge label="No positions yet" variant="neutral" />
+                : null
+            }
+          </div>
+
+          {!loading && spotTrades.length === 0 && (
+            <div className="px-5 py-12 text-center text-slate-600 text-sm">
+              No trades yet.{' '}
+              <button type="button" className="text-brand-400 hover:text-brand-300 underline underline-offset-2"
+                onClick={() => navigate('/trades/new-spot')}>
+                Log your first trade →
+              </button>
+            </div>
+          )}
+
+          {loading && (
+            <div className="px-5 py-8 space-y-3">
+              {[1, 2, 3].map((i) => (
+                <div key={i} className="h-7 rounded bg-surface-700 animate-pulse" />
+              ))}
+            </div>
+          )}
+
+          {!loading && spotTrades.length > 0 && (
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="border-b border-surface-700">
+                    {['Pair', 'Opened', 'Entry', 'Qty', 'Cost', 'SL', 'P&L', 'Status', 'Actions'].map((h, i) => (
+                      <th key={i} className="px-4 py-2.5 text-left text-slate-600 font-medium uppercase tracking-wider whitespace-nowrap">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {spotTrades.map((t) => {
+                    const pnlNum = t.realized_pnl ? parseFloat(t.realized_pnl) : null
+                    const isOpen = t.status === 'open'
+                    return (
+                      <tr key={t.id} className="border-b border-surface-700/50 hover:bg-surface-700/30 transition-colors">
+                        <td className="px-4 py-2.5 font-semibold text-slate-200">{t.pair}</td>
+                        <td className="px-4 py-2.5 font-mono text-slate-500">{fmtDate(t.created_at)}</td>
+                        <td className="px-4 py-2.5 font-mono text-slate-400">{fmt(t.entry_price)}</td>
+                        <td className="px-4 py-2.5 font-mono text-slate-400">{fmt(t.quantity, 4)}</td>
+                        <td className="px-4 py-2.5 font-mono text-slate-400">{fmt(t.total_cost)}</td>
+                        <td className="px-4 py-2.5 font-mono text-slate-500">{t.stop_loss ? fmt(t.stop_loss) : '—'}</td>
+                        <td className="px-4 py-2.5 font-mono">
+                          {pnlNum != null
+                            ? <span className={pnlNum >= 0 ? 'text-emerald-400' : 'text-red-400'}>{pnlNum >= 0 ? '+' : ''}{fmt(pnlNum)}</span>
+                            : <span className="text-slate-600">—</span>}
+                        </td>
+                        <td className="px-4 py-2.5">
+                          <span className={cn(
+                            'px-1.5 py-0.5 rounded text-[10px] font-medium border',
+                            t.status === 'open'   ? 'text-sky-300 bg-sky-500/15 border-sky-500/30'
+                            : t.status === 'closed' ? 'text-emerald-300 bg-emerald-500/15 border-emerald-500/30'
+                            : 'text-slate-500 bg-surface-700 border-surface-600',
+                          )}>
+                            {t.status}
+                          </span>
+                        </td>
+                        <td className="px-4 py-2.5">
+                          {isOpen ? (
+                            <div className="flex items-center gap-2">
+                              <button type="button" onClick={() => setClosingSpotTrade(t)}
+                                className="text-[10px] text-emerald-400 hover:text-emerald-300 transition-colors flex items-center gap-1">
+                                <CheckCircle2 size={11} /> Close
+                              </button>
+                              <button type="button" disabled={cancellingSpot === t.id}
+                                onClick={() => handleSpotCancel(t.id)}
+                                className="text-[10px] text-slate-500 hover:text-red-400 transition-colors flex items-center gap-1 disabled:opacity-40">
+                                <XCircle size={11} /> Cancel
+                              </button>
+                            </div>
+                          ) : (
+                            <span className="text-slate-600">{t.closed_at ? fmtDate(t.closed_at) : '—'}</span>
+                          )}
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Trades table ────────────────────────────────────────────────────── */}
+      {!isSpot && activeProfile && (
         <div className="rounded-xl bg-surface-800 border border-surface-700 overflow-hidden mb-6">
           {/* Table header bar */}
           <div className="flex items-center justify-between px-5 py-3 border-b border-surface-700">
@@ -629,6 +889,16 @@ export function TradesPage() {
             </div>
           )}
         </div>
+      )}
+
+      {/* ── Spot modals ───────────────────────────────────────────────────── */}
+      {isSpot && closingSpotTrade && activeProfile && (
+        <SpotCloseModal
+          trade={closingSpotTrade}
+          profileId={activeProfile.id}
+          onClose={() => setClosingSpotTrade(null)}
+          onSaved={() => { setClosingSpotTrade(null); fetchTrades() }}
+        />
       )}
     </div>
   )

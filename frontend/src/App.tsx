@@ -3,6 +3,7 @@ import { AppLayout } from './layouts/AppLayout'
 import { DashboardPage } from './pages/dashboard/DashboardPage'
 import { TradesPage } from './pages/trades/TradesPage'
 import { NewTradePage } from './pages/trades/NewTradePage'
+import { NewSpotTradePage } from './pages/trades/NewSpotTradePage'
 import { TradeDetailPage } from './pages/trades/TradeDetailPage'
 import { MarketAnalysisPage } from './pages/market-analysis/MarketAnalysisPage'
 import { NewAnalysisPage } from './pages/market-analysis/NewAnalysisPage'
@@ -23,6 +24,20 @@ import { WatchlistsPage } from './pages/volatility/WatchlistsPage'
 import { PerformancePage } from './pages/analytics/PerformancePage'
 import { RitualPage } from './pages/ritual/RitualPage'
 import { RitualSettingsPage } from './pages/settings/RitualSettingsPage'
+import { PortfolioPage } from './pages/portfolio/PortfolioPage'
+import { InvestmentSettingsPage } from './pages/settings/InvestmentSettingsPage'
+import { useProfile } from './context/ProfileContext'
+
+// Route guard — /trades/new-spot is only for spot profiles.
+// Contracts profiles are redirected to /trades/new.
+function SpotRouteGuard() {
+  const { activeProfile, loading } = useProfile()
+  if (loading) return null
+  if (activeProfile?.account_type !== 'spot') {
+    return <Navigate to="/trades/new" replace />
+  }
+  return <NewSpotTradePage />
+}
 
 export default function App() {
   return (
@@ -32,6 +47,7 @@ export default function App() {
         <Route path="/dashboard" element={<DashboardPage />} />
         <Route path="/trades" element={<TradesPage />} />
         <Route path="/trades/new" element={<NewTradePage />} />
+        <Route path="/trades/new-spot" element={<SpotRouteGuard />} />
         <Route path="/trades/:id" element={<TradeDetailPage />} />
         <Route path="/market-analysis" element={<MarketAnalysisPage />} />
         <Route path="/market-analysis/new" element={<NewAnalysisPage />} />
@@ -56,6 +72,13 @@ export default function App() {
         {/* Phase 6B — Ritual */}
         <Route path="/ritual" element={<RitualPage />} />
         <Route path="/settings/ritual" element={<RitualSettingsPage />} />
+        {/* Phase 7 — Spot / Portfolio */}
+        <Route path="/portfolio" element={<PortfolioPage />} />
+        <Route path="/deposits" element={<Navigate to="/portfolio" replace />} />
+        <Route path="/settings/investment" element={<InvestmentSettingsPage />} />
+        {/* Legacy redirects — /spot → /portfolio */}
+        <Route path="/spot" element={<Navigate to="/portfolio" replace />} />
+        <Route path="/spot/deposits" element={<Navigate to="/portfolio" replace />} />
       </Route>
     </Routes>
   )

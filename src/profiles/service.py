@@ -67,6 +67,9 @@ def _validate_broker(db: Session, broker_id: int, market_type: str) -> None:
             ),
         )
 
+def is_spot_profile(profile: Profile) -> bool:
+    """Return True if this is a spot/investment profile (Phase 7)."""
+    return getattr(profile, "account_type", "contracts") == "spot"
 
 def get_all(db: Session) -> list[Profile]:
     """Return all non-deleted profiles, most recent first."""
@@ -89,6 +92,7 @@ def create(db: Session, data: ProfileCreate) -> Profile:
     profile = Profile(
         name=data.name,
         market_type=data.market_type,
+        account_type=data.account_type,
         broker_id=data.broker_id,
         currency=data.currency,
         capital_start=data.capital_start,

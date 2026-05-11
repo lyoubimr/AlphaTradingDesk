@@ -251,8 +251,15 @@ def _db_order_type(kraken_type: str) -> str:
 
 # ── Trade automation actions ──────────────────────────────────────────────────
 
-def open_automated_trade(trade_id: int, db: Session) -> KrakenOrder:
+def open_automated_trade(
+    trade_id: int,
+    db: Session,
+    sl_overrides: dict | None = None,
+) -> KrakenOrder:
     """Place the entry order for an automated trade on Kraken Futures.
+
+    sl_overrides: per-trade SL config that takes priority over profile settings.
+                  Supported keys: sl_order_type, sl_limit_offset_pct.
 
     Validates: automation_enabled, API keys, instrument precision, lot size.
     Inserts a KrakenOrder(role='entry') and updates trade.kraken_entry_order_id.
@@ -495,7 +502,11 @@ def open_automated_trade(trade_id: int, db: Session) -> KrakenOrder:
     # For LIMIT orders: Celery poll_pending_orders handles SL/TP after fill.
     if trade.order_type == "MARKET":
         with _make_client(settings_row) as sl_tp_client:
-            place_sl_tp_orders(trade, lot_size, sl_tp_client, db)
+            place_sl_tp_orders(
+                trade, lot_size, sl_tp_client, db,
+                settings_row=settings_row,
+                sl_overrides=sl_overrides or {},
+            )
 
         # Mark the entry as filled so Celery's poll_pending_orders skips it.
         # Without this, the Celery task sees status='open' (no fill_id set),
@@ -516,10 +527,15 @@ def place_sl_tp_orders(
     entry_size: Decimal,
     client: KrakenExecutionClient,
     db: Session,
+    settings_row: AutomationSettings | None = None,
+    sl_overrides: dict | None = None,
 ) -> list[KrakenOrder]:
     """Place SL and TP orders after the entry fill is confirmed.
 
     - SL: stop order (stp) at trade.stop_loss, reduce_only=True, FULL size.
+          If sl_order_type="stop_limit" (default), a limitPrice is included to
+          cap slippage at sl_limit_offset_pct % beyond the trigger price.
+          If sl_order_type="stop_market", no limitPrice (legacy behaviour).
     - TP1/2/3: take_profit orders at position.take_profit_price, reduce_only=True,
                sized by position.lot_percentage.
 
@@ -534,12 +550,37 @@ def place_sl_tp_orders(
     orders: list[KrakenOrder] = []
 
     # SL order — full size, reduce_only
+    # stop_limit (default): adds limitPrice to cap slippage at sl_limit_offset_pct %.
+    # stop_market: no limitPrice — fills at any price after trigger (spike-vulnerable).
+    # sl_overrides (per-trade) take priority over profile-level settings_row config.
+    _overrides = sl_overrides or {}
+    if "sl_order_type" in _overrides:
+        _sl_order_type = _overrides["sl_order_type"]
+    elif settings_row:
+        _sl_order_type = settings_row.config.get("sl_order_type", "stop_limit")
+    else:
+        _sl_order_type = "stop_limit"
+    if "sl_limit_offset_pct" in _overrides:
+        _sl_offset_pct = float(_overrides["sl_limit_offset_pct"])
+    elif settings_row:
+        _sl_offset_pct = float(settings_row.config.get("sl_limit_offset_pct", 1.5))
+    else:
+        _sl_offset_pct = 1.5
+    _sl_stop_price = Decimal(str(trade.stop_loss))
+    _sl_limit_price: Decimal | None = None
+    if _sl_order_type == "stop_limit":
+        _offset = Decimal(str(_sl_offset_pct)) / Decimal("100")
+        if trade.direction == "long":
+            _sl_limit_price = _sl_stop_price * (Decimal("1") - _offset)
+        else:
+            _sl_limit_price = _sl_stop_price * (Decimal("1") + _offset)
     sl_result = client.send_order(
         order_type="stp",
         symbol=instrument.symbol,
         side=exit_side,
         size=str(entry_size),
-        stop_price=str(trade.stop_loss),
+        stop_price=str(_sl_stop_price),
+        limit_price=str(_sl_limit_price) if _sl_limit_price is not None else None,
         reduce_only=True,
         raise_on_rejection=False,
     )
@@ -573,7 +614,7 @@ def place_sl_tp_orders(
         symbol=instrument.symbol,
         side=exit_side,
         size=float(entry_size),
-        limit_price=None,
+        limit_price=float(_sl_limit_price) if _sl_limit_price is not None else None,
         error_message=None if sl_order_db_status == "open" else f"Kraken rejected: {sl_placement_status}",
     )
     db.add(sl_order)
@@ -874,12 +915,24 @@ def move_to_breakeven(trade_id: int, db: Session) -> KrakenOrder:
             sl_order.status = "cancelled"
 
         # Place new SL at entry_price with correct remaining size
+        # Honour sl_order_type setting (stop_limit vs stop_market)
+        _be_sl_type = settings_row.config.get("sl_order_type", "stop_limit")
+        _be_offset_pct = float(settings_row.config.get("sl_limit_offset_pct", 1.5))
+        _be_stop_price = Decimal(str(trade.entry_price))
+        _be_limit_price: Decimal | None = None
+        if _be_sl_type == "stop_limit":
+            _be_offset = Decimal(str(_be_offset_pct)) / Decimal("100")
+            if trade.direction == "long":
+                _be_limit_price = _be_stop_price * (Decimal("1") - _be_offset)
+            else:
+                _be_limit_price = _be_stop_price * (Decimal("1") + _be_offset)
         sl_result = client.send_order(
             order_type="stp",
             symbol=instrument.symbol,
             side=_exit_side(trade),
             size=str(remaining_size),
-            stop_price=str(trade.entry_price),
+            stop_price=str(_be_stop_price),
+            limit_price=str(_be_limit_price) if _be_limit_price is not None else None,
             reduce_only=True,
         )
 
@@ -894,7 +947,7 @@ def move_to_breakeven(trade_id: int, db: Session) -> KrakenOrder:
         symbol=instrument.symbol,
         side=_exit_side(trade),
         size=float(remaining_size),
-        limit_price=None,
+        limit_price=float(_be_limit_price) if _be_limit_price is not None else None,
     )
     db.add(new_sl)
     db.commit()
@@ -1140,7 +1193,7 @@ def sync_pending_fill(trade_id: int, db: Session) -> dict:
             entry_size = Decimal(str(entry_order.size))
             # Reload trade to get fresh relationships after activate
             db.refresh(trade)
-            place_sl_tp_orders(trade, entry_size, client, db)
+            place_sl_tp_orders(trade, entry_size, client, db, settings_row=settings_row)
 
     logger.info(
         "sync_fill_detected",

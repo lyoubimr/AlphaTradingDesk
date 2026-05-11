@@ -17,11 +17,15 @@ import type {
   MarketVIOut, AggregatedMarketVIOut, PairsVIOut, WatchlistOut, WatchlistMetaOut, LivePricesResponse,
   VolatilitySettingsOut, NotificationSettingsOut,
   RiskBudgetOut, RiskAdvisorOut, RiskSettingsOut, PairVIOut,
-  AutomationSettingsOut, AutomationSettingsUpdateIn, ConnectionTestOut, KrakenOrderOut,
+  AutomationSettingsOut, AutomationSettingsUpdateIn, ConnectionTestOut, KrakenOrderOut, OpenTradeIn,
   PerformanceReport, AnalyticsSettingsOut, AnalyticsSettingsUpdateIn,
   AIKeysStatusOut, AIKeysUpdateIn, AIGenerateOut,
   RitualSettings, PinnedPair, PinnedPairCreate, RitualStep, RitualSession,
   SmartWLResult, WeeklyScore, StepLog,
+  SpotTradeOut, SpotTradeCreate, SpotTradeUpdate, SpotTradeClose,
+  DepositOut, DepositCreate, DepositUpdate,
+  PortfolioOut, InvestmentSettingsOut,
+  SpotWatchlistOut, SpotWatchlistMetaOut, SpotVolatilitySettingsOut, SpotRunResponse,
 } from '../types/api'
 
 const BASE = '/api'
@@ -629,8 +633,11 @@ export const automationApi = {
     request(`/kraken-execution/orders/${tradeId}`),
 
   /** POST /api/kraken-execution/trades/{tradeId}/open */
-  openTrade: (tradeId: number): Promise<KrakenOrderOut> =>
-    request(`/kraken-execution/trades/${tradeId}/open`, { method: 'POST' }),
+  openTrade: (tradeId: number, opts?: OpenTradeIn): Promise<KrakenOrderOut> =>
+    request(`/kraken-execution/trades/${tradeId}/open`, {
+      method: 'POST',
+      body: opts ? JSON.stringify(opts) : undefined,
+    }),
 
   /** POST /api/kraken-execution/trades/{tradeId}/close */
   closeTrade: (tradeId: number): Promise<KrakenOrderOut> =>
@@ -766,4 +773,97 @@ export const ritualApi = {
     request(`${R(pid)}/score`),
   getScoreHistory: (pid: number, weeks = 8): Promise<WeeklyScore[]> =>
     request(`${R(pid)}/score/history?weeks=${weeks}`),
+}
+
+export const investmentApi = {
+  listTrades: (profileId: number, status?: string): Promise<SpotTradeOut[]> => {
+    const qs = status ? `?status=${status}` : ''
+    return request(`/investment/spot-trades/${profileId}${qs}`)
+  },
+  createTrade: (profileId: number, data: SpotTradeCreate): Promise<SpotTradeOut> =>
+    request(`/investment/spot-trades/${profileId}`, { method: 'POST', body: JSON.stringify(data) }),
+  getTrade: (profileId: number, tradeId: number): Promise<SpotTradeOut> =>
+    request(`/investment/spot-trades/${profileId}/${tradeId}`),
+  updateTrade: (profileId: number, tradeId: number, data: SpotTradeUpdate): Promise<SpotTradeOut> =>
+    request(`/investment/spot-trades/${profileId}/${tradeId}`, { method: 'PUT', body: JSON.stringify(data) }),
+  closeTrade: (profileId: number, tradeId: number, data: SpotTradeClose): Promise<SpotTradeOut> =>
+    request(`/investment/spot-trades/${profileId}/${tradeId}/close`, { method: 'POST', body: JSON.stringify(data) }),
+  cancelTrade: (profileId: number, tradeId: number): Promise<SpotTradeOut> =>
+    request(`/investment/spot-trades/${profileId}/${tradeId}/cancel`, { method: 'POST' }),
+
+  listDeposits: (profileId: number): Promise<DepositOut[]> =>
+    request(`/investment/deposits/${profileId}`),
+  createDeposit: (profileId: number, data: DepositCreate): Promise<DepositOut> =>
+    request(`/investment/deposits/${profileId}`, { method: 'POST', body: JSON.stringify(data) }),
+  updateDeposit: (profileId: number, depositId: number, data: DepositUpdate): Promise<DepositOut> =>
+    request(`/investment/deposits/${profileId}/${depositId}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteDeposit: (profileId: number, depositId: number): Promise<void> =>
+    request(`/investment/deposits/${profileId}/${depositId}`, { method: 'DELETE' }),
+
+  getPortfolio: (profileId: number): Promise<PortfolioOut> =>
+    request(`/investment/portfolio/${profileId}`),
+
+  syncSpotInstruments: (): Promise<{ synced: number }> =>
+    request('/investment/instruments/sync-spot', { method: 'POST' }),
+
+  listInstruments: (profileId: number): Promise<Instrument[]> =>
+    request(`/investment/instruments/${profileId}`),
+
+  getSettings: (profileId: number): Promise<InvestmentSettingsOut> =>
+    request(`/investment/settings/${profileId}`),
+  updateSettings: (profileId: number, config: Record<string, unknown>): Promise<InvestmentSettingsOut> =>
+    request(`/investment/settings/${profileId}`, { method: 'PUT', body: JSON.stringify({ config }) }),
+
+  /** GET /api/investment/price/{symbol} — real-time ask/bid/last from Kraken Spot */
+  getSpotPrice: (symbol: string): Promise<{ symbol: string; ask_price: number; bid_price: number; last_price: number }> =>
+    request(`/investment/price/${encodeURIComponent(symbol)}`),
+
+  /** POST /api/investment/spot-trades/{profileId}/{tradeId}/screenshots — upload screenshot */
+  uploadSnapshot: async (profileId: number, tradeId: number, file: File): Promise<SpotTradeOut> => {
+    const form = new FormData()
+    form.append('file', file)
+    const res = await fetch(`${BASE}/investment/spot-trades/${profileId}/${tradeId}/screenshots`, {
+      method: 'POST',
+      body: form,
+    })
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({ detail: res.statusText }))
+      throw new Error(typeof body.detail === 'string' ? body.detail : JSON.stringify(body.detail))
+    }
+    return res.json() as Promise<SpotTradeOut>
+  },
+}
+
+// ── Spot Volatility Engine (Phase 7) ──────────────────────────────────────────
+
+export const spotVolatilityApi = {
+  /** GET /api/spot-volatility/watchlist/{timeframe} — latest snapshot (404 if none) */
+  getWatchlist: (timeframe: string): Promise<SpotWatchlistOut> =>
+    request(`/spot-volatility/watchlist/${timeframe}`),
+
+  /** GET /api/spot-volatility/watchlists?days=N — metadata list */
+  listWatchlists: (days = 30): Promise<SpotWatchlistMetaOut[]> =>
+    request(`/spot-volatility/watchlists?days=${days}`),
+
+  /** GET /api/spot-volatility/watchlist-by-id/{id} — full snapshot by PK */
+  getWatchlistById: (snapshotId: number): Promise<SpotWatchlistOut> =>
+    request(`/spot-volatility/watchlist-by-id/${snapshotId}`),
+
+  /** POST /api/spot-volatility/run — synchronous compute (5–15 s) */
+  runTask: (timeframe: string): Promise<SpotRunResponse> =>
+    request('/spot-volatility/run', {
+      method: 'POST',
+      body: JSON.stringify({ timeframe }),
+    }),
+
+  /** GET /api/spot-volatility/settings — global settings (auto-init) */
+  getSettings: (): Promise<SpotVolatilitySettingsOut> =>
+    request('/spot-volatility/settings'),
+
+  /** PUT /api/spot-volatility/settings — deep-merge patch */
+  updateSettings: (config: Record<string, unknown>): Promise<SpotVolatilitySettingsOut> =>
+    request('/spot-volatility/settings', {
+      method: 'PUT',
+      body: JSON.stringify({ config }),
+    }),
 }

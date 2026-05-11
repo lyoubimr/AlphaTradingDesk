@@ -531,6 +531,11 @@ function ProfileCard({ profile, isActive, onSelect, onEdit, onDelete }: ProfileC
             )}>
               {profile.market_type}
             </span>
+            {profile.account_type === 'spot' && (
+              <span className="px-1.5 py-0.5 rounded text-[9px] font-semibold border text-cyan-300 bg-cyan-500/15 border-cyan-500/40">
+                Spot
+              </span>
+            )}
           </div>
           {profile.description && (
             <p className="text-xs text-slate-500 mt-0.5 truncate">{profile.description}</p>
@@ -609,6 +614,7 @@ function StatBE({ profile }: { profile: Profile }) {
 interface ProfileFormData {
   name: string
   market_type: 'CFD' | 'Crypto'
+  account_type: 'contracts' | 'spot'
   broker_id: string
   currency: string
   capital_start: string
@@ -621,6 +627,7 @@ interface ProfileFormData {
 const EMPTY_FORM: ProfileFormData = {
   name: '',
   market_type: 'Crypto',
+  account_type: 'contracts',
   broker_id: '',
   currency: '',
   capital_start: '',
@@ -634,6 +641,7 @@ function profileToForm(p: Profile): ProfileFormData {
   return {
     name: p.name,
     market_type: p.market_type,
+    account_type: p.account_type ?? 'contracts',
     broker_id: p.broker_id ? String(p.broker_id) : '',
     currency: p.currency ?? '',
     capital_start: p.capital_start,
@@ -665,7 +673,7 @@ function ProfileModal({ profile, brokers, onClose, onSaved }: ProfileModalProps)
   const set = (field: keyof ProfileFormData, value: string) =>
     setForm((f) => ({ ...f, [field]: value }))
 
-  // When market_type changes: reset broker if incompatible + clear currency
+  // When market_type changes: reset broker if incompatible + clear currency + reset account_type for CFD
   const setMarketType = (mt: 'CFD' | 'Crypto') => {
     setForm((f) => {
       const currentBroker = brokers.find((b) => String(b.id) === f.broker_id)
@@ -673,6 +681,7 @@ function ProfileModal({ profile, brokers, onClose, onSaved }: ProfileModalProps)
       return {
         ...f,
         market_type: mt,
+        account_type: mt === 'CFD' ? 'contracts' : f.account_type,
         broker_id: brokerCompatible ? f.broker_id : '',
         currency:   brokerCompatible ? f.currency : '',
       }
@@ -698,6 +707,7 @@ function ProfileModal({ profile, brokers, onClose, onSaved }: ProfileModalProps)
         const update: ProfileUpdate = {
           name: form.name,
           market_type: form.market_type,
+          account_type: form.account_type,
           broker_id: form.broker_id ? parseInt(form.broker_id) : null,
           currency: form.currency || null,
           capital_start: form.capital_start,
@@ -711,6 +721,7 @@ function ProfileModal({ profile, brokers, onClose, onSaved }: ProfileModalProps)
         const create: ProfileCreate = {
           name: form.name,
           market_type: form.market_type,
+          account_type: form.account_type,
           broker_id: form.broker_id ? parseInt(form.broker_id) : null,
           currency: form.currency || null,
           capital_start: form.capital_start,
@@ -818,6 +829,29 @@ function ProfileModal({ profile, brokers, onClose, onSaved }: ProfileModalProps)
               ))}
             </div>
           </Field>
+
+          {/* Account type — Crypto only */}
+          {form.market_type === 'Crypto' && (
+            <Field label="Account type">
+              <div className="grid grid-cols-2 gap-2">
+                {(['contracts', 'spot'] as const).map((t) => (
+                  <button
+                    key={t}
+                    type="button"
+                    onClick={() => set('account_type', t)}
+                    className={cn(
+                      'py-2 rounded-lg border text-sm font-medium transition-colors capitalize',
+                      form.account_type === t
+                        ? 'bg-brand-600/20 border-brand-600/50 text-brand-300'
+                        : 'bg-surface-700 border-surface-600 text-slate-400 hover:text-slate-200',
+                    )}
+                  >
+                    {t}
+                  </button>
+                ))}
+              </div>
+            </Field>
+          )}
 
           {/* Broker + currency */}
           <div className="grid grid-cols-2 gap-3">

@@ -35,6 +35,7 @@ from src.ritual.schemas import (
     DEFAULT_STEPS,
     DISCIPLINE_POINTS,
     MAX_WEEKLY_SCORE,
+    MAX_WEEKLY_SCORE_SPOT,
     MODULE_PATHS,
     SESSION_EMOJIS,
     SESSION_LABELS,
@@ -53,6 +54,7 @@ from src.ritual.schemas import (
     StepRead,
     WeeklyScoreRead,
 )
+from src.spot_volatility.models import SpotWatchlistSnapshot
 from src.volatility.models import WatchlistSnapshot
 
 # ── Internal helpers ──────────────────────────────────────────────────────────
@@ -131,6 +133,10 @@ def _monday_of(dt: date) -> date:
     return dt - timedelta(days=dt.weekday())
 
 
+def _month_start(dt: date) -> date:
+    return dt.replace(day=1)
+
+
 def _enrich_step(step: RitualStep) -> StepRead:
     data = StepRead.model_validate(step)
     data.emoji = STEP_EMOJIS.get(step.step_type, "🔷")
@@ -206,41 +212,55 @@ def update_ritual_settings(
 # ── Step templates ────────────────────────────────────────────────────────────
 
 def _seed_steps(profile_id: int, db: Session) -> None:
-    """Seed default step templates for a new profile — called on first access."""
+    """Seed default step templates for a profile — skips positions that already exist."""
+    # Build set of (session_type, position) already in DB for this profile
+    existing = {
+        (r.session_type, r.position)
+        for r in db.query(RitualStep.session_type, RitualStep.position)
+        .filter_by(profile_id=profile_id)
+        .all()
+    }
     for session_type, steps in DEFAULT_STEPS.items():
         for step_dict in steps:
-            step = RitualStep(
-                profile_id=profile_id,
-                session_type=session_type,
-                **step_dict,
-            )
-            db.add(step)
+            if (session_type, step_dict["position"]) in existing:
+                continue  # already seeded, skip to avoid UniqueViolation
+            db.add(RitualStep(profile_id=profile_id, session_type=session_type, **step_dict))
     db.commit()
 
 
 def _sync_step_labels(profile_id: int, session_type: str, rows: list, db: Session) -> None:
     """Silently update step labels/configs that differ from current DEFAULT_STEPS.
 
-    This handles the case where DB rows were seeded with an old default
-    (e.g. smart_wl label without 1D) and DEFAULT_STEPS has been updated since.
-    Only syncs rows that have NOT been manually customised (label still matches
-    an old pattern we know about, or exactly matches an old default within this
-    session type).
+    Also inserts any new step positions that exist in DEFAULT_STEPS but not yet
+    in the DB (e.g. when a new step is added to an existing session template).
     """
     defaults = DEFAULT_STEPS.get(session_type, [])
     default_by_pos: dict[int, dict] = {d["position"]: d for d in defaults}
+    existing_positions = {row.position for row in rows}
     changed = False
+
+    # Update labels/configs/step_type of existing rows
     for row in rows:
         default = default_by_pos.get(row.position)
         if not default:
             continue
+        if row.step_type != default["step_type"]:
+            row.step_type = default["step_type"]
+            changed = True
         if row.label != default["label"]:
             row.label = default["label"]
             changed = True
         default_config = default.get("config", {})
-        if default_config and row.config != default_config:
+        if row.config != default_config:
             row.config = default_config
             changed = True
+
+    # Insert new steps for positions not yet in DB
+    for pos, default in default_by_pos.items():
+        if pos not in existing_positions:
+            db.add(RitualStep(profile_id=profile_id, session_type=session_type, **default))
+            changed = True
+
     if changed:
         db.commit()
 
@@ -551,7 +571,9 @@ def close_session(
         # Compute and record discipline points
         pts = _compute_discipline_points(session, payload, db)
         session.discipline_points = pts
-        _update_weekly_score(profile_id, pts, session, db)
+        profile = _get_profile_or_404(db, profile_id)
+        is_spot = getattr(profile, "account_type", "contracts") == "spot"
+        _update_weekly_score(profile_id, pts, session, db, is_spot=is_spot)
 
     db.commit()
     db.refresh(session)
@@ -577,6 +599,10 @@ def _compute_discipline_points(
         return base
     if stype == "weekend_review":
         return DISCIPLINE_POINTS["weekend_review_done"]
+    if stype == "spot_monthly":
+        return DISCIPLINE_POINTS["spot_monthly_done"]
+    if stype == "spot_weekly":
+        return DISCIPLINE_POINTS["spot_weekly_done"]
     return 0
 
 
@@ -585,26 +611,31 @@ def _update_weekly_score(
     points: int,
     session: RitualSession,
     db: Session,
+    *,
+    is_spot: bool = False,
 ) -> None:
     today = session.started_at.date() if hasattr(session.started_at, "date") else date.today()
-    monday = _monday_of(today)
+    period_start = _month_start(today) if is_spot else _monday_of(today)
+    max_score = MAX_WEEKLY_SCORE_SPOT if is_spot else MAX_WEEKLY_SCORE
 
     row = (
         db.query(RitualWeeklyScore)
-        .filter_by(profile_id=profile_id, week_start=monday)
+        .filter_by(profile_id=profile_id, week_start=period_start)
         .first()
     )
     if not row:
         row = RitualWeeklyScore(
             profile_id=profile_id,
-            week_start=monday,
+            week_start=period_start,
             score=0,
-            max_score=MAX_WEEKLY_SCORE,
+            max_score=max_score,
             details={
                 "sessions": {
                     "weekly_setup": 0,
                     "trade_session": 0,
                     "weekend_review": 0,
+                    "spot_monthly": 0,
+                    "spot_weekly": 0,
                 },
                 "bonuses": {"no_opportunity": 0, "pairs_pinned": 0},
                 "penalties": {"vol_too_low_trade": 0},
@@ -640,34 +671,40 @@ def _update_weekly_score(
 
 
 def get_weekly_score(profile_id: int, db: Session) -> WeeklyScoreRead:
-    _get_profile_or_404(db, profile_id)
-    monday = _monday_of(date.today())
+    profile = _get_profile_or_404(db, profile_id)
+    is_spot = getattr(profile, "account_type", "contracts") == "spot"
+    period_start = _month_start(date.today()) if is_spot else _monday_of(date.today())
+    period = "month" if is_spot else "week"
     row = (
         db.query(RitualWeeklyScore)
-        .filter_by(profile_id=profile_id, week_start=monday)
+        .filter_by(profile_id=profile_id, week_start=period_start)
         .first()
     )
     if not row:
         return WeeklyScoreRead(
             id=0,
             profile_id=profile_id,
-            week_start=monday,
+            week_start=period_start,
             score=0,
-            max_score=MAX_WEEKLY_SCORE,
+            max_score=MAX_WEEKLY_SCORE_SPOT if is_spot else MAX_WEEKLY_SCORE,
             details={},
             pct=0.0,
             grade="—",
+            period=period,
         )
     data = WeeklyScoreRead.model_validate(row)
     data.pct = round(row.score / row.max_score * 100, 1) if row.max_score > 0 else 0.0
     data.grade = _grade(data.pct)
+    data.period = period
     return data
 
 
 def get_weekly_score_history(
     profile_id: int, db: Session, weeks: int = 8
 ) -> list[WeeklyScoreRead]:
-    _get_profile_or_404(db, profile_id)
+    profile = _get_profile_or_404(db, profile_id)
+    is_spot = getattr(profile, "account_type", "contracts") == "spot"
+    period = "month" if is_spot else "week"
     rows = (
         db.query(RitualWeeklyScore)
         .filter_by(profile_id=profile_id)
@@ -680,6 +717,7 @@ def get_weekly_score_history(
         data = WeeklyScoreRead.model_validate(row)
         data.pct = round(row.score / row.max_score * 100, 1) if row.max_score > 0 else 0.0
         data.grade = _grade(data.pct)
+        data.period = period
         result.append(data)
     return result
 
@@ -712,7 +750,7 @@ def generate_smart_watchlist(
 
     Pinned pairs are injected at the top of their TF section regardless of score.
     """
-    _get_profile_or_404(db, profile_id)
+    _profile = _get_profile_or_404(db, profile_id)
     settings_row = get_ritual_settings(profile_id, db)
     cfg = settings_row.config
 
@@ -722,7 +760,9 @@ def generate_smart_watchlist(
         .filter_by(profile_id=profile_id, session_type=session_type)
         .all()
     )
-    smart_step = next((s for s in steps if s.step_type == "smart_wl"), None)
+    smart_step = next(
+        (s for s in steps if s.step_type in ("smart_wl", "watchlist_htf_spot")), None
+    )
     if smart_step and smart_step.config.get("timeframes"):
         tfs: list[str] = smart_step.config["timeframes"]
     else:
@@ -730,6 +770,8 @@ def generate_smart_watchlist(
             "weekly_setup": ["1W", "1D", "4H", "1H", "15m"],
             "trade_session": ["1D", "4H", "1H", "15m"],
             "weekend_review": ["1D", "4H"],
+            "spot_monthly": ["1W", "1D", "4H"],
+            "spot_weekly": ["1D", "4H"],
         }.get(session_type, ["4H", "1H"])
 
     if top_n is None:
@@ -747,15 +789,28 @@ def generate_smart_watchlist(
     pair_tf_data: dict[str, dict[str, dict]] = {}
     tf_pairs: dict[str, list[str]] = {}
 
+    # Determine data source from profile account_type — not session_type.
+    # This allows weekend_review to use spot data for spot profiles.
+    _is_spot_session = getattr(_profile, "account_type", "contracts") == "spot"
+
     for tf in tfs:
-        # Normalize to lowercase — WatchlistSnapshot stores TFs in lowercase (e.g. "4h", "1h")
+        # Normalize to lowercase — snapshots store TFs in lowercase (e.g. "4h", "1h")
         # but step configs may use uppercase (e.g. "4H", "1H").
-        snapshot = (
-            db.query(WatchlistSnapshot)
-            .filter(WatchlistSnapshot.timeframe == tf.lower())
-            .order_by(WatchlistSnapshot.generated_at.desc())
-            .first()
-        )
+        snapshot: SpotWatchlistSnapshot | WatchlistSnapshot | None
+        if _is_spot_session:
+            snapshot = (
+                db.query(SpotWatchlistSnapshot)
+                .filter(SpotWatchlistSnapshot.timeframe == tf.lower())
+                .order_by(SpotWatchlistSnapshot.generated_at.desc())
+                .first()
+            )
+        else:
+            snapshot = (
+                db.query(WatchlistSnapshot)
+                .filter(WatchlistSnapshot.timeframe == tf.lower())
+                .order_by(WatchlistSnapshot.generated_at.desc())
+                .first()
+            )
         if not snapshot:
             continue
 
@@ -799,10 +854,9 @@ def generate_smart_watchlist(
     pinned_map: dict[str, RitualPinnedPair] = {p.pair: p for p in active_pins}
 
     # Get broker name for filename
-    profile = db.query(Profile).filter_by(id=profile_id).first()
     broker_name = "Kraken"
-    if profile and profile.broker_id:
-        broker = db.query(Broker).filter_by(id=profile.broker_id).first()
+    if _profile and _profile.broker_id:
+        broker = db.query(Broker).filter_by(id=_profile.broker_id).first()
         if broker:
             broker_name = broker.name.replace(" ", "")
 

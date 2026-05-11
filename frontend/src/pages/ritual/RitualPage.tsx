@@ -58,11 +58,34 @@ const SESSION_TYPES: { type: SessionType; emoji: string; label: string; when: st
     emoji: '📊',
     label: 'Weekend Review',
     when: 'Sat / Sun',
-    desc: 'Analytics + Journal + Goals + Learning',
-    est: '~35 min',
+    desc: 'Analytics + Journal + Goals + Watchlist + Learning',
+    est: '~40 min',
     accent: '#2dd4bf',
     gradient: 'from-teal-950/60 to-surface-800/40',
-    steps: ['Analytics', 'Journal', 'Goals', 'Learning Note'],
+    steps: ['Analytics', 'Journal', 'Goals', 'Learning Note', 'Smart Watchlist'],
+  },
+  // ── Spot sessions (shown for spot profiles) ──────────────────────────────
+  {
+    type: 'spot_monthly',
+    emoji: '🪙',
+    label: 'Spot Monthly Review',
+    when: 'Monthly',
+    desc: 'Deposit check + holdings + HTF spot watchlist',
+    est: '~35 min',
+    accent: '#f59e0b',
+    gradient: 'from-amber-950/60 to-surface-800/40',
+    steps: ['Deposit Check', 'Holdings', 'HTF Watchlist', 'TradingView', 'Goals'],
+  },
+  {
+    type: 'spot_weekly',
+    emoji: '🔍',
+    label: 'Spot Weekly Check',
+    when: 'Weekly',
+    desc: 'Open positions + HTF scan + analysis',
+    est: '~25 min',
+    accent: '#0ea5e9',
+    gradient: 'from-sky-950/60 to-surface-800/40',
+    steps: ['Holdings Check', 'HTF Scan', 'TradingView', 'Outcome'],
   },
 ]
 
@@ -139,7 +162,7 @@ function TFBadge({ tf }: { tf: string }) {
 }
 
 // ── Score ring ────────────────────────────────────────────────────────────────
-function ScoreRing({ score, maxScore, pct, grade }: { score: number; maxScore: number; pct: number; grade: string }) {
+function ScoreRing({ score, maxScore, pct, grade, period = 'week' }: { score: number; maxScore: number; pct: number; grade: string; period?: string }) {
   const radius = 28
   const circumference = 2 * Math.PI * radius
   const strokeDash = circumference * (pct / 100)
@@ -164,7 +187,7 @@ function ScoreRing({ score, maxScore, pct, grade }: { score: number; maxScore: n
       </div>
       <div className="text-center">
         <p className="text-sm font-semibold text-slate-200">{score} <span className="text-slate-500 text-xs">/ {maxScore}</span></p>
-        <p className="text-[10px] text-slate-500">This week</p>
+        <p className="text-[10px] text-slate-500">{period === 'month' ? 'This month' : 'This week'}</p>
       </div>
     </div>
   )
@@ -396,8 +419,8 @@ function StepItem({
             />
           )}
 
-          {/* Smart WL panel */}
-          {log.step_type === 'smart_wl' && isCurrent && !isDoneOrSkipped && (
+          {/* Smart WL panel — for both contracts (smart_wl) and spot (watchlist_htf_spot) */}
+          {(log.step_type === 'smart_wl' || log.step_type === 'watchlist_htf_spot') && isCurrent && !isDoneOrSkipped && (
             <SmartWLPanel
               result={wlResult ?? null}
               loading={wlLoading ?? false}
@@ -646,7 +669,12 @@ function SmartWLPanel({
                       <span className="text-[11px] text-slate-200 font-semibold truncate flex-1">
                         {p.display_name}
                       </span>
-                      <span className="text-[10px] tabular-nums text-slate-500 shrink-0">{p.vi_score.toFixed(2)}</span>
+                      <span className={cn(
+                        'text-[10px] tabular-nums shrink-0 font-medium',
+                        p.vi_score > 0.67 ? 'text-green-400' :
+                        p.vi_score > 0.50 ? 'text-emerald-500/80' :
+                        p.vi_score > 0.33 ? 'text-amber-500' : 'text-slate-500',
+                      )}>{Math.round(p.vi_score * 100)}%</span>
                       {!p.is_pinned && onPin && (
                         <button
                           onClick={() => onPin(p.pair, tf)}
@@ -657,14 +685,14 @@ function SmartWLPanel({
                         </button>
                       )}
                     </div>
-                    {/* vi_score bar */}
+                    {/* vi_score bar — green=high, amber=mid, muted=low */}
                     <div className="h-[2px] bg-surface-700/60">
                       <div
                         className={cn(
                           'h-full transition-all rounded-sm',
-                          p.vi_score > 0.67 ? 'bg-red-500/70' :
-                          p.vi_score > 0.5  ? 'bg-amber-500/70' :
-                          p.vi_score > 0.33 ? 'bg-green-500/70' : 'bg-blue-500/50',
+                          p.vi_score > 0.67 ? 'bg-green-500/80' :
+                          p.vi_score > 0.50 ? 'bg-emerald-500/60' :
+                          p.vi_score > 0.33 ? 'bg-amber-500/60' : 'bg-slate-600/50',
                         )}
                         style={{ width: `${Math.round(p.vi_score * 100)}%` }}
                       />
@@ -1016,12 +1044,19 @@ function PinnedPanel({ profileId, onPinsChanged }: PinnedPanelProps) {
 export function RitualPage() {
   const { activeProfile } = useProfile()
   const profileId = activeProfile?.id
+  const isSpot = activeProfile?.account_type === 'spot'
+
+  // Show spot sessions for spot profiles; contracts sessions for others
+  const visibleSessionTypes = isSpot
+    ? SESSION_TYPES.filter((s) => s.type === 'spot_weekly' || s.type === 'spot_monthly')
+    : SESSION_TYPES.filter((s) => s.type !== 'spot_monthly' && s.type !== 'spot_weekly')
 
   const [activeSession, setActiveSession] = useState<RitualSession | null>(null)
   const [steps, setSteps] = useState<RitualStep[]>([])
   const [score, setScore] = useState<WeeklyScore | null>(null)
   const [recentSessions, setRecentSessions] = useState<RitualSession[]>([])
   const [starting, setStarting] = useState<SessionType | null>(null)
+  const [completeError, setCompleteError] = useState<string | null>(null)
 
   // Smart WL state
   const [wlResult, setWlResult] = useState<SmartWLResult | null>(null)
@@ -1073,6 +1108,7 @@ export function RitualPage() {
   const handleCompleteStep = async (logId: number, status: 'done' | 'skipped', stepOutput?: Record<string, unknown>) => {
     if (!profileId || !activeSession) return
     const output = stepOutput ?? {}
+    setCompleteError(null)
     await ritualApi.completeStep(profileId, activeSession.id, logId, status, output)
     // If last mandatory step done → auto-prompt to complete session
     await reload()
@@ -1080,10 +1116,15 @@ export function RitualPage() {
 
   const handleCompleteSession = async (outcome?: SessionOutcome | null) => {
     if (!profileId || !activeSession) return
-    await ritualApi.completeSession(profileId, activeSession.id, outcome, null)
-    setActiveSession(null)
-    setWlResult(null)
-    await reload()
+    setCompleteError(null)
+    try {
+      await ritualApi.completeSession(profileId, activeSession.id, outcome, null)
+      setActiveSession(null)
+      setWlResult(null)
+      await reload()
+    } catch {
+      setCompleteError('Session completion failed. Please retry.')
+    }
   }
 
   const handleAbandon = async () => {
@@ -1161,7 +1202,7 @@ export function RitualPage() {
           {score && (
             <div className="rounded-xl border border-surface-700 bg-surface-800/50 p-4">
               <div className="flex items-center gap-4">
-                <ScoreRing score={score.score} maxScore={score.max_score} pct={score.pct} grade={score.grade} />
+                <ScoreRing score={score.score} maxScore={score.max_score} pct={score.pct} grade={score.grade} period={score.period} />
                 <div className="flex-1 space-y-2">
                   <p className="text-sm font-semibold text-slate-200">Discipline Score</p>
                   <div className="w-full bg-surface-700 rounded-full h-1.5">
@@ -1173,8 +1214,11 @@ export function RitualPage() {
                       }}
                     />
                   </div>
-                  <div className="grid grid-cols-4 gap-1">
-                    {(['weekly_setup', 'trade_session', 'weekend_review'] as SessionType[]).map(st => {
+                  <div className={`grid gap-1 ${isSpot ? 'grid-cols-2' : 'grid-cols-4'}`}>
+                    {(isSpot
+                      ? (['spot_monthly', 'spot_weekly'] as SessionType[])
+                      : (['weekly_setup', 'trade_session', 'weekend_review'] as SessionType[])
+                    ).map(st => {
                       const info = SESSION_TYPES.find(s => s.type === st)!
                       const count = (score.details as Record<string, Record<string, number>>)?.sessions?.[st] ?? 0
                       return (
@@ -1222,6 +1266,9 @@ export function RitualPage() {
                   </div>
                 </div>
                 <div className="flex items-center gap-1.5">
+                  {completeError && (
+                    <span className="text-[10px] text-red-400 max-w-[140px] leading-tight">{completeError}</span>
+                  )}
                   {allDone && (
                     <button
                       onClick={() => handleCompleteSession(sessionOutcome ?? null)}
@@ -1290,7 +1337,7 @@ export function RitualPage() {
               )
             })()}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              {SESSION_TYPES.map((st) => (
+              {visibleSessionTypes.map((st) => (
                 <button
                   key={st.type}
                   onClick={() => handleStart(st.type)}

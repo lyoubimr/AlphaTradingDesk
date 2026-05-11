@@ -252,6 +252,7 @@ def poll_pending_orders(self: Task) -> dict:
                                     entry_size=Decimal(str(entry.filled_size or entry.size)),
                                     client=sl_client,
                                     db=db,
+                                    settings_row=settings_row,
                                 )
                             db.commit()
                         except Exception as sl_exc:
@@ -405,6 +406,116 @@ def sync_open_positions(self: Task) -> dict:
                 logger.exception(
                     "sync_open_positions: unexpected error", profile_id=profile_id, exc=exc
                 )
+
+        # ── Max Loss Guard ───────────────────────────────────────────────────────────
+        # Runs once per profile that has open SL/TP orders (covers 99% of active trades).
+        # Resolution: every 60s — protects against prolonged drawdowns, not sub-minute spikes.
+        for profile_id, orders in by_profile.items():
+            try:
+                settings_row = get_automation_settings(profile_id, db)
+                guard_cfg = settings_row.config.get("max_loss_guard", {})
+                if not guard_cfg.get("enabled", False):
+                    continue
+
+                multiplier = float(guard_cfg.get("multiplier", 2.0))
+                tickers: dict = {}
+                pos_by_symbol: dict = {}
+                try:
+                    with _make_client(settings_row) as mlg_client:
+                        tickers = mlg_client.get_tickers()
+                        pos_by_symbol = {
+                            p.get("symbol"): p for p in mlg_client.get_open_positions()
+                        }
+                except Exception as _mlg_fetch_exc:  # noqa: BLE001
+                    logger.warning(
+                        "max_loss_guard: data fetch failed, skipping",
+                        profile_id=profile_id,
+                        error=str(_mlg_fetch_exc),
+                    )
+                    continue
+
+                trade_ids = {o.trade_id for o in orders}
+                profile_trades: list[Trade] = (
+                    db.query(Trade)
+                    .filter(
+                        Trade.id.in_(trade_ids),
+                        Trade.status.in_(["open", "partial", "runner"]),
+                        Trade.automation_enabled.is_(True),
+                    )
+                    .all()
+                )
+
+
+                for trade in profile_trades:
+                    db.refresh(trade)  # pick up any fill that just closed it
+                    if trade.status not in ("open", "partial", "runner"):
+                        continue
+                    if trade.risk_amount is None:
+                        continue
+
+                    instr = trade.instrument
+                    symbol = instr.symbol if instr else None
+                    if not symbol:
+                        continue
+
+                    pos = pos_by_symbol.get(symbol, {})
+                    ticker = tickers.get(symbol, {})
+                    raw_mark = ticker.get("markPrice") or ticker.get("last")
+                    pos_size = pos.get("size")
+
+                    if raw_mark is None or pos_size is None:
+                        continue
+
+                    try:
+                        cp = float(raw_mark)
+                        ep = float(trade.entry_price)
+                        sz = abs(float(pos_size))
+                        if trade.direction == "long":
+                            unrealized_pnl = sz * (cp - ep)
+                        else:
+                            unrealized_pnl = sz * (ep - cp)
+
+                        threshold = -(float(trade.risk_amount) * multiplier)
+                        if unrealized_pnl < threshold:
+                            logger.warning(
+                                "max_loss_guard_triggered",
+                                trade_id=trade.id,
+                                profile_id=profile_id,
+                                unrealized_pnl=round(unrealized_pnl, 2),
+                                threshold=round(threshold, 2),
+                                multiplier=multiplier,
+                            )
+                            from src.kraken_execution.service import (  # noqa: PLC0415
+                                close_automated_trade as _force_close,
+                            )
+                            try:
+                                _force_close(trade.id, db)
+                            except Exception as _close_exc:  # noqa: BLE001
+                                logger.error(
+                                    "max_loss_guard_close_failed",
+                                    trade_id=trade.id,
+                                    error=str(_close_exc),
+                                )
+                                continue
+                            _notify_event(
+                                profile_id,
+                                "MAX_LOSS_GUARD",
+                                db,
+                                trade_id=trade.id,
+                                pair=trade.pair,
+                                direction=trade.direction,
+                                entry_price=str(trade.entry_price),
+                                current_price=str(round(cp, 4)),
+                                unrealized_pnl=round(unrealized_pnl, 2),
+                                threshold=round(threshold, 2),
+                            )
+                    except (TypeError, ValueError, ZeroDivisionError):
+                        continue
+
+            except MissingAPIKeysError:
+                logger.warning("max_loss_guard: missing API keys", profile_id=profile_id)
+            except Exception as exc:  # noqa: BLE001
+                logger.exception("max_loss_guard: unexpected error", profile_id=profile_id, exc=exc)
 
         return {"processed": processed}
 

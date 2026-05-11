@@ -8,7 +8,7 @@
 // ────────────────────────────────────────────────────────────────────────────
 
 import { useState, useEffect } from 'react'
-import { Loader2, CheckCircle2, XCircle, KeyRound, Activity, Info, Clock } from 'lucide-react'
+import { Loader2, CheckCircle2, XCircle, KeyRound, Activity, Info, Clock, Shield, AlertTriangle } from 'lucide-react'
 import { automationApi } from '../../lib/api'
 import { useApi } from '../../hooks/useApi'
 import { cn } from '../../lib/cn'
@@ -46,10 +46,12 @@ export function AutomationSettings({ profileId }: Props) {
   )
 
   // Local form state — only for mutable fields
-  const [enabled,     setEnabled]     = useState(false)
-  const [pnlInterval, setPnlInterval] = useState(60)
-  const [apiKey,      setApiKey]      = useState('')
-  const [apiSecret,   setApiSecret]   = useState('')
+  const [enabled,          setEnabled]          = useState(false)
+  const [pnlInterval,      setPnlInterval]      = useState(60)
+  const [apiKey,           setApiKey]           = useState('')
+  const [apiSecret,        setApiSecret]        = useState('')
+  const [guardEnabled,     setGuardEnabled]     = useState(false)
+  const [guardMultiplier,  setGuardMultiplier]  = useState(2.0)
 
   const [saving,  setSaving]  = useState(false)
   const [saveMsg, setSaveMsg] = useState<{ ok: boolean; text: string } | null>(null)
@@ -70,6 +72,8 @@ export function AutomationSettings({ profileId }: Props) {
     if (!settings) return
     setEnabled(settings.config.enabled)
     setPnlInterval(settings.config.pnl_status_interval_minutes)
+    setGuardEnabled(settings.config.max_loss_guard?.enabled ?? false)
+    setGuardMultiplier(settings.config.max_loss_guard?.multiplier ?? 2.0)
   }, [settings])
 
   async function handleSave() {
@@ -80,6 +84,7 @@ export function AutomationSettings({ profileId }: Props) {
       const patch: AutomationSettingsUpdateIn = {
         enabled,
         pnl_status_interval_minutes: pnlInterval,
+        max_loss_guard: { enabled: guardEnabled, multiplier: guardMultiplier },
       }
       if (apiKey.trim())    patch.kraken_api_key    = apiKey.trim()
       if (apiSecret.trim()) patch.kraken_api_secret = apiSecret.trim()
@@ -218,7 +223,7 @@ export function AutomationSettings({ profileId }: Props) {
         </div>
 
         {/* PNL Status interval */}
-        <div className={cn('flex items-start justify-between gap-4 py-3 border-b border-surface-700', pnlIntervalError && 'pb-1')}>
+        <div className={cn('flex items-start justify-between gap-4 py-3', pnlIntervalError && 'pb-1')}>
           <div>
             <div className="flex items-center gap-1.5">
               <p className="text-xs font-medium text-slate-300">PnL status interval</p>
@@ -250,6 +255,76 @@ export function AutomationSettings({ profileId }: Props) {
             />
             <span className="text-[11px] text-slate-600">min</span>
           </div>
+        </div>
+      </section>
+      <section>
+        <div className="flex items-center gap-2 mb-3">
+          <Shield size={13} className="text-slate-500" />
+          <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wide">
+            Max Loss Guard
+          </h3>
+          <InfoBubble text="Background task (every 60 s) that force-closes a position when unrealized loss exceeds N × initial risk amount — emergency circuit breaker for spike events." />
+        </div>
+        <div className="rounded-xl bg-surface-700/50 border border-surface-600 p-3 space-y-3">
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <p className="text-xs font-medium text-slate-300">Enable guard</p>
+              <p className="text-[11px] text-slate-600 mt-0.5">
+                Force-close when unrealized loss &gt; multiplier × initial risk.
+              </p>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={guardEnabled}
+              onClick={() => setGuardEnabled((v) => !v)}
+              className={cn(
+                'relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent',
+                'transition-colors duration-200 focus:outline-none',
+                guardEnabled ? 'bg-amber-500' : 'bg-surface-500',
+              )}
+            >
+              <span
+                className={cn(
+                  'pointer-events-none inline-block h-4 w-4 rounded-full bg-white shadow',
+                  'transition-transform duration-200',
+                  guardEnabled ? 'translate-x-4' : 'translate-x-0',
+                )}
+              />
+            </button>
+          </div>
+
+          {guardEnabled && (
+            <div className="flex items-center justify-between gap-4 pt-2 border-t border-surface-700/60">
+              <div>
+                <div className="flex items-center gap-1.5">
+                  <p className="text-xs font-medium text-slate-300">Multiplier</p>
+                  <InfoBubble text="Example: 2.0 = force-close when unrealized loss reaches 2 × initial R. 1.0 triggers at 1 R (aggressive), 5.0 is very wide." />
+                </div>
+                <p className="text-[11px] text-slate-600 mt-0.5">1.0 – 10.0 × initial risk</p>
+              </div>
+              <div className="flex items-center gap-1.5 shrink-0">
+                <input
+                  type="number"
+                  min={1.0}
+                  max={10.0}
+                  step={0.5}
+                  value={guardMultiplier}
+                  onChange={(e) => setGuardMultiplier(Number(e.target.value))}
+                  className="w-16 rounded-lg bg-surface-700 border border-surface-600 px-2 py-1.5
+                    text-right text-xs text-slate-300
+                    focus:outline-none focus:border-brand-500/60 transition-colors"
+                />
+                <span className="text-[11px] text-slate-600">× R</span>
+              </div>
+            </div>
+          )}
+
+          {guardEnabled && (
+            <p className="text-[10px] text-amber-400/70 flex items-center gap-1">
+              <AlertTriangle size={10} /> Guard runs every 60 s — spikes shorter than 60 s are not covered.
+            </p>
+          )}
         </div>
       </section>
 
