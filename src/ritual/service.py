@@ -234,16 +234,19 @@ def _sync_step_labels(profile_id: int, session_type: str, rows: list, db: Sessio
     existing_positions = {row.position for row in rows}
     changed = False
 
-    # Update labels/configs of existing rows
+    # Update labels/configs/step_type of existing rows
     for row in rows:
         default = default_by_pos.get(row.position)
         if not default:
             continue
+        if row.step_type != default["step_type"]:
+            row.step_type = default["step_type"]
+            changed = True
         if row.label != default["label"]:
             row.label = default["label"]
             changed = True
         default_config = default.get("config", {})
-        if default_config and row.config != default_config:
+        if row.config != default_config:
             row.config = default_config
             changed = True
 

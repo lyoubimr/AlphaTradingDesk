@@ -419,10 +419,10 @@ DEFAULT_STEPS: dict[str, list[dict]] = {
             "cadence_hours": None, "config": {},
         },
         {
-            "position": 3, "step_type": "watchlist_htf_spot",
-            "label": "Spot HTF Watchlist (1W + 1D + 4H)", "est_minutes": 3,
+            "position": 3, "step_type": "tv_analysis",
+            "label": "Monthly HTF Analysis in TradingView (1W)", "est_minutes": 15,
             "is_mandatory": True, "linked_module": None,
-            "cadence_hours": None, "config": {"timeframes": ["1W", "1D", "4H"]},
+            "cadence_hours": None, "config": {},
         },
         {
             "position": 4, "step_type": "tv_analysis",
@@ -446,9 +446,9 @@ DEFAULT_STEPS: dict[str, list[dict]] = {
         },
         {
             "position": 2, "step_type": "watchlist_htf_spot",
-            "label": "Spot HTF Watchlist Scan (1D + 4H)", "est_minutes": 3,
+            "label": "Spot HTF Watchlist (1W + 1D + 4H)", "est_minutes": 5,
             "is_mandatory": True, "linked_module": None,
-            "cadence_hours": None, "config": {"timeframes": ["1D", "4H"]},
+            "cadence_hours": None, "config": {"timeframes": ["1W", "1D", "4H"]},
         },
         {
             "position": 3, "step_type": "tv_analysis",
