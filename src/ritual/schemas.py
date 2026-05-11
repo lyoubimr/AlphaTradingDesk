@@ -276,7 +276,10 @@ MAX_WEEKLY_SCORE = (
     DISCIPLINE_POINTS["weekly_setup_done"]
     + DISCIPLINE_POINTS["trade_session_done"] * 5
     + DISCIPLINE_POINTS["weekend_review_done"]
-)  # = 20 + 50 + 15 = 85 (spot sessions are additive — no need to cap)
+)  # = 20 + 50 + 15 = 85  (contracts profiles)
+
+# Spot: one spot_weekly per week (20 pts). spot_monthly is a monthly bonus — not counted in weekly max.
+MAX_WEEKLY_SCORE_SPOT = DISCIPLINE_POINTS["spot_weekly_done"]  # = 20
 
 
 # ── Default Config ────────────────────────────────────────────────────────────

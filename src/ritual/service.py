@@ -35,6 +35,7 @@ from src.ritual.schemas import (
     DEFAULT_STEPS,
     DISCIPLINE_POINTS,
     MAX_WEEKLY_SCORE,
+    MAX_WEEKLY_SCORE_SPOT,
     MODULE_PATHS,
     SESSION_EMOJIS,
     SESSION_LABELS,
@@ -566,7 +567,9 @@ def close_session(
         # Compute and record discipline points
         pts = _compute_discipline_points(session, payload, db)
         session.discipline_points = pts
-        _update_weekly_score(profile_id, pts, session, db)
+        profile = _get_profile_or_404(db, profile_id)
+        is_spot = getattr(profile, "account_type", "contracts") == "spot"
+        _update_weekly_score(profile_id, pts, session, db, is_spot=is_spot)
 
     db.commit()
     db.refresh(session)
@@ -604,9 +607,12 @@ def _update_weekly_score(
     points: int,
     session: RitualSession,
     db: Session,
+    *,
+    is_spot: bool = False,
 ) -> None:
     today = session.started_at.date() if hasattr(session.started_at, "date") else date.today()
     monday = _monday_of(today)
+    max_score = MAX_WEEKLY_SCORE_SPOT if is_spot else MAX_WEEKLY_SCORE
 
     row = (
         db.query(RitualWeeklyScore)
@@ -618,7 +624,7 @@ def _update_weekly_score(
             profile_id=profile_id,
             week_start=monday,
             score=0,
-            max_score=MAX_WEEKLY_SCORE,
+            max_score=max_score,
             details={
                 "sessions": {
                     "weekly_setup": 0,
