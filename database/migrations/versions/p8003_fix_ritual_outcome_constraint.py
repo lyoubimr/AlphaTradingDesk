@@ -23,6 +23,13 @@ _TABLE = "ritual_sessions"
 
 
 def upgrade() -> None:
+    # Widen alembic_version.version_num from VARCHAR(32) → VARCHAR(64).
+    # MUST run first: this revision ID (35 chars) exceeds the default column width.
+    # Upgrading VARCHAR(32)→VARCHAR(64) is a no-op if already VARCHAR(64) — safe.
+    op.execute(
+        "ALTER TABLE alembic_version ALTER COLUMN version_num TYPE VARCHAR(64)"
+    )
+
     # Drop old constraint (IF EXISTS for idempotency)
     op.execute(f"ALTER TABLE {_TABLE} DROP CONSTRAINT IF EXISTS {_CONSTRAINT}")
     # Add new constraint with pairs_pinned included
