@@ -528,11 +528,10 @@ def sync_open_positions(self: Task) -> dict:
             from decimal import Decimal  # noqa: PLC0415
 
             from fastapi import HTTPException  # noqa: PLC0415
+            from sqlalchemy import select  # noqa: PLC0415
 
             from src.trades.schemas import TradeClose  # noqa: PLC0415
             from src.trades.service import full_close  # noqa: PLC0415
-
-            from sqlalchemy import select  # noqa: PLC0415
 
             _has_open_sl = (
                 select(KrakenOrder.trade_id)
