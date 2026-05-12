@@ -532,15 +532,17 @@ def sync_open_positions(self: Task) -> dict:
             from src.trades.schemas import TradeClose  # noqa: PLC0415
             from src.trades.service import full_close  # noqa: PLC0415
 
+            from sqlalchemy import select  # noqa: PLC0415
+
             _has_open_sl = (
-                db.query(KrakenOrder.trade_id)
-                .filter(KrakenOrder.role == "sl", KrakenOrder.status == "open")
-                .subquery()
+                select(KrakenOrder.trade_id)
+                .where(KrakenOrder.role == "sl", KrakenOrder.status == "open")
+                .scalar_subquery()
             )
             _has_pending_entry = (
-                db.query(KrakenOrder.trade_id)
-                .filter(KrakenOrder.role == "entry", KrakenOrder.status == "open")
-                .subquery()
+                select(KrakenOrder.trade_id)
+                .where(KrakenOrder.role == "entry", KrakenOrder.status == "open")
+                .scalar_subquery()
             )
             orphaned: list[Trade] = (
                 db.query(Trade)
