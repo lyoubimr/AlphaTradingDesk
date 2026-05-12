@@ -141,6 +141,27 @@ def extend_pinned(
     return service.extend_pinned(profile_id, pin_id, payload, db)
 
 
+@router.get(
+    "/pinned/tv-export",
+    summary="Export active pinned pairs as TradingView watchlist",
+)
+def export_pinned_tv(profile_id: int, db: DbDep) -> Response:
+    """Download active pinned pairs as a TradingView-importable .txt file.
+
+    - No smart WL pre-generation required — pure DB read.
+    - Falls back to pair name when tv_symbol is not set.
+    - Returns an info comment (not a 404) when no active pins exist.
+    """
+    content = service.generate_pinned_tv_export(profile_id, db)
+    now_str = datetime.now().strftime("%Y%m%d_%H%M")
+    filename = f"ATD_Pinned_{profile_id}_{now_str}.txt"
+    return Response(
+        content=content,
+        media_type="text/plain",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
 # ── Sessions ─────────────────────────────────────────────────────────────────
 
 @router.get(
