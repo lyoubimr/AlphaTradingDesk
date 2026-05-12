@@ -742,6 +742,8 @@ export const ritualApi = {
     request(`${R(pid)}/pinned/${pinId}`, { method: 'DELETE' }),
   extendPinned: (pid: number, pinId: number, hours: number): Promise<PinnedPair> =>
     request(`${R(pid)}/pinned/${pinId}/extend`, { method: 'POST', body: JSON.stringify({ hours }) }),
+  tvExportPinnedUrl: (pid: number): string =>
+    `/api${R(pid)}/pinned/tv-export`,
 
   listSessions: (pid: number, limit = 20): Promise<RitualSession[]> =>
     request(`${R(pid)}/sessions?limit=${limit}`),

@@ -1,11 +1,11 @@
 // ── PortfolioPage ── Phase 7 — Capital & deposits overview (all profile types)
 import { useEffect, useState, useCallback } from 'react'
 import { Link } from 'react-router-dom'
-import { Loader2, Plus, X, Pencil, Trash2, BookOpen, ChevronRight } from 'lucide-react'
+import { Loader2, Plus, X, Pencil, Trash2, BookOpen, ChevronRight, Download } from 'lucide-react'
 import { PageHeader } from '../../components/ui/PageHeader'
 import { StatCard } from '../../components/ui/StatCard'
 import { useProfile } from '../../context/ProfileContext'
-import { investmentApi } from '../../lib/api'
+import { investmentApi, ritualApi } from '../../lib/api'
 import { cn } from '../../lib/cn'
 import type {
   PortfolioOut, DepositOut, DepositCreate, DepositUpdate,
@@ -260,13 +260,23 @@ export function PortfolioPage() {
         title="Portfolio"
         subtitle={activeProfile.name}
         actions={
-          <button
-            type="button"
-            onClick={() => setDepositModal('new')}
-            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-brand-600 hover:bg-brand-500 text-white text-sm font-medium transition-colors"
-          >
-            <Plus size={15} /> Add entry
-          </button>
+          <div className="flex items-center gap-2">
+            <a
+              href={ritualApi.tvExportPinnedUrl(activeProfile.id)}
+              download
+              className="flex items-center gap-2 px-4 py-2 rounded-xl border border-surface-600 bg-surface-700 text-slate-300 hover:text-white text-sm font-medium transition-colors"
+              title="Download pinned pairs as TradingView watchlist"
+            >
+              <Download size={15} /> TV Watchlist
+            </a>
+            <button
+              type="button"
+              onClick={() => setDepositModal('new')}
+              className="flex items-center gap-2 px-4 py-2 rounded-xl bg-brand-600 hover:bg-brand-500 text-white text-sm font-medium transition-colors"
+            >
+              <Plus size={15} /> Add entry
+            </button>
+          </div>
         }
       />
 
@@ -275,16 +285,21 @@ export function PortfolioPage() {
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
             <StatCard
               label="Capital"
-              value={`${fmt(portfolio.capital_current, 0)} ${currency}`}
-              sub={`Start: ${fmt(portfolio.capital_start, 0)}`}
+              value={`${fmt(portfolio.capital_current, 0)}${currency ? ` ${currency}` : ''}`}
+              sub={`Start: ${fmt(portfolio.capital_start, 0)}${currency ? ` ${currency}` : ''}`}
             />
             <StatCard
               label="Total deposited"
-              value={`${fmt(portfolio.total_deposited, 0)} ${currency}`}
+              value={`${fmt(portfolio.total_deposited, 0)}${currency ? ` ${currency}` : ''}`}
             />
             <StatCard
               label="Realized P&L"
-              value={`${pnlPositive ? '+' : ''}${fmt(portfolio.realized_pnl ?? '0')} ${currency}`}
+              value={
+                <span className={pnlPositive ? 'text-emerald-400' : 'text-red-400'}>
+                  {pnlPositive ? '+' : ''}{fmt(portfolio.realized_pnl ?? '0')}
+                  {currency && <span className="text-sm text-slate-500 ml-1 font-normal">{currency}</span>}
+                </span>
+              }
               accent={pnlPositive ? 'bull' : 'bear'}
             />
           </div>
@@ -320,11 +335,16 @@ export function PortfolioPage() {
       {!loading && (
         <div className="space-y-4">
           <div className="grid grid-cols-3 gap-4">
-            <StatCard label="Total deposited" value={`${fmt(totalDeposited, 0)} ${currency}`} accent="bull" />
-            <StatCard label="Total withdrawn"  value={`${fmt(Math.abs(totalWithdrawn), 0)} ${currency}`} accent="bear" />
+            <StatCard label="Total deposited" value={`${fmt(totalDeposited, 0)}${currency ? ` ${currency}` : ''}`} accent="bull" />
+            <StatCard label="Total withdrawn"  value={`${fmt(Math.abs(totalWithdrawn), 0)}${currency ? ` ${currency}` : ''}`} accent="bear" />
             <StatCard
               label="Net contribution"
-              value={`${netContribution >= 0 ? '+' : ''}${fmt(netContribution, 0)} ${currency}`}
+              value={
+                <span className={netContribution >= 0 ? 'text-emerald-400' : 'text-red-400'}>
+                  {netContribution >= 0 ? '+' : ''}{fmt(netContribution, 0)}
+                  {currency && <span className="text-sm text-slate-500 ml-1 font-normal">{currency}</span>}
+                </span>
+              }
               accent={netContribution >= 0 ? 'bull' : 'bear'}
             />
           </div>

@@ -1001,7 +1001,17 @@ function PinnedPanel({ profileId, onPinsChanged }: PinnedPanelProps) {
         <Star size={14} className="text-yellow-400" />
         <h3 className="text-sm font-semibold text-slate-200">Pinned Pairs</h3>
         {pins.length > 0 && (
-          <span className="ml-auto text-[10px] text-slate-500">{pins.length} active</span>
+          <>
+            <span className="text-[10px] text-slate-500">{pins.length} active</span>
+            <a
+              href={ritualApi.tvExportPinnedUrl(profileId)}
+              download
+              className="ml-auto flex items-center gap-1 px-2 py-1 rounded-lg border border-surface-600 bg-surface-700 text-slate-400 hover:text-white text-[10px] font-medium transition-colors"
+              title="Download as TradingView watchlist"
+            >
+              <Download size={11} /> TV Export
+            </a>
+          </>
         )}
       </div>
 
