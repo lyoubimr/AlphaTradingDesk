@@ -1,11 +1,10 @@
 // ── PortfolioPage ── Phase 7 — Capital & deposits overview (all profile types)
 import { useEffect, useState, useCallback } from 'react'
-import { Link } from 'react-router-dom'
-import { Loader2, Plus, X, Pencil, Trash2, BookOpen, ChevronRight, Download } from 'lucide-react'
+import { Loader2, Plus, X, Pencil, Trash2 } from 'lucide-react'
 import { PageHeader } from '../../components/ui/PageHeader'
 import { StatCard } from '../../components/ui/StatCard'
 import { useProfile } from '../../context/ProfileContext'
-import { investmentApi, ritualApi } from '../../lib/api'
+import { investmentApi } from '../../lib/api'
 import { cn } from '../../lib/cn'
 import type {
   PortfolioOut, DepositOut, DepositCreate, DepositUpdate,
@@ -252,77 +251,96 @@ export function PortfolioPage() {
   const totalDeposited  = deposits.filter((d) => Number(d.amount) > 0).reduce((s, d) => s + Number(d.amount), 0)
   const totalWithdrawn  = deposits.filter((d) => Number(d.amount) < 0).reduce((s, d) => s + Number(d.amount), 0)
   const netContribution = totalDeposited + totalWithdrawn
+  const capitalGrowth    = portfolio ? Number(portfolio.capital_current) - Number(portfolio.capital_start) : 0
+  const capitalGrowthPct = portfolio && Number(portfolio.capital_start) !== 0
+    ? (capitalGrowth / Number(portfolio.capital_start)) * 100
+    : 0
+  const growthPos = capitalGrowth >= 0
 
   return (
-    <div className="p-6 max-w-6xl mx-auto space-y-6">
+    <div className="p-6 max-w-5xl mx-auto space-y-6">
       <PageHeader
         icon={isSpot ? '🪙' : '💼'}
         title="Portfolio"
         subtitle={activeProfile.name}
         actions={
-          <div className="flex items-center gap-2">
-            <a
-              href={ritualApi.tvExportPinnedUrl(activeProfile.id)}
-              download
-              className="flex items-center gap-2 px-4 py-2 rounded-xl border border-surface-600 bg-surface-700 text-slate-300 hover:text-white text-sm font-medium transition-colors"
-              title="Download pinned pairs as TradingView watchlist"
-            >
-              <Download size={15} /> TV Watchlist
-            </a>
-            <button
-              type="button"
-              onClick={() => setDepositModal('new')}
-              className="flex items-center gap-2 px-4 py-2 rounded-xl bg-brand-600 hover:bg-brand-500 text-white text-sm font-medium transition-colors"
-            >
-              <Plus size={15} /> Add entry
-            </button>
-          </div>
+          <button
+            type="button"
+            onClick={() => setDepositModal('new')}
+            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-brand-600 hover:bg-brand-500 text-white text-sm font-medium transition-colors"
+          >
+            <Plus size={15} /> Add entry
+          </button>
         }
       />
-
-      {portfolio && (
-        <>
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-            <StatCard
-              label="Capital"
-              value={`${fmt(portfolio.capital_current, 0)}${currency ? ` ${currency}` : ''}`}
-              sub={`Start: ${fmt(portfolio.capital_start, 0)}${currency ? ` ${currency}` : ''}`}
-            />
-            <StatCard
-              label="Total deposited"
-              value={`${fmt(portfolio.total_deposited, 0)}${currency ? ` ${currency}` : ''}`}
-            />
-            <StatCard
-              label="Realized P&L"
-              value={
-                <span className={pnlPositive ? 'text-emerald-400' : 'text-red-400'}>
-                  {pnlPositive ? '+' : ''}{fmt(portfolio.realized_pnl ?? '0')}
-                  {currency && <span className="text-sm text-slate-500 ml-1 font-normal">{currency}</span>}
-                </span>
-              }
-              accent={pnlPositive ? 'bull' : 'bear'}
-            />
-          </div>
-
-          <div className="rounded-xl bg-surface-800/50 border border-surface-700 px-5 py-4 flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <BookOpen size={15} className="text-brand-400 shrink-0" />
-              <span className="text-sm text-slate-400">
-                {isSpot
-                  ? `${portfolio.open_positions_count} open holdings — manage your spot trades`
-                  : 'Manage and review your trades'}
-              </span>
-            </div>
-            <Link to="/trades" className="text-xs text-brand-400 hover:text-brand-300 flex items-center gap-1 shrink-0">
-              Trade Journal <ChevronRight size={12} />
-            </Link>
-          </div>
-        </>
-      )}
 
       {error && (
         <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-2 text-xs text-red-400">
           {error}
+        </div>
+      )}
+
+      {/* ── Hero Capital Card ──────────────────────────────────────────────── */}
+      {portfolio && (
+        <div className="relative rounded-2xl border border-surface-700 bg-gradient-to-br from-surface-800 to-surface-700/60 px-6 py-6 overflow-hidden">
+          <div className="absolute inset-0 bg-gradient-to-r from-brand-600/8 to-transparent pointer-events-none" />
+          <div className="relative flex items-start justify-between gap-6 flex-wrap">
+            <div>
+              <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-500 mb-2">Current Capital</p>
+              <p className="text-4xl font-bold text-slate-100 tabular-nums leading-none">
+                {fmt(portfolio.capital_current, 0)}
+                {currency && <span className="text-2xl text-slate-500 ml-2 font-normal">{currency}</span>}
+              </p>
+              <p className="text-xs text-slate-500 mt-2">
+                Started at{' '}
+                <span className="text-slate-400 font-medium">
+                  {fmt(portfolio.capital_start, 0)}{currency ? ` ${currency}` : ''}
+                </span>
+              </p>
+            </div>
+
+            {Number(portfolio.capital_start) > 0 && (
+              <div className={cn(
+                'flex flex-col items-end gap-1 px-5 py-3 rounded-xl border shrink-0',
+                growthPos
+                  ? 'bg-emerald-500/10 border-emerald-500/25 text-emerald-400'
+                  : 'bg-red-500/10 border-red-500/25 text-red-400',
+              )}>
+                <span className="text-[10px] font-semibold uppercase tracking-wider opacity-60">Growth</span>
+                <span className="text-xl font-bold tabular-nums leading-none">
+                  {growthPos ? '+' : ''}{fmt(capitalGrowth, 0)}{currency ? ` ${currency}` : ''}
+                </span>
+                <span className="text-sm font-semibold">
+                  {growthPos ? '+' : ''}{capitalGrowthPct.toFixed(2)}%
+                </span>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── Stat Cards ─────────────────────────────────────────────────────── */}
+      {portfolio && (
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+          <StatCard
+            label="Realized P&L"
+            value={
+              <span className={pnlPositive ? 'text-emerald-400' : 'text-red-400'}>
+                {pnlPositive ? '+' : ''}{fmt(portfolio.realized_pnl ?? '0')}
+                {currency && <span className="text-sm text-slate-500 ml-1 font-normal">{currency}</span>}
+              </span>
+            }
+            accent={pnlPositive ? 'bull' : 'bear'}
+          />
+          <StatCard
+            label="Total deposited"
+            value={`${fmt(portfolio.total_deposited, 0)}${currency ? ` ${currency}` : ''}`}
+          />
+          <StatCard
+            label="Open positions"
+            value={String(portfolio.open_positions_count)}
+            sub={isSpot ? 'Holdings in spot account' : 'Active trades in Trade Journal'}
+          />
         </div>
       )}
 
@@ -332,34 +350,53 @@ export function PortfolioPage() {
         </div>
       )}
 
+      {/* ── Deposit History ────────────────────────────────────────────────── */}
       {!loading && (
-        <div className="space-y-4">
-          <div className="grid grid-cols-3 gap-4">
-            <StatCard label="Total deposited" value={`${fmt(totalDeposited, 0)}${currency ? ` ${currency}` : ''}`} accent="bull" />
-            <StatCard label="Total withdrawn"  value={`${fmt(Math.abs(totalWithdrawn), 0)}${currency ? ` ${currency}` : ''}`} accent="bear" />
-            <StatCard
-              label="Net contribution"
-              value={
-                <span className={netContribution >= 0 ? 'text-emerald-400' : 'text-red-400'}>
-                  {netContribution >= 0 ? '+' : ''}{fmt(netContribution, 0)}
-                  {currency && <span className="text-sm text-slate-500 ml-1 font-normal">{currency}</span>}
-                </span>
-              }
-              accent={netContribution >= 0 ? 'bull' : 'bear'}
-            />
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-sm font-semibold text-slate-200">Deposit History</h2>
+              {deposits.length > 0 && (
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Net:{' '}
+                  <span className={cn('font-medium', netContribution >= 0 ? 'text-emerald-400' : 'text-red-400')}>
+                    {netContribution >= 0 ? '+' : ''}{fmt(netContribution, 0)}{currency ? ` ${currency}` : ''}
+                  </span>
+                  {totalWithdrawn < 0 && (
+                    <span className="ml-2 text-slate-600">
+                      ({fmt(totalDeposited, 0)} in · {fmt(Math.abs(totalWithdrawn), 0)} out)
+                    </span>
+                  )}
+                </p>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={() => setDepositModal('new')}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-surface-600 bg-surface-700 text-slate-300 hover:text-white text-xs font-medium transition-colors"
+            >
+              <Plus size={12} /> Add entry
+            </button>
           </div>
 
           <div className="rounded-xl bg-surface-800 border border-surface-700 overflow-hidden">
             {deposits.length === 0 ? (
-              <div className="px-4 py-12 text-center text-xs text-slate-600">
-                No entries yet. Click "Add entry" to log your first deposit.
+              <div className="px-4 py-14 text-center">
+                <p className="text-sm text-slate-500">No deposits or withdrawals logged yet.</p>
+                <button
+                  type="button"
+                  onClick={() => setDepositModal('new')}
+                  className="mt-3 inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-brand-600/20 border border-brand-500/30 text-brand-400 hover:text-brand-300 text-xs font-medium transition-colors"
+                >
+                  <Plus size={12} /> Log first deposit
+                </button>
               </div>
             ) : (
               <div className="overflow-x-auto">
                 <table className="w-full text-left">
                   <thead>
                     <tr className="border-b border-surface-700/50">
-                      {['Date', 'Amount', 'Label', 'Type', 'Actions'].map((h) => (
+                      {['Date', 'Amount', 'Label', 'Type', ''].map((h) => (
                         <th key={h} className="px-4 py-2.5 text-[10px] font-semibold uppercase tracking-wider text-slate-600">{h}</th>
                       ))}
                     </tr>
@@ -369,7 +406,7 @@ export function PortfolioPage() {
                       const isPos = Number(d.amount) >= 0
                       return (
                         <tr key={d.id} className="border-b border-surface-700/50 hover:bg-surface-700/30 transition-colors">
-                          <td className="px-4 py-3 text-xs text-slate-400 font-mono">{fmtDate(d.deposit_date)}</td>
+                          <td className="px-4 py-3 text-xs text-slate-400 font-mono whitespace-nowrap">{fmtDate(d.deposit_date)}</td>
                           <td className="px-4 py-3">
                             <span className={cn('text-sm font-mono font-semibold', isPos ? 'text-emerald-400' : 'text-red-400')}>
                               {isPos ? '+' : ''}{fmt(d.amount)}
