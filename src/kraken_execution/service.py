@@ -574,16 +574,31 @@ def place_sl_tp_orders(
             _sl_limit_price = _sl_stop_price * (Decimal("1") - _offset)
         else:
             _sl_limit_price = _sl_stop_price * (Decimal("1") + _offset)
-    sl_result = client.send_order(
-        order_type="stp",
-        symbol=instrument.symbol,
-        side=exit_side,
-        size=str(entry_size),
-        stop_price=str(_sl_stop_price),
-        limit_price=str(_sl_limit_price) if _sl_limit_price is not None else None,
-        reduce_only=True,
-        raise_on_rejection=False,
-    )
+    # ── Place SL order — with automatic fallback stop_limit → stop_market ───
+    # If stop_limit is rejected by Kraken (bad limitPrice precision, unsupported pair,
+    # or any API error), we auto-retry as stop_market so the position is ALWAYS protected.
+    try:
+        sl_result = client.send_order(
+            order_type="stp",
+            symbol=instrument.symbol,
+            side=exit_side,
+            size=str(entry_size),
+            stop_price=str(_sl_stop_price),
+            limit_price=str(_sl_limit_price) if _sl_limit_price is not None else None,
+            reduce_only=True,
+            raise_on_rejection=False,
+        )
+    except Exception as _sl_api_err:
+        # Kraken returned result != "success" (hard API error) — treat as rejected
+        # and synthesize a response so the fallback logic below handles it.
+        logger.error(
+            "automation_sl_api_hard_error",
+            trade_id=trade.id,
+            sl_type=_sl_order_type,
+            error=str(_sl_api_err),
+        )
+        sl_result = {"sendStatus": {"status": "apiError", "order_id": ""}}
+
     sl_send_status = sl_result.get("sendStatus", {})
     sl_order_id = sl_send_status.get("order_id", "") or ""
     sl_placement_status = sl_send_status.get("status", "unknown")
@@ -591,6 +606,46 @@ def place_sl_tp_orders(
     # position). We store the real placement status so phantom orders are visible as "error"
     # instead of "open" — prevents false monitoring and UI confusion.
     sl_order_db_status = "open" if sl_placement_status == "placed" else "error"
+
+    # ── Fallback: stop_limit rejected → retry as stop_market ─────────────────
+    # Any rejection of a stop_limit SL is retried as stop_market to guarantee placement.
+    if sl_order_db_status == "error" and _sl_order_type == "stop_limit":
+        logger.warning(
+            "automation_sl_stop_limit_rejected_fallback_stop_market",
+            trade_id=trade.id,
+            original_status=sl_placement_status,
+        )
+        try:
+            sl_result = client.send_order(
+                order_type="stp",
+                symbol=instrument.symbol,
+                side=exit_side,
+                size=str(entry_size),
+                stop_price=str(_sl_stop_price),
+                limit_price=None,  # stop_market — no limitPrice
+                reduce_only=True,
+                raise_on_rejection=False,
+            )
+            sl_send_status = sl_result.get("sendStatus", {})
+            sl_order_id = sl_send_status.get("order_id", "") or ""
+            sl_placement_status = sl_send_status.get("status", "unknown")
+            sl_order_db_status = "open" if sl_placement_status == "placed" else "error"
+            if sl_order_db_status == "open":
+                logger.info(
+                    "automation_sl_fallback_stop_market_placed",
+                    trade_id=trade.id,
+                    sl_order_id=sl_order_id,
+                )
+                _sl_limit_price = None  # stop_market: no limit_price stored in DB
+        except Exception as _fb_err:
+            logger.error(
+                "automation_sl_fallback_also_failed",
+                trade_id=trade.id,
+                error=str(_fb_err),
+            )
+            sl_order_db_status = "error"
+            sl_placement_status = "fallback_failed"
+
     if sl_order_db_status == "error":
         logger.error(
             "automation_sl_placement_rejected",
@@ -598,6 +653,21 @@ def place_sl_tp_orders(
             kraken_status=sl_placement_status,
             kraken_order_id=sl_order_id or "(none)",
             reason=sl_send_status.get("receivedTime", ""),
+        )
+        # CRITICAL: notify the user — they MUST know the SL was not placed.
+        # Uses ORDER_ERROR event (always enabled by default).
+        _notify_execution_event(
+            profile_id=trade.profile_id,
+            event="ORDER_ERROR",
+            db=db,
+            trade_id=trade.id,
+            pair=trade.pair,
+            direction=trade.direction,
+            error_message=(
+                f"🚨 SL NOT PLACED on Kraken! "
+                f"Stop at {_sl_stop_price} was rejected ({sl_placement_status}). "
+                f"Close your position manually NOW."
+            ),
         )
     # If Kraken returned no order_id (extremely rare), generate a unique synthetic ID.
     # Must be unique due to UNIQUE constraint on kraken_order_id.
