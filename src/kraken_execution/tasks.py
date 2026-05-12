@@ -517,6 +517,157 @@ def sync_open_positions(self: Task) -> dict:
             except Exception as exc:  # noqa: BLE001
                 logger.exception("max_loss_guard: unexpected error", profile_id=profile_id, exc=exc)
 
+        # ── Orphaned-trade sweeper ────────────────────────────────────────────────────
+        # Detects trades that are open in ATD but whose position was closed externally
+        # on Kraken (manual close, Kraken liquidation, SL hit with no ATD order placed).
+        #
+        # Condition: open automated trade with NO open SL order and NO pending entry.
+        # These are trades our main fill-detection loop can never process because there
+        # is no KrakenOrder.status='open' to match against.
+        try:
+            from decimal import Decimal  # noqa: PLC0415
+
+            from fastapi import HTTPException  # noqa: PLC0415
+
+            from src.trades.schemas import TradeClose  # noqa: PLC0415
+            from src.trades.service import full_close  # noqa: PLC0415
+
+            _has_open_sl = (
+                db.query(KrakenOrder.trade_id)
+                .filter(KrakenOrder.role == "sl", KrakenOrder.status == "open")
+                .subquery()
+            )
+            _has_pending_entry = (
+                db.query(KrakenOrder.trade_id)
+                .filter(KrakenOrder.role == "entry", KrakenOrder.status == "open")
+                .subquery()
+            )
+            orphaned: list[Trade] = (
+                db.query(Trade)
+                .filter(
+                    Trade.status.in_(["open", "partial", "runner"]),
+                    Trade.automation_enabled.is_(True),
+                    ~Trade.id.in_(_has_open_sl),
+                    ~Trade.id.in_(_has_pending_entry),
+                )
+                .all()
+            )
+
+            if orphaned:
+                orphaned_by_profile: dict[int, list[Trade]] = {}
+                for _t in orphaned:
+                    orphaned_by_profile.setdefault(_t.profile_id, []).append(_t)
+
+                for profile_id, orphaned_trades in orphaned_by_profile.items():
+                    try:
+                        settings_row = get_automation_settings(profile_id, db)
+                        with _make_client(settings_row) as _client:
+                            _open_positions = _client.get_open_positions()
+                            _fills = _client.get_fills()
+                            try:
+                                _tickers = _client.get_tickers()
+                            except Exception:  # noqa: BLE001
+                                _tickers = {}
+
+                        _open_symbols = {p.get("symbol") for p in _open_positions}
+
+                        # Index fills by symbol + side for matching
+                        _fills_by_symbol: dict[str, list[dict]] = {}
+                        for _f in _fills:
+                            _sym = _f.get("symbol") or ""
+                            _fills_by_symbol.setdefault(_sym, []).append(_f)
+
+                        for trade in orphaned_trades:
+                            instr = trade.instrument
+                            symbol = instr.symbol if instr else None
+                            if not symbol:
+                                continue
+
+                            if symbol in _open_symbols:
+                                continue  # still open on Kraken — nothing to do
+
+                            # Position is gone from Kraken → closed externally
+                            logger.warning(
+                                "orphaned_trade_externally_closed",
+                                trade_id=trade.id,
+                                symbol=symbol,
+                                profile_id=profile_id,
+                            )
+
+                            # Determine exit price: most recent fill for this symbol
+                            # matching the closing side (sell for long, buy for short)
+                            _closing_side = "sell" if trade.direction == "long" else "buy"
+                            _symbol_fills = [
+                                f for f in _fills_by_symbol.get(symbol, [])
+                                if f.get("side", "").lower() == _closing_side
+                            ]
+                            if _symbol_fills:
+                                # Kraken returns newest-first
+                                _exit_price = Decimal(str(_symbol_fills[0].get("price", 0)))
+                            else:
+                                # Fallback: use current mark price from tickers
+                                _ticker = _tickers.get(symbol, {})
+                                _raw_mark = _ticker.get("markPrice") or _ticker.get("last")
+                                if _raw_mark is None:
+                                    logger.error(
+                                        "orphaned_trade_no_exit_price",
+                                        trade_id=trade.id,
+                                        symbol=symbol,
+                                    )
+                                    continue
+                                _exit_price = Decimal(str(_raw_mark))
+
+                            try:
+                                full_close(
+                                    db=db,
+                                    trade_id=trade.id,
+                                    data=TradeClose(
+                                        exit_price=_exit_price,
+                                        close_notes="Externally closed on Kraken — auto-synced by ATD",
+                                    ),
+                                )
+                                processed += 1
+                                _notify_event(
+                                    profile_id,
+                                    "SL_HIT",
+                                    db,
+                                    trade_id=trade.id,
+                                    pair=trade.pair,
+                                    direction=trade.direction,
+                                    filled_price=str(_exit_price),
+                                    size="—",
+                                    pnl_pct=_compute_pnl_pct(
+                                        trade.direction, _exit_price, trade.entry_price
+                                    ),
+                                    trade_pnl=(
+                                        str(trade.realized_pnl)
+                                        if trade.realized_pnl is not None
+                                        else None
+                                    ),
+                                )
+                            except HTTPException as _exc:
+                                if _exc.status_code == 409:
+                                    logger.warning(
+                                        "orphaned_trade_already_closed",
+                                        trade_id=trade.id,
+                                    )
+                                else:
+                                    raise
+
+                    except MissingAPIKeysError:
+                        logger.warning(
+                            "orphaned_sweeper: missing API keys", profile_id=profile_id
+                        )
+                    except Exception as _exc:  # noqa: BLE001
+                        logger.exception(
+                            "orphaned_sweeper: unexpected error",
+                            profile_id=profile_id,
+                            exc=_exc,
+                        )
+
+        except Exception as _sweep_exc:  # noqa: BLE001
+            logger.exception("orphaned_sweeper: fatal error", exc=_sweep_exc)
+
         return {"processed": processed}
 
     except Exception as exc:
