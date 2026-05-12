@@ -421,6 +421,49 @@ def extend_pinned(
     return _enrich_pinned(pin, db)
 
 
+def generate_pinned_tv_export(profile_id: int, db: Session) -> bytes:
+    """Build a TradingView-importable .txt from active pinned pairs only.
+
+    - No smart WL pre-generation required — pure DB read.
+    - Groups pins by canonical TF order: 1W > 1D > 4H > 1H > 15m.
+    - Falls back to _to_tv_symbol(pair) when tv_symbol is not set.
+    - Returns an info message (not empty) when no active pins exist.
+    """
+    _CANONICAL = ["1W", "1D", "4H", "1H", "15m"]
+    _TF_EMOJI = {"1W": "🟣", "1D": "🔵", "4H": "⏳", "1H": "🟢", "15m": "⚡"}
+
+    pins = (
+        db.query(RitualPinnedPair)
+        .filter_by(profile_id=profile_id, status="active")
+        .order_by(RitualPinnedPair.timeframe, RitualPinnedPair.pinned_at.desc())
+        .all()
+    )
+
+    if not pins:
+        return (
+            "# ATD Pinned Pairs — TradingView Export\n"
+            "# Aucune paire épinglée active pour ce profil.\n"
+            "# Épinglez des paires depuis le Ritual pour les voir ici.\n"
+        ).encode()
+
+    by_tf: dict[str, list[str]] = {}
+    for pin in pins:
+        symbol = pin.tv_symbol or _to_tv_symbol(pin.pair)
+        by_tf.setdefault(pin.timeframe, []).append(symbol)
+
+    buf = io.StringIO()
+    for tf in _CANONICAL:
+        if tf not in by_tf:
+            continue
+        emoji = _TF_EMOJI.get(tf, "📌")
+        buf.write(f"###{emoji} {tf}###\n")
+        for sym in by_tf[tf]:
+            buf.write(f"{sym}\n")
+        buf.write("\n")
+
+    return buf.getvalue().encode()
+
+
 # ── Sessions ─────────────────────────────────────────────────────────────────
 
 def list_sessions(

@@ -561,3 +561,176 @@ class TestPlaceSlTpOrders:
         )
         assert sl_row is not None
         assert sl_row.limit_price is None
+
+
+# ── SL fallback: stop_limit → stop_market ─────────────────────────────────────
+
+class _RejectFirstSpyClient:
+    """Spy that rejects the first send_order call (simulates stop_limit rejection)
+    and accepts all subsequent ones (simulates stop_market fallback success)."""
+
+    def __init__(self):
+        self.orders_sent: list[dict] = []
+        self._call_count = 0
+
+    def send_order(self, order_type: str, symbol: str, side: str, size: str, **kwargs) -> dict:
+        self._call_count += 1
+        call = {"order_type": order_type, "symbol": symbol, "side": side, "size": size, **kwargs}
+        self.orders_sent.append(call)
+        if self._call_count == 1:
+            # Simulate Kraken rejecting the stop_limit SL
+            return {"sendStatus": {"order_id": "", "status": "invalidArgument"}}
+        return {"sendStatus": {"order_id": f"TEST-{self._call_count}", "status": "placed"}}
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_):
+        pass
+
+
+class _AlwaysRejectSpyClient:
+    """Spy that always rejects every send_order call."""
+
+    def __init__(self):
+        self.orders_sent: list[dict] = []
+
+    def send_order(self, order_type: str, symbol: str, side: str, size: str, **kwargs) -> dict:
+        call = {"order_type": order_type, "symbol": symbol, "side": side, "size": size, **kwargs}
+        self.orders_sent.append(call)
+        return {"sendStatus": {"order_id": "", "status": "invalidArgument"}}
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_):
+        pass
+
+
+class TestSlFallback:
+    """
+    Tests for the stop_limit → stop_market fallback logic in place_sl_tp_orders.
+    Regression tests for: SL silently not placed when stop_limit is rejected by Kraken.
+    """
+
+    def test_fallback_retries_without_limit_price_when_stop_limit_rejected(
+        self, db_session: Session
+    ):
+        """When stop_limit is rejected, the retry call must NOT send a limit_price."""
+        from decimal import Decimal  # noqa: PLC0415
+
+        from src.kraken_execution.service import place_sl_tp_orders  # noqa: PLC0415
+
+        profile, _instr, trade = _setup_trade_for_sl_test(
+            db_session, name_suffix="SL-Fallback"
+        )
+        update_automation_settings(
+            profile.id, {"sl_order_type": "stop_limit", "sl_limit_offset_pct": 1.5}, db_session
+        )
+        settings = get_automation_settings(profile.id, db_session)
+
+        spy = _RejectFirstSpyClient()
+        place_sl_tp_orders(trade, Decimal("0.001"), spy, db_session, settings_row=settings)
+
+        # Exactly 2 stp calls: first stop_limit (rejected), then stop_market (fallback)
+        stp_calls = [c for c in spy.orders_sent if c["order_type"] == "stp"]
+        assert len(stp_calls) == 2, f"Expected 2 stp calls (limit+fallback), got {len(stp_calls)}"
+
+        fallback_call = stp_calls[1]
+        assert fallback_call.get("limit_price") is None, "Fallback must be stop_market (no limit_price)"
+
+    def test_fallback_sl_stored_as_open_in_db(self, db_session: Session):
+        """When stop_limit is rejected but stop_market fallback succeeds,
+        the KrakenOrder for SL must have status='open' (not 'error')."""
+        from decimal import Decimal  # noqa: PLC0415
+
+        from src.kraken_execution.models import KrakenOrder  # noqa: PLC0415
+        from src.kraken_execution.service import place_sl_tp_orders  # noqa: PLC0415
+
+        profile, _instr, trade = _setup_trade_for_sl_test(
+            db_session, name_suffix="SL-FallbackDB"
+        )
+        update_automation_settings(
+            profile.id, {"sl_order_type": "stop_limit"}, db_session
+        )
+        settings = get_automation_settings(profile.id, db_session)
+
+        spy = _RejectFirstSpyClient()
+        place_sl_tp_orders(trade, Decimal("0.001"), spy, db_session, settings_row=settings)
+
+        sl_row = (
+            db_session.query(KrakenOrder)
+            .filter(KrakenOrder.trade_id == trade.id, KrakenOrder.role == "sl")
+            .first()
+        )
+        assert sl_row is not None
+        # Fallback to stop_market succeeded → must be "open" not "error"
+        assert sl_row.status == "open", f"Expected 'open', got '{sl_row.status}'"
+        # Fallback is stop_market → limit_price must be NULL in DB
+        assert sl_row.limit_price is None, "Fallback stop_market must have NULL limit_price in DB"
+
+    def test_tp_orders_still_placed_when_sl_rejected_and_fallback_fails(
+        self, db_session: Session
+    ):
+        """Even when both stop_limit and stop_market SL placements fail,
+        TP orders must still be attempted (position is partially protected)."""
+        from decimal import Decimal  # noqa: PLC0415
+
+        from src.kraken_execution.models import KrakenOrder  # noqa: PLC0415
+        from src.kraken_execution.service import place_sl_tp_orders  # noqa: PLC0415
+
+        profile, _instr, trade = _setup_trade_for_sl_test(
+            db_session, name_suffix="SL-NoFallback"
+        )
+        update_automation_settings(
+            profile.id, {"sl_order_type": "stop_limit"}, db_session
+        )
+        settings = get_automation_settings(profile.id, db_session)
+
+        spy = _AlwaysRejectSpyClient()
+        # Must NOT raise — SL failure is handled gracefully
+        place_sl_tp_orders(trade, Decimal("0.001"), spy, db_session, settings_row=settings)
+
+        # SL row exists but with error status
+        sl_row = (
+            db_session.query(KrakenOrder)
+            .filter(KrakenOrder.trade_id == trade.id, KrakenOrder.role == "sl")
+            .first()
+        )
+        assert sl_row is not None
+        assert sl_row.status == "error"
+
+        # TP row must still have been attempted
+        tp_calls = [c for c in spy.orders_sent if c.get("order_type") == "lmt"]
+        assert len(tp_calls) >= 1, "TP orders must be placed even when SL fails"
+
+    def test_stop_market_no_fallback_when_already_stop_market(self, db_session: Session):
+        """When sl_order_type=stop_market is rejected, there is no fallback (no infinite loop).
+        The SL is stored as 'error' and we move on."""
+        from decimal import Decimal  # noqa: PLC0415
+
+        from src.kraken_execution.models import KrakenOrder  # noqa: PLC0415
+        from src.kraken_execution.service import place_sl_tp_orders  # noqa: PLC0415
+
+        profile, _instr, trade = _setup_trade_for_sl_test(
+            db_session, name_suffix="SL-MktReject"
+        )
+        update_automation_settings(
+            profile.id, {"sl_order_type": "stop_market"}, db_session
+        )
+        settings = get_automation_settings(profile.id, db_session)
+
+        spy = _AlwaysRejectSpyClient()
+        place_sl_tp_orders(trade, Decimal("0.001"), spy, db_session, settings_row=settings)
+
+        stp_calls = [c for c in spy.orders_sent if c["order_type"] == "stp"]
+        # stop_market rejected: exactly 1 stp call, no fallback
+        assert len(stp_calls) == 1, f"stop_market must not trigger fallback, got {len(stp_calls)} stp calls"
+
+        sl_row = (
+            db_session.query(KrakenOrder)
+            .filter(KrakenOrder.trade_id == trade.id, KrakenOrder.role == "sl")
+            .first()
+        )
+        assert sl_row is not None
+        assert sl_row.status == "error"
