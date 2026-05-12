@@ -162,10 +162,19 @@ function TFBadge({ tf }: { tf: string }) {
 }
 
 // ── Score ring ────────────────────────────────────────────────────────────────
+const GRADE_STROKE: Record<string, string> = {
+  S: '#facc15',  // yellow-400  — elite
+  A: '#4ade80',  // green-400
+  B: '#60a5fa',  // blue-400
+  C: '#fb923c',  // amber-400
+  D: '#f87171',  // red-400
+}
+
 function ScoreRing({ score, maxScore, pct, grade, period = 'week' }: { score: number; maxScore: number; pct: number; grade: string; period?: string }) {
   const radius = 28
   const circumference = 2 * Math.PI * radius
   const strokeDash = circumference * (pct / 100)
+  const strokeColor = GRADE_STROKE[grade] ?? '#f87171'
 
   return (
     <div className="flex flex-col items-center gap-1">
@@ -174,7 +183,7 @@ function ScoreRing({ score, maxScore, pct, grade, period = 'week' }: { score: nu
           <circle cx="36" cy="36" r={radius} fill="none" stroke="#1e293b" strokeWidth="5" />
           <circle
             cx="36" cy="36" r={radius} fill="none"
-            stroke={pct >= 75 ? '#4ade80' : pct >= 50 ? '#60a5fa' : pct >= 30 ? '#facc15' : '#f87171'}
+            stroke={strokeColor}
             strokeWidth="5"
             strokeDasharray={`${strokeDash} ${circumference}`}
             strokeLinecap="round"
@@ -1001,7 +1010,17 @@ function PinnedPanel({ profileId, onPinsChanged }: PinnedPanelProps) {
         <Star size={14} className="text-yellow-400" />
         <h3 className="text-sm font-semibold text-slate-200">Pinned Pairs</h3>
         {pins.length > 0 && (
-          <span className="ml-auto text-[10px] text-slate-500">{pins.length} active</span>
+          <>
+            <span className="text-[10px] text-slate-500">{pins.length} active</span>
+            <a
+              href={ritualApi.tvExportPinnedUrl(profileId)}
+              download
+              className="ml-auto flex items-center gap-1 px-2 py-1 rounded-lg border border-surface-600 bg-surface-700 text-slate-400 hover:text-white text-[10px] font-medium transition-colors"
+              title="Download as TradingView watchlist"
+            >
+              <Download size={11} /> TV Export
+            </a>
+          </>
         )}
       </div>
 
@@ -1210,7 +1229,7 @@ export function RitualPage() {
                       className="h-1.5 rounded-full transition-all"
                       style={{
                         width: `${score.pct}%`,
-                        background: score.pct >= 75 ? '#4ade80' : score.pct >= 50 ? '#60a5fa' : score.pct >= 30 ? '#facc15' : '#f87171',
+                        background: GRADE_STROKE[score.grade] ?? '#f87171',
                       }}
                     />
                   </div>

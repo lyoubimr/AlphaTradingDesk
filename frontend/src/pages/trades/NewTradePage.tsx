@@ -1062,14 +1062,14 @@ export function NewTradePage() {
   const [krakenMargin, setKrakenMargin] = useState<{ available: number | null; loading: boolean }>({ available: null, loading: false })
 
   // Latest Market Analysis session — auto-fetched for ma_direction in Risk Advisor
-  // NOTE: not filtered by profile — MA sessions represent global market context
+  // Filtered by activeProfile.id so a Gold analysis doesn't bleed into a Crypto trade form.
   const [latestMaSessionId, setLatestMaSessionId] = useState<number | null>(null)
 
   useEffect(() => {
-    maApi.listSessions(undefined, 1)
+    maApi.listSessions(undefined, 1, activeProfile?.id)
       .then((sessions) => setLatestMaSessionId(sessions[0]?.id ?? null))
       .catch(() => setLatestMaSessionId(null))
-  }, [])
+  }, [activeProfile?.id])
 
   const handleAdvisorAccept = useCallback((suggestedRiskPct: number, snapshot: Record<string, unknown>) => {
     // Pre-fill the risk % field with the advisor's suggestion

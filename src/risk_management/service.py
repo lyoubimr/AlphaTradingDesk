@@ -297,7 +297,10 @@ def _resolve_ma_direction_match(
     if timeframe:
         indicator = (
             db.query(MarketAnalysisIndicator.timeframe_level)
-            .filter(sa_func.lower(MarketAnalysisIndicator.tv_timeframe) == timeframe.lower())
+            .filter(
+                sa_func.lower(MarketAnalysisIndicator.tv_timeframe) == timeframe.lower(),
+                MarketAnalysisIndicator.module_id == session.module_id,
+            )
             .limit(1)
             .scalar()
         )
