@@ -439,19 +439,30 @@ def generate_pinned_tv_export(profile_id: int, db: Session) -> bytes:
         .all()
     )
 
+    # Market indices section: read from ritual_settings config (same field used by smart WL).
+    # Falls back to DEFAULT_RITUAL_CONFIG values if the profile has never customised them.
+    settings_row = get_ritual_settings(profile_id, db)
+    cfg = settings_row.config if isinstance(settings_row.config, dict) else {}
+    market_indices: list[str] = cfg.get(
+        "market_analysis_pairs",
+        DEFAULT_RITUAL_CONFIG["market_analysis_pairs"],
+    )
+
+    buf = io.StringIO()
+    # Always prepend the market indices section
+    buf.write("###📊 Market###\n")
+    for sym in market_indices:
+        buf.write(f"{sym}\n")
+    buf.write("\n")
+
     if not pins:
-        return (
-            "# ATD Pinned Pairs — TradingView Export\n"
-            "# Aucune paire épinglée active pour ce profil.\n"
-            "# Épinglez des paires depuis le Ritual pour les voir ici.\n"
-        ).encode()
+        return buf.getvalue().encode()
 
     by_tf: dict[str, list[str]] = {}
     for pin in pins:
         symbol = pin.tv_symbol or _to_tv_symbol(pin.pair)
         by_tf.setdefault(pin.timeframe, []).append(symbol)
 
-    buf = io.StringIO()
     for tf in _CANONICAL:
         if tf not in by_tf:
             continue

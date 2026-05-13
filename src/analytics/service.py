@@ -154,13 +154,28 @@ def compute_performance_report(profile_id: int, period: str, db: Session) -> Per
             -- is_be: |pnl/risk| < threshold (same units as min_pnl_pct_for_stats)
             -- ⚠️ do NOT multiply by 100 here — min_pnl_pct_for_stats is stored as ratio (0.100 = 10%)
             ABS(COALESCE(t.realized_pnl / NULLIF(t.risk_amount, 0), 0)) < :min_pnl_pct AS is_be,
-            -- strategy_broken: post_trade_review->>'tags' contains a tag starting with 'strategy_broken_'
-            EXISTS (
-              SELECT 1 FROM jsonb_array_elements_text(
-                COALESCE(t.post_trade_review->'tags', '[]'::jsonb)
-              ) tag
-              WHERE tag LIKE 'strategy_broken_%'
-            ) AS is_strategy_broken,
+            -- strategy_broken: a trade is broken only when ALL its assigned strategies are flagged.
+            -- If at least ONE strategy has no 'strategy_broken_{id}' tag → the trade is not broken.
+            -- Trades with no assigned strategy: broken if any strategy_broken_* tag present (legacy).
+            CASE
+              WHEN NOT EXISTS (
+                SELECT 1 FROM trade_strategies ts_sb WHERE ts_sb.trade_id = t.id
+              ) THEN
+                EXISTS (
+                  SELECT 1 FROM jsonb_array_elements_text(
+                    COALESCE(t.post_trade_review->'tags', '[]'::jsonb)
+                  ) tag WHERE tag LIKE 'strategy_broken_%'
+                )
+              ELSE
+                NOT EXISTS (
+                  SELECT 1 FROM trade_strategies ts_sb
+                  WHERE ts_sb.trade_id = t.id
+                    AND NOT (
+                      COALESCE(t.post_trade_review->'tags', '[]'::jsonb)
+                      ? ('strategy_broken_' || ts_sb.strategy_id::text)
+                    )
+                )
+            END AS is_strategy_broken,
             -- strategy_name: first assigned strategy (LIMIT 1 to avoid double-counting)
             (SELECT CASE WHEN s.emoji IS NOT NULL AND s.emoji != ''
                          THEN s.emoji || ' ' || s.name ELSE s.name END
