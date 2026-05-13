@@ -439,20 +439,19 @@ def generate_pinned_tv_export(profile_id: int, db: Session) -> bytes:
         .all()
     )
 
-    _MARKET_INDICES = [
-        "CRYPTOCAP:BTC.D",
-        "CRYPTOCAP:TOTAL",
-        "CRYPTOCAP:TOTAL2",
-        "CRYPTOCAP:USDT.D",
-        "BINANCE:BTCUSDT",
-        "BINANCE:ETHUSDT",
-        "BINANCE:ETHBTC",
-    ]
+    # Market indices section: read from ritual_settings config (same field used by smart WL).
+    # Falls back to DEFAULT_RITUAL_CONFIG values if the profile has never customised them.
+    settings_row = get_ritual_settings(profile_id, db)
+    cfg = settings_row.config if isinstance(settings_row.config, dict) else {}
+    market_indices: list[str] = cfg.get(
+        "market_analysis_pairs",
+        DEFAULT_RITUAL_CONFIG["market_analysis_pairs"],
+    )
 
     buf = io.StringIO()
     # Always prepend the market indices section
     buf.write("###📊 Market###\n")
-    for sym in _MARKET_INDICES:
+    for sym in market_indices:
         buf.write(f"{sym}\n")
     buf.write("\n")
 
