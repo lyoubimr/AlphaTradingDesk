@@ -5,7 +5,7 @@
 // Layout (mobile):  1-col — sections stack vertically
 
 import { useEffect, useState, useCallback } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link } from 'react-router-dom'
 import {
   Star, Pin, PinOff, Plus, Download, RefreshCw,
   ChevronRight, ChevronLeft, CheckCircle2, SkipForward,
@@ -210,7 +210,6 @@ function MarketAnalysisPanel({
   logId: number
   onComplete: (logId: number, status: 'done' | 'skipped', output?: Record<string, unknown>) => void
 }) {
-  const navigate = useNavigate()
   const { activeProfile } = useProfile()
   const [staleness, setStaleness] = useState<MAStaleness[] | null>(null)
   const [loading, setLoading] = useState(true)
@@ -242,7 +241,7 @@ function MarketAnalysisPanel({
         <div className="space-y-2">
           <p className="text-xs text-slate-400">No Market Analysis modules configured.</p>
           <button
-            onClick={() => navigate('/market-analysis')}
+            onClick={() => window.open('/market-analysis', '_blank')}
             className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-brand-700/20 border border-brand-600/40 text-brand-400 text-xs font-medium hover:bg-brand-700/30 transition-colors"
           >
             <ExternalLink size={11} /> Open Market Analysis
@@ -266,7 +265,7 @@ function MarketAnalysisPanel({
             </button>
           </div>
           <button
-            onClick={() => navigate('/market-analysis')}
+            onClick={() => window.open('/market-analysis', '_blank')}
             className="flex items-center gap-1 text-[11px] text-slate-500 hover:text-brand-400 transition-colors"
           >
             <ExternalLink size={10} /> Open Market Analysis →
@@ -302,7 +301,7 @@ function MarketAnalysisPanel({
           </div>
           <div className="flex gap-2">
             <button
-              onClick={() => navigate('/market-analysis')}
+              onClick={() => window.open('/market-analysis', '_blank')}
               className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-brand-700/20 border border-brand-600/40 text-brand-400 text-xs font-medium hover:bg-brand-700/30 transition-colors"
             >
               <ExternalLink size={11} />
@@ -341,7 +340,6 @@ function StepItem({
   log, step, isCurrent, profileId,
   onComplete, onGenerateWL, wlResult, wlLoading, downloadUrl, topN, setTopN, onPin,
 }: StepItemProps) {
-  const navigate = useNavigate()
   const isDone = log.status === 'done'
   const isSkipped = log.status === 'skipped'
   const isDoneOrSkipped = isDone || isSkipped
@@ -411,7 +409,7 @@ function StepItem({
           {/* Linked module shortcut */}
           {step?.module_path && isCurrent && !isDoneOrSkipped && log.step_type !== 'market_analysis' && (
             <button
-              onClick={() => navigate(step.module_path!)}
+              onClick={() => window.open(step.module_path!, '_blank')}
               className="mt-1.5 inline-flex items-center gap-1 text-[11px] text-brand-400 hover:text-brand-300 transition-colors"
             >
               <ExternalLink size={10} />
@@ -574,7 +572,6 @@ function SmartWLPanel({
   onPin?: (pair: string, tf: string) => Promise<void>
   readOnly?: boolean
 }) {
-  const navigate = useNavigate()
   const [expandedTFs, setExpandedTFs] = useState<Set<string>>(new Set())
   const hasData = result !== null && Object.values(result.timeframes).some(pairs => pairs.length > 0)
   const PREVIEW = 8
@@ -628,7 +625,7 @@ function SmartWLPanel({
             Run the volatility analysis first to populate the watchlists.
           </p>
           <button
-            onClick={() => navigate('/volatility/market')}
+            onClick={() => window.open('/volatility/market', '_blank')}
             className="mt-2 flex items-center gap-1.5 text-xs text-brand-400 hover:text-brand-300 transition-colors"
           >
             <ExternalLink size={11} /> Go to Volatility →
