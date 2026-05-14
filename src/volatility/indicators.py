@@ -161,8 +161,9 @@ def compute_ema_score(
         Defaults to periods[0] when not supplied.
         Recommended per TF: 15m→55, 1h→99, 4h→200, 1d→99, 1w→55.
 
-    retest_tolerance: maximum % distance from ema_ref (as a fraction, e.g. 0.01 = 1%) to
-        classify the candle as a retest. Comes from per-pair DB config
+    retest_tolerance: max % the close can breach ema_ref after a wick touch (fraction,
+        e.g. 0.005 = 0.5%). A wick touch is required (low ≤ ema×1.003 for retest_up,
+        high ≥ ema×0.997 for retest_down). Comes from per-pair DB config
         (ema_retest_tolerance per TF). Falls back to 0.005 (0.5%) when absent.
 
     Signal labels (ema_ref-based, used as the watchlist `ema_signal` column):
@@ -170,8 +171,8 @@ def compute_ema_score(
         below_all      — price < all 3 scoring EMAs  (state, no alert)
         breakout_up    — price crossed ema_ref upward within last 3 bars
         breakdown_down — price crossed ema_ref downward within last 3 bars
-        retest_up      — price within retest_tolerance above ema_ref (testing support)
-        retest_down    — price within retest_tolerance below ema_ref (testing resistance)
+        retest_up      — wick touched EMA from above (low ≤ ema_ref), close held above
+        retest_down    — wick touched EMA from below (high ≥ ema_ref), close held below
         mixed          — everything else              (no alert)
 
     Returns:
@@ -202,15 +203,26 @@ def compute_ema_score(
             signal = "breakout_up"
         elif prev_close_3 > prev_ref_ema_3 and last < ref_ema_val:
             signal = "breakdown_down"
-        elif ref_ema_val > 0 and abs(last - ref_ema_val) / ref_ema_val < (retest_tolerance or 0.005):
-            # within retest_tolerance of ref EMA — retest regardless of other EMAs
-            signal = "retest_up" if last >= ref_ema_val else "retest_down"
-        elif all(above):
-            signal = "above_all"
-        elif not any(above):
-            signal = "below_all"
-        else:
-            signal = "mixed"
+        elif ref_ema_val > 0:
+            _low = float(df["low"].iloc[-1])
+            _high = float(df["high"].iloc[-1])
+            _tol = retest_tolerance or 0.005
+            # Wick-based retest: wick must physically touch EMA (±0.3% epsilon),
+            # close must not break through by more than retest_tolerance.
+            # retest_up   = low touched EMA from above  (testing support)
+            # retest_down = high touched EMA from below (testing resistance)
+            _retest_up = _low <= ref_ema_val * 1.003 and last >= ref_ema_val * (1.0 - _tol)
+            _retest_dn = _high >= ref_ema_val * 0.997 and last <= ref_ema_val * (1.0 + _tol)
+            if _retest_up:
+                signal = "retest_up"
+            elif _retest_dn:
+                signal = "retest_down"
+            elif all(above):
+                signal = "above_all"
+            elif not any(above):
+                signal = "below_all"
+            else:
+                signal = "mixed"
     else:
         # Fallback when not enough bars for crossover check
         if all(above):

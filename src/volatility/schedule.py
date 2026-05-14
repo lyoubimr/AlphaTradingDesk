@@ -42,7 +42,7 @@ _DEFAULT_PER_PAIR: dict = {
     # Retest proximity tolerance per TF (fraction — e.g. 0.01 = 1%).
     # A candle closing within this % of ema_ref is classified as retest_up/down.
     # Higher TFs = larger candles = wider tolerance needed for visual accuracy.
-    "ema_retest_tolerance": {"15m": 0.008, "1h": 0.015, "4h": 0.025, "1d": 0.035, "1w": 0.050},
+    "ema_retest_tolerance": {"15m": 0.005, "1h": 0.010, "4h": 0.015, "1d": 0.020, "1w": 0.030},
 }
 
 
