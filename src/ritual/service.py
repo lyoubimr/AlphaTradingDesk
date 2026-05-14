@@ -880,15 +880,21 @@ def generate_smart_watchlist(
             ema_score: float = float(entry.get("ema_score", 0))
 
             # Cascade contribution
-            # trend_bonus rewards directional EMA alignment:
-            #   Long signals (all profiles):      breakout_up, above_all
-            #   Short signals (Contracts only):   breakdown_down, below_all
-            # "trend_up" never existed — was a dead label; replaced by above_all.
+            # Cascade bonus hierarchy:
+            #   ×1.30 — retest_after_breakout: wick confirmed retest AFTER a recent breakout
+            #            → best setup: breakout + pullback + hold (Contracts: both dirs; Spot: long)
+            #   ×1.20 — trend_bonus: strong directional signal (breakout, above_all, below_all)
+            #   ×1.0  — standalone retest_up/retest_down: wick touched EMA but no recent BO
+            #            → no bonus, ambiguous context
             contribution = tf_w * vi
             _long_signal = ema_signal in ("breakout_up", "above_all")
             _short_signal = (not _is_spot_session) and ema_signal in ("breakdown_down", "below_all")
-            if _long_signal or _short_signal:
-                contribution *= trend_bonus
+            _retest_conf_long = ema_signal == "retest_after_breakout_up"
+            _retest_conf_short = (not _is_spot_session) and ema_signal == "retest_after_breakdown_down"
+            if _retest_conf_long or _retest_conf_short:
+                contribution *= 1.3  # ×1.30 — breakout + confirmed retest (best)
+            elif _long_signal or _short_signal:
+                contribution *= trend_bonus  # ×1.20
             if ema_score >= ema_bonus_threshold:
                 contribution *= ema_bonus_factor
 
@@ -944,12 +950,23 @@ def generate_smart_watchlist(
                 )
             )
 
+        # Composite score = cascade_score × regime_multiplier
+        # Multiplicative approach: regime adjusts cascade proportionally.
+        # Unlike tuple-sort (regime, cascade), this lets a very strong cascade
+        # ACTIVE pair beat a weak cascade TRENDING pair — which is correct.
+        # TRENDING/NORMAL get a boost; EXTREME/DEAD get penalised.
+        _REGIME_MULTIPLIER: dict[str, float] = {
+            "TRENDING": 1.30,
+            "NORMAL":   1.10,
+            "ACTIVE":   0.90,
+            "CALM":     0.80,
+            "EXTREME":  0.60,
+            "DEAD":     0.30,
+        }
         pinned_entries = [e for e in scored if e.is_pinned]
         rest = sorted(
             [e for e in scored if not e.is_pinned],
-            # Primary: vi_score of THIS TF (most actionable first within the section)
-            # Secondary: cascade score (tie-break by overall cross-TF quality)
-            key=lambda x: (x.vi_score, x.score),
+            key=lambda x: x.score * _REGIME_MULTIPLIER.get(x.regime, 1.0),
             reverse=True,
         )
         result_tfs[tf] = pinned_entries + rest[:top_n]

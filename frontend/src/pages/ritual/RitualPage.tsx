@@ -107,25 +107,48 @@ const TF_COLORS: Record<string, string> = {
 
 // ── Smart WL — EMA signal display helpers ────────────────────────────────────
 const EMA_DISPLAY_WL: Record<string, { label: string; color: string; symbol: string }> = {
-  above_all:      { label: 'Above All',   color: '#10b981', symbol: '▲'  },
-  below_all:      { label: 'Below All',   color: '#ef4444', symbol: '▼'  },
-  breakout_up:    { label: 'Breakout ↑',  color: '#0ea5e9', symbol: '🚀' },
-  breakdown_down: { label: 'Breakdown ↓', color: '#f97316', symbol: '💥' },
-  retest_up:      { label: 'Retest ↑',    color: '#a855f7', symbol: '🔄' },
-  retest_down:    { label: 'Retest ↓',    color: '#c084fc', symbol: '🔁' },
-  mixed:          { label: 'Mixed',       color: '#71717a', symbol: '∿'  },
+  above_all:                { label: 'Above All',   color: '#10b981', symbol: '▲'  },
+  below_all:                { label: 'Below All',   color: '#ef4444', symbol: '▼'  },
+  breakout_up:              { label: 'Breakout ↑',  color: '#0ea5e9', symbol: '🚀' },
+  breakdown_down:           { label: 'Breakdown ↓', color: '#f97316', symbol: '💥' },
+  retest_after_breakout_up:   { label: 'Retest ↑',  color: '#facc15', symbol: '🎯' },
+  retest_after_breakdown_down:{ label: 'Retest ↓',  color: '#fb923c', symbol: '🎯' },
+  retest_up:                { label: 'Retest ↑',    color: '#a855f7', symbol: '🔄' },
+  retest_down:              { label: 'Retest ↓',    color: '#c084fc', symbol: '🔁' },
+  mixed:                    { label: 'Mixed',        color: '#71717a', symbol: '∿'  },
 }
 const EMA_TOOLTIP_WL: Record<string, string> = {
-  above_all:      'Bull alignment (EMA20/50/200) — gets trend bonus ×1.2',
-  below_all:      'Bear alignment — gets trend bonus ×1.2 (Contracts)',
-  breakout_up:    'Breakout above ref EMA — gets trend bonus ×1.2',
-  breakdown_down: 'Breakdown below ref EMA — gets trend bonus ×1.2 (Contracts)',
-  retest_up:      'Testing ref EMA as support',
-  retest_down:    'Testing ref EMA as resistance',
-  mixed:          'Mixed EMA positioning — no bonus',
+  above_all:                  'Bull alignment (EMA20/50/200) — gets trend bonus ×1.2',
+  below_all:                  'Bear alignment — gets trend bonus ×1.2 (Contracts)',
+  breakout_up:                'Breakout above ref EMA — gets trend bonus ×1.2',
+  breakdown_down:             'Breakdown below ref EMA — gets trend bonus ×1.2 (Contracts)',
+  retest_after_breakout_up:   'Confirmed retest after recent breakout — best setup ×1.3',
+  retest_after_breakdown_down:'Confirmed retest after recent breakdown — best setup ×1.3 (Contracts)',
+  retest_up:                  'Wick touched EMA (no recent breakout) — no bonus',
+  retest_down:                'Wick touched EMA (no recent breakdown) — no bonus',
+  mixed:                      'Mixed EMA positioning — no bonus',
 }
 const REGIME_EMOJI_WL: Record<string, string> = {
   DEAD: '⬜', CALM: '💧', NORMAL: '📊', TRENDING: '💎', ACTIVE: '⚠️', EXTREME: '🚫',
+}
+// TF → reference EMA used for crossover/retest signal detection (matches backend _TF_EMA_REF)
+const TF_EMA_REF_WL: Record<string, number> = {
+  '15m': 55, '1H': 99, '4H': 200, '1D': 99, '1W': 55,
+  '1h': 99,  '4h': 200, '1d': 99, '1w': 55,
+}
+// Signals that reference a specific EMA — we append the EMA number to the label
+const EMA_REF_SIGNALS = new Set(['breakout_up', 'breakdown_down', 'retest_up', 'retest_down', 'retest_after_breakout_up', 'retest_after_breakdown_down'])
+// Color based on regime (TRADING quality), not raw VI%.
+// TRENDING 💎 = best = indigo | NORMAL = emerald | ACTIVE ⚠️ = amber | EXTREME/DEAD = red/muted
+function regimeViColor(regime: string): { text: string; bar: string } {
+  switch (regime) {
+    case 'TRENDING': return { text: 'text-indigo-400',  bar: 'bg-indigo-500/80'  }
+    case 'NORMAL':   return { text: 'text-emerald-400', bar: 'bg-emerald-500/70' }
+    case 'ACTIVE':   return { text: 'text-amber-400',   bar: 'bg-amber-500/70'   }
+    case 'CALM':     return { text: 'text-sky-400',      bar: 'bg-sky-500/60'     }
+    case 'EXTREME':  return { text: 'text-red-400',      bar: 'bg-red-500/70'     }
+    default:         return { text: 'text-slate-500',   bar: 'bg-slate-600/50'   }
+  }
 }
 
 function ttlColor(pct: number | null): string {
@@ -737,12 +760,10 @@ function SmartWLPanel({
                       <span className="text-[11px] text-slate-200 font-semibold truncate flex-1">
                         {p.display_name}
                       </span>
-                      <span className={cn(
-                        'text-[10px] tabular-nums shrink-0 font-medium',
-                        p.vi_score > 0.67 ? 'text-green-400' :
-                        p.vi_score > 0.50 ? 'text-emerald-500/80' :
-                        p.vi_score > 0.33 ? 'text-amber-500' : 'text-slate-500',
-                      )}>{Math.round(p.vi_score * 100)}%</span>
+                      <span
+                        className={cn('text-[10px] tabular-nums shrink-0 font-medium', regimeViColor(p.regime).text)}
+                        title={`Regime: ${p.regime}`}
+                      >{Math.round(p.vi_score * 100)}%</span>
                       {!p.is_pinned && onPin && (
                         <button
                           onClick={() => onPin(p.pair, tf)}
@@ -756,33 +777,37 @@ function SmartWLPanel({
                     {/* EMA signal + regime */}
                     {(p.ema_signal || p.regime) && (
                       <div className="flex items-center gap-1 px-1.5 pb-0.5">
-                        {p.ema_signal && EMA_DISPLAY_WL[p.ema_signal] && (
-                          <span
-                            title={EMA_TOOLTIP_WL[p.ema_signal] ?? p.ema_signal}
-                            className="text-[9px] font-medium px-1 rounded border inline-block leading-relaxed"
-                            style={{
-                              color: EMA_DISPLAY_WL[p.ema_signal].color,
-                              borderColor: EMA_DISPLAY_WL[p.ema_signal].color + '50',
-                              background: EMA_DISPLAY_WL[p.ema_signal].color + '15',
-                            }}
-                          >
-                            {EMA_DISPLAY_WL[p.ema_signal].symbol} {EMA_DISPLAY_WL[p.ema_signal].label}
-                          </span>
-                        )}
+                        {p.ema_signal && EMA_DISPLAY_WL[p.ema_signal] && (() => {
+                          const meta = EMA_DISPLAY_WL[p.ema_signal]
+                          const emaRef = TF_EMA_REF_WL[tf]
+                          const showRef = EMA_REF_SIGNALS.has(p.ema_signal) && emaRef
+                          const label = showRef ? `${meta.label} ${emaRef}` : meta.label
+                          const tooltip = showRef
+                            ? `${EMA_TOOLTIP_WL[p.ema_signal] ?? p.ema_signal} (EMA ${emaRef})`
+                            : (EMA_TOOLTIP_WL[p.ema_signal] ?? p.ema_signal)
+                          return (
+                            <span
+                              title={tooltip}
+                              className="text-[9px] font-medium px-1 rounded border inline-block leading-relaxed"
+                              style={{
+                                color: meta.color,
+                                borderColor: meta.color + '50',
+                                background: meta.color + '15',
+                              }}
+                            >
+                              {meta.symbol} {label}
+                            </span>
+                          )
+                        })()}
                         {p.regime && REGIME_EMOJI_WL[p.regime] && (
                           <span title={`Regime: ${p.regime}`} className="text-[10px] leading-none">{REGIME_EMOJI_WL[p.regime]}</span>
                         )}
                       </div>
                     )}
-                    {/* vi_score bar — green=high, amber=mid, muted=low */}
+                    {/* vi_score bar — colored by regime quality, not raw VI% */}
                     <div className="h-[2px] bg-surface-700/60">
                       <div
-                        className={cn(
-                          'h-full transition-all rounded-sm',
-                          p.vi_score > 0.67 ? 'bg-green-500/80' :
-                          p.vi_score > 0.50 ? 'bg-emerald-500/60' :
-                          p.vi_score > 0.33 ? 'bg-amber-500/60' : 'bg-slate-600/50',
-                        )}
+                        className={cn('h-full transition-all rounded-sm', regimeViColor(p.regime).bar)}
                         style={{ width: `${Math.round(p.vi_score * 100)}%` }}
                       />
                     </div>

@@ -24,13 +24,15 @@ const REGIME_EMOJI: Record<string, string> = {
 }
 
 const EMA_DISPLAY: Record<string, { label: string; color: string; symbol: string }> = {
-  above_all:      { label: 'Above All',   color: '#10b981', symbol: '▲'  },
-  below_all:      { label: 'Below All',   color: '#ef4444', symbol: '▼'  },
-  breakout_up:    { label: 'Breakout ↑',  color: '#0ea5e9', symbol: '🚀' },
-  breakdown_down: { label: 'Breakdown ↓', color: '#f97316', symbol: '💥' },
-  retest_up:      { label: 'Retest ↑',    color: '#a855f7', symbol: '🔄' },
-  retest_down:    { label: 'Retest ↓',    color: '#c084fc', symbol: '🔁' },
-  mixed:          { label: 'Mixed',       color: '#71717a', symbol: '∿'  },
+  above_all:                   { label: 'Above All',   color: '#10b981', symbol: '▲'  },
+  below_all:                   { label: 'Below All',   color: '#ef4444', symbol: '▼'  },
+  breakout_up:                 { label: 'Breakout ↑',  color: '#0ea5e9', symbol: '🚀' },
+  breakdown_down:              { label: 'Breakdown ↓', color: '#f97316', symbol: '💥' },
+  retest_after_breakout_up:    { label: 'Retest ↑',    color: '#facc15', symbol: '🎯' },
+  retest_after_breakdown_down: { label: 'Retest ↓',    color: '#fb923c', symbol: '🎯' },
+  retest_up:                   { label: 'Retest ↑',    color: '#a855f7', symbol: '🔄' },
+  retest_down:                 { label: 'Retest ↓',    color: '#c084fc', symbol: '🔁' },
+  mixed:                       { label: 'Mixed',       color: '#71717a', symbol: '∿'  },
 }
 
 export function VolatilityLegendPanel({
@@ -167,8 +169,10 @@ export function VolatilityLegendPanel({
               { sig: 'below_all',      action: 'SHORT BIAS',   detail: 'Price is below EMA 21, 55 AND 200 (all scoring EMAs). Full bearish alignment — all moving averages confirm downtrend. Strong short bias.' },
               { sig: 'breakout_up',    action: 'MOMENTUM ↑',   detail: 'Price crossed ABOVE the reference EMA within the last 3 candles. Ref EMA: 55 (15m) · 99 (1h) · 200 (4h) · 99 (1d) · 55 (1w). Fresh bullish momentum — look for volume confirmation.' },
               { sig: 'breakdown_down', action: 'MOMENTUM ↓',   detail: 'Price crossed BELOW the reference EMA within the last 3 candles. Ref EMA: 55 (15m) · 99 (1h) · 200 (4h) · 99 (1d) · 55 (1w). Fresh bearish momentum — look for volume confirmation.' },
-              { sig: 'retest_up',      action: 'SUPPORT TEST', detail: 'Price is ≤ 0.5% above the reference EMA — testing it as support from above. Ref per TF: 55 (15m) · 99 (1h) · 200 (4h) · 99 (1d) · 55 (1w). Classic long entry zone if price bounces. Confluence with higher TF bias needed.' },
-              { sig: 'retest_down',    action: 'RESIST TEST',  detail: 'Price is ≤ 0.5% below the reference EMA — testing it as resistance from below. Ref per TF: 55 (15m) · 99 (1h) · 200 (4h) · 99 (1d) · 55 (1w). Classic short entry zone if price rejects. Confluence with higher TF bias needed.' },
+              { sig: 'retest_after_breakout_up',    action: 'BEST LONG',    detail: 'Wick touched the ref EMA as support AND there was a breakout within the last 15 bars. The EMA flipped from resistance to support — this retest confirms it. Highest-quality long setup. Cascade bonus ×1.3.' },
+              { sig: 'retest_after_breakdown_down',  action: 'BEST SHORT',   detail: 'Wick touched the ref EMA as resistance AND there was a breakdown within the last 15 bars. The EMA flipped from support to resistance — this retest confirms it. Highest-quality short setup (Contracts). Cascade bonus ×1.3.' },
+              { sig: 'retest_up',      action: 'SUPPORT TEST', detail: 'Wick of the candle touched the ref EMA from above (price held above). No recent breakout context — could be mid-range test. Useful but no cascade bonus. Ref per TF: 55 (15m) · 99 (1h) · 200 (4h) · 99 (1d) · 55 (1w).' },
+              { sig: 'retest_down',    action: 'RESIST TEST',  detail: 'Wick of the candle touched the ref EMA from below (price held below). No recent breakdown context — could be mid-range test. Useful but no cascade bonus. Ref per TF: 55 (15m) · 99 (1h) · 200 (4h) · 99 (1d) · 55 (1w).' },
               { sig: 'mixed',          action: 'NO SIGNAL',    detail: 'Price position is ambiguous relative to the 3 scoring EMAs (21 / 55 / 200) — some above, some below. No clear directional edge. Wait for cleaner alignment.' },
             ] as const).map(({ sig, action, detail }) => {
               const ema = EMA_DISPLAY[sig]

@@ -1775,13 +1775,15 @@ export function TradeDetailPage() {
           }
 
           const EMA_SIGNAL_DISPLAY: Record<string, { label: string; color: string; symbol: string }> = {
-            above_all:      { label: 'Above All',   color: '#10b981', symbol: '▲' },
-            below_all:      { label: 'Below All',   color: '#ef4444', symbol: '▼' },
-            breakout_up:    { label: 'Breakout ↑',  color: '#0ea5e9', symbol: '🚀' },
-            breakdown_down: { label: 'Breakdown ↓', color: '#f97316', symbol: '💥' },
-            retest_up:      { label: 'Retest ↑',    color: '#a855f7', symbol: '🔄' },
-            retest_down:    { label: 'Retest ↓',    color: '#c084fc', symbol: '🔁' },
-            mixed:          { label: 'Mixed',       color: '#71717a', symbol: '∿' },
+            above_all:                   { label: 'Above All',   color: '#10b981', symbol: '▲' },
+            below_all:                   { label: 'Below All',   color: '#ef4444', symbol: '▼' },
+            breakout_up:                 { label: 'Breakout ↑',  color: '#0ea5e9', symbol: '🚀' },
+            breakdown_down:              { label: 'Breakdown ↓', color: '#f97316', symbol: '💥' },
+            retest_after_breakout_up:    { label: 'Retest ↑ ✓',  color: '#facc15', symbol: '🎯' },
+            retest_after_breakdown_down: { label: 'Retest ↓ ✓',  color: '#fb923c', symbol: '🎯' },
+            retest_up:                   { label: 'Retest ↑',    color: '#a855f7', symbol: '🔄' },
+            retest_down:                 { label: 'Retest ↓',    color: '#c084fc', symbol: '🔁' },
+            mixed:                       { label: 'Mixed',       color: '#71717a', symbol: '∿' },
           }
           const criteria = (snap.criteria ?? []).filter(c => c.enabled)
 
