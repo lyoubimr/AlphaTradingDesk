@@ -46,13 +46,15 @@ const REGIME_EMOJI: Record<string, string> = {
 }
 
 const EMA_DISPLAY: Record<string, { label: string; color: string; symbol: string }> = {
-  above_all:      { label: 'Above All',   color: '#10b981', symbol: '▲'  },
-  below_all:      { label: 'Below All',   color: '#ef4444', symbol: '▼'  },
-  breakout_up:    { label: 'Breakout ↑',  color: '#0ea5e9', symbol: '🚀' },
-  breakdown_down: { label: 'Breakdown ↓', color: '#f97316', symbol: '💥' },
-  retest_up:      { label: 'Retest ↑',    color: '#a855f7', symbol: '🔄' },
-  retest_down:    { label: 'Retest ↓',    color: '#c084fc', symbol: '🔁' },
-  mixed:          { label: 'Mixed',       color: '#71717a', symbol: '∿'  },
+  above_all:                    { label: 'Above All',   color: '#10b981', symbol: '▲'  },
+  below_all:                    { label: 'Below All',   color: '#ef4444', symbol: '▼'  },
+  breakout_up:                  { label: 'Breakout ↑',  color: '#0ea5e9', symbol: '🚀' },
+  breakdown_down:               { label: 'Breakdown ↓', color: '#f97316', symbol: '💥' },
+  retest_after_breakout_up:     { label: 'Retest ↑',    color: '#facc15', symbol: '🎯' },
+  retest_after_breakdown_down:  { label: 'Retest ↓',    color: '#fb923c', symbol: '🎯' },
+  retest_up:                    { label: 'Retest ↑',    color: '#a855f7', symbol: '🔄' },
+  retest_down:                  { label: 'Retest ↓',    color: '#c084fc', symbol: '🔁' },
+  mixed:                        { label: 'Mixed',       color: '#71717a', symbol: '∿'  },
 }
 
 const REGIME_DESCRIPTION: Record<string, string> = {
@@ -65,13 +67,15 @@ const REGIME_DESCRIPTION: Record<string, string> = {
 }
 
 const EMA_TOOLTIP: Record<string, string> = {
-  above_all:      'Price above EMA 20, 50 & 200 — full bull alignment',
-  below_all:      'Price below EMA 20, 50 & 200 — full bear alignment',
-  breakout_up:    'Price crossed above ref EMA (EMA 50 on 15m · EMA 100 on 1h · EMA 200 on 4h/1d) in the last 3 bars',
-  breakdown_down: 'Price crossed below ref EMA (EMA 50 on 15m · EMA 100 on 1h · EMA 200 on 4h/1d) in the last 3 bars',
-  retest_up:      'Price ≤ 0.5% above ref EMA — testing it as support',
-  retest_down:    'Price ≤ 0.5% below ref EMA — testing it as resistance',
-  mixed:          'Price position mixed relative to EMAs 20 / 50 / 200',
+  above_all:                   'Price above EMA 21, 55 & 200 — full bull alignment',
+  below_all:                   'Price below EMA 21, 55 & 200 — full bear alignment',
+  breakout_up:                 'Price crossed above ref EMA (55 on 15m · 99 on 1h · 200 on 4h/1d) in the last 3 bars',
+  breakdown_down:              'Price crossed below ref EMA (55 on 15m · 99 on 1h · 200 on 4h/1d) in the last 3 bars',
+  retest_after_breakout_up:    'Wick touched ref EMA as support after recent breakout — best setup (×1.3)',
+  retest_after_breakdown_down: 'Wick touched ref EMA as resistance after recent breakdown — best setup (×1.3)',
+  retest_up:                   'Wick touched ref EMA as support — no recent breakout context (no bonus)',
+  retest_down:                 'Wick touched ref EMA as resistance — no recent breakout context (no bonus)',
+  mixed:                       'Price position mixed relative to EMAs 21 / 55 / 200',
 }
 
 type SortKey = 'vi_score' | 'change_24h' | 'pair' | 'ema_score' | 'tf_sup_vi'
