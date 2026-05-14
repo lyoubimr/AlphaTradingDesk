@@ -146,6 +146,7 @@ def compute_ema_score(
     periods: tuple[int, int, int] = (21, 55, 200),
     ema_ref: int | None = None,
     retest_tolerance: float | None = None,
+    breakout_lookback: int = 15,
 ) -> dict:
     """EMA position score — directional signal for watchlist ranking.
 
@@ -165,6 +166,11 @@ def compute_ema_score(
         e.g. 0.005 = 0.5%). A wick touch is required (low ≤ ema×1.003 for retest_up,
         high ≥ ema×0.997 for retest_down). Comes from per-pair DB config
         (ema_retest_tolerance per TF). Falls back to 0.005 (0.5%) when absent.
+
+    breakout_lookback: how many bars back to search for a prior crossover when
+        qualifying a retest. TF-dependent — shorter on high TF (days), longer on
+        low TF (minutes). Defaults to 15.
+        Recommended: 15m→30 | 1h→24 | 4h→15 | 1d→10 | 1w→7
 
     Signal labels (ema_ref-based, used as the watchlist `ema_signal` column):
         above_all      — price > all 3 scoring EMAs  (state, no alert)
@@ -214,13 +220,14 @@ def compute_ema_score(
             _retest_up = _low <= ref_ema_val * 1.003 and last >= ref_ema_val * (1.0 - _tol)
             _retest_dn = _high >= ref_ema_val * 0.997 and last <= ref_ema_val * (1.0 + _tol)
             if _retest_up or _retest_dn:
-                # Qualify retest: was there a breakout in the last 15 bars?
+                # Qualify retest: was there a breakout in the last `breakout_lookback` bars?
                 # retest_after_breakout_up/down = highest-quality signal (pullback confirms BO)
                 _close_above = close > ref_ema_series
                 _crossup = (~_close_above.shift(1).fillna(False)) & _close_above
                 _crossdn = _close_above.shift(1).fillna(False) & (~_close_above)
-                _had_breakup = bool(_crossup.iloc[-15:-1].any())
-                _had_breakdown = bool(_crossdn.iloc[-15:-1].any())
+                _lb = breakout_lookback
+                _had_breakup = bool(_crossup.iloc[-_lb:-1].any())
+                _had_breakdown = bool(_crossdn.iloc[-_lb:-1].any())
                 if _retest_up:
                     signal = "retest_after_breakout_up" if _had_breakup else "retest_up"
                 else:
@@ -261,6 +268,7 @@ def compute_vi_score(
     ema_ref: int | None = None,
     indicator_weights: dict | None = None,
     retest_tolerance: float | None = None,
+    breakout_lookback: int = 15,
 ) -> dict:
     """Compute VI score for a single instrument from OHLCV candles.
 
@@ -274,6 +282,9 @@ def compute_vi_score(
         retest_tolerance:   per-TF retest proximity threshold (fraction, e.g. 0.01 = 1%).
                             Comes from per-pair DB config (ema_retest_tolerance).
                             Falls back to 0.005 inside compute_ema_score when absent.
+        breakout_lookback:  how many bars back to search for a prior crossover when
+                            qualifying a retest as retest_after_breakout.
+                            TF-dependent: 15m→30 | 1h→24 | 4h→15 | 1d→10 | 1w→7.
 
     Returns:
         {
@@ -320,7 +331,7 @@ def compute_vi_score(
     # EMA: computed and stored, but NOT included in VI average
     # (watchlist ranking boost — dotted arrow in architecture doc)
     if cfg.get("ema", True):
-        ema = compute_ema_score(df, ema_ref=ema_ref, retest_tolerance=retest_tolerance)
+        ema = compute_ema_score(df, ema_ref=ema_ref, retest_tolerance=retest_tolerance, breakout_lookback=breakout_lookback)
         components["ema_score"] = ema["score"]
         components["ema_signal"] = ema["signal"]
         components["ema_ref_period"] = ema["ema_ref_period"]
