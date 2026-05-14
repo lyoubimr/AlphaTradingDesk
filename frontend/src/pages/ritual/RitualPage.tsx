@@ -640,7 +640,7 @@ function SmartWLPanel({
         <div className="flex items-center gap-2">
           <label className="text-[11px] text-slate-400 whitespace-nowrap">Per TF:</label>
           <input
-            type="range" min={3} max={16} step={1} value={topN}
+            type="range" min={3} max={20} step={1} value={topN}
             onChange={(e) => setTopN(Number(e.target.value))}
             className="w-24 accent-brand-500"
           />
