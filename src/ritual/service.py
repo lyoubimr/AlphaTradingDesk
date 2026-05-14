@@ -974,7 +974,10 @@ def generate_smart_watchlist(
             key=lambda x: x.score * _REGIME_MULTIPLIER.get(x.regime, 1.0),
             reverse=True,
         )
-        result_tfs[tf] = pinned_entries + rest[:top_n]
+        # Keep ALL sorted candidates pre-dedup so that pairs "stolen" by a
+        # better TF during dedup can be replaced by lower-ranked candidates.
+        # top_n is enforced AFTER dedup below.
+        result_tfs[tf] = pinned_entries + rest
 
     # ── Dedup: each pair appears in exactly one TF section ───────────────────
     # Strategy: assign each pair to the TF where it ranks best (lowest index
@@ -1000,8 +1003,11 @@ def generate_smart_watchlist(
                 pair_best_rank[e.pair] = rank
                 pair_best_tf[e.pair] = tf
 
+    # Apply top_n AFTER dedup: each TF now has a full sorted candidate list,
+    # so trimming here guarantees up to top_n pairs per TF even after dedup
+    # has redistributed pairs across TFs.
     result_tfs = {
-        tf: [e for e in entries if pair_best_tf.get(e.pair) == tf]
+        tf: [e for e in entries if pair_best_tf.get(e.pair) == tf][:top_n]
         for tf, entries in result_tfs.items()
     }
 

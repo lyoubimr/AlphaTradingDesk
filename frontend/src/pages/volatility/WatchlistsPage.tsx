@@ -217,6 +217,7 @@ export function WatchlistsPage() {
   const [expandedTFs, setExpandedTFs]     = useState<Set<string>>(new Set())
   const [regimeFilters, setRegimeFilters] = useState<Set<string>>(new Set(['ALL']))
   const [emaFilters, setEmaFilters]       = useState<Set<string>>(new Set(['ALL']))
+  const [topNFilter, setTopNFilter]       = useState<number | null>(null)
   const [sortKey, setSortKey]             = useState<SortKey>('vi_score')
   const [sortDesc, setSortDesc]           = useState(true)
   const [showGenerateModal, setShowGenerateModal] = useState(false)
@@ -439,8 +440,9 @@ export function WatchlistsPage() {
       const bv = (b[sortKey] ?? -Infinity) as number
       return sortDesc ? bv - av : av - bv
     })
+    if (topNFilter !== null) rows = rows.slice(0, topNFilter)
     return rows
-  }, [selectedData, regimeFilters, emaFilters, supRegimeFilters, viRange, sortKey, sortDesc])
+  }, [selectedData, regimeFilters, emaFilters, supRegimeFilters, viRange, sortKey, sortDesc, topNFilter])
 
   const regimeCounts = useMemo(() => {
     if (!selectedData) return {}
@@ -897,6 +899,22 @@ export function WatchlistsPage() {
 
                 {/* Row 2: meta + export — single line, right-aligned */}
                 <div className="flex items-center justify-end gap-3">
+                  {/* Top-N filter for download */}
+                  <div className="flex items-center gap-1">
+                    {([null, 20, 50, 100] as (number | null)[]).map((n) => (
+                      <button
+                        key={n ?? 'all'}
+                        onClick={() => setTopNFilter(n)}
+                        className={`px-1.5 py-0.5 rounded text-xs font-mono transition-colors ${
+                          topNFilter === n
+                            ? 'bg-zinc-700 text-zinc-100'
+                            : 'text-zinc-500 hover:text-zinc-300'
+                        }`}
+                      >
+                        {n === null ? 'All' : `Top ${n}`}
+                      </button>
+                    ))}
+                  </div>
                   <span className="text-xs font-mono text-zinc-600">
                     {filteredPairs.length === selectedData.pairs_count
                       ? `${selectedData.pairs_count} pairs`
