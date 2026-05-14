@@ -836,7 +836,7 @@ def generate_smart_watchlist(
         "weights", {"1W": 4.0, "1D": 3.0, "4H": 2.0, "1H": 1.0, "15m": 0.5}
     )
     trend_bonus: float = sf.get("trend_bonus", 1.2)
-    ema_bonus_threshold: int = sf.get("ema_bonus_threshold", 70)
+    ema_bonus_threshold: float = sf.get("ema_bonus_threshold", 0.70)
     ema_bonus_factor: float = sf.get("ema_bonus_factor", 1.1)
 
     pair_scores: dict[str, float] = {}
@@ -880,8 +880,14 @@ def generate_smart_watchlist(
             ema_score: float = float(entry.get("ema_score", 0))
 
             # Cascade contribution
+            # trend_bonus rewards directional EMA alignment:
+            #   Long signals (all profiles):      breakout_up, above_all
+            #   Short signals (Contracts only):   breakdown_down, below_all
+            # "trend_up" never existed — was a dead label; replaced by above_all.
             contribution = tf_w * vi
-            if ema_signal in ("breakout_up", "trend_up"):
+            _long_signal = ema_signal in ("breakout_up", "above_all")
+            _short_signal = (not _is_spot_session) and ema_signal in ("breakdown_down", "below_all")
+            if _long_signal or _short_signal:
                 contribution *= trend_bonus
             if ema_score >= ema_bonus_threshold:
                 contribution *= ema_bonus_factor
@@ -941,22 +947,23 @@ def generate_smart_watchlist(
         pinned_entries = [e for e in scored if e.is_pinned]
         rest = sorted(
             [e for e in scored if not e.is_pinned],
-            key=lambda x: x.vi_score,  # rank by THIS TF's vi_score, not cascade
+            key=lambda x: x.score,  # rank by cascade_score (cross-TF quality)
             reverse=True,
         )
         result_tfs[tf] = pinned_entries + rest[:top_n]
 
     # ── Dedup: each pair appears in exactly one TF section ───────────────────
     # Strategy: assign each pair to the TF where it ranks best (lowest index
-    # in per-TF vi_score sort).  Ties go to the first TF in `tfs` order
+    # in per-TF cascade_score sort).  Ties go to the first TF in `tfs` order
     # (i.e. the higher timeframe, since tfs is ordered high → low).
     #
     # Why NOT "highest TF wins": ALL Kraken pairs appear in ALL TF snapshots,
     # so "highest TF wins" would send every pair to 1W/1D and leave lower TFs
     # completely empty.
     #
-    # Why NOT "argmax(vi_score)": shorter TFs systematically have higher
-    # vi_scores in volatile markets → 1H/15m would monopolise all pairs.
+    # Cascade sort (replacing former vi_score sort) already prevents shorter-TF
+    # monopolisation: a pair hot on 1H but weak on 1D/4H has a low cascade
+    # score and therefore ranks low on all TF sections, not just on 1H.
     #
     # "Best rank per TF" naturally distributes pairs: a pair that is
     # particularly hot on 4H (rank #2) vs mediocre on 1D (rank #12) goes to 4H.

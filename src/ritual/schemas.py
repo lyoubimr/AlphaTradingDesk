@@ -316,7 +316,7 @@ DEFAULT_RITUAL_CONFIG: dict[str, Any] = {
     "smart_filter": {
         "weights": {"1W": 4.0, "1D": 3.0, "4H": 2.0, "1H": 1.0, "15m": 0.5},
         "trend_bonus": 1.2,
-        "ema_bonus_threshold": 70,
+        "ema_bonus_threshold": 0.70,
         "ema_bonus_factor": 1.1,
     },
 }

@@ -105,6 +105,29 @@ const TF_COLORS: Record<string, string> = {
   '15m': 'text-amber-400 border-amber-700/40 bg-amber-900/20',
 }
 
+// ── Smart WL — EMA signal display helpers ────────────────────────────────────
+const EMA_DISPLAY_WL: Record<string, { label: string; color: string; symbol: string }> = {
+  above_all:      { label: 'Above All',   color: '#10b981', symbol: '▲'  },
+  below_all:      { label: 'Below All',   color: '#ef4444', symbol: '▼'  },
+  breakout_up:    { label: 'Breakout ↑',  color: '#0ea5e9', symbol: '🚀' },
+  breakdown_down: { label: 'Breakdown ↓', color: '#f97316', symbol: '💥' },
+  retest_up:      { label: 'Retest ↑',    color: '#a855f7', symbol: '🔄' },
+  retest_down:    { label: 'Retest ↓',    color: '#c084fc', symbol: '🔁' },
+  mixed:          { label: 'Mixed',       color: '#71717a', symbol: '∿'  },
+}
+const EMA_TOOLTIP_WL: Record<string, string> = {
+  above_all:      'Bull alignment (EMA20/50/200) — gets trend bonus ×1.2',
+  below_all:      'Bear alignment — gets trend bonus ×1.2 (Contracts)',
+  breakout_up:    'Breakout above ref EMA — gets trend bonus ×1.2',
+  breakdown_down: 'Breakdown below ref EMA — gets trend bonus ×1.2 (Contracts)',
+  retest_up:      'Testing ref EMA as support',
+  retest_down:    'Testing ref EMA as resistance',
+  mixed:          'Mixed EMA positioning — no bonus',
+}
+const REGIME_EMOJI_WL: Record<string, string> = {
+  DEAD: '⬜', CALM: '💧', NORMAL: '📊', TRENDING: '💎', ACTIVE: '⚠️', EXTREME: '🚫',
+}
+
 function ttlColor(pct: number | null): string {
   if (pct === null) return 'text-slate-400 border-slate-700'
   if (pct > 0.5) return 'text-green-400 border-green-700/60 bg-green-900/20'
@@ -573,8 +596,13 @@ function SmartWLPanel({
   readOnly?: boolean
 }) {
   const [expandedTFs, setExpandedTFs] = useState<Set<string>>(new Set())
+  const [emaFilter, setEmaFilter] = useState<string>('ALL')
   const hasData = result !== null && Object.values(result.timeframes).some(pairs => pairs.length > 0)
   const PREVIEW = 8
+  // Unique EMA signals present in the result — drives filter pills
+  const activeSignals = result
+    ? [...new Set(Object.values(result.timeframes).flat().map(p => p.ema_signal).filter(Boolean))]
+    : []
 
   const toggleTF = (tf: string) => setExpandedTFs(prev => {
     const next = new Set(prev)
@@ -650,17 +678,51 @@ function SmartWLPanel({
               </div>
             </div>
           )}
+          {/* EMA filter pills */}
+          {activeSignals.length > 1 && (
+            <div className="px-3 pt-2 pb-1 flex flex-wrap gap-1 items-center border-b border-surface-700/60">
+              <span className="text-[9px] text-slate-600 uppercase tracking-wider mr-1">EMA:</span>
+              {(['ALL', ...activeSignals] as string[]).map(sig => {
+                const meta = sig === 'ALL' ? null : EMA_DISPLAY_WL[sig]
+                const isActive = emaFilter === sig
+                return (
+                  <button
+                    key={sig}
+                    onClick={() => setEmaFilter(sig)}
+                    className={cn(
+                      'text-[10px] px-1.5 py-0 rounded border transition-colors leading-relaxed',
+                      isActive && !meta
+                        ? 'border-brand-500/60 bg-brand-900/30 text-brand-400'
+                        : !isActive
+                        ? 'border-surface-600 bg-surface-800/40 text-slate-500 hover:text-slate-400'
+                        : '',
+                    )}
+                    style={isActive && meta ? {
+                      borderColor: meta.color + '80',
+                      backgroundColor: meta.color + '15',
+                      color: meta.color,
+                    } : {}}
+                    title={meta ? (EMA_TOOLTIP_WL[sig] ?? sig) : 'Show all signals'}
+                  >
+                    {meta ? `${meta.symbol} ${meta.label}` : 'ALL'}
+                  </button>
+                )
+              })}
+            </div>
+          )}
           {Object.entries(result.timeframes)
             .filter(([, pairs]) => pairs.length > 0)
             .map(([tf, pairs]) => {
             const isExpanded = expandedTFs.has(tf)
-            const visible = isExpanded ? pairs : pairs.slice(0, PREVIEW)
-            const hidden = pairs.length - PREVIEW
+            const filteredPairs = emaFilter === 'ALL' ? pairs : pairs.filter(p => p.ema_signal === emaFilter)
+            const visible = isExpanded ? filteredPairs : filteredPairs.slice(0, PREVIEW)
+            const hidden = filteredPairs.length - PREVIEW
+            if (filteredPairs.length === 0) return null
             return (
             <div key={tf} className="px-3 py-2">
               <div className="flex items-center gap-2 mb-1.5">
                 <TFBadge tf={tf} />
-                <span className="text-[10px] text-slate-500">{pairs.length} pairs</span>
+                <span className="text-[10px] text-slate-500">{filteredPairs.length} pairs</span>
               </div>
               <div className="grid grid-cols-2 gap-1">
                 {visible.map((p) => (
@@ -691,6 +753,27 @@ function SmartWLPanel({
                         </button>
                       )}
                     </div>
+                    {/* EMA signal + regime */}
+                    {(p.ema_signal || p.regime) && (
+                      <div className="flex items-center gap-1 px-1.5 pb-0.5">
+                        {p.ema_signal && EMA_DISPLAY_WL[p.ema_signal] && (
+                          <span
+                            title={EMA_TOOLTIP_WL[p.ema_signal] ?? p.ema_signal}
+                            className="text-[9px] font-medium px-1 rounded border inline-block leading-relaxed"
+                            style={{
+                              color: EMA_DISPLAY_WL[p.ema_signal].color,
+                              borderColor: EMA_DISPLAY_WL[p.ema_signal].color + '50',
+                              background: EMA_DISPLAY_WL[p.ema_signal].color + '15',
+                            }}
+                          >
+                            {EMA_DISPLAY_WL[p.ema_signal].symbol} {EMA_DISPLAY_WL[p.ema_signal].label}
+                          </span>
+                        )}
+                        {p.regime && REGIME_EMOJI_WL[p.regime] && (
+                          <span title={`Regime: ${p.regime}`} className="text-[10px] leading-none">{REGIME_EMOJI_WL[p.regime]}</span>
+                        )}
+                      </div>
+                    )}
                     {/* vi_score bar — green=high, amber=mid, muted=low */}
                     <div className="h-[2px] bg-surface-700/60">
                       <div
@@ -713,7 +796,7 @@ function SmartWLPanel({
                     + {hidden} more — click to show all
                   </button>
                 )}
-                {isExpanded && pairs.length > PREVIEW && (
+                {isExpanded && filteredPairs.length > PREVIEW && (
                   <button
                     onClick={() => toggleTF(tf)}
                     className="col-span-2 text-left text-[10px] text-slate-500 hover:text-slate-400 pl-1.5 py-0.5 transition-colors"
