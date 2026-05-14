@@ -944,20 +944,23 @@ def generate_smart_watchlist(
                 )
             )
 
-        # Regime quality for trading — TRENDING is the sweet spot, EXTREME is risky.
-        # Within the same regime tier, cascade score is the tie-breaker.
-        # The cascade score already encodes VI × EMA direction × EMA quality cross-TF,
-        # so raw vi_score is NOT used as an intermediate key (would be redundant+wrong).
-        _REGIME_TRADE_RANK: dict[str, int] = {
-            "TRENDING": 6, "NORMAL": 5, "ACTIVE": 4,
-            "CALM": 3, "EXTREME": 2, "DEAD": 1,
+        # Composite score = cascade_score × regime_multiplier
+        # Multiplicative approach: regime adjusts cascade proportionally.
+        # Unlike tuple-sort (regime, cascade), this lets a very strong cascade
+        # ACTIVE pair beat a weak cascade TRENDING pair — which is correct.
+        # TRENDING/NORMAL get a boost; EXTREME/DEAD get penalised.
+        _REGIME_MULTIPLIER: dict[str, float] = {
+            "TRENDING": 1.30,
+            "NORMAL":   1.10,
+            "ACTIVE":   0.90,
+            "CALM":     0.80,
+            "EXTREME":  0.60,
+            "DEAD":     0.30,
         }
         pinned_entries = [e for e in scored if e.is_pinned]
         rest = sorted(
             [e for e in scored if not e.is_pinned],
-            # 1. Best trading regime on THIS TF (local condition — not in cascade)
-            # 2. Cascade score: VI × EMA direction × EMA quality (already includes VI)
-            key=lambda x: (_REGIME_TRADE_RANK.get(x.regime, 0), x.score),
+            key=lambda x: x.score * _REGIME_MULTIPLIER.get(x.regime, 1.0),
             reverse=True,
         )
         result_tfs[tf] = pinned_entries + rest[:top_n]
