@@ -935,6 +935,11 @@ def generate_smart_watchlist(
         for p in tf_pair_list:
             tf_info = tf_data.get(p, {}).get(tf, {})
             pin = pinned_map.get(p)
+            # Only treat as pinned in the TF it was actually pinned on.
+            # Without this check, a pair pinned on 4H gets is_pinned=True on
+            # ALL TFs → rank=0 everywhere → dedup always picks the first TF
+            # in iteration order (1D), ignoring where it was actually pinned.
+            is_pinned_here = pin is not None and pin.timeframe.upper() == tf.upper()
             scored.append(
                 SmartWLPairEntry(
                     pair=p,
@@ -944,9 +949,9 @@ def generate_smart_watchlist(
                     regime=tf_info.get("regime", ""),
                     ema_signal=tf_info.get("ema_signal", ""),
                     score=round(pair_scores.get(p, 0.0), 3),
-                    is_pinned=pin is not None,
-                    pin_note=pin.note if pin else None,
-                    pin_id=pin.id if pin else None,
+                    is_pinned=is_pinned_here,
+                    pin_note=pin.note if is_pinned_here else None,
+                    pin_id=pin.id if is_pinned_here else None,
                 )
             )
 
