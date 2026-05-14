@@ -100,6 +100,18 @@ _TF_EMA_REF: dict[str, int] = {
     "1w":  55,
 }
 
+# How many bars back to search for a prior crossover when qualifying a wick retest
+# as retest_after_breakout. Calibrated in real-time (elapsed since BO per TF):
+#   15m →30 bars = 7h30  | 1h →24 bars = 24h   | 4h →15 bars = 60h
+#   1d  →10 bars = 10d   | 1w →7  bars = 7w
+_TF_BREAKOUT_LOOKBACK: dict[str, int] = {
+    "15m": 30,
+    "1h":  24,
+    "4h":  15,
+    "1d":  10,
+    "1w":   7,
+}
+
 # Candle limit per TF — EMA200 on 4h requires 500 candles for <1% convergence bias.
 # All other TFs converge within 220 candles for their respective ema_ref periods.
 _TF_CANDLE_LIMIT: dict[str, int] = {
@@ -358,9 +370,10 @@ def compute_market_vi(self, timeframe: str) -> dict:  # type: ignore[override]
                 try:
                     ema_ref = (mv_cfg.get("ema_ref_periods") or {}).get(timeframe) or _TF_EMA_REF.get(timeframe, 50)
                     retest_tol = (mv_cfg.get("ema_retest_tolerance") or {}).get(timeframe)
+                    bo_lookback = _TF_BREAKOUT_LOOKBACK.get(timeframe, 15)
                     limit = _TF_CANDLE_LIMIT.get(timeframe, 220)
                     candles = client.fetch_ohlcv(symbol, timeframe, limit=limit)
-                    result = compute_vi_score(candles, enabled, ema_ref, indicator_weights, retest_tol)
+                    result = compute_vi_score(candles, enabled, ema_ref, indicator_weights, retest_tol, bo_lookback)
                     pair_scores[symbol] = result
                 except Exception as pair_exc:
                     logger.warning(
@@ -667,9 +680,10 @@ def compute_pair_vi(self, timeframe: str, force: bool = False) -> dict:  # type:
                 try:
                     ema_ref = (pp_cfg.get("ema_ref_periods") or {}).get(timeframe) or _TF_EMA_REF.get(timeframe, 50)
                     retest_tol = (pp_cfg.get("ema_retest_tolerance") or {}).get(timeframe)
+                    bo_lookback = _TF_BREAKOUT_LOOKBACK.get(timeframe, 15)
                     limit = _TF_CANDLE_LIMIT.get(timeframe, 220)
                     candles = client.fetch_ohlcv(symbol, timeframe, limit=limit)
-                    result = compute_vi_score(candles, enabled, ema_ref, indicator_weights, retest_tol)
+                    result = compute_vi_score(candles, enabled, ema_ref, indicator_weights, retest_tol, bo_lookback)
                     pair_scores[symbol] = result
                 except Exception as pair_exc:
                     logger.warning(
