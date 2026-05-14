@@ -947,7 +947,9 @@ def generate_smart_watchlist(
         pinned_entries = [e for e in scored if e.is_pinned]
         rest = sorted(
             [e for e in scored if not e.is_pinned],
-            key=lambda x: x.score,  # rank by cascade_score (cross-TF quality)
+            # Primary: vi_score of THIS TF (most actionable first within the section)
+            # Secondary: cascade score (tie-break by overall cross-TF quality)
+            key=lambda x: (x.vi_score, x.score),
             reverse=True,
         )
         result_tfs[tf] = pinned_entries + rest[:top_n]
