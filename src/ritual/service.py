@@ -880,8 +880,14 @@ def generate_smart_watchlist(
             ema_score: float = float(entry.get("ema_score", 0))
 
             # Cascade contribution
+            # trend_bonus rewards directional EMA alignment:
+            #   Long signals (all profiles):      breakout_up, above_all
+            #   Short signals (Contracts only):   breakdown_down, below_all
+            # "trend_up" never existed — was a dead label; replaced by above_all.
             contribution = tf_w * vi
-            if ema_signal in ("breakout_up", "trend_up"):
+            _long_signal = ema_signal in ("breakout_up", "above_all")
+            _short_signal = (not _is_spot_session) and ema_signal in ("breakdown_down", "below_all")
+            if _long_signal or _short_signal:
                 contribution *= trend_bonus
             if ema_score >= ema_bonus_threshold:
                 contribution *= ema_bonus_factor

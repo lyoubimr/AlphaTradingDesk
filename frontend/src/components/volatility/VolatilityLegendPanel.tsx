@@ -87,7 +87,7 @@ export function VolatilityLegendPanel({
                 key: 'MFI',
                 full: 'Money Flow Index',
                 color: '#a855f7',
-                desc: 'RSI-like oscillator weighted by volume. Captures buying vs selling pressure. High MFI = money flowing in (bullish pressure). Low MFI = money flowing out (selling pressure).'
+                desc: 'RSI-like oscillator weighted by volume. VI score uses absolute deviation from centre (50): both overbought (>80) and oversold (<20) readings score equally high. Direction (bullish vs bearish) is not factored in — use MFI direction as manual context only.'
               },
               {
                 key: 'ATR%',

@@ -103,7 +103,7 @@ _TF_EMA_REF: dict[str, int] = {
 # Candle limit per TF — EMA200 on 4h requires 500 candles for <1% convergence bias.
 # All other TFs converge within 220 candles for their respective ema_ref periods.
 _TF_CANDLE_LIMIT: dict[str, int] = {
-    "15m": 220,
+    "15m": 480,  # ~5 days (was 220 = 2.3 days) — reduces spike sensitivity
     "1h":  220,
     "4h":  500,   # EMA200: (1 - 2/201)^500 ≈ 0.7% residual vs 11% at 220
     "1d":  220,
