@@ -46,15 +46,18 @@ const REGIME_EMOJI: Record<string, string> = {
 }
 
 const EMA_DISPLAY: Record<string, { label: string; color: string; symbol: string }> = {
-  above_all:                    { label: 'Above All',        color: '#10b981', symbol: '▲'  },
-  below_all:                    { label: 'Below All',        color: '#ef4444', symbol: '▼'  },
-  breakout_up:                  { label: 'Breakout ↑',       color: '#0ea5e9', symbol: '🚀' },
-  breakdown_down:               { label: 'Breakdown ↓',      color: '#f97316', symbol: '💥' },
-  retest_after_breakout_up:     { label: 'Retest BO ↑',      color: '#facc15', symbol: '🎯' },
-  retest_after_breakdown_down:  { label: 'Retest BD ↓',      color: '#fb923c', symbol: '🎯' },
-  retest_up:                    { label: 'Retest ↑',         color: '#a855f7', symbol: '🔄' },
-  retest_down:                  { label: 'Retest ↓',         color: '#c084fc', symbol: '🔁' },
-  mixed:                        { label: 'Mixed',            color: '#71717a', symbol: '∿'  },
+  // ── Bullish — green spectrum (bright = best signal) ───────────────────────
+  retest_after_breakout_up:     { label: 'Retest BO ↑',  color: '#22c55e', symbol: '🎯' }, // ×1.30 — best
+  breakout_up:                  { label: 'Breakout ↑',   color: '#10b981', symbol: '🚀' }, // ×1.20
+  above_all:                    { label: 'Above All',    color: '#34d399', symbol: '▲'  }, // ×1.20
+  retest_up:                    { label: 'Retest ↑',     color: '#6ee7b7', symbol: '🔄' }, // ×1.0 — no bonus
+  // ── Bearish — red spectrum (deep = best short signal) ────────────────────
+  retest_after_breakdown_down:  { label: 'Retest BD ↓',  color: '#dc2626', symbol: '🎯' }, // ×1.30 — best
+  breakdown_down:               { label: 'Breakdown ↓',  color: '#ef4444', symbol: '💥' }, // ×1.20
+  below_all:                    { label: 'Below All',    color: '#f87171', symbol: '▼'  }, // ×1.20
+  retest_down:                  { label: 'Retest ↓',     color: '#fca5a5', symbol: '🔁' }, // ×1.0 — no bonus
+  // ── Neutral ───────────────────────────────────────────────────────────────
+  mixed:                        { label: 'Mixed',        color: '#71717a', symbol: '∿'  },
 }
 
 const REGIME_DESCRIPTION: Record<string, string> = {
