@@ -944,12 +944,19 @@ def generate_smart_watchlist(
                 )
             )
 
+        # Regime quality for trading — TRENDING is the sweet spot, EXTREME is risky.
+        # Pairs are sorted: best trading regime first, then VI score, then cascade.
+        _REGIME_TRADE_RANK: dict[str, int] = {
+            "TRENDING": 6, "NORMAL": 5, "ACTIVE": 4,
+            "CALM": 3, "EXTREME": 2, "DEAD": 1,
+        }
         pinned_entries = [e for e in scored if e.is_pinned]
         rest = sorted(
             [e for e in scored if not e.is_pinned],
-            # Primary: vi_score of THIS TF (most actionable first within the section)
-            # Secondary: cascade score (tie-break by overall cross-TF quality)
-            key=lambda x: (x.vi_score, x.score),
+            # 1. Best trading regime (TRENDING > NORMAL > ACTIVE > CALM > EXTREME > DEAD)
+            # 2. VI score of this TF within the same regime tier
+            # 3. Cross-TF cascade score as final tie-breaker
+            key=lambda x: (_REGIME_TRADE_RANK.get(x.regime, 0), x.vi_score, x.score),
             reverse=True,
         )
         result_tfs[tf] = pinned_entries + rest[:top_n]

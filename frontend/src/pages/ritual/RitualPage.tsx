@@ -127,6 +127,18 @@ const EMA_TOOLTIP_WL: Record<string, string> = {
 const REGIME_EMOJI_WL: Record<string, string> = {
   DEAD: '⬜', CALM: '💧', NORMAL: '📊', TRENDING: '💎', ACTIVE: '⚠️', EXTREME: '🚫',
 }
+// Color based on regime (TRADING quality), not raw VI%.
+// TRENDING 💎 = best = indigo | NORMAL = emerald | ACTIVE ⚠️ = amber | EXTREME/DEAD = red/muted
+function regimeViColor(regime: string): { text: string; bar: string } {
+  switch (regime) {
+    case 'TRENDING': return { text: 'text-indigo-400',  bar: 'bg-indigo-500/80'  }
+    case 'NORMAL':   return { text: 'text-emerald-400', bar: 'bg-emerald-500/70' }
+    case 'ACTIVE':   return { text: 'text-amber-400',   bar: 'bg-amber-500/70'   }
+    case 'CALM':     return { text: 'text-sky-400',      bar: 'bg-sky-500/60'     }
+    case 'EXTREME':  return { text: 'text-red-400',      bar: 'bg-red-500/70'     }
+    default:         return { text: 'text-slate-500',   bar: 'bg-slate-600/50'   }
+  }
+}
 
 function ttlColor(pct: number | null): string {
   if (pct === null) return 'text-slate-400 border-slate-700'
@@ -737,12 +749,10 @@ function SmartWLPanel({
                       <span className="text-[11px] text-slate-200 font-semibold truncate flex-1">
                         {p.display_name}
                       </span>
-                      <span className={cn(
-                        'text-[10px] tabular-nums shrink-0 font-medium',
-                        p.vi_score > 0.67 ? 'text-green-400' :
-                        p.vi_score > 0.50 ? 'text-emerald-500/80' :
-                        p.vi_score > 0.33 ? 'text-amber-500' : 'text-slate-500',
-                      )}>{Math.round(p.vi_score * 100)}%</span>
+                      <span
+                        className={cn('text-[10px] tabular-nums shrink-0 font-medium', regimeViColor(p.regime).text)}
+                        title={`Regime: ${p.regime}`}
+                      >{Math.round(p.vi_score * 100)}%</span>
                       {!p.is_pinned && onPin && (
                         <button
                           onClick={() => onPin(p.pair, tf)}
@@ -774,15 +784,10 @@ function SmartWLPanel({
                         )}
                       </div>
                     )}
-                    {/* vi_score bar — green=high, amber=mid, muted=low */}
+                    {/* vi_score bar — colored by regime quality, not raw VI% */}
                     <div className="h-[2px] bg-surface-700/60">
                       <div
-                        className={cn(
-                          'h-full transition-all rounded-sm',
-                          p.vi_score > 0.67 ? 'bg-green-500/80' :
-                          p.vi_score > 0.50 ? 'bg-emerald-500/60' :
-                          p.vi_score > 0.33 ? 'bg-amber-500/60' : 'bg-slate-600/50',
-                        )}
+                        className={cn('h-full transition-all rounded-sm', regimeViColor(p.regime).bar)}
                         style={{ width: `${Math.round(p.vi_score * 100)}%` }}
                       />
                     </div>
