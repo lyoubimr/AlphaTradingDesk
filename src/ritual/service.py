@@ -950,8 +950,8 @@ def generate_smart_watchlist(
                     ema_signal=tf_info.get("ema_signal", ""),
                     score=round(pair_scores.get(p, 0.0), 3),
                     is_pinned=is_pinned_here,
-                    pin_note=pin.note if is_pinned_here else None,
-                    pin_id=pin.id if is_pinned_here else None,
+                    pin_note=pin.note if (is_pinned_here and pin is not None) else None,
+                    pin_id=pin.id if (is_pinned_here and pin is not None) else None,
                 )
             )
 
