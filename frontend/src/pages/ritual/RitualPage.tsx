@@ -107,22 +107,26 @@ const TF_COLORS: Record<string, string> = {
 
 // ── Smart WL — EMA signal display helpers ────────────────────────────────────
 const EMA_DISPLAY_WL: Record<string, { label: string; color: string; symbol: string }> = {
-  above_all:      { label: 'Above All',   color: '#10b981', symbol: '▲'  },
-  below_all:      { label: 'Below All',   color: '#ef4444', symbol: '▼'  },
-  breakout_up:    { label: 'Breakout ↑',  color: '#0ea5e9', symbol: '🚀' },
-  breakdown_down: { label: 'Breakdown ↓', color: '#f97316', symbol: '💥' },
-  retest_up:      { label: 'Retest ↑',    color: '#a855f7', symbol: '🔄' },
-  retest_down:    { label: 'Retest ↓',    color: '#c084fc', symbol: '🔁' },
-  mixed:          { label: 'Mixed',       color: '#71717a', symbol: '∿'  },
+  above_all:                { label: 'Above All',   color: '#10b981', symbol: '▲'  },
+  below_all:                { label: 'Below All',   color: '#ef4444', symbol: '▼'  },
+  breakout_up:              { label: 'Breakout ↑',  color: '#0ea5e9', symbol: '🚀' },
+  breakdown_down:           { label: 'Breakdown ↓', color: '#f97316', symbol: '💥' },
+  retest_after_breakout_up:   { label: 'Retest ↑',  color: '#facc15', symbol: '🎯' },
+  retest_after_breakdown_down:{ label: 'Retest ↓',  color: '#fb923c', symbol: '🎯' },
+  retest_up:                { label: 'Retest ↑',    color: '#a855f7', symbol: '🔄' },
+  retest_down:              { label: 'Retest ↓',    color: '#c084fc', symbol: '🔁' },
+  mixed:                    { label: 'Mixed',        color: '#71717a', symbol: '∿'  },
 }
 const EMA_TOOLTIP_WL: Record<string, string> = {
-  above_all:      'Bull alignment (EMA20/50/200) — gets trend bonus ×1.2',
-  below_all:      'Bear alignment — gets trend bonus ×1.2 (Contracts)',
-  breakout_up:    'Breakout above ref EMA — gets trend bonus ×1.2',
-  breakdown_down: 'Breakdown below ref EMA — gets trend bonus ×1.2 (Contracts)',
-  retest_up:      'Testing ref EMA as support',
-  retest_down:    'Testing ref EMA as resistance',
-  mixed:          'Mixed EMA positioning — no bonus',
+  above_all:                  'Bull alignment (EMA20/50/200) — gets trend bonus ×1.2',
+  below_all:                  'Bear alignment — gets trend bonus ×1.2 (Contracts)',
+  breakout_up:                'Breakout above ref EMA — gets trend bonus ×1.2',
+  breakdown_down:             'Breakdown below ref EMA — gets trend bonus ×1.2 (Contracts)',
+  retest_after_breakout_up:   'Confirmed retest after recent breakout — best setup ×1.3',
+  retest_after_breakdown_down:'Confirmed retest after recent breakdown — best setup ×1.3 (Contracts)',
+  retest_up:                  'Wick touched EMA (no recent breakout) — no bonus',
+  retest_down:                'Wick touched EMA (no recent breakdown) — no bonus',
+  mixed:                      'Mixed EMA positioning — no bonus',
 }
 const REGIME_EMOJI_WL: Record<string, string> = {
   DEAD: '⬜', CALM: '💧', NORMAL: '📊', TRENDING: '💎', ACTIVE: '⚠️', EXTREME: '🚫',
@@ -133,7 +137,7 @@ const TF_EMA_REF_WL: Record<string, number> = {
   '1h': 99,  '4h': 200, '1d': 99, '1w': 55,
 }
 // Signals that reference a specific EMA — we append the EMA number to the label
-const EMA_REF_SIGNALS = new Set(['breakout_up', 'breakdown_down', 'retest_up', 'retest_down'])
+const EMA_REF_SIGNALS = new Set(['breakout_up', 'breakdown_down', 'retest_up', 'retest_down', 'retest_after_breakout_up', 'retest_after_breakdown_down'])
 // Color based on regime (TRADING quality), not raw VI%.
 // TRENDING 💎 = best = indigo | NORMAL = emerald | ACTIVE ⚠️ = amber | EXTREME/DEAD = red/muted
 function regimeViColor(regime: string): { text: string; bar: string } {

@@ -171,8 +171,10 @@ def compute_ema_score(
         below_all      — price < all 3 scoring EMAs  (state, no alert)
         breakout_up    — price crossed ema_ref upward within last 3 bars
         breakdown_down — price crossed ema_ref downward within last 3 bars
-        retest_up      — wick touched EMA from above (low ≤ ema_ref), close held above
-        retest_down    — wick touched EMA from below (high ≥ ema_ref), close held below
+        retest_after_breakout_up   — wick retest + recent breakout_up in last 15 bars (best)
+        retest_after_breakdown_down — wick retest + recent breakdown_down in last 15 bars (best)
+        retest_up      — wick touched EMA from above (low ≤ ema_ref), no recent breakout
+        retest_down    — wick touched EMA from below (high ≥ ema_ref), no recent breakdown
         mixed          — everything else              (no alert)
 
     Returns:
@@ -209,14 +211,20 @@ def compute_ema_score(
             _tol = retest_tolerance or 0.005
             # Wick-based retest: wick must physically touch EMA (±0.3% epsilon),
             # close must not break through by more than retest_tolerance.
-            # retest_up   = low touched EMA from above  (testing support)
-            # retest_down = high touched EMA from below (testing resistance)
             _retest_up = _low <= ref_ema_val * 1.003 and last >= ref_ema_val * (1.0 - _tol)
             _retest_dn = _high >= ref_ema_val * 0.997 and last <= ref_ema_val * (1.0 + _tol)
-            if _retest_up:
-                signal = "retest_up"
-            elif _retest_dn:
-                signal = "retest_down"
+            if _retest_up or _retest_dn:
+                # Qualify retest: was there a breakout in the last 15 bars?
+                # retest_after_breakout_up/down = highest-quality signal (pullback confirms BO)
+                _close_above = close > ref_ema_series
+                _crossup = (~_close_above.shift(1).fillna(False)) & _close_above
+                _crossdn = _close_above.shift(1).fillna(False) & (~_close_above)
+                _had_breakup = bool(_crossup.iloc[-15:-1].any())
+                _had_breakdown = bool(_crossdn.iloc[-15:-1].any())
+                if _retest_up:
+                    signal = "retest_after_breakout_up" if _had_breakup else "retest_up"
+                else:
+                    signal = "retest_after_breakdown_down" if _had_breakdown else "retest_down"
             elif all(above):
                 signal = "above_all"
             elif not any(above):
