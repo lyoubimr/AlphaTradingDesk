@@ -127,6 +127,13 @@ const EMA_TOOLTIP_WL: Record<string, string> = {
 const REGIME_EMOJI_WL: Record<string, string> = {
   DEAD: '⬜', CALM: '💧', NORMAL: '📊', TRENDING: '💎', ACTIVE: '⚠️', EXTREME: '🚫',
 }
+// TF → reference EMA used for crossover/retest signal detection (matches backend _TF_EMA_REF)
+const TF_EMA_REF_WL: Record<string, number> = {
+  '15m': 55, '1H': 99, '4H': 200, '1D': 99, '1W': 55,
+  '1h': 99,  '4h': 200, '1d': 99, '1w': 55,
+}
+// Signals that reference a specific EMA — we append the EMA number to the label
+const EMA_REF_SIGNALS = new Set(['breakout_up', 'breakdown_down', 'retest_up', 'retest_down'])
 // Color based on regime (TRADING quality), not raw VI%.
 // TRENDING 💎 = best = indigo | NORMAL = emerald | ACTIVE ⚠️ = amber | EXTREME/DEAD = red/muted
 function regimeViColor(regime: string): { text: string; bar: string } {
@@ -766,19 +773,28 @@ function SmartWLPanel({
                     {/* EMA signal + regime */}
                     {(p.ema_signal || p.regime) && (
                       <div className="flex items-center gap-1 px-1.5 pb-0.5">
-                        {p.ema_signal && EMA_DISPLAY_WL[p.ema_signal] && (
-                          <span
-                            title={EMA_TOOLTIP_WL[p.ema_signal] ?? p.ema_signal}
-                            className="text-[9px] font-medium px-1 rounded border inline-block leading-relaxed"
-                            style={{
-                              color: EMA_DISPLAY_WL[p.ema_signal].color,
-                              borderColor: EMA_DISPLAY_WL[p.ema_signal].color + '50',
-                              background: EMA_DISPLAY_WL[p.ema_signal].color + '15',
-                            }}
-                          >
-                            {EMA_DISPLAY_WL[p.ema_signal].symbol} {EMA_DISPLAY_WL[p.ema_signal].label}
-                          </span>
-                        )}
+                        {p.ema_signal && EMA_DISPLAY_WL[p.ema_signal] && (() => {
+                          const meta = EMA_DISPLAY_WL[p.ema_signal]
+                          const emaRef = TF_EMA_REF_WL[tf]
+                          const showRef = EMA_REF_SIGNALS.has(p.ema_signal) && emaRef
+                          const label = showRef ? `${meta.label} ${emaRef}` : meta.label
+                          const tooltip = showRef
+                            ? `${EMA_TOOLTIP_WL[p.ema_signal] ?? p.ema_signal} (EMA ${emaRef})`
+                            : (EMA_TOOLTIP_WL[p.ema_signal] ?? p.ema_signal)
+                          return (
+                            <span
+                              title={tooltip}
+                              className="text-[9px] font-medium px-1 rounded border inline-block leading-relaxed"
+                              style={{
+                                color: meta.color,
+                                borderColor: meta.color + '50',
+                                background: meta.color + '15',
+                              }}
+                            >
+                              {meta.symbol} {label}
+                            </span>
+                          )
+                        })()}
                         {p.regime && REGIME_EMOJI_WL[p.regime] && (
                           <span title={`Regime: ${p.regime}`} className="text-[10px] leading-none">{REGIME_EMOJI_WL[p.regime]}</span>
                         )}
