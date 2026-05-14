@@ -880,15 +880,21 @@ def generate_smart_watchlist(
             ema_score: float = float(entry.get("ema_score", 0))
 
             # Cascade contribution
-            # trend_bonus rewards directional EMA alignment:
+            # trend_bonus ×1.2 rewards strong directional EMA alignment:
             #   Long signals (all profiles):      breakout_up, above_all
             #   Short signals (Contracts only):   breakdown_down, below_all
-            # "trend_up" never existed — was a dead label; replaced by above_all.
+            # retest_bonus ×1.1 rewards pullback-entry precision (wick touched EMA):
+            #   retest_up  (all profiles) — wick touched EMA, close held above
+            #   retest_down (Contracts only) — wick touched EMA, close held below
             contribution = tf_w * vi
             _long_signal = ema_signal in ("breakout_up", "above_all")
             _short_signal = (not _is_spot_session) and ema_signal in ("breakdown_down", "below_all")
+            _retest_long = ema_signal == "retest_up"
+            _retest_short = (not _is_spot_session) and ema_signal == "retest_down"
             if _long_signal or _short_signal:
-                contribution *= trend_bonus
+                contribution *= trend_bonus  # ×1.2
+            elif _retest_long or _retest_short:
+                contribution *= 1.1  # lighter bonus — pullback entry
             if ema_score >= ema_bonus_threshold:
                 contribution *= ema_bonus_factor
 
