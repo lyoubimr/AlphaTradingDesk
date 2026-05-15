@@ -13,6 +13,9 @@ Handles:
 from __future__ import annotations
 
 import io
+
+# ── Internal helpers ──────────────────────────────────────────────────────────
+import logging
 from copy import deepcopy
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
@@ -57,9 +60,82 @@ from src.ritual.schemas import (
 from src.spot_volatility.models import SpotWatchlistSnapshot
 from src.volatility.models import WatchlistSnapshot
 
-# ── Internal helpers ──────────────────────────────────────────────────────────
+logger = logging.getLogger(__name__)
 
 _ACTIVE_TRADE_STATUSES = ("pending", "open", "partial", "runner")
+
+# ── Live EMA refresh — staleness thresholds ───────────────────────────────────
+# If the latest watchlist snapshot is older than these bounds, we refetch live
+# candles for the top candidates and recompute only the EMA signal/score.
+# Thresholds mirror the Celery beat cadence so we refresh exactly once per cycle.
+_TF_STALE_SECONDS: dict[str, int] = {
+    "15m": 15 * 60,
+    "1h":  60 * 60,
+    "4h":  4 * 60 * 60,
+    "1d":  24 * 60 * 60,
+    "1w":  7 * 24 * 60 * 60,
+}
+# Local copies of TF params — avoids importing tasks.py (pulls in Celery)
+_TF_EMA_REF_LOCAL: dict[str, int]           = {"15m": 55, "1h": 99, "4h": 200, "1d": 99, "1w": 55}
+_TF_CANDLE_LIMIT_LOCAL: dict[str, int]      = {"15m": 700, "1h": 500, "4h": 500, "1d": 500, "1w": 220}
+_TF_BREAKOUT_LOOKBACK_LOCAL: dict[str, int] = {"15m": 30, "1h": 24, "4h": 15, "1d": 10, "1w": 7}
+_EMA_ONLY_ENABLED = {"rvol": False, "mfi": False, "atr": False, "bb": False, "ema": True}
+
+
+def _refresh_ema_signals(
+    pairs_data: list[dict],
+    timeframe: str,
+    is_spot: bool,
+    top_n_candidates: int,
+) -> dict[str, dict]:
+    """Fetch live candles for top N×3 candidates and recompute EMA signal only.
+
+    Returns {symbol: {"ema_signal": str, "ema_score": float}}.
+    Falls back silently to empty dict on any error — caller uses snapshot values.
+    """
+    candidates = sorted(
+        pairs_data, key=lambda x: float(x.get("vi_score", 0)), reverse=True
+    )[: top_n_candidates * 3]
+    if not candidates:
+        return {}
+
+    tf_key = timeframe.lower()
+    ema_ref   = _TF_EMA_REF_LOCAL.get(tf_key, 50)
+    limit     = _TF_CANDLE_LIMIT_LOCAL.get(tf_key, 500)
+    bo_lookback = _TF_BREAKOUT_LOOKBACK_LOCAL.get(tf_key, 15)
+
+    refreshed: dict[str, dict] = {}
+    try:
+        if is_spot:
+            from src.spot_volatility.kraken_spot_client import KrakenSpotClient  # noqa: PLC0415
+            client_cls = KrakenSpotClient
+        else:
+            from src.volatility.kraken_client import KrakenClient  # noqa: PLC0415
+            client_cls = KrakenClient  # type: ignore[assignment]
+
+        from src.volatility.indicators import compute_vi_score  # noqa: PLC0415
+
+        with client_cls() as client:
+            for entry in candidates:
+                symbol = entry.get("pair", "")
+                if not symbol:
+                    continue
+                try:
+                    candles = client.fetch_ohlcv(symbol, tf_key, limit=limit)
+                    result = compute_vi_score(
+                        candles, _EMA_ONLY_ENABLED, ema_ref,
+                        None, None, bo_lookback,
+                    )
+                    refreshed[symbol] = {
+                        "ema_signal": result.get("ema_signal", entry.get("ema_signal", "")),
+                        "ema_score": float(result.get("ema_score", entry.get("ema_score", 0.0))),
+                    }
+                except Exception as pair_exc:  # noqa: BLE001
+                    logger.debug("_refresh_ema_signals: %s/%s failed — %s", symbol, tf_key, pair_exc)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("_refresh_ema_signals: client error for %s — %s", tf_key, exc)
+
+    return refreshed
 
 
 def _utcnow() -> datetime:
@@ -868,6 +944,20 @@ def generate_smart_watchlist(
         if not snapshot:
             continue
 
+        # Live EMA refresh when snapshot is older than the TF beat cadence
+        _stale_secs = _TF_STALE_SECONDS.get(tf.lower(), 900)
+        _snap_dt = snapshot.generated_at
+        if _snap_dt.tzinfo is None:
+            _snap_dt = _snap_dt.replace(tzinfo=UTC)
+        _snap_age = (_utcnow() - _snap_dt).total_seconds()
+        _live_ema: dict[str, dict] = {}
+        if _snap_age > _stale_secs:
+            logger.info(
+                "SmartWL: %s snapshot is %.0fs old (threshold %ds) — refreshing EMA live",
+                tf, _snap_age, _stale_secs,
+            )
+            _live_ema = _refresh_ema_signals(snapshot.pairs, tf, _is_spot_session, top_n)
+
         tf_pairs[tf] = []
         tf_w = weights.get(tf, 1.0)
 
@@ -876,8 +966,10 @@ def generate_smart_watchlist(
             if not pair:
                 continue
             vi: float = float(entry.get("vi_score", 0))
-            ema_signal: str = entry.get("ema_signal", "")
-            ema_score: float = float(entry.get("ema_score", 0))
+            # Use live-refreshed EMA signal if available, else snapshot value
+            _live = _live_ema.get(pair, {})
+            ema_signal: str = _live.get("ema_signal") or entry.get("ema_signal", "")
+            ema_score: float = float(_live.get("ema_score", entry.get("ema_score", 0)))
 
             # Cascade contribution
             # Cascade bonus hierarchy:
