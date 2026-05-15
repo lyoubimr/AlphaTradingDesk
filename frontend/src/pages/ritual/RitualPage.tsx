@@ -1214,6 +1214,27 @@ export function RitualPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profileId, activeSession?.id, activeSession?.session_type])
 
+  // Restore cached WL result when navigating back to the page during an active session
+  useEffect(() => {
+    if (!profileId || !activeSession?.id) return
+    const key = `ritual_wl_${profileId}_${activeSession.id}`
+    const cached = sessionStorage.getItem(key)
+    if (cached) {
+      try {
+        setWlResult(JSON.parse(cached) as SmartWLResult)
+      } catch {
+        sessionStorage.removeItem(key)
+      }
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [profileId, activeSession?.id])
+
+  // Persist WL result so it survives navigation within the same session
+  useEffect(() => {
+    if (!profileId || !activeSession?.id || !wlResult) return
+    sessionStorage.setItem(`ritual_wl_${profileId}_${activeSession.id}`, JSON.stringify(wlResult))
+  }, [wlResult, profileId, activeSession?.id])
+
   const handleStart = async (type: SessionType) => {
     if (!profileId) return
     setStarting(type)
