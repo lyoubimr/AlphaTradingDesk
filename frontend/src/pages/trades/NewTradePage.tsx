@@ -1961,7 +1961,7 @@ export function NewTradePage() {
           pair={instrument?.symbol ?? null}
           timeframe={timeframe || null}
           direction={direction}
-          strategyId={strategyIds[0] ?? null}
+          strategyIds={strategyIds}
           confidence={confidence ? Number(confidence) : null}
           maSessionId={latestMaSessionId}
           onAccept={handleAdvisorAccept}

@@ -338,9 +338,17 @@ def _resolve_ma_direction_match(
         return None
     bias_lower = bias.lower()
     if direction == "long":
-        return "aligned" if bias_lower == "bullish" else "opposed"
+        if bias_lower == "bullish":
+            return "aligned"
+        if bias_lower == "neutral":
+            return "neutral"
+        return "opposed"
     if direction == "short":
-        return "aligned" if bias_lower == "bearish" else "opposed"
+        if bias_lower == "bearish":
+            return "aligned"
+        if bias_lower == "neutral":
+            return "neutral"
+        return "opposed"
     return None
 
 
@@ -398,6 +406,43 @@ def _resolve_strategy_stats(
     return wr, has_stats
 
 
+def _resolve_multi_strategy_stats(
+    strategy_ids: list[int],
+    db: Session,
+    *,
+    confluence_bonus: float = 0.03,
+) -> tuple[float | None, bool]:
+    """Compute combined WR for multiple strategies with a confluence bonus.
+
+    Takes the best (max) WR across all strategies that have valid stats,
+    then adds ``confluence_bonus`` (default +3 pp) per extra strategy that
+    also has valid stats.  Capped at 1.0.
+
+    Returns (None, False) when no strategy has valid stats.
+    """
+    if not strategy_ids:
+        return None, False
+    if len(strategy_ids) == 1:
+        return _resolve_strategy_stats(strategy_ids[0], db)
+
+    valid_wrs: list[float] = []
+    any_has_stats = False
+    for sid in strategy_ids:
+        wr, has_stats = _resolve_strategy_stats(sid, db)
+        if has_stats:
+            any_has_stats = True
+        if has_stats and wr is not None:
+            valid_wrs.append(wr)
+
+    if not valid_wrs:
+        return None, any_has_stats
+
+    best_wr = max(valid_wrs)
+    n_extra = len(valid_wrs) - 1  # extra strategies beyond the best one
+    combined_wr = min(best_wr + confluence_bonus * n_extra, 1.0)
+    return combined_wr, True
+
+
 def orchestrate_risk_advisor(
     profile_id: int,
     pair: str,
@@ -407,6 +452,7 @@ def orchestrate_risk_advisor(
     confidence: int | None,
     ma_session_id: int | None,
     db: Session,
+    strategy_ids: list[int] | None = None,
 ) -> dict:
     """Full Risk Advisor orchestration — combines all P3-2 through P3-5 pieces.
 
@@ -482,7 +528,14 @@ def orchestrate_risk_advisor(
     ma_direction_match: str | None = _resolve_ma_direction_match(ma_session_id, direction, db, timeframe, pair=pair)
 
     # ── 7. Strategy stats ─────────────────────────────────────────────────────
-    strategy_wr, strategy_has_stats = _resolve_strategy_stats(strategy_id, db)
+    # strategy_ids (multi-select) takes priority over legacy strategy_id.
+    effective_ids: list[int] = strategy_ids or ([strategy_id] if strategy_id else [])
+    if len(effective_ids) > 1:
+        strategy_wr, strategy_has_stats = _resolve_multi_strategy_stats(effective_ids, db)
+    else:
+        strategy_wr, strategy_has_stats = _resolve_strategy_stats(
+            effective_ids[0] if effective_ids else None, db
+        )
 
     # ── 8. Confidence score (1-10 int, None if not provided) ──────────────────
     confidence_score: int | None = confidence
