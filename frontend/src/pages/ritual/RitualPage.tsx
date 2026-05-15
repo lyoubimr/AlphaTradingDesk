@@ -27,6 +27,11 @@ import type {
 // Constants & helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
+// Module-level WL cache: survives component unmount/remount across route changes.
+// Cleared on session start / complete / abandon — never stale between sessions.
+// Key: `${profileId}_${sessionId}`
+const _wlCache = new Map<string, SmartWLResult>()
+
 // inline type for market analysis staleness (field names match backend StalenessItem)
 type MAStaleness = { module_name: string; last_analyzed_at: string | null; days_old: number | null; is_stale: boolean }
 
@@ -1200,6 +1205,11 @@ export function RitualPage() {
     setActiveSession(sess)
     setScore(sc)
     setRecentSessions(recent)
+    // Restore cached WL result immediately — synchronous, no timing issue
+    if (sess?.id) {
+      const cached = _wlCache.get(`${profileId}_${sess.id}`)
+      if (cached) setWlResult(cached)
+    }
   }, [profileId])
 
   useEffect(() => {
@@ -1214,27 +1224,6 @@ export function RitualPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profileId, activeSession?.id, activeSession?.session_type])
 
-  // Restore cached WL result when navigating back to the page during an active session
-  useEffect(() => {
-    if (!profileId || !activeSession?.id) return
-    const key = `ritual_wl_${profileId}_${activeSession.id}`
-    const cached = sessionStorage.getItem(key)
-    if (cached) {
-      try {
-        setWlResult(JSON.parse(cached) as SmartWLResult)
-      } catch {
-        sessionStorage.removeItem(key)
-      }
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [profileId, activeSession?.id])
-
-  // Persist WL result so it survives navigation within the same session
-  useEffect(() => {
-    if (!profileId || !activeSession?.id || !wlResult) return
-    sessionStorage.setItem(`ritual_wl_${profileId}_${activeSession.id}`, JSON.stringify(wlResult))
-  }, [wlResult, profileId, activeSession?.id])
-
   const handleStart = async (type: SessionType) => {
     if (!profileId) return
     setStarting(type)
@@ -1242,6 +1231,8 @@ export function RitualPage() {
       const session = await ritualApi.startSession(profileId, type)
       setActiveSession(session)
       setWlResult(null)
+      // New session — clear any cached WL for previous sessions of this profile
+      if (session?.id) _wlCache.delete(`${profileId}_${session.id}`)
       const st = await ritualApi.getSteps(profileId, type)
       setSteps(st)
       await reload()
@@ -1264,6 +1255,7 @@ export function RitualPage() {
     setCompleteError(null)
     try {
       await ritualApi.completeSession(profileId, activeSession.id, outcome, null)
+      if (activeSession?.id) _wlCache.delete(`${profileId}_${activeSession.id}`)
       setActiveSession(null)
       setWlResult(null)
       await reload()
@@ -1275,6 +1267,7 @@ export function RitualPage() {
   const handleAbandon = async () => {
     if (!profileId || !activeSession) return
     await ritualApi.abandonSession(profileId, activeSession.id)
+    if (activeSession?.id) _wlCache.delete(`${profileId}_${activeSession.id}`)
     setActiveSession(null)
     setWlResult(null)
     await reload()
@@ -1286,7 +1279,7 @@ export function RitualPage() {
     setPinnedKey(k => k + 1)
     setWlResult(prev => {
       if (!prev) return prev
-      return {
+      const updated = {
         ...prev,
         timeframes: Object.fromEntries(
           Object.entries(prev.timeframes).map(([t, pairs]) => [
@@ -1295,6 +1288,9 @@ export function RitualPage() {
           ])
         ),
       }
+      // Keep cache in sync with pin state
+      if (profileId && activeSession?.id) _wlCache.set(`${profileId}_${activeSession.id}`, updated)
+      return updated
     })
   }
 
@@ -1304,6 +1300,8 @@ export function RitualPage() {
     try {
       const result = await ritualApi.generateWatchlist(profileId, activeSession.session_type, topN)
       setWlResult(result)
+      // Save to module-level cache — survives navigation without async timing issues
+      _wlCache.set(`${profileId}_${activeSession.id}`, result)
     } finally {
       setWlLoading(false)
     }
