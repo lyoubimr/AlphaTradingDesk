@@ -21,7 +21,7 @@ interface Props {
   pair: string | null
   timeframe: string | null
   direction: 'LONG' | 'SHORT'
-  strategyId?: number | null
+  strategyIds?: number[]
   confidence?: number | null
   /** Latest Market Analysis session ID — used to resolve MA direction alignment */
   maSessionId?: number | null
@@ -82,7 +82,7 @@ function CriterionRow({ c }: { c: CriterionDetail }) {
 
 export function RiskAdvisorPanel({
   profileId, pair, timeframe, direction,
-  strategyId, confidence, maSessionId,
+  strategyIds, confidence, maSessionId,
   onAccept, onReset, onForce,
 }: Props) {
   const [advisor,  setAdvisor]  = useState<RiskAdvisorOut | null>(null)
@@ -109,7 +109,7 @@ export function RiskAdvisorPanel({
         pair,
         timeframe,
         direction: direction.toLowerCase() as 'long' | 'short',
-        strategy_id: strategyId ?? null,
+        strategy_ids: strategyIds && strategyIds.length > 0 ? strategyIds : undefined,
         confidence: confidence ?? null,
         ma_session_id: maSessionId ?? null,
       })
@@ -122,13 +122,13 @@ export function RiskAdvisorPanel({
     } finally {
       setLoading(false)
     }
-  }, [ready, profileId, pair, timeframe, direction, strategyId, confidence, maSessionId])
+  }, [ready, profileId, pair, timeframe, direction, strategyIds, confidence, maSessionId])
 
   useEffect(() => {
     if (ready) { void fetchAdvisor() }
     else { setAdvisor(null); setError(null) }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pair, timeframe, direction, strategyId, confidence, maSessionId])
+  }, [pair, timeframe, direction, strategyIds, confidence, maSessionId])
 
   // Don't render if trigger conditions not met
   if (!ready) return null

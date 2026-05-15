@@ -140,6 +140,17 @@ def test_ma_direction_opposed_factor():
     assert abs(ma_detail.factor - 0.60) < 1e-6
 
 
+def test_ma_direction_neutral_is_not_penalized():
+    """neutral bias must map to factor 1.0 — not treated as 'opposed' (0.60)."""
+    result = _run(ma_direction_match="neutral")
+    ma_detail = next(c for c in result.criteria if c.name == "ma_direction")
+    assert abs(ma_detail.factor - 1.00) < 1e-6, (
+        f"Expected MA neutral factor 1.0, got {ma_detail.factor} — "
+        "neutral should not penalise the trade"
+    )
+    assert "Neutral" in ma_detail.value_label
+
+
 # ── Case 6: disabled criterion not included in calculation ────────────────────
 
 def test_disabled_criterion_excluded():

@@ -588,11 +588,13 @@ export const riskApi = {
     timeframe: string
     direction: string
     strategy_id?: number | null
+    strategy_ids?: number[]
     confidence?: number | null
     ma_session_id?: number | null
   }): Promise<RiskAdvisorOut> => {
     const q = new URLSearchParams({ profile_id: String(params.profile_id), pair: params.pair, timeframe: params.timeframe, direction: params.direction })
     if (params.strategy_id != null)  q.set('strategy_id',  String(params.strategy_id))
+    params.strategy_ids?.forEach(id => q.append('strategy_ids', String(id)))
     if (params.confidence  != null)  q.set('confidence',   String(params.confidence))
     if (params.ma_session_id != null) q.set('ma_session_id', String(params.ma_session_id))
     return request(`/risk/advisor?${q.toString()}`)
