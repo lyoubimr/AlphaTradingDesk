@@ -79,18 +79,15 @@ _TF_STALE_SECONDS: dict[str, int] = {
 _TF_EMA_REF_LOCAL: dict[str, int]           = {"15m": 55, "1h": 99, "4h": 200, "1d": 99, "1w": 55}
 _TF_CANDLE_LIMIT_LOCAL: dict[str, int]      = {"15m": 700, "1h": 500, "4h": 500, "1d": 500, "1w": 220}
 _TF_BREAKOUT_LOOKBACK_LOCAL: dict[str, int] = {"15m": 30, "1h": 24, "4h": 15, "1d": 10, "1w": 7}
-_EMA_ONLY_ENABLED = {"rvol": False, "mfi": False, "atr": False, "bb": False, "ema": True}
-
-
-def _refresh_ema_signals(
+def _refresh_vi_scores(
     pairs_data: list[dict],
     timeframe: str,
     is_spot: bool,
     top_n_candidates: int,
 ) -> dict[str, dict]:
-    """Fetch live candles for top N×3 candidates and recompute EMA signal only.
+    """Fetch live candles for top N×3 candidates and recompute full VI score.
 
-    Returns {symbol: {"ema_signal": str, "ema_score": float}}.
+    Returns {symbol: {"vi_score": float, "ema_signal": str, "ema_score": float}}.
     Falls back silently to empty dict on any error — caller uses snapshot values.
     """
     candidates = sorted(
@@ -123,17 +120,18 @@ def _refresh_ema_signals(
                 try:
                     candles = client.fetch_ohlcv(symbol, tf_key, limit=limit)
                     result = compute_vi_score(
-                        candles, _EMA_ONLY_ENABLED, ema_ref,
+                        candles, None, ema_ref,
                         None, None, bo_lookback,
                     )
                     refreshed[symbol] = {
+                        "vi_score": float(result.get("vi_score", entry.get("vi_score", 0.0))),
                         "ema_signal": result.get("ema_signal", entry.get("ema_signal", "")),
                         "ema_score": float(result.get("ema_score", entry.get("ema_score", 0.0))),
                     }
                 except Exception as pair_exc:  # noqa: BLE001
-                    logger.debug("_refresh_ema_signals: %s/%s failed — %s", symbol, tf_key, pair_exc)
+                    logger.debug("_refresh_vi_scores: %s/%s failed — %s", symbol, tf_key, pair_exc)
     except Exception as exc:  # noqa: BLE001
-        logger.warning("_refresh_ema_signals: client error for %s — %s", tf_key, exc)
+        logger.warning("_refresh_vi_scores: client error for %s — %s", tf_key, exc)
 
     return refreshed
 
@@ -950,13 +948,13 @@ def generate_smart_watchlist(
         if _snap_dt.tzinfo is None:
             _snap_dt = _snap_dt.replace(tzinfo=UTC)
         _snap_age = (_utcnow() - _snap_dt).total_seconds()
-        _live_ema: dict[str, dict] = {}
+        _live_vi: dict[str, dict] = {}
         if _snap_age > _stale_secs:
             logger.info(
-                "SmartWL: %s snapshot is %.0fs old (threshold %ds) — refreshing EMA live",
+                "SmartWL: %s snapshot is %.0fs old (threshold %ds) — refreshing VI live",
                 tf, _snap_age, _stale_secs,
             )
-            _live_ema = _refresh_ema_signals(snapshot.pairs, tf, _is_spot_session, top_n)
+            _live_vi = _refresh_vi_scores(snapshot.pairs, tf, _is_spot_session, top_n)
 
         tf_pairs[tf] = []
         tf_w = weights.get(tf, 1.0)
@@ -965,9 +963,9 @@ def generate_smart_watchlist(
             pair: str = entry.get("pair", "")
             if not pair:
                 continue
-            vi: float = float(entry.get("vi_score", 0))
-            # Use live-refreshed EMA signal if available, else snapshot value
-            _live = _live_ema.get(pair, {})
+            # Use live-refreshed VI + EMA if available, else fall back to snapshot value
+            _live = _live_vi.get(pair, {})
+            vi: float = float(_live.get("vi_score", entry.get("vi_score", 0)))
             ema_signal: str = _live.get("ema_signal") or entry.get("ema_signal", "")
             ema_score: float = float(_live.get("ema_score", entry.get("ema_score", 0)))
 
