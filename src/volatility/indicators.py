@@ -215,11 +215,24 @@ def compute_ema_score(
             _low = float(df["low"].iloc[-1])
             _high = float(df["high"].iloc[-1])
             _tol = retest_tolerance or 0.005
+            # Directionality guard: previous close must confirm price was on the correct side
+            # of the EMA before the wick touched it.  Without this, a pair trending 0.4% below
+            # EMA for many candles satisfies the retest_up close-tolerance by accident.
+            _prev_close = float(close.iloc[-2]) if len(close) >= 2 else last
+            _prev_ref_ema = float(ref_ema_series.iloc[-2]) if len(ref_ema_series) >= 2 else ref_ema_val
             # Wick-based retest: wick must physically touch or cross the EMA.
             # 0.1% epsilon only as floating-point / tick-size safety margin.
             # (was 0.3% — too loose, caused false positives when wick stopped visually above EMA)
-            _retest_up = _low <= ref_ema_val * 1.001 and last >= ref_ema_val * (1.0 - _tol)
-            _retest_dn = _high >= ref_ema_val * 0.999 and last <= ref_ema_val * (1.0 + _tol)
+            _retest_up = (
+                _low <= ref_ema_val * 1.001
+                and last >= ref_ema_val * (1.0 - _tol)
+                and _prev_close >= _prev_ref_ema  # prev close must have been above EMA
+            )
+            _retest_dn = (
+                _high >= ref_ema_val * 0.999
+                and last <= ref_ema_val * (1.0 + _tol)
+                and _prev_close <= _prev_ref_ema  # prev close must have been below EMA
+            )
             if _retest_up or _retest_dn:
                 # Qualify retest: was there a breakout in the last `breakout_lookback` bars?
                 # retest_after_breakout_up/down = highest-quality signal (pullback confirms BO)
