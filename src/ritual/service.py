@@ -906,9 +906,19 @@ def generate_smart_watchlist(
             "spot_weekly": ["1D", "4H"],
         }.get(session_type, ["4H", "1H"])
 
-    if top_n is None:
-        _default_top_n = DEFAULT_RITUAL_CONFIG.get("top_n", {}).get(session_type, 20)
-        top_n = cfg.get("top_n", {}).get(session_type, _default_top_n)
+    # If caller passed explicit top_n via API query param → honor it unchanged.
+    # Otherwise compute dynamically from TV 100-symbol budget (two-step: preliminary
+    # before active pins are known, then refined once pins are fetched below).
+    _top_n_auto = top_n is None
+    if _top_n_auto:
+        _n_tfs_pre = max(len(tfs), 1)
+        _mkt_pre = len(
+            cfg.get("market_analysis_pairs") or DEFAULT_RITUAL_CONFIG["market_analysis_pairs"]
+        )
+        # No pins known yet → overhead is underestimated → top_n slightly generous.
+        # This is intentional: _refresh_vi_scores benefits from a wider candidate pool.
+        _overhead_pre = 2 + _mkt_pre + _n_tfs_pre * 2
+        top_n = max(5, (100 - _overhead_pre) // _n_tfs_pre)
 
     sf = cfg.get("smart_filter", {})
     weights: dict[str, float] = sf.get(
@@ -1013,6 +1023,17 @@ def generate_smart_watchlist(
         .all()
     )
     pinned_map: dict[str, RitualPinnedPair] = {p.pair: p for p in active_pins}
+
+    if _top_n_auto:
+        # Exact overhead — active pins are now known
+        _n_tfs_f = max(len(tfs), 1)
+        _n_pins_f = len(active_pins)
+        _n_pin_tfs_f = len({p.timeframe for p in active_pins}) if active_pins else 0
+        _mkt_f = len(
+            cfg.get("market_analysis_pairs") or DEFAULT_RITUAL_CONFIG["market_analysis_pairs"]
+        )
+        _overhead_f = 2 + _mkt_f + _n_pins_f + _n_pin_tfs_f * 2 + _n_tfs_f * 2
+        top_n = max(5, (100 - _overhead_f) // _n_tfs_f)
 
     # Get broker name for filename
     broker_name = "Kraken"

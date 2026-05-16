@@ -310,13 +310,17 @@ DEFAULT_RITUAL_CONFIG: dict[str, Any] = {
         "BINANCE:ETHUSDT",
         "BINANCE:ETHBTC",
     ],
+    # top_n per session type — these are MAX CEILINGS for the Settings UI.
+    # The service computes the actual value dynamically from the TV 100-symbol
+    # budget: top_n = (100 - overhead) // n_tfs. These values are only used
+    # when top_n is passed explicitly via the API query param.
     "top_n": {
-        "weekly_setup": 20,
-        "trade_session": 10,
-        "weekend_review": 20,
-        "weekend_trading": 40,  # 2 TFs only (1H+15m) → 2×40=80 pairs, safe under TV 100 limit
-        "spot_monthly": 25,
-        "spot_weekly": 20,  # 3 timeframes now, same as weekly_setup
+        "weekly_setup": 50,
+        "trade_session": 50,
+        "weekend_review": 50,
+        "weekend_trading": 50,
+        "spot_monthly": 50,
+        "spot_weekly": 50,
     },
     "smart_filter": {
         "weights": {"1W": 4.0, "1D": 3.0, "4H": 2.0, "1H": 1.0, "15m": 0.5},
