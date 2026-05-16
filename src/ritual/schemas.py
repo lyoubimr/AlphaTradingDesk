@@ -314,7 +314,7 @@ DEFAULT_RITUAL_CONFIG: dict[str, Any] = {
         "weekly_setup": 20,
         "trade_session": 10,
         "weekend_review": 20,
-        "weekend_trading": 10,
+        "weekend_trading": 40,  # 2 TFs only (1H+15m) → 2×40=80 pairs, safe under TV 100 limit
         "spot_monthly": 25,
         "spot_weekly": 20,  # 3 timeframes now, same as weekly_setup
     },

@@ -907,7 +907,8 @@ def generate_smart_watchlist(
         }.get(session_type, ["4H", "1H"])
 
     if top_n is None:
-        top_n = cfg.get("top_n", {}).get(session_type, 20)
+        _default_top_n = DEFAULT_RITUAL_CONFIG.get("top_n", {}).get(session_type, 20)
+        top_n = cfg.get("top_n", {}).get(session_type, _default_top_n)
 
     sf = cfg.get("smart_filter", {})
     weights: dict[str, float] = sf.get(
