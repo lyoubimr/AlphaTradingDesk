@@ -69,6 +69,17 @@ const SESSION_TYPES: { type: SessionType; emoji: string; label: string; when: st
     gradient: 'from-teal-950/60 to-surface-800/40',
     steps: ['Analytics', 'Journal', 'Goals', 'Learning Note', 'Smart Watchlist'],
   },
+  {
+    type: 'weekend_trading',
+    emoji: '⚡',
+    label: 'Weekend Trading',
+    when: 'Sat / Sun (optionnel)',
+    desc: 'VI check + pins + watchlist 1H/15m + trade decision',
+    est: '~20 min',
+    accent: '#f97316',
+    gradient: 'from-orange-950/60 to-surface-800/40',
+    steps: ['VI Check', 'Pins Review', 'Smart WL 1H+15m', 'TradingView', 'Outcome'],
+  },
   // ── Spot sessions (shown for spot profiles) ──────────────────────────────
   {
     type: 'spot_monthly',
@@ -1360,7 +1371,7 @@ export function RitualPage() {
                   <div className={`grid gap-1 ${isSpot ? 'grid-cols-2' : 'grid-cols-4'}`}>
                     {(isSpot
                       ? (['spot_monthly', 'spot_weekly'] as SessionType[])
-                      : (['weekly_setup', 'trade_session', 'weekend_review'] as SessionType[])
+                      : (['weekly_setup', 'trade_session', 'weekend_review', 'weekend_trading'] as SessionType[])
                     ).map(st => {
                       const info = SESSION_TYPES.find(s => s.type === st)!
                       const count = (score.details as Record<string, Record<string, number>>)?.sessions?.[st] ?? 0

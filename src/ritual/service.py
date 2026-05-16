@@ -727,6 +727,8 @@ def _compute_discipline_points(
         return base
     if stype == "weekend_review":
         return DISCIPLINE_POINTS["weekend_review_done"]
+    if stype == "weekend_trading":
+        return DISCIPLINE_POINTS["weekend_trading_done"]
     if stype == "spot_monthly":
         return DISCIPLINE_POINTS["spot_monthly_done"]
     if stype == "spot_weekly":
@@ -762,6 +764,7 @@ def _update_weekly_score(
                     "weekly_setup": 0,
                     "trade_session": 0,
                     "weekend_review": 0,
+                    "weekend_trading": 0,
                     "spot_monthly": 0,
                     "spot_weekly": 0,
                 },
@@ -898,6 +901,7 @@ def generate_smart_watchlist(
             "weekly_setup": ["1W", "1D", "4H", "1H", "15m"],
             "trade_session": ["1D", "4H", "1H", "15m"],
             "weekend_review": ["1D", "4H"],
+            "weekend_trading": ["1H", "15m"],
             "spot_monthly": ["1W", "1D", "4H"],
             "spot_weekly": ["1D", "4H"],
         }.get(session_type, ["4H", "1H"])

@@ -30,18 +30,28 @@ def upgrade() -> None:
     # Patch only rows where smart_filter.ema_bonus_threshold is still the buggy integer 70.
     # jsonb_set replaces the key in-place; the rest of the config is untouched.
     # CAST('70' AS text) matches the stored JSON representation of the integer 70.
+    # Guard against fresh test DBs where ritual_settings may not exist yet.
     op.execute(
         """
-        UPDATE ritual_settings
-        SET config = jsonb_set(
-            config,
-            '{smart_filter,ema_bonus_threshold}',
-            '0.7'::jsonb,
-            false
-        )
-        WHERE
-            config ? 'smart_filter'
-            AND (config -> 'smart_filter' ->> 'ema_bonus_threshold') = '70'
+        DO $$
+        BEGIN
+            IF EXISTS (
+                SELECT 1 FROM information_schema.tables
+                WHERE table_name = 'ritual_settings'
+            ) THEN
+                UPDATE ritual_settings
+                SET config = jsonb_set(
+                    config,
+                    '{smart_filter,ema_bonus_threshold}',
+                    '0.7'::jsonb,
+                    false
+                )
+                WHERE
+                    config ? 'smart_filter'
+                    AND (config -> 'smart_filter' ->> 'ema_bonus_threshold') = '70';
+            END IF;
+        END
+        $$;
         """
     )
 
@@ -50,15 +60,24 @@ def downgrade() -> None:
     # Restore the buggy value for rollback (matches the old DEFAULT).
     op.execute(
         """
-        UPDATE ritual_settings
-        SET config = jsonb_set(
-            config,
-            '{smart_filter,ema_bonus_threshold}',
-            '70'::jsonb,
-            false
-        )
-        WHERE
-            config ? 'smart_filter'
-            AND (config -> 'smart_filter' ->> 'ema_bonus_threshold') = '0.7'
+        DO $$
+        BEGIN
+            IF EXISTS (
+                SELECT 1 FROM information_schema.tables
+                WHERE table_name = 'ritual_settings'
+            ) THEN
+                UPDATE ritual_settings
+                SET config = jsonb_set(
+                    config,
+                    '{smart_filter,ema_bonus_threshold}',
+                    '70'::jsonb,
+                    false
+                )
+                WHERE
+                    config ? 'smart_filter'
+                    AND (config -> 'smart_filter' ->> 'ema_bonus_threshold') = '0.7';
+            END IF;
+        END
+        $$;
         """
     )

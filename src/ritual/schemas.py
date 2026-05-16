@@ -81,13 +81,14 @@ class PinnedPairExtend(BaseModel):
 
 # ── Steps ────────────────────────────────────────────────────────────────────
 
-SessionType = Literal["weekly_setup", "trade_session", "weekend_review", "spot_monthly", "spot_weekly"]
+SessionType = Literal["weekly_setup", "trade_session", "weekend_review", "weekend_trading", "spot_monthly", "spot_weekly"]
 
 SESSION_LABELS: dict[str, str] = {
     "weekly_setup": "Weekly Setup",
     "daily_prep": "Daily Prep",
     "trade_session": "Trade Session",
     "weekend_review": "Weekend Review",
+    "weekend_trading": "Weekend Trading",
     "spot_monthly": "Spot Monthly Review",
     "spot_weekly": "Spot Weekly Check",
 }
@@ -97,6 +98,7 @@ SESSION_EMOJIS: dict[str, str] = {
     "daily_prep": "☀️",
     "trade_session": "🎯",
     "weekend_review": "📊",
+    "weekend_trading": "⚡",
     "spot_monthly": "🪙",
     "spot_weekly": "�",
 }
@@ -266,6 +268,7 @@ DISCIPLINE_POINTS: dict[str, int] = {
     "trade_session_done": 10,
     "no_opportunity": 10,   # discipline reward
     "weekend_review_done": 15,
+    "weekend_trading_done": 5,
     "vol_too_low_trade": -20,  # penalty
     "trade_outside_session": -15,  # penalty (future — Phase 5)
     # Spot session discipline points
@@ -277,7 +280,8 @@ MAX_WEEKLY_SCORE = (
     DISCIPLINE_POINTS["weekly_setup_done"]
     + DISCIPLINE_POINTS["trade_session_done"] * 5
     + DISCIPLINE_POINTS["weekend_review_done"]
-)  # = 20 + 50 + 15 = 85  (contracts profiles)
+    + DISCIPLINE_POINTS["weekend_trading_done"]
+)  # = 20 + 50 + 15 + 5 = 90  (contracts profiles)
 
 # Spot: monthly period — 4 spot_weekly sessions + 1 spot_monthly review = 100 pts/month
 MAX_MONTHLY_SCORE_SPOT = (
@@ -310,6 +314,7 @@ DEFAULT_RITUAL_CONFIG: dict[str, Any] = {
         "weekly_setup": 20,
         "trade_session": 10,
         "weekend_review": 20,
+        "weekend_trading": 10,
         "spot_monthly": 25,
         "spot_weekly": 20,  # 3 timeframes now, same as weekly_setup
     },
@@ -411,6 +416,37 @@ DEFAULT_STEPS: dict[str, list[dict]] = {
             "label": "Generate Watchlist (1W + 1D + 4H)", "est_minutes": 1,
             "is_mandatory": False, "linked_module": None,
             "cadence_hours": None, "config": {"timeframes": ["1W", "1D", "4H"]},
+        },
+    ],
+    "weekend_trading": [
+        {
+            "position": 1, "step_type": "vi_check",
+            "label": "Check Volatility Index", "est_minutes": 1,
+            "is_mandatory": True, "linked_module": "volatility",
+            "cadence_hours": None, "config": {},
+        },
+        {
+            "position": 2, "step_type": "pinned_review",
+            "label": "Review active pinned pairs", "est_minutes": 2,
+            "is_mandatory": True, "linked_module": None,
+            "cadence_hours": None, "config": {},
+        },
+        {
+            "position": 3, "step_type": "smart_wl",
+            "label": "Generate Smart Watchlist (1H + 15m)",
+            "est_minutes": 1, "is_mandatory": True, "linked_module": None,
+            "cadence_hours": None, "config": {"timeframes": ["1H", "15m"]},
+        },
+        {
+            "position": 4, "step_type": "tv_analysis",
+            "label": "Analyse in TradingView", "est_minutes": 15,
+            "is_mandatory": True, "linked_module": None,
+            "cadence_hours": None, "config": {},
+        },
+        {
+            "position": 5, "step_type": "outcome", "label": "Session Outcome",
+            "est_minutes": 1, "is_mandatory": True, "linked_module": None,
+            "cadence_hours": None, "config": {},
         },
     ],
     # ── Spot session templates ────────────────────────────────────────────────
