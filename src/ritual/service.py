@@ -727,6 +727,8 @@ def _compute_discipline_points(
         return base
     if stype == "weekend_review":
         return DISCIPLINE_POINTS["weekend_review_done"]
+    if stype == "weekend_trading":
+        return DISCIPLINE_POINTS["weekend_trading_done"]
     if stype == "spot_monthly":
         return DISCIPLINE_POINTS["spot_monthly_done"]
     if stype == "spot_weekly":
@@ -762,6 +764,7 @@ def _update_weekly_score(
                     "weekly_setup": 0,
                     "trade_session": 0,
                     "weekend_review": 0,
+                    "weekend_trading": 0,
                     "spot_monthly": 0,
                     "spot_weekly": 0,
                 },
@@ -898,12 +901,28 @@ def generate_smart_watchlist(
             "weekly_setup": ["1W", "1D", "4H", "1H", "15m"],
             "trade_session": ["1D", "4H", "1H", "15m"],
             "weekend_review": ["1D", "4H"],
+            "weekend_trading": ["1H", "15m"],
             "spot_monthly": ["1W", "1D", "4H"],
             "spot_weekly": ["1D", "4H"],
         }.get(session_type, ["4H", "1H"])
 
-    if top_n is None:
-        top_n = cfg.get("top_n", {}).get(session_type, 20)
+    # If caller passed explicit top_n via API query param → honor it unchanged.
+    # Otherwise compute dynamically from TV 100-symbol budget (two-step: preliminary
+    # before active pins are known, then refined once pins are fetched below).
+    _top_n_auto = top_n is None
+    if _top_n_auto:
+        _n_tfs_pre = max(len(tfs), 1)
+        _mkt_pre = len(
+            cfg.get("market_analysis_pairs") or DEFAULT_RITUAL_CONFIG["market_analysis_pairs"]
+        )
+        # No pins known yet → overhead is underestimated → top_n slightly generous.
+        # This is intentional: _refresh_vi_scores benefits from a wider candidate pool.
+        _overhead_pre = 2 + _mkt_pre + _n_tfs_pre * 2
+        top_n = max(5, (100 - _overhead_pre) // _n_tfs_pre)
+
+    # After both auto-compute branches, top_n is guaranteed to be int.
+    # (caller passed int, or _top_n_auto computed it above)
+    assert top_n is not None
 
     sf = cfg.get("smart_filter", {})
     weights: dict[str, float] = sf.get(
@@ -1008,6 +1027,17 @@ def generate_smart_watchlist(
         .all()
     )
     pinned_map: dict[str, RitualPinnedPair] = {p.pair: p for p in active_pins}
+
+    if _top_n_auto:
+        # Exact overhead — active pins are now known
+        _n_tfs_f = max(len(tfs), 1)
+        _n_pins_f = len(active_pins)
+        _n_pin_tfs_f = len({p.timeframe for p in active_pins}) if active_pins else 0
+        _mkt_f = len(
+            cfg.get("market_analysis_pairs") or DEFAULT_RITUAL_CONFIG["market_analysis_pairs"]
+        )
+        _overhead_f = 2 + _mkt_f + _n_pins_f + _n_pin_tfs_f * 2 + _n_tfs_f * 2
+        top_n = max(5, (100 - _overhead_f) // _n_tfs_f)
 
     # Get broker name for filename
     broker_name = "Kraken"
