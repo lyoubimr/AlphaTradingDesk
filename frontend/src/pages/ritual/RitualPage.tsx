@@ -393,8 +393,8 @@ interface StepItemProps {
   wlResult?: SmartWLResult | null
   wlLoading?: boolean
   downloadUrl?: string
-  topN?: number
-  setTopN?: (n: number) => void
+  topN?: number | null
+  setTopN?: (n: number | null) => void
   onPin?: (pair: string, tf: string) => Promise<void>
 }
 
@@ -494,7 +494,7 @@ function StepItem({
               result={wlResult ?? null}
               loading={wlLoading ?? false}
               downloadUrl={downloadUrl ?? ''}
-              topN={topN ?? 12}
+              topN={topN ?? null}
               setTopN={setTopN ?? (() => {})}
               onGenerate={onGenerateWL ?? (() => {})}
               onPin={onPin}
@@ -507,7 +507,7 @@ function StepItem({
               result={wlResult}
               loading={false}
               downloadUrl={downloadUrl ?? ''}
-              topN={topN ?? 12}
+              topN={topN ?? null}
               setTopN={setTopN ?? (() => {})}
               onGenerate={onGenerateWL ?? (() => {})}
               onPin={onPin}
@@ -628,8 +628,8 @@ function SmartWLPanel({
   result: SmartWLResult | null
   loading: boolean
   downloadUrl: string
-  topN: number
-  setTopN: (n: number) => void
+  topN: number | null
+  setTopN: (n: number | null) => void
   onGenerate: () => void
   onPin?: (pair: string, tf: string) => Promise<void>
   readOnly?: boolean
@@ -656,11 +656,13 @@ function SmartWLPanel({
         <div className="flex items-center gap-2">
           <label className="text-[11px] text-slate-400 whitespace-nowrap">Per TF:</label>
           <input
-            type="range" min={3} max={20} step={1} value={topN}
+            type="range" min={3} max={50} step={1} value={topN ?? result?.top_n ?? 20}
             onChange={(e) => setTopN(Number(e.target.value))}
             className="w-24 accent-brand-500"
           />
-          <span className="text-[12px] text-brand-400 font-semibold w-6 text-right">{topN}</span>
+          <span className="text-[12px] text-brand-400 font-semibold w-6 text-right">
+            {topN ?? (result?.top_n ? result.top_n : '?')}
+          </span>
           <span className="text-[10px] text-slate-600">/TF</span>
         </div>
         <button
@@ -1201,7 +1203,7 @@ export function RitualPage() {
   // Smart WL state
   const [wlResult, setWlResult] = useState<SmartWLResult | null>(null)
   const [wlLoading, setWlLoading] = useState(false)
-  const [topN, setTopN] = useState(12)
+  const [topN, setTopN] = useState<number | null>(null)  // null = auto-computed by backend
   const [pinnedKey, setPinnedKey] = useState(0)
 
   const elapsed = useElapsed(activeSession?.started_at ?? null)
@@ -1242,6 +1244,7 @@ export function RitualPage() {
       const session = await ritualApi.startSession(profileId, type)
       setActiveSession(session)
       setWlResult(null)
+      setTopN(null)  // reset to auto on each new session
       // New session — clear any cached WL for previous sessions of this profile
       if (session?.id) _wlCache.delete(`${profileId}_${session.id}`)
       const st = await ritualApi.getSteps(profileId, type)
@@ -1309,8 +1312,10 @@ export function RitualPage() {
     if (!profileId || !activeSession) return
     setWlLoading(true)
     try {
-      const result = await ritualApi.generateWatchlist(profileId, activeSession.session_type, topN)
+      const result = await ritualApi.generateWatchlist(profileId, activeSession.session_type, topN ?? undefined)
       setWlResult(result)
+      // Sync topN from the actual value computed by the backend
+      if (result.top_n) setTopN(result.top_n)
       // Save to module-level cache — survives navigation without async timing issues
       _wlCache.set(`${profileId}_${activeSession.id}`, result)
     } finally {
@@ -1319,7 +1324,7 @@ export function RitualPage() {
   }
 
   const downloadUrl = profileId && activeSession
-    ? ritualApi.downloadWatchlistUrl(profileId, activeSession.session_type, topN)
+    ? ritualApi.downloadWatchlistUrl(profileId, activeSession.session_type, topN ?? undefined)
     : ''
 
   // Filter obsolete step types; all pending steps are independently actionable (non-procedural)
