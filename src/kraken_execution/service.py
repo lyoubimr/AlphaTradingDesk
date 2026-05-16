@@ -571,9 +571,21 @@ def place_sl_tp_orders(
     if _sl_order_type == "stop_limit":
         _offset = Decimal(str(_sl_offset_pct)) / Decimal("100")
         if trade.direction == "long":
-            _sl_limit_price = _sl_stop_price * (Decimal("1") - _offset)
+            _raw_limit = _sl_stop_price * (Decimal("1") - _offset)
         else:
-            _sl_limit_price = _sl_stop_price * (Decimal("1") + _offset)
+            _raw_limit = _sl_stop_price * (Decimal("1") + _offset)
+        # Quantize to the same decimal precision as the stop_price so Kraken
+        # does not reject the order due to tick size violations on low-priced
+        # instruments (e.g. PF_DYMUSD @ $0.023 needs 4dp, not 7).
+        _stop_str = str(_sl_stop_price)
+        _dp = len(_stop_str.split(".")[-1]) if "." in _stop_str else 0
+        _tick = Decimal("1").scaleb(-_dp) if _dp > 0 else Decimal("1")
+        from decimal import ROUND_DOWN as _RD
+        from decimal import ROUND_UP as _RU  # noqa: PLC0415
+        if trade.direction == "long":
+            _sl_limit_price = _raw_limit.quantize(_tick, rounding=_RD)
+        else:
+            _sl_limit_price = _raw_limit.quantize(_tick, rounding=_RU)
     # ── Place SL order — with automatic fallback stop_limit → stop_market ───
     # If stop_limit is rejected by Kraken (bad limitPrice precision, unsupported pair,
     # or any API error), we auto-retry as stop_market so the position is ALWAYS protected.
@@ -993,9 +1005,19 @@ def move_to_breakeven(trade_id: int, db: Session) -> KrakenOrder:
         if _be_sl_type == "stop_limit":
             _be_offset = Decimal(str(_be_offset_pct)) / Decimal("100")
             if trade.direction == "long":
-                _be_limit_price = _be_stop_price * (Decimal("1") - _be_offset)
+                _be_raw_limit = _be_stop_price * (Decimal("1") - _be_offset)
             else:
-                _be_limit_price = _be_stop_price * (Decimal("1") + _be_offset)
+                _be_raw_limit = _be_stop_price * (Decimal("1") + _be_offset)
+            # Quantize to stop_price decimal precision (tick size guard).
+            _be_stop_str = str(_be_stop_price)
+            _be_dp = len(_be_stop_str.split(".")[-1]) if "." in _be_stop_str else 0
+            _be_tick = Decimal("1").scaleb(-_be_dp) if _be_dp > 0 else Decimal("1")
+            from decimal import ROUND_DOWN as _RD2
+            from decimal import ROUND_UP as _RU2  # noqa: PLC0415
+            if trade.direction == "long":
+                _be_limit_price = _be_raw_limit.quantize(_be_tick, rounding=_RD2)
+            else:
+                _be_limit_price = _be_raw_limit.quantize(_be_tick, rounding=_RU2)
         sl_result = client.send_order(
             order_type="stp",
             symbol=instrument.symbol,
