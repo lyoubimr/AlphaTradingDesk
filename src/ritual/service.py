@@ -920,6 +920,10 @@ def generate_smart_watchlist(
         _overhead_pre = 2 + _mkt_pre + _n_tfs_pre * 2
         top_n = max(5, (100 - _overhead_pre) // _n_tfs_pre)
 
+    # After both auto-compute branches, top_n is guaranteed to be int.
+    # (caller passed int, or _top_n_auto computed it above)
+    assert top_n is not None
+
     sf = cfg.get("smart_filter", {})
     weights: dict[str, float] = sf.get(
         "weights", {"1W": 4.0, "1D": 3.0, "4H": 2.0, "1H": 1.0, "15m": 0.5}
