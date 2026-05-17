@@ -34,7 +34,7 @@ Capital is ALWAYS updated in the same DB transaction as trade close.
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 from fastapi import HTTPException, status
@@ -63,6 +63,70 @@ from src.trades.schemas import (
 
 # CFD: safe_margin = (lots x contract_size x entry_price / max_leverage) x MARGIN_SAFETY_FACTOR
 # We flag a warning when capital_current < safe_margin.
+
+# Valid timeframes accepted by ritual_pinned_pairs CHECK constraint.
+_VALID_PIN_TF = {"1W", "1D", "4H", "1H", "15m"}
+# Normalize common variations (e.g. "1h" → "1H") to the canonical form.
+_TF_NORMALIZE: dict[str, str] = {
+    "1w": "1W", "1d": "1D", "4h": "4H", "1h": "1H",
+    "15m": "15m", "15M": "15m",
+}
+
+
+def _auto_pin_trade(db: Session, trade: Trade) -> None:
+    """Silently create a RitualPinnedPair when a trade is opened.
+
+    - Uses analyzed_timeframe (normalized) or falls back to '1H'.
+    - No-op if an active pin already exists for the same pair + TF.
+    - Never raises — pin failure must never block trade creation.
+    """
+    try:
+        from src.ritual.models import RitualPinnedPair  # noqa: PLC0415
+        from src.ritual.schemas import TTL_HOURS  # noqa: PLC0415
+
+        pair = (trade.pair or "").strip().upper()
+        if not pair:
+            return
+
+        raw_tf = (trade.analyzed_timeframe or "").strip()
+        tf = _TF_NORMALIZE.get(raw_tf) or (raw_tf if raw_tf in _VALID_PIN_TF else "1H")
+
+        existing = (
+            db.query(RitualPinnedPair)
+            .filter_by(profile_id=trade.profile_id, pair=pair, timeframe=tf, status="active")
+            .first()
+        )
+        if existing:
+            return
+
+        now = datetime.now(tz=UTC)
+        ttl_h = TTL_HOURS.get(tf, 72)
+        p = pair
+        if p.startswith(("PF_", "PI_")):
+            tv_symbol = f"KRAKEN:{p[3:]}.PM"
+        else:
+            tv_symbol = f"KRAKEN:{p.replace('/', '')}"
+
+        pin = RitualPinnedPair(
+            profile_id=trade.profile_id,
+            pair=pair,
+            tv_symbol=tv_symbol,
+            timeframe=tf,
+            note=f"Auto-pinned — trade #{trade.id}",
+            source="manual",
+            pinned_at=now,
+            expires_at=now + timedelta(hours=ttl_h),
+            status="active",
+        )
+        db.add(pin)
+        db.commit()
+        logger.info("_auto_pin_trade: pinned %s @ %s for profile %d", pair, tf, trade.profile_id)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("_auto_pin_trade: failed to auto-pin %s — %s", getattr(trade, "pair", "?"), exc)
+        try:
+            db.rollback()
+        except Exception:  # noqa: BLE001
+            pass
 
 
 def _detect_session(dt: datetime) -> str:
@@ -675,6 +739,7 @@ def open_trade(db: Session, data: TradeOpen) -> TradeOut:
         _sync_trade_strategies(db, trade, data.strategy_ids)
 
     db.commit()
+    _auto_pin_trade(db, trade)
     # Reload fresh with joinedload to populate instrument_display_name
     return _reload_and_out(db, trade.id, size_info)
 
