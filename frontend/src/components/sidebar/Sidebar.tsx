@@ -118,15 +118,17 @@ export function Sidebar({ apiStatus, environment, version, isOpen = false, onClo
       {/* ── Logo ──────────────────────────────────────────────────────────── */}
       <div className="flex items-center gap-2.5 px-4 pt-5 pb-4 border-b border-surface-800">
         {/* Greek alpha + candlestick SVG mark */}
-        <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-brand-600 shadow-lg shadow-brand-900/50 shrink-0">
-          <TrendingUp size={15} className="text-white" strokeWidth={2.5} />
-        </div>
-        <div className="flex-1">
-          <div className="flex items-baseline gap-1">
-            <span className="text-brand-400 font-bold text-sm tracking-tight">α</span>
-            <span className="text-slate-100 font-semibold text-sm tracking-tight">TradingDesk</span>
+        <NavLink to="/dashboard" className="flex items-center gap-2.5 flex-1 min-w-0">
+          <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-brand-600 shadow-lg shadow-brand-900/50 shrink-0">
+            <TrendingUp size={15} className="text-white" strokeWidth={2.5} />
           </div>
-        </div>
+          <div className="flex-1">
+            <div className="flex items-baseline gap-1">
+              <span className="text-brand-400 font-bold text-sm tracking-tight">α</span>
+              <span className="text-slate-100 font-semibold text-sm tracking-tight">TradingDesk</span>
+            </div>
+          </div>
+        </NavLink>
         {/* Close button — mobile only */}
         {onClose && (
           <button
