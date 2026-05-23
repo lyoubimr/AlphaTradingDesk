@@ -574,11 +574,13 @@ def place_sl_tp_orders(
             _raw_limit = _sl_stop_price * (Decimal("1") - _offset)
         else:
             _raw_limit = _sl_stop_price * (Decimal("1") + _offset)
-        # Quantize to the same decimal precision as the stop_price so Kraken
+        # Quantize limit to the same natural precision as the stop_price so Kraken
         # does not reject the order due to tick size violations on low-priced
         # instruments (e.g. PF_DYMUSD @ $0.023 needs 4dp, not 7).
-        _stop_str = str(_sl_stop_price)
-        _dp = len(_stop_str.split(".")[-1]) if "." in _stop_str else 0
+        # Strip trailing zeros first — DB stores Numeric(20,8) so str() always gives
+        # 8dp (e.g. "25.30000000") which would yield a spuriously tight tick.
+        _stop_norm = format(_sl_stop_price, 'f').rstrip('0').rstrip('.')
+        _dp = len(_stop_norm.split(".")[-1]) if "." in _stop_norm else 0
         _tick = Decimal("1").scaleb(-_dp) if _dp > 0 else Decimal("1")
         from decimal import ROUND_DOWN as _RD
         from decimal import ROUND_UP as _RU  # noqa: PLC0415
@@ -1008,9 +1010,11 @@ def move_to_breakeven(trade_id: int, db: Session) -> KrakenOrder:
                 _be_raw_limit = _be_stop_price * (Decimal("1") - _be_offset)
             else:
                 _be_raw_limit = _be_stop_price * (Decimal("1") + _be_offset)
-            # Quantize to stop_price decimal precision (tick size guard).
-            _be_stop_str = str(_be_stop_price)
-            _be_dp = len(_be_stop_str.split(".")[-1]) if "." in _be_stop_str else 0
+            # Strip trailing zeros from the DB-stored price (Numeric(20,8) always
+            # serialises with 8dp: "25.30000000"). Deriving tick from the raw string
+            # would give dp=8 → tick=0.00000001 → Kraken rejects with invalidPrice.
+            _be_stop_norm = format(_be_stop_price, 'f').rstrip('0').rstrip('.')
+            _be_dp = len(_be_stop_norm.split(".")[-1]) if "." in _be_stop_norm else 0
             _be_tick = Decimal("1").scaleb(-_be_dp) if _be_dp > 0 else Decimal("1")
             from decimal import ROUND_DOWN as _RD2
             from decimal import ROUND_UP as _RU2  # noqa: PLC0415
@@ -1018,17 +1022,63 @@ def move_to_breakeven(trade_id: int, db: Session) -> KrakenOrder:
                 _be_limit_price = _be_raw_limit.quantize(_be_tick, rounding=_RD2)
             else:
                 _be_limit_price = _be_raw_limit.quantize(_be_tick, rounding=_RU2)
-        sl_result = client.send_order(
-            order_type="stp",
-            symbol=instrument.symbol,
-            side=_exit_side(trade),
-            size=str(remaining_size),
-            stop_price=str(_be_stop_price),
-            limit_price=str(_be_limit_price) if _be_limit_price is not None else None,
-            reduce_only=True,
-        )
 
-    new_order_id = sl_result.get("sendStatus", {}).get("order_id", "")
+        # ── Place BE SL — with automatic fallback stop_limit → stop_market ──
+        # Mirrors open_trade: if stop_limit is rejected (invalidPrice, unsupported
+        # pair…), auto-retry as stop_market so the SL is ALWAYS placed.
+        try:
+            sl_result = client.send_order(
+                order_type="stp",
+                symbol=instrument.symbol,
+                side=_exit_side(trade),
+                size=str(remaining_size),
+                stop_price=str(_be_stop_price),
+                limit_price=str(_be_limit_price) if _be_limit_price is not None else None,
+                reduce_only=True,
+                raise_on_rejection=False,
+            )
+        except Exception as _be_sl_err:
+            logger.error("automation_be_sl_api_hard_error", trade_id=trade_id, error=str(_be_sl_err))
+            sl_result = {"sendStatus": {"status": "apiError", "order_id": ""}}
+
+        _be_send_status = sl_result.get("sendStatus", {})
+        _be_placement_status = _be_send_status.get("status", "unknown")
+
+        # Fallback: stop_limit rejected → retry as stop_market
+        if _be_placement_status != "placed" and _be_sl_type == "stop_limit":
+            logger.warning(
+                "automation_be_stop_limit_rejected_fallback_stop_market",
+                trade_id=trade_id,
+                original_status=_be_placement_status,
+            )
+            try:
+                sl_result = client.send_order(
+                    order_type="stp",
+                    symbol=instrument.symbol,
+                    side=_exit_side(trade),
+                    size=str(remaining_size),
+                    stop_price=str(_be_stop_price),
+                    limit_price=None,
+                    reduce_only=True,
+                    raise_on_rejection=False,
+                )
+                _be_send_status = sl_result.get("sendStatus", {})
+                _be_placement_status = _be_send_status.get("status", "unknown")
+                if _be_placement_status == "placed":
+                    _be_limit_price = None  # stop_market placed — no limit_price
+                    logger.info("automation_be_fallback_stop_market_placed", trade_id=trade_id)
+            except Exception as _be_fb_err:
+                logger.error("automation_be_fallback_also_failed", trade_id=trade_id, error=str(_be_fb_err))
+                _be_placement_status = "fallback_failed"
+
+        if _be_placement_status != "placed":
+            raise KrakenAPIError(
+                0,
+                f"BE SL rejected by Kraken — status={_be_placement_status!r} | "
+                f"symbol={instrument.symbol} stop={_be_stop_price} size={remaining_size}",
+            )
+
+    new_order_id = _be_send_status.get("order_id", "")
     new_sl = KrakenOrder(
         trade_id=trade.id,
         profile_id=trade.profile_id,
