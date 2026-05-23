@@ -98,12 +98,9 @@ function StrategySnapshotGallery({
   const [deleting,  setDeleting]  = useState<string | null>(null)
   const [error,     setError]     = useState<string | null>(null)
   const [lightbox,  setLightbox]  = useState<string | null>(null)
-
   const list = strategy.screenshot_urls ?? []
 
-  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file) return
+  const uploadFile = async (file: File) => {
     setUploading(true); setError(null)
     try {
       const updated = profileId === null
@@ -114,9 +111,30 @@ function StrategySnapshotGallery({
       setError((ex as Error).message)
     } finally {
       setUploading(false)
-      e.target.value = ''
     }
   }
+
+  // Clipboard paste — fires whenever this gallery is mounted (i.e. strategy is in edit mode)
+  useEffect(() => {
+    const onPaste = (e: ClipboardEvent) => {
+      const target = e.target as HTMLElement
+      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') return
+      const items = e.clipboardData?.items
+      if (!items) return
+      for (const item of Array.from(items)) {
+        if (item.type.startsWith('image/')) {
+          const blob = item.getAsFile()
+          if (!blob) continue
+          const file = new File([blob], `paste-${Date.now()}.png`, { type: blob.type })
+          void uploadFile(file)
+          break
+        }
+      }
+    }
+    document.addEventListener('paste', onPaste)
+    return () => document.removeEventListener('paste', onPaste)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [strategy.id, profileId])
 
   const handleDelete = async (url: string) => {
     setDeleting(url); setError(null)
@@ -136,7 +154,7 @@ function StrategySnapshotGallery({
     <div className="space-y-2">
       <label className="text-[10px] text-slate-500 uppercase tracking-wide flex items-center gap-1">
         <ImagePlus size={10} /> Screenshots
-        <span className="text-slate-600 normal-case">(charts, examples · multiple allowed)</span>
+        <span className="text-slate-600 normal-case">(charts, examples · multiple allowed · or paste 📋)</span>
       </label>
 
       {/* Lightbox */}
@@ -209,7 +227,7 @@ function StrategySnapshotGallery({
             type="file"
             accept="image/*"
             className="hidden"
-            onChange={(e) => void handleUpload(e)}
+          onChange={(e) => { if (e.target.files?.[0]) void uploadFile(e.target.files[0]); e.target.value = '' }}
             disabled={uploading}
           />
         </label>
