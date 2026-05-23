@@ -22,6 +22,7 @@ import { Link } from 'react-router-dom'
 import {
   BarChart2, Plus, Loader2, RefreshCw, Trash2,
   Pencil, X, Check, BookOpen, ExternalLink, Globe, User, ImagePlus, Maximize2,
+  ChevronLeft, ChevronRight,
 } from 'lucide-react'
 import { PageHeader } from '../../components/ui/PageHeader'
 import { useProfile } from '../../context/ProfileContext'
@@ -97,7 +98,7 @@ function StrategySnapshotGallery({
   const [uploading, setUploading] = useState(false)
   const [deleting,  setDeleting]  = useState<string | null>(null)
   const [error,     setError]     = useState<string | null>(null)
-  const [lightbox,  setLightbox]  = useState<string | null>(null)
+  const [lightboxIdx, setLightboxIdx] = useState<number | null>(null)
   const list = strategy.screenshot_urls ?? []
 
   const uploadFile = async (file: File) => {
@@ -157,30 +158,58 @@ function StrategySnapshotGallery({
         <span className="text-slate-600 normal-case">(charts, examples · multiple allowed · or paste 📋)</span>
       </label>
 
-      {/* Lightbox */}
-      {lightbox && (
+      {/* Lightbox with navigation */}
+      {lightboxIdx !== null && (
         <div
-          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/85 backdrop-blur-sm"
-          onClick={() => setLightbox(null)}
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/90 backdrop-blur-sm"
+          onClick={() => setLightboxIdx(null)}
         >
           <img
-            src={lightbox}
-            alt="screenshot"
-            className="max-w-[90vw] max-h-[90vh] object-contain rounded-xl shadow-2xl"
+            src={list[lightboxIdx]}
+            alt={`screenshot ${lightboxIdx + 1}`}
+            className="max-w-[90vw] max-h-[85vh] object-contain rounded-xl shadow-2xl"
+            onClick={e => e.stopPropagation()}
           />
+          {/* Close */}
           <button
             type="button"
-            onClick={() => setLightbox(null)}
-            className="absolute top-4 right-4 text-slate-400 hover:text-white bg-black/50 rounded-full p-2"
+            onClick={() => setLightboxIdx(null)}
+            className="absolute top-4 right-4 text-slate-400 hover:text-white bg-black/60 rounded-full p-2"
           >
             <X size={18} />
           </button>
+          {/* Prev */}
+          {lightboxIdx > 0 && (
+            <button
+              type="button"
+              onClick={e => { e.stopPropagation(); setLightboxIdx(lightboxIdx - 1) }}
+              className="absolute left-4 top-1/2 -translate-y-1/2 text-white bg-black/60 hover:bg-black/80 rounded-full p-2 transition-colors"
+            >
+              <ChevronLeft size={24} />
+            </button>
+          )}
+          {/* Next */}
+          {lightboxIdx < list.length - 1 && (
+            <button
+              type="button"
+              onClick={e => { e.stopPropagation(); setLightboxIdx(lightboxIdx + 1) }}
+              className="absolute right-4 top-1/2 -translate-y-1/2 text-white bg-black/60 hover:bg-black/80 rounded-full p-2 transition-colors"
+            >
+              <ChevronRight size={24} />
+            </button>
+          )}
+          {/* Counter */}
+          {list.length > 1 && (
+            <div className="absolute bottom-4 left-1/2 -translate-x-1/2 text-xs text-slate-400 bg-black/60 px-3 py-1 rounded-full">
+              {lightboxIdx + 1} / {list.length}
+            </div>
+          )}
         </div>
       )}
 
       {/* Grid */}
       <div className="flex flex-wrap gap-2">
-        {list.map((url) => (
+        {list.map((url, idx) => (
           <div
             key={url}
             className="relative group w-24 h-24 rounded-lg overflow-hidden border border-surface-600 bg-surface-700 shrink-0"
@@ -189,11 +218,11 @@ function StrategySnapshotGallery({
               src={url}
               alt="screenshot"
               className="w-full h-full object-cover cursor-pointer"
-              onClick={() => setLightbox(url)}
+              onClick={() => setLightboxIdx(idx)}
             />
             <button
               type="button"
-              onClick={() => setLightbox(url)}
+              onClick={() => setLightboxIdx(idx)}
               className="absolute top-1 left-1 opacity-0 group-hover:opacity-100 bg-black/60 text-white rounded p-0.5 transition-opacity"
             >
               <Maximize2 size={11} />
@@ -286,10 +315,13 @@ function StrategyRow({
 }) {
   const isGlobal = strategy.profile_id === null
 
-  const [editing,  setEditing]  = useState(false)
-  const [saving,   setSaving]   = useState(false)
-  const [deleting, setDeleting] = useState(false)
-  const [error,    setError]    = useState<string | null>(null)
+  const [editing,     setEditing]     = useState(false)
+  const [saving,      setSaving]      = useState(false)
+  const [deleting,    setDeleting]    = useState(false)
+  const [error,       setError]       = useState<string | null>(null)
+  const [readLbIdx,   setReadLbIdx]   = useState<number | null>(null)
+
+  const readUrls = strategy.screenshot_urls ?? []
 
   const [name,           setName]           = useState(strategy.name)
   const [description,    setDescription]    = useState(strategy.description ?? '')
@@ -447,22 +479,67 @@ function StrategyRow({
 
       {/* Image preview (outside edit mode) — removed, screenshots gallery below */}
 
-      {/* Screenshot gallery read-view */}
-      {!editing && strategy.screenshot_urls && strategy.screenshot_urls.length > 0 && (
+      {/* Screenshot gallery read-view — in-page lightbox */}
+      {!editing && readUrls.length > 0 && (
         <div className="px-4 pb-4">
           <p className="text-[10px] text-slate-600 uppercase tracking-wide mb-1.5">Screenshots</p>
           <div className="flex flex-wrap gap-2">
-            {strategy.screenshot_urls.map((url) => (
+            {readUrls.map((url, idx) => (
               <div
                 key={url}
-                className="w-20 h-20 rounded-lg overflow-hidden border border-surface-700 bg-surface-900 cursor-pointer"
-                onClick={() => window.open(url, '_blank')}
-                title="Open full size"
+                className="w-20 h-20 rounded-lg overflow-hidden border border-surface-700 bg-surface-900 cursor-pointer hover:border-surface-500 transition-colors"
+                onClick={() => setReadLbIdx(idx)}
+                title="View screenshot"
               >
                 <img src={url} alt="screenshot" className="w-full h-full object-cover" />
               </div>
             ))}
           </div>
+        </div>
+      )}
+
+      {/* Read-mode lightbox with navigation */}
+      {readLbIdx !== null && (
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/90 backdrop-blur-sm"
+          onClick={() => setReadLbIdx(null)}
+        >
+          <img
+            src={readUrls[readLbIdx]}
+            alt={`screenshot ${readLbIdx + 1}`}
+            className="max-w-[90vw] max-h-[85vh] object-contain rounded-xl shadow-2xl"
+            onClick={e => e.stopPropagation()}
+          />
+          <button
+            type="button"
+            onClick={() => setReadLbIdx(null)}
+            className="absolute top-4 right-4 text-slate-400 hover:text-white bg-black/60 rounded-full p-2"
+          >
+            <X size={18} />
+          </button>
+          {readLbIdx > 0 && (
+            <button
+              type="button"
+              onClick={e => { e.stopPropagation(); setReadLbIdx(readLbIdx - 1) }}
+              className="absolute left-4 top-1/2 -translate-y-1/2 text-white bg-black/60 hover:bg-black/80 rounded-full p-2 transition-colors"
+            >
+              <ChevronLeft size={24} />
+            </button>
+          )}
+          {readLbIdx < readUrls.length - 1 && (
+            <button
+              type="button"
+              onClick={e => { e.stopPropagation(); setReadLbIdx(readLbIdx + 1) }}
+              className="absolute right-4 top-1/2 -translate-y-1/2 text-white bg-black/60 hover:bg-black/80 rounded-full p-2 transition-colors"
+            >
+              <ChevronRight size={24} />
+            </button>
+          )}
+          {readUrls.length > 1 && (
+            <div className="absolute bottom-4 left-1/2 -translate-x-1/2 text-xs text-slate-400 bg-black/60 px-3 py-1 rounded-full">
+              {readLbIdx + 1} / {readUrls.length}
+            </div>
+          )}
         </div>
       )}
 
