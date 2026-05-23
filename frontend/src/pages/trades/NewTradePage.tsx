@@ -30,7 +30,7 @@ import {
 } from 'lucide-react'
 import { PageHeader } from '../../components/ui/PageHeader'
 import { useProfile } from '../../context/ProfileContext'
-import { instrumentsApi, tradesApi, strategiesApi, statsApi, goalsApi, maApi, automationApi } from '../../lib/api'
+import { instrumentsApi, tradesApi, strategiesApi, statsApi, goalsApi, maApi, automationApi, ApiDetailError } from '../../lib/api'
 import { useRiskCalc } from '../../hooks/useRiskCalc'
 import type { RiskCalcResult } from '../../hooks/useRiskCalc'
 import { cn } from '../../lib/cn'
@@ -1012,6 +1012,7 @@ export function NewTradePage() {
 
   const [submitting, setSubmitting]       = useState(false)
   const [error, setError]                 = useState<string | null>(null)
+  const [budgetBlock, setBudgetBlock]     = useState<{ force_allowed: boolean } | null>(null)
   const [automationWarning, setAutomationWarning] = useState<{ msg: string; tradeId: number } | null>(null)
 
   // ── Stable object URLs for screenshot thumbnails (avoids scroll-jump on add) ──
@@ -1050,6 +1051,7 @@ export function NewTradePage() {
   // ── Risk Advisor state ────────────────────────────────────────────────────
   const [advisorSnapshot, setAdvisorSnapshot] = useState<Record<string, unknown> | null>(null)
   const [forceOpen, setForceOpen]             = useState(false)
+  const formRef                               = useRef<HTMLFormElement>(null)
 
   // ── Automation (Crypto profiles only) ────────────────────────────────────
   const [automateOnCreate,        setAutomateOnCreate]        = useState(false)
@@ -1513,7 +1515,7 @@ export function NewTradePage() {
       setError('Please select at least one strategy before opening a trade.')
       return
     }
-    setError(null); setSubmitting(true)
+    setError(null); setBudgetBlock(null); setSubmitting(true)
     // ⚠️ Market order deviation warning: if declared entry is >1% off mark price, warn before executing
     if (orderType === 'MARKET' && automateOnCreate && markPriceCached != null && entryNum != null) {
       const dev = Math.abs(entryNum - markPriceCached) / markPriceCached
@@ -1599,9 +1601,10 @@ export function NewTradePage() {
       navigate('/trades')
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Unknown error'
-      // Surface budget block clearly so the user knows to use the advisor panel
-      if (msg.includes('RISK_BUDGET_EXCEEDED')) {
-        setError('Risk budget exceeded — not enough budget for this trade. Use the Risk Advisor panel above to force open (if allowed) or close existing positions first.')
+      // Surface budget block clearly so the user can force-open if allowed
+      if (err instanceof ApiDetailError && err.payload?.code === 'RISK_BUDGET_EXCEEDED') {
+        setError(msg)
+        setBudgetBlock({ force_allowed: !!err.payload.force_allowed })
       } else {
         setError(msg)
       }
@@ -1651,11 +1654,30 @@ export function NewTradePage() {
         subtitle={`${activeProfile.name} · ${activeProfile.market_type} · ${Number(activeProfile.capital_current).toLocaleString()} ${ccy}`}
       />
 
-      <form onSubmit={handleSubmit} className="max-w-2xl space-y-5 mt-2">
+      <form ref={formRef} onSubmit={handleSubmit} className="max-w-2xl space-y-5 mt-2">
 
         {error && (
           <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/30 text-red-400 text-xs">
             <AlertTriangle size={14} className="shrink-0" />{error}
+          </div>
+        )}
+
+        {budgetBlock && (
+          <div className="rounded-lg bg-amber-500/10 border border-amber-500/30 px-3 py-2.5 flex items-center justify-between gap-3">
+            <p className="text-xs text-amber-300">
+              {budgetBlock.force_allowed
+                ? 'Risk budget exceeded. Force-open is allowed — click to override and open anyway.'
+                : 'Risk budget exceeded. Force-open is disabled in Risk Settings.'}
+            </p>
+            {budgetBlock.force_allowed && (
+              <button
+                type="button"
+                onClick={() => { setForceOpen(true); setBudgetBlock(null); setError(null); setTimeout(() => formRef.current?.requestSubmit(), 0) }}
+                className="shrink-0 text-xs font-semibold px-3 py-1 rounded bg-amber-500/20 border border-amber-500/40 text-amber-300 hover:bg-amber-500/30 transition-colors"
+              >
+                Force open
+              </button>
+            )}
           </div>
         )}
 
