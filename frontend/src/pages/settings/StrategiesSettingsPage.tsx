@@ -16,7 +16,7 @@
 //   DELETE /api/profiles/{id}/strategies/{sid}/image
 // ──────────────────────────────────────────────────────────────────────────
 
-import { useEffect, useRef, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import type React from 'react'
 import { Link } from 'react-router-dom'
 import {
@@ -98,9 +98,6 @@ function StrategySnapshotGallery({
   const [deleting,  setDeleting]  = useState<string | null>(null)
   const [error,     setError]     = useState<string | null>(null)
   const [lightbox,  setLightbox]  = useState<string | null>(null)
-  // Track whether mouse is over this gallery so paste is scoped to the hovered one
-  const hoveredRef = useRef(false)
-
   const list = strategy.screenshot_urls ?? []
 
   const uploadFile = async (file: File) => {
@@ -117,10 +114,9 @@ function StrategySnapshotGallery({
     }
   }
 
-  // Clipboard paste — scoped to the gallery under the mouse cursor
+  // Clipboard paste — fires whenever this gallery is mounted (i.e. strategy is in edit mode)
   useEffect(() => {
     const onPaste = (e: ClipboardEvent) => {
-      if (!hoveredRef.current) return
       const target = e.target as HTMLElement
       if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') return
       const items = e.clipboardData?.items
@@ -155,11 +151,7 @@ function StrategySnapshotGallery({
   }
 
   return (
-    <div
-      className="space-y-2"
-      onMouseEnter={() => { hoveredRef.current = true }}
-      onMouseLeave={() => { hoveredRef.current = false }}
-    >
+    <div className="space-y-2">
       <label className="text-[10px] text-slate-500 uppercase tracking-wide flex items-center gap-1">
         <ImagePlus size={10} /> Screenshots
         <span className="text-slate-600 normal-case">(charts, examples · multiple allowed · or paste 📋)</span>
