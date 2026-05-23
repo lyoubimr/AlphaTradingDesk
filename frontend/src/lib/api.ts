@@ -30,6 +30,16 @@ import type {
 
 const BASE = '/api'
 
+/** Structured API error that preserves the full detail payload from FastAPI. */
+export class ApiDetailError extends Error {
+  readonly payload: Record<string, unknown>
+  constructor(message: string, payload: Record<string, unknown> = {}) {
+    super(message)
+    this.name = 'ApiDetailError'
+    this.payload = payload
+  }
+}
+
 async function request<T>(
   path: string,
   options?: RequestInit,
@@ -52,8 +62,10 @@ async function request<T>(
         .join(' · ')
     } else if (body?.detail && typeof body.detail === 'object') {
       // Risk Guard and similar return detail as a dict with a nested "detail" string.
-      detail = (body.detail as Record<string, unknown>).detail as string
-        ?? JSON.stringify(body.detail)
+      // Preserve the full payload so callers can inspect code/force_allowed/etc.
+      const payload = body.detail as Record<string, unknown>
+      detail = (payload.detail as string | undefined) ?? JSON.stringify(payload)
+      throw new ApiDetailError(detail, payload)
     } else {
       detail = body?.detail ?? `HTTP ${res.status}`
     }

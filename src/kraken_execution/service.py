@@ -970,7 +970,7 @@ def move_to_breakeven(trade_id: int, db: Session) -> KrakenOrder:
     # ── Compute remaining position size from open positions ─────────────────
     # Always derive size from open positions, not from the previous SL order.
     # This ensures partial TP fills are accounted for.
-    from src.core.models.position import Position  # noqa: PLC0415
+    from src.core.models.trade import Position  # noqa: PLC0415
     from src.kraken_execution.precision import quantize_size as _qs  # noqa: PLC0415
 
     open_positions = (
