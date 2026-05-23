@@ -618,9 +618,14 @@ export function TradesPage() {
                         </span>
                       </span>
                       {pnlNum !== null ? (
-                        <span className={cn('font-semibold', isBull ? 'text-green-400' : isBear ? 'text-red-400' : 'text-slate-400')}>
-                          {isBull ? '+' : ''}{pnlNum.toFixed(2)}
-                        </span>
+                        <div className="flex items-baseline gap-1.5">
+                          <span className={cn('font-semibold', isBull ? 'text-green-400' : isBear ? 'text-red-400' : 'text-slate-400')}>
+                            {isBull ? '+' : ''}{pnlNum.toFixed(2)}
+                          </span>
+                          {t.tp_hits && t.tp_hits.length > 0 && (
+                            <span className="text-[9px] text-emerald-400/60">{t.tp_hits.map(n => `TP${n}`).join(' ')}✓</span>
+                          )}
+                        </div>
                       ) : (t.status === 'open' || t.status === 'partial') ? (
                         <span className="text-brand-500/60">Open</span>
                       ) : null}
@@ -679,10 +684,22 @@ export function TradesPage() {
               <table className="w-full text-xs">
                 <thead>
                   <tr className="border-b border-surface-700">
-                    {['Date', 'Pair', 'Side', 'Status', 'Entry', 'Exit', 'Stop Loss', 'Risk', 'Strategy', 'P&L', '', ''].map((h, i) => (
+                    {([
+                      ['Date',     ''],
+                      ['Pair',     ''],
+                      ['Side',     ''],
+                      ['Status',   ''],
+                      ['Entry',    ''],
+                      ['Exit',     ''],
+                      ['SL',       'hidden xl:table-cell'],
+                      ['Risk $',   'hidden xl:table-cell'],
+                      ['Strategy', ''],
+                      ['P&L',      ''],
+                      ['',         ''],
+                    ] as [string, string][]).map(([h, cls], i) => (
                       <th
                         key={i}
-                        className="px-4 py-2.5 text-left text-slate-600 font-medium uppercase tracking-wider whitespace-nowrap"
+                        className={cn('px-4 py-2.5 text-left text-slate-600 font-medium uppercase tracking-wider whitespace-nowrap', cls)}
                       >
                         {h}
                       </th>
@@ -721,12 +738,17 @@ export function TradesPage() {
                             : '—'}
                         </td>
 
-                        {/* Pair */}
+                        {/* Pair + reviewed indicator */}
                         <td className="px-4 py-2.5 font-medium">
-                          <span className="text-slate-200">{t.instrument_display_name ?? t.pair}</span>
-                          {t.instrument_display_name && (
-                            <span className="ml-1.5 text-[10px] text-slate-600 font-mono">{t.pair}</span>
-                          )}
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            <span className="text-slate-200 truncate">{t.instrument_display_name ?? t.pair}</span>
+                            {t.instrument_display_name && (
+                              <span className="shrink-0 text-[10px] text-slate-600 font-mono">{t.pair}</span>
+                            )}
+                            {t.is_reviewed && (
+                              <span className="shrink-0 text-emerald-500 leading-none" title="Post-trade reviewed">📋</span>
+                            )}
+                          </div>
                         </td>
 
                         {/* Direction */}
@@ -768,16 +790,16 @@ export function TradesPage() {
                           )}
                         </td>
 
-                        {/* Stop loss */}
-                        <td className="px-4 py-2.5 text-red-500/70 tabular-nums font-mono">
+                        {/* Stop loss — hidden on small/medium screens */}
+                        <td className="hidden xl:table-cell px-4 py-2.5 text-red-500/70 tabular-nums font-mono">
                           {parseFloat(t.stop_loss).toLocaleString('en-US', {
                             minimumFractionDigits: 2,
                             maximumFractionDigits: 5,
                           })}
                         </td>
 
-                        {/* Risk */}
-                        <td className="px-4 py-2.5 text-slate-500 tabular-nums">
+                        {/* Risk — hidden on small/medium screens */}
+                        <td className="hidden xl:table-cell px-4 py-2.5 text-slate-500 tabular-nums">
                           ${parseFloat(t.risk_amount).toFixed(2)}
                         </td>
 
@@ -802,16 +824,24 @@ export function TradesPage() {
                           )}
                         </td>
 
-                        {/* P&L */}
+                        {/* P&L + TP hits */}
                         <td className="px-4 py-2.5 tabular-nums font-mono">
                           {pnlNum !== null ? (
-                            <span className={isBull ? 'text-green-400' : isBear ? 'text-red-400' : 'text-slate-400'}>
-                              {isBull ? '+' : ''}{pnlNum.toFixed(2)}
-                              {/* Show TP marker for partial booked P&L */}
-                              {!t.realized_pnl && t.booked_pnl && (
-                                <span className="ml-1 text-[9px] text-slate-500">partial</span>
+                            <div className="flex flex-col gap-0.5">
+                              <span className={isBull ? 'text-green-400' : isBear ? 'text-red-400' : 'text-slate-400'}>
+                                {isBull ? '+' : ''}{pnlNum.toFixed(2)}
+                                {!t.realized_pnl && t.booked_pnl && (
+                                  <span className="ml-1 text-[9px] text-slate-500">partial</span>
+                                )}
+                              </span>
+                              {t.tp_hits && t.tp_hits.length > 0 && (
+                                <div className="flex gap-1">
+                                  {t.tp_hits.map((n) => (
+                                    <span key={n} className="text-[9px] text-emerald-400/70 font-medium">TP{n}✓</span>
+                                  ))}
+                                </div>
                               )}
-                            </span>
+                            </div>
                           ) : t.status === 'cancelled' ? (
                             <span className="text-slate-700">—</span>
                           ) : (
@@ -819,24 +849,7 @@ export function TradesPage() {
                           )}
                         </td>
 
-                        {/* Reviewed badge + TP hits */}
-                        <td className="px-2 py-2.5">
-                          <div className="flex flex-wrap gap-1">
-                            {t.status === 'closed' && t.tp_hits?.map((n) => (
-                              <span key={n} className="inline-flex items-center px-1.5 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/30 text-[10px] font-medium text-emerald-400 whitespace-nowrap">
-                                TP{n} ✅
-                              </span>
-                            ))}
-                            {t.is_reviewed && (
-                              <span
-                                className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/30 text-[10px] font-medium text-emerald-400 whitespace-nowrap"
-                                title="Post-trade review complète : outcome + notes + screenshot + tags"
-                              >
-                                📋 reviewed
-                              </span>
-                            )}
-                          </div>
-                        </td>
+
 
                         {/* Actions */}
                         <td className="px-4 py-2.5" onClick={(e) => e.stopPropagation()}>

@@ -50,6 +50,8 @@ from src.kraken_execution.service import (
     list_kraken_orders,
     move_to_breakeven,
     open_automated_trade,
+    recover_orphaned_trade,
+    retry_sl_placement,
     sync_pending_fill,
     sync_sl_tp_fills,
     update_automation_settings,
@@ -308,6 +310,46 @@ def trigger_sync_sl_tp(
     """
     try:
         return sync_sl_tp_fills(trade_id, db)
+    except Exception as exc:
+        raise _map_exc(exc) from exc
+
+
+@router.post("/trades/{trade_id}/retry-sl", response_model=KrakenOrderOut)
+def trigger_retry_sl(
+    trade_id: int,
+    db: Session = Depends(get_db),
+) -> KrakenOrderOut:
+    """Re-attempt SL placement for an open trade with a missing/failed SL order.
+
+    - Cancels any existing error SL rows.
+    - Computes remaining size from open positions (accounts for partial TP fills).
+    - Tries stop_limit first (profile default), falls back to stop_market on rejection.
+    - Idempotent: returns 400 if an open SL is already active.
+    """
+    try:
+        order = retry_sl_placement(trade_id, db)
+    except Exception as exc:
+        raise _map_exc(exc) from exc
+    return KrakenOrderOut.model_validate(order)
+
+
+@router.post("/trades/{trade_id}/recover-orphaned")
+def trigger_recover_orphaned(
+    trade_id: int,
+    db: Session = Depends(get_db),
+) -> dict:
+    """Sync an open automated trade that was closed externally on Kraken.
+
+    Checks Kraken for the current open positions. If the position is gone from
+    Kraken (manual close, SL hit with no ATD order, liquidation), closes the
+    trade in ATD at the most recent fill price (mark price as fallback).
+
+    Returns:
+        {"closed": True, "exit_price": float, "symbol": str}
+        {"closed": False, "reason": str, ...}
+    """
+    try:
+        return recover_orphaned_trade(trade_id, db)
     except Exception as exc:
         raise _map_exc(exc) from exc
 

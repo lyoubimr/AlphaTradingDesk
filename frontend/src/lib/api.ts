@@ -678,6 +678,26 @@ export const automationApi = {
   syncSlTp: (tradeId: number): Promise<{ processed: number; events: { role: string; fill_price: number }[]; skipped?: boolean }> =>
     request(`/kraken-execution/trades/${tradeId}/sync-sl-tp`, { method: 'POST' }),
 
+  /** POST /api/kraken-execution/trades/{tradeId}/retry-sl
+   *  Re-attempt SL placement for a trade whose SL failed or was never placed.
+   *  Cancels existing error SL rows and places a fresh stop order.
+   */
+  retrySl: (tradeId: number): Promise<KrakenOrderOut> =>
+    request(`/kraken-execution/trades/${tradeId}/retry-sl`, { method: 'POST' }),
+
+  /** POST /api/kraken-execution/trades/{tradeId}/recover-orphaned
+   *  Sync an open trade that was closed externally on Kraken.
+   *  Returns {closed, exit_price?, symbol?, reason?, still_open_on_kraken?}.
+   */
+  recoverOrphaned: (tradeId: number): Promise<{
+    closed: boolean
+    exit_price?: number
+    symbol?: string
+    reason?: string
+    still_open_on_kraken?: boolean
+  }> =>
+    request(`/kraken-execution/trades/${tradeId}/recover-orphaned`, { method: 'POST' }),
+
   /** GET /api/kraken-execution/mark-price/{symbol} — public, no auth required */
   getMarkPrice: (symbol: string): Promise<{ symbol: string; mark_price: number }> =>
     request(`/kraken-execution/mark-price/${encodeURIComponent(symbol)}`),
