@@ -502,11 +502,50 @@ def open_automated_trade(
     # For LIMIT orders: Celery poll_pending_orders handles SL/TP after fill.
     if trade.order_type == "MARKET":
         with _make_client(settings_row) as sl_tp_client:
-            place_sl_tp_orders(
-                trade, lot_size, sl_tp_client, db,
-                settings_row=settings_row,
-                sl_overrides=sl_overrides or {},
-            )
+            try:
+                place_sl_tp_orders(
+                    trade, lot_size, sl_tp_client, db,
+                    settings_row=settings_row,
+                    sl_overrides=sl_overrides or {},
+                )
+            except Exception as _sl_crash:  # noqa: BLE001
+                # place_sl_tp_orders crashed (e.g. stop_loss=None after the NULL guard
+                # in place_sl_tp_orders itself already ran, or a DB error on commit).
+                # Entry is already committed — trade IS open on Kraken.
+                # Insert a synthetic error row so the UI and orphaned sweeper can react.
+                logger.error(
+                    "open_trade_sl_tp_placement_crashed",
+                    trade_id=trade_id,
+                    error=str(_sl_crash),
+                )
+                import uuid as _uuid  # noqa: PLC0415
+                _sl_err_id = f"NO-ID-sl-{trade_id}-{_uuid.uuid4().hex[:8]}"
+                _sl_err = KrakenOrder(
+                    trade_id=trade.id,
+                    profile_id=trade.profile_id,
+                    kraken_order_id=_sl_err_id,
+                    role="sl",
+                    status="error",
+                    order_type="stop",
+                    symbol=instrument.symbol,
+                    side=_exit_side(trade),
+                    size=float(lot_size),
+                    error_message=f"SL placement crashed (MARKET open): {_sl_crash}",
+                )
+                db.add(_sl_err)
+                db.commit()
+                _notify_execution_event(
+                    profile_id=trade.profile_id,
+                    event="ORDER_ERROR",
+                    db=db,
+                    trade_id=trade_id,
+                    pair=trade.pair,
+                    direction=trade.direction,
+                    error_message=(
+                        f"\U0001f6a8 SL NOT PLACED \u2014 {_sl_crash}. "
+                        "Use \u2018Retry SL\u2019 or close manually NOW."
+                    ),
+                )
 
         # Mark the entry as filled so Celery's poll_pending_orders skips it.
         # Without this, the Celery task sees status='open' (no fill_id set),
@@ -548,6 +587,47 @@ def place_sl_tp_orders(
     assert instrument is not None, f"Trade {trade.id} has no instrument loaded"
     exit_side = _exit_side(trade)
     orders: list[KrakenOrder] = []
+
+    # guard: stop_loss must be set — without it we cannot compute the SL order.
+    # This can happen when a trade was created manually with no stop_loss, or when
+    # the DB value is NULL due to a data migration. Rather than crashing (which
+    # would leave the trade open with NO sl_order row in the DB at all), we insert
+    # an error sl_order so the UI shows the problem and the orphaned sweeper fires.
+    if trade.stop_loss is None:
+        import uuid as _uuid  # noqa: PLC0415
+        _no_sl_id = f"NO-ID-sl-{trade.id}-{_uuid.uuid4().hex[:8]}"
+        logger.error(
+            "automation_sl_stop_loss_null",
+            trade_id=trade.id,
+            symbol=instrument.symbol,
+        )
+        _notify_execution_event(
+            profile_id=trade.profile_id,
+            event="ORDER_ERROR",
+            db=db,
+            trade_id=trade.id,
+            pair=trade.pair,
+            direction=trade.direction,
+            error_message=(
+                "\U0001f6a8 SL NOT PLACED: stop_loss is NULL on this trade. "
+                "Set a stop loss, then use \u2018Retry SL\u2019."
+            ),
+        )
+        _null_sl = KrakenOrder(
+            trade_id=trade.id,
+            profile_id=trade.profile_id,
+            kraken_order_id=_no_sl_id,
+            role="sl",
+            status="error",
+            order_type="stop",
+            symbol=instrument.symbol,
+            side=exit_side,
+            size=float(entry_size),
+            error_message="SL not placed: stop_loss is NULL",
+        )
+        db.add(_null_sl)
+        db.commit()
+        return [_null_sl]
 
     # SL order — full size, reduce_only
     # stop_limit (default): adds limitPrice to cap slippage at sl_limit_offset_pct %.
@@ -1335,7 +1415,48 @@ def sync_pending_fill(trade_id: int, db: Session) -> dict:
             entry_size = Decimal(str(entry_order.size))
             # Reload trade to get fresh relationships after activate
             db.refresh(trade)
-            place_sl_tp_orders(trade, entry_size, client, db, settings_row=settings_row)
+            try:
+                place_sl_tp_orders(trade, entry_size, client, db, settings_row=settings_row)
+            except Exception as _sl_crash:  # noqa: BLE001
+                # place_sl_tp_orders crashed before inserting any sl_order row.
+                # This can happen when stop_loss=None, a DB commit fails, or an
+                # unhandled exception in the SL computation logic.
+                # Insert a synthetic error row so:
+                # 1) the UI shows "No SL — Retry" immediately
+                # 2) the orphaned sweeper fires when the position is closed externally
+                logger.error(
+                    "sync_fill_sl_tp_placement_crashed",
+                    trade_id=trade_id,
+                    error=str(_sl_crash),
+                )
+                import uuid as _uuid  # noqa: PLC0415
+                _sl_err_id = f"NO-ID-sl-{trade_id}-{_uuid.uuid4().hex[:8]}"
+                _sl_err = KrakenOrder(
+                    trade_id=trade_id,
+                    profile_id=trade.profile_id,
+                    kraken_order_id=_sl_err_id,
+                    role="sl",
+                    status="error",
+                    order_type="stop",
+                    symbol=instrument.symbol,
+                    side=_exit_side(trade),
+                    size=float(entry_size),
+                    error_message=f"SL placement crashed after fill: {_sl_crash}",
+                )
+                db.add(_sl_err)
+                db.commit()
+                _notify_execution_event(
+                    profile_id=trade.profile_id,
+                    event="ORDER_ERROR",
+                    db=db,
+                    trade_id=trade_id,
+                    pair=trade.pair,
+                    direction=trade.direction,
+                    error_message=(
+                        f"\U0001f6a8 SL NOT PLACED after fill \u2014 {_sl_crash}. "
+                        "Use \u2018Retry SL\u2019 or close manually NOW."
+                    ),
+                )
 
     logger.info(
         "sync_fill_detected",
@@ -1846,3 +1967,332 @@ def _notify_execution_event(
             event=event,
             profile_id=profile_id,
         )
+
+
+# ── Recovery endpoints ────────────────────────────────────────────────────────
+
+def retry_sl_placement(trade_id: int, db: Session) -> KrakenOrder:
+    """Re-attempt SL placement for an open trade whose SL was never placed or failed.
+
+    Use when:
+    - sl_order row has status='error' (Kraken rejected the initial placement)
+    - No sl_order row exists at all (crash before db.add)
+
+    Action:
+    - Cancels all existing error SL rows (they become 'cancelled' so the UI is clean)
+    - Computes remaining size from open positions
+    - Tries stop_limit → falls back to stop_market on rejection
+    - Inserts a fresh KrakenOrder row (status='open' if placed, 'error' if rejected)
+
+    Raises:
+        AutomationNotEnabledError  — automation is off for this trade
+        ValueError                 — trade not open, SL already active, or no entry order
+    """
+    trade = _get_trade_or_404(trade_id, db)
+    if not trade.automation_enabled:
+        raise AutomationNotEnabledError(f"Trade {trade_id} does not have automation enabled.")
+    if trade.status not in ("open", "partial", "runner"):
+        raise ValueError(
+            f"Trade {trade_id} is not open (current status: '{trade.status}'). "
+            "Cannot place SL for a non-open trade."
+        )
+    if trade.stop_loss is None:
+        raise ValueError(
+            f"Trade {trade_id} has no stop_loss set. "
+            "Update the stop_loss on the trade before retrying SL placement."
+        )
+
+    # Idempotent: SL already active — nothing to do
+    existing_open_sl = (
+        db.query(KrakenOrder)
+        .filter(
+            KrakenOrder.trade_id == trade_id,
+            KrakenOrder.role == "sl",
+            KrakenOrder.status == "open",
+        )
+        .first()
+    )
+    if existing_open_sl is not None:
+        raise ValueError(
+            f"An active SL order already exists for trade {trade_id} "
+            f"(kraken_id={existing_open_sl.kraken_order_id}). No retry needed."
+        )
+
+    instrument = _resolve_instrument(trade, db)
+    settings_row = get_automation_settings(trade.profile_id, db)
+
+    # Compute remaining size from open positions (accounts for partial TP fills)
+    open_positions = (
+        db.query(Position)
+        .filter(Position.trade_id == trade_id, Position.status == "open")
+        .all()
+    )
+    open_lot_pct = sum(Decimal(str(p.lot_percentage)) for p in open_positions)
+
+    entry_order = (
+        db.query(KrakenOrder)
+        .filter(KrakenOrder.trade_id == trade_id, KrakenOrder.role == "entry")
+        .order_by(KrakenOrder.sent_at.asc())
+        .first()
+    )
+    if entry_order is None:
+        raise ValueError(f"No entry order found for trade {trade_id}.")
+
+    entry_size = Decimal(str(entry_order.size))
+    if open_lot_pct > 0:
+        remaining_size = quantize_size(
+            (open_lot_pct / Decimal("100")) * entry_size,
+            instrument.contract_value_precision if instrument.contract_value_precision is not None else 2,
+        )
+    else:
+        remaining_size = entry_size
+
+    # Cancel all existing error SL rows so the panel shows a clean state
+    for _err_sl in (
+        db.query(KrakenOrder)
+        .filter(
+            KrakenOrder.trade_id == trade_id,
+            KrakenOrder.role == "sl",
+            KrakenOrder.status == "error",
+        )
+        .all()
+    ):
+        _err_sl.status = "cancelled"
+    db.commit()
+
+    # SL placement — same logic as place_sl_tp_orders
+    _sl_order_type = settings_row.config.get("sl_order_type", "stop_limit")
+    _sl_offset_pct = float(settings_row.config.get("sl_limit_offset_pct", 1.5))
+    _sl_stop_price = Decimal(str(trade.stop_loss))
+    _sl_limit_price: Decimal | None = None
+    if _sl_order_type == "stop_limit":
+        from decimal import ROUND_DOWN as _RD  # noqa: PLC0415
+        from decimal import ROUND_UP as _RU  # noqa: PLC0415
+        _offset = Decimal(str(_sl_offset_pct)) / Decimal("100")
+        if trade.direction == "long":
+            _raw_limit = _sl_stop_price * (Decimal("1") - _offset)
+        else:
+            _raw_limit = _sl_stop_price * (Decimal("1") + _offset)
+        _stop_norm = format(_sl_stop_price, "f").rstrip("0").rstrip(".")
+        _dp = len(_stop_norm.split(".")[-1]) if "." in _stop_norm else 0
+        _tick = Decimal("1").scaleb(-_dp) if _dp > 0 else Decimal("1")
+        if trade.direction == "long":
+            _sl_limit_price = _raw_limit.quantize(_tick, rounding=_RD)
+        else:
+            _sl_limit_price = _raw_limit.quantize(_tick, rounding=_RU)
+
+    exit_side = _exit_side(trade)
+
+    with _make_client(settings_row) as client:
+        try:
+            sl_result = client.send_order(
+                order_type="stp",
+                symbol=instrument.symbol,
+                side=exit_side,
+                size=str(remaining_size),
+                stop_price=str(_sl_stop_price),
+                limit_price=str(_sl_limit_price) if _sl_limit_price is not None else None,
+                reduce_only=True,
+                raise_on_rejection=False,
+            )
+        except Exception as _api_err:
+            logger.error("retry_sl_api_hard_error", trade_id=trade_id, error=str(_api_err))
+            sl_result = {"sendStatus": {"status": "apiError", "order_id": ""}}
+
+        _send_status = sl_result.get("sendStatus", {})
+        _placement_status = _send_status.get("status", "unknown")
+
+        # Fallback: stop_limit rejected → retry as stop_market
+        if _placement_status != "placed" and _sl_order_type == "stop_limit":
+            logger.warning(
+                "retry_sl_stop_limit_rejected_fallback_stop_market",
+                trade_id=trade_id,
+                original_status=_placement_status,
+            )
+            try:
+                sl_result = client.send_order(
+                    order_type="stp",
+                    symbol=instrument.symbol,
+                    side=exit_side,
+                    size=str(remaining_size),
+                    stop_price=str(_sl_stop_price),
+                    limit_price=None,
+                    reduce_only=True,
+                    raise_on_rejection=False,
+                )
+                _send_status = sl_result.get("sendStatus", {})
+                _placement_status = _send_status.get("status", "unknown")
+                if _placement_status == "placed":
+                    _sl_limit_price = None
+                    logger.info("retry_sl_fallback_stop_market_placed", trade_id=trade_id)
+            except Exception as _fb_err:
+                logger.error("retry_sl_fallback_also_failed", trade_id=trade_id, error=str(_fb_err))
+                _placement_status = "fallback_failed"
+
+    sl_order_id = _send_status.get("order_id", "") or ""
+    sl_db_status = "open" if _placement_status == "placed" else "error"
+    if not sl_order_id:
+        import uuid as _uuid  # noqa: PLC0415
+        sl_order_id = f"NO-ID-sl-retry-{trade_id}-{_uuid.uuid4().hex[:8]}"
+
+    new_sl = KrakenOrder(
+        trade_id=trade.id,
+        profile_id=trade.profile_id,
+        kraken_order_id=sl_order_id,
+        role="sl",
+        status=sl_db_status,
+        order_type="stop",
+        symbol=instrument.symbol,
+        side=exit_side,
+        size=float(remaining_size),
+        limit_price=float(_sl_limit_price) if _sl_limit_price is not None else None,
+        error_message=None if sl_db_status == "open" else f"Retry failed: {_placement_status}",
+    )
+    db.add(new_sl)
+    db.commit()
+    db.refresh(new_sl)
+
+    if sl_db_status == "error":
+        logger.error("retry_sl_placement_failed", trade_id=trade_id, kraken_status=_placement_status)
+        _notify_execution_event(
+            profile_id=trade.profile_id,
+            event="ORDER_ERROR",
+            db=db,
+            trade_id=trade_id,
+            pair=trade.pair,
+            direction=trade.direction,
+            error_message=(
+                f"\U0001f6a8 SL retry FAILED \u2014 {_placement_status}. "
+                "Close position manually NOW."
+            ),
+        )
+    else:
+        logger.info("retry_sl_placed", trade_id=trade_id, sl_order_id=sl_order_id)
+        _notify_execution_event(
+            profile_id=trade.profile_id,
+            event="ORDER_ERROR",
+            db=db,
+            trade_id=trade_id,
+            pair=trade.pair,
+            direction=trade.direction,
+            error_message=(
+                f"\u2705 SL retry successful \u2014 stop at {_sl_stop_price} ({remaining_size} units)"
+            ),
+        )
+
+    return new_sl
+
+
+def recover_orphaned_trade(trade_id: int, db: Session) -> dict:
+    """Check if a specific automated trade was closed externally on Kraken and sync ATD.
+
+    Called on-demand when a trade is stuck as 'open' in ATD but the position
+    is gone from Kraken (manual close, liquidation, SL hit with no ATD order).
+
+    Returns:
+        {"closed": True, "exit_price": float, "symbol": str}       — synced+closed
+        {"closed": False, "still_open_on_kraken": True, "reason"} — position still open
+        {"closed": False, "reason": str}                           — other error
+    """
+    from fastapi import HTTPException  # noqa: PLC0415
+
+    from src.trades.schemas import TradeClose  # noqa: PLC0415
+    from src.trades.service import full_close  # noqa: PLC0415
+
+    trade = _get_trade_or_404(trade_id, db)
+
+    if trade.status not in ("open", "partial", "runner"):
+        return {
+            "closed": False,
+            "reason": f"Trade is already '{trade.status}' \u2014 nothing to recover.",
+        }
+    if not trade.automation_enabled:
+        return {"closed": False, "reason": "Automation not enabled for this trade."}
+
+    instrument = _resolve_instrument(trade, db)
+    settings_row = get_automation_settings(trade.profile_id, db)
+
+    with _make_client(settings_row) as client:
+        open_positions = client.get_open_positions()
+        fills = client.get_fills()
+        try:
+            tickers = client.get_tickers()
+        except Exception:  # noqa: BLE001
+            tickers = {}
+
+    open_symbols = {p.get("symbol") for p in open_positions}
+
+    if instrument.symbol in open_symbols:
+        return {
+            "closed": False,
+            "still_open_on_kraken": True,
+            "reason": (
+                f"Position for {instrument.symbol} is still open on Kraken. "
+                "Use \u2018Close position\u2019 to close it from ATD, "
+                "or \u2018Retry SL\u2019 to re-protect it."
+            ),
+        }
+
+    # Position is gone from Kraken \u2014 determine exit price
+    closing_side = "sell" if trade.direction == "long" else "buy"
+    symbol_fills = [
+        f for f in fills
+        if f.get("symbol") == instrument.symbol
+        and f.get("side", "").lower() == closing_side
+    ]
+    if symbol_fills:
+        # Kraken returns newest-first
+        exit_price = Decimal(str(symbol_fills[0].get("price", 0)))
+    else:
+        ticker = tickers.get(instrument.symbol, {})
+        raw_mark = ticker.get("markPrice") or ticker.get("last")
+        if raw_mark is None:
+            return {
+                "closed": False,
+                "reason": (
+                    f"Position is gone from Kraken but no exit price available "
+                    f"(no fills found, no mark price for {instrument.symbol}). "
+                    "Close the trade manually in ATD."
+                ),
+            }
+        exit_price = Decimal(str(raw_mark))
+
+    try:
+        full_close(
+            db=db,
+            trade_id=trade_id,
+            data=TradeClose(
+                exit_price=exit_price,
+                close_notes="Externally closed on Kraken \u2014 recovered via ATD Sync",
+            ),
+        )
+    except HTTPException as exc:
+        if exc.status_code == 409:
+            return {"closed": False, "reason": "Trade was already closed (race condition)."}
+        raise
+
+    logger.info(
+        "recover_orphaned_trade_closed",
+        trade_id=trade_id,
+        symbol=instrument.symbol,
+        exit_price=str(exit_price),
+    )
+
+    _notify_execution_event(
+        profile_id=trade.profile_id,
+        event="SL_HIT",
+        db=db,
+        trade_id=trade_id,
+        pair=trade.pair,
+        direction=trade.direction,
+        filled_price=str(exit_price),
+        size="\u2014",
+        pnl_pct=None,
+        trade_pnl=None,
+    )
+
+    return {
+        "closed": True,
+        "exit_price": float(exit_price),
+        "symbol": instrument.symbol,
+    }

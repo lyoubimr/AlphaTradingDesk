@@ -6,7 +6,7 @@
 // ────────────────────────────────────────────────────────────────────────────
 
 import { useEffect, useState } from 'react'
-import { RefreshCw, Loader2, CheckCircle2, ShieldCheck } from 'lucide-react'
+import { RefreshCw, Loader2, CheckCircle2, ShieldCheck, AlertTriangle, RotateCcw } from 'lucide-react'
 import { automationApi } from '../../lib/api'
 import { useApi } from '../../hooks/useApi'
 import { AutomationStatusBadge } from './AutomationStatusBadge'
@@ -40,6 +40,10 @@ export function KrakenOrdersPanel({ tradeId, tradeStatus, automationEnabled, onO
   const [movingBe,     setMovingBe]     = useState(false)
   const [confirmClose, setConfirmClose] = useState(false)
   const [actionError,  setActionError]  = useState<string | null>(null)
+  // Recovery state
+  const [retryingSlBusy, setRetryingSlBusy] = useState(false)
+  const [recoveringBusy, setRecoveringBusy] = useState(false)
+  const [recoveryError,  setRecoveryError]  = useState<string | null>(null)
 
   // Notify parent whenever orders change
   useEffect(() => {
@@ -52,6 +56,14 @@ export function KrakenOrdersPanel({ tradeId, tradeStatus, automationEnabled, onO
   const hasOrders    = activeOrders.length > 0
   const hasOpenEntry = orders?.some((o) => o.role === 'entry' && o.status === 'open') ?? false
   const isLive       = automationEnabled && (tradeStatus === 'open' || tradeStatus === 'partial')
+  // True when the trade is live + automation has placed at least one order (entry exists)
+  // but there is no active SL on Kraken — position is unprotected.
+  const hasMissingSl = Boolean(
+    isLive &&
+    orders !== null &&
+    orders.some((o) => o.role === 'entry') &&
+    !orders.some((o) => o.role === 'sl' && o.status === 'open'),
+  )
 
   async function handleClose() {
     setClosingTrade(true); setActionError(null)
@@ -77,6 +89,36 @@ export function KrakenOrdersPanel({ tradeId, tradeStatus, automationEnabled, onO
       setActionError((e as Error).message)
     } finally {
       setMovingBe(false)
+    }
+  }
+
+  async function handleRetrySl() {
+    setRetryingSlBusy(true); setRecoveryError(null)
+    try {
+      await automationApi.retrySl(tradeId)
+      refetch()
+      onTradeUpdated?.()
+    } catch (e: unknown) {
+      setRecoveryError((e as Error).message)
+    } finally {
+      setRetryingSlBusy(false)
+    }
+  }
+
+  async function handleRecoverOrphaned() {
+    setRecoveringBusy(true); setRecoveryError(null)
+    try {
+      const result = await automationApi.recoverOrphaned(tradeId)
+      if (result.closed) {
+        onTradeUpdated?.()
+      } else {
+        setRecoveryError(result.reason ?? 'Position is still open on Kraken — check manually')
+      }
+      refetch()
+    } catch (e: unknown) {
+      setRecoveryError((e as Error).message)
+    } finally {
+      setRecoveringBusy(false)
     }
   }
 
@@ -224,6 +266,42 @@ export function KrakenOrdersPanel({ tradeId, tradeStatus, automationEnabled, onO
                 [{o.role.toUpperCase()}] {o.error_message}
               </p>
             ))}
+          </div>
+        )}
+
+        {/* ── SL protection alert ─────────────────────────────────────────── */}
+        {hasMissingSl && (
+          <div className="mt-3 rounded-lg bg-red-950/60 border border-red-500/60 p-2.5 space-y-2">
+            <div className="flex items-center gap-1.5">
+              <AlertTriangle size={11} className="text-red-400 shrink-0" />
+              <p className="text-[11px] font-semibold text-red-300">
+                No active SL on Kraken — position unprotected
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => void handleRetrySl()}
+                disabled={retryingSlBusy}
+                className="flex items-center gap-1 px-2 py-1 rounded-md bg-red-600/30 border border-red-500/50 text-[10px] font-medium text-red-200 hover:bg-red-600/40 transition-colors disabled:opacity-50"
+              >
+                {retryingSlBusy ? <Loader2 size={9} className="animate-spin" /> : <RefreshCw size={9} />}
+                Retry SL placement
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleRecoverOrphaned()}
+                disabled={recoveringBusy}
+                className="flex items-center gap-1 px-2 py-1 rounded-md bg-slate-700/50 border border-slate-600/50 text-[10px] font-medium text-slate-300 hover:bg-slate-700/70 transition-colors disabled:opacity-50"
+                title="Check if the position was already closed on Kraken and sync ATD"
+              >
+                {recoveringBusy ? <Loader2 size={9} className="animate-spin" /> : <RotateCcw size={9} />}
+                Sync with Kraken
+              </button>
+            </div>
+            {recoveryError && (
+              <p className="text-[10px] text-amber-400">{recoveryError}</p>
+            )}
           </div>
         )}
       </div>

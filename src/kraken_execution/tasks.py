@@ -270,6 +270,39 @@ def poll_pending_orders(self: Task) -> dict:
                                 direction=trade.direction,
                                 error_message=f"SL/TP placement failed after fill: {sl_exc}",
                             )
+                            # Insert a synthetic error sl_order so:
+                            # 1) the UI shows "No SL protection" immediately
+                            # 2) the orphaned sweeper can detect this trade when it
+                            #    checks for open automated trades with no open SL.
+                            try:
+                                import uuid as _uuid  # noqa: PLC0415
+                                _sl_err_id = f"NO-ID-sl-{trade.id}-{_uuid.uuid4().hex[:8]}"
+                                _exit_s = "sell" if trade.direction == "long" else "buy"
+                                _sl_err = KrakenOrder(
+                                    trade_id=trade.id,
+                                    profile_id=trade.profile_id,
+                                    kraken_order_id=_sl_err_id,
+                                    role="sl",
+                                    status="error",
+                                    order_type="stop",
+                                    symbol=entry.symbol,
+                                    side=_exit_s,
+                                    size=float(entry.filled_size or entry.size),
+                                    error_message=f"SL placement crashed after fill: {sl_exc}",
+                                )
+                                db.add(_sl_err)
+                                db.commit()
+                                logger.warning(
+                                    "sl_error_row_inserted",
+                                    trade_id=trade.id,
+                                    sl_err_id=_sl_err_id,
+                                )
+                            except Exception as _sl_ins_err:  # noqa: BLE001
+                                logger.error(
+                                    "sl_error_row_insert_failed",
+                                    trade_id=trade.id,
+                                    error=str(_sl_ins_err),
+                                )
 
                     processed += 1
                     logger.info(
@@ -349,9 +382,12 @@ def sync_open_positions(self: Task) -> dict:
             .all()
         )
 
-        if not open_orders:
-            return {"processed": 0}
-
+        # Do NOT early-return here even if open_orders is empty.
+        # The orphaned-trade sweeper at the bottom of this function detects trades
+        # that were closed externally on Kraken with NO open SL/TP order in ATD
+        # (e.g. SL placement failed → no sl_order row → list is empty → old early
+        # return silently prevented the sweeper from ever running).
+        # With by_profile empty the loops below are no-ops — cost is negligible.
         by_profile: dict[int, list[KrakenOrder]] = {}
         for order in open_orders:
             by_profile.setdefault(order.profile_id, []).append(order)
