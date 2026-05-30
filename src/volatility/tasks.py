@@ -1016,14 +1016,16 @@ def cleanup_old_snapshots(self) -> dict:  # type: ignore[override]
         mvi_cutoff = f"NOW() - INTERVAL '{mvi_retention} days'"
         retention_days = max(pp_retention, mvi_retention)  # for log/return only
 
-        # ── 2. TimescaleDB drop_chunks for hypertables ────────────────────
-        # drop_chunks() returns one row per chunk dropped.
-        vol_chunks = db.execute(
-            text(f"SELECT drop_chunks('volatility_snapshots', {pp_cutoff})")
-        ).fetchall()
-        mvi_chunks = db.execute(
-            text(f"SELECT drop_chunks('market_vi_snapshots', {mvi_cutoff})")
-        ).fetchall()
+        # ── 2. DELETE for all three tables (plain SQL — no TimescaleDB) ───
+        # drop_chunks() requires the TimescaleDB extension which is not
+        # installed on this server. Plain DELETE works correctly for all
+        # regular PostgreSQL tables.
+        vol_deleted = db.execute(
+            text(f'DELETE FROM volatility_snapshots WHERE "timestamp" < {pp_cutoff}')
+        ).rowcount  # type: ignore[attr-defined]
+        mvi_deleted = db.execute(
+            text(f'DELETE FROM market_vi_snapshots WHERE "timestamp" < {mvi_cutoff}')
+        ).rowcount  # type: ignore[attr-defined]
 
         # ── 3. Plain DELETE for watchlist_snapshots (regular table) ───────
         # Uses per_pair retention — watchlist is the output of the per-pair pipeline
@@ -1034,14 +1036,14 @@ def cleanup_old_snapshots(self) -> dict:  # type: ignore[override]
         db.commit()
         logger.info(
             "cleanup_old_snapshots: retention=%d days | "
-            "vol_chunks=%d mvi_chunks=%d watchlist_rows=%d",
-            retention_days, len(vol_chunks), len(mvi_chunks), deleted_watchlist,
+            "vol_rows=%d mvi_rows=%d watchlist_rows=%d",
+            retention_days, vol_deleted, mvi_deleted, deleted_watchlist,
         )
         return {
             "status": "ok",
             "retention_days": retention_days,
-            "volatility_chunks_dropped": len(vol_chunks),
-            "market_vi_chunks_dropped": len(mvi_chunks),
+            "volatility_rows_deleted": vol_deleted,
+            "market_vi_rows_deleted": mvi_deleted,
             "watchlist_rows_deleted": deleted_watchlist,
         }
 
