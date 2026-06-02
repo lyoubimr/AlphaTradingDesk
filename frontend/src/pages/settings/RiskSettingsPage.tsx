@@ -32,7 +32,7 @@ interface RiskConfig {
     confidence:   { enabled: boolean; weight: number; min_factor: number; max_factor: number }
   }
   global_multiplier_max: number
-  risk_guard:   { enabled: boolean; force_allowed: boolean; hard_block_at_zero: boolean }
+  risk_guard:   { enabled: boolean; force_allowed: boolean; hard_block_at_zero: boolean; max_risk_pct_override: number }
   alert_banner: { enabled: boolean; trigger_threshold_pct: number }
 }
 
@@ -45,7 +45,7 @@ const DEFAULTS: RiskConfig = {
     confidence:   { enabled: true, weight: 0.15, min_factor: 0.50, max_factor: 1.50 },
   },
   global_multiplier_max: 2.0,
-  risk_guard:   { enabled: true, force_allowed: true, hard_block_at_zero: false },
+  risk_guard:   { enabled: true, force_allowed: true, hard_block_at_zero: false, max_risk_pct_override: 10 },
   alert_banner: { enabled: true, trigger_threshold_pct: 100.0 },
 }
 
@@ -72,7 +72,11 @@ function hydrate(raw: Record<string, unknown>): RiskConfig {
       confidence:  { ...DEFAULTS.criteria.confidence,  ...(crit.confidence  ?? {}) } as RiskConfig['criteria']['confidence'],
     },
     global_multiplier_max: (raw.global_multiplier_max as number | undefined) ?? DEFAULTS.global_multiplier_max,
-    risk_guard:   { ...DEFAULTS.risk_guard,   ...((raw.risk_guard   as Partial<RiskConfig['risk_guard']>)   ?? {}) },
+    risk_guard: {
+      ...DEFAULTS.risk_guard,
+      ...((raw.risk_guard as Partial<RiskConfig['risk_guard']>) ?? {}),
+      max_risk_pct_override: ((raw.risk_guard as Record<string, unknown>)?.max_risk_pct_override as number | undefined) ?? DEFAULTS.risk_guard.max_risk_pct_override,
+    },
     alert_banner: { ...DEFAULTS.alert_banner, ...((raw.alert_banner as Partial<RiskConfig['alert_banner']>) ?? {}) },
   }
 }
@@ -546,7 +550,23 @@ export function RiskSettingsPage() {
                 />
               </div>
             ))}
-          </SectionCard>
+            {/* Max risk % override */}
+            <div className="flex items-start justify-between gap-3 py-2.5">
+              <div>
+                <p className="text-xs text-slate-300">Max risk % override per trade</p>
+                <p className="text-xs text-slate-600 mt-0.5">Maximum allowed value when manually overriding the risk % on a trade. A Force open button appears when exceeded (if force override is allowed).</p>
+              </div>
+              <div className="flex items-center gap-1.5 shrink-0">
+                <input
+                  type="number"
+                  min={1} max={100} step={0.5}
+                  value={config.risk_guard.max_risk_pct_override}
+                  onChange={e => upd(c => ({ ...c, risk_guard: { ...c.risk_guard, max_risk_pct_override: parseFloat(e.target.value) || 10 } }))}
+                  className="w-16 px-2 py-1.5 rounded-lg text-center text-xs text-slate-300 tabular-nums bg-surface-700 border border-surface-600 focus:outline-none focus:border-brand-500/60 transition-colors"
+                />
+                <span className="text-xs text-slate-500">%</span>
+              </div>
+            </div>          </SectionCard>
 
           {/* Alert Banner */}
           <SectionCard
