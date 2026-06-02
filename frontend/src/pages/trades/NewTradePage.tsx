@@ -1013,6 +1013,7 @@ export function NewTradePage() {
   const [submitting, setSubmitting]       = useState(false)
   const [error, setError]                 = useState<string | null>(null)
   const [budgetBlock, setBudgetBlock]     = useState<{ force_allowed: boolean } | null>(null)
+  const [pctBlock, setPctBlock]           = useState<{ force_allowed: boolean; max_pct: number } | null>(null)
   const [automationWarning, setAutomationWarning] = useState<{ msg: string; tradeId: number } | null>(null)
 
   // ── Stable object URLs for screenshot thumbnails (avoids scroll-jump on add) ──
@@ -1515,7 +1516,7 @@ export function NewTradePage() {
       setError('Please select at least one strategy before opening a trade.')
       return
     }
-    setError(null); setBudgetBlock(null); setSubmitting(true)
+    setError(null); setBudgetBlock(null); setPctBlock(null); setSubmitting(true)
     // ⚠️ Market order deviation warning: if declared entry is >1% off mark price, warn before executing
     if (orderType === 'MARKET' && automateOnCreate && markPriceCached != null && entryNum != null) {
       const dev = Math.abs(entryNum - markPriceCached) / markPriceCached
@@ -1605,6 +1606,9 @@ export function NewTradePage() {
       if (err instanceof ApiDetailError && err.payload?.code === 'RISK_BUDGET_EXCEEDED') {
         setError(msg)
         setBudgetBlock({ force_allowed: !!err.payload.force_allowed })
+      } else if (err instanceof ApiDetailError && err.payload?.code === 'RISK_PCT_EXCEEDED') {
+        setError(msg)
+        setPctBlock({ force_allowed: !!err.payload.force_allowed, max_pct: (err.payload.max_risk_pct_override as number) ?? 10 })
       } else {
         setError(msg)
       }
@@ -1673,6 +1677,25 @@ export function NewTradePage() {
               <button
                 type="button"
                 onClick={() => { setForceOpen(true); setBudgetBlock(null); setError(null); setTimeout(() => formRef.current?.requestSubmit(), 0) }}
+                className="shrink-0 text-xs font-semibold px-3 py-1 rounded bg-amber-500/20 border border-amber-500/40 text-amber-300 hover:bg-amber-500/30 transition-colors"
+              >
+                Force open
+              </button>
+            )}
+          </div>
+        )}
+
+        {pctBlock && (
+          <div className="rounded-lg bg-amber-500/10 border border-amber-500/30 px-3 py-2.5 flex items-center justify-between gap-3">
+            <p className="text-xs text-amber-300">
+              {pctBlock.force_allowed
+                ? `Risk % exceeds profile max (${pctBlock.max_pct}%). Force-open is allowed — click to override.`
+                : `Risk % exceeds profile max (${pctBlock.max_pct}%). Force-open is disabled in Risk Settings.`}
+            </p>
+            {pctBlock.force_allowed && (
+              <button
+                type="button"
+                onClick={() => { setForceOpen(true); setPctBlock(null); setError(null); setTimeout(() => formRef.current?.requestSubmit(), 0) }}
                 className="shrink-0 text-xs font-semibold px-3 py-1 rounded bg-amber-500/20 border border-amber-500/40 text-amber-300 hover:bg-amber-500/30 transition-colors"
               >
                 Force open

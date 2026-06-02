@@ -563,7 +563,7 @@ def _compute_wr_by_day_hour(trades: list[dict]) -> list[WRByDayHour]:
 # ── Top / Worst trades ────────────────────────────────────────────────────────
 
 def _compute_top_worst_trades(
-    trades: list[dict], n: int = 10
+    trades: list[dict], n: int = 30
 ) -> tuple[list[TradeSummaryRow], list[TradeSummaryRow]]:
     """Return (top_n, worst_n) sorted by realized_pnl descending / ascending."""
     def to_row(t: dict) -> TradeSummaryRow:

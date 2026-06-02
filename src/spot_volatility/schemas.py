@@ -78,7 +78,7 @@ DEFAULT_SPOT_CONFIG: dict = {
         "bb":   True,
         "ema":  True,
     },
-    "retention_days": 60,
+    "retention_days": 30,
 }
 
 

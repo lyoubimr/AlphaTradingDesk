@@ -93,7 +93,7 @@ class TradeOpen(BaseModel):
     positions: list[PositionIn] = Field(..., min_length=1, max_length=4)
 
     # Optional overrides — if None the profile default is used
-    risk_pct_override: Decimal | None = Field(default=None, gt=0, le=10)
+    risk_pct_override: Decimal | None = Field(default=None, gt=0, le=100)
 
     # Crypto position sizing — entered by the user in the form
     leverage: Decimal | None = Field(default=None, gt=0)  # actual leverage used

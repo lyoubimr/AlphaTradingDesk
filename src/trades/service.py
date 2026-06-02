@@ -629,9 +629,36 @@ def open_trade(db: Session, data: TradeOpen) -> TradeOut:
         guard_enabled: bool = bool(guard_config.get("enabled", True))
         if guard_enabled:
             budget = get_risk_budget(data.profile_id, db)
+            force_allowed: bool = budget["force_allowed"]
             effective_risk_pct = float(risk_pct)
+
+            # ── Check 1: risk_pct_override exceeds per-profile max ──────────────
+            if data.risk_pct_override is not None:
+                max_pct = float(guard_config.get("max_risk_pct_override", 10.0))
+                if float(data.risk_pct_override) > max_pct:
+                    if not data.force or not force_allowed:
+                        raise HTTPException(
+                            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                            detail={
+                                "detail": (
+                                    f"Risk % override {data.risk_pct_override}% exceeds the "
+                                    f"profile maximum {max_pct}%. "
+                                    f"Use force=true to override."
+                                ),
+                                "code": "RISK_PCT_EXCEEDED",
+                                "max_risk_pct_override": max_pct,
+                                "requested_pct": float(data.risk_pct_override),
+                                "force_allowed": force_allowed,
+                            },
+                        )
+                    logger.warning(
+                        "open_trade: risk_pct_override bypassed via force=True "
+                        "(profile=%d, max=%.2f%%, requested=%.2f%%)",
+                        data.profile_id, max_pct, float(data.risk_pct_override),
+                    )
+
+            # ── Check 2: effective risk exceeds remaining budget ─────────────────
             if effective_risk_pct > budget["budget_remaining_pct"]:
-                force_allowed: bool = budget["force_allowed"]
                 if not data.force or not force_allowed:
                     raise HTTPException(
                         status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
