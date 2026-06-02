@@ -76,6 +76,7 @@ DEFAULT_RISK_CONFIG: dict = {
         "enabled": True,
         "force_allowed": True,       # False = strict discipline, force=True ignored
         "hard_block_at_zero": False,  # True = block even base risk when budget = 0
+        "max_risk_pct_override": 10.0,  # max allowed risk_pct_override per trade (per-profile)
     },
     # Dashboard alert banner triggered when budget usage crosses the threshold.
     "alert_banner": {
