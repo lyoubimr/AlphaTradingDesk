@@ -81,7 +81,7 @@ class PinnedPairExtend(BaseModel):
 
 # ── Steps ────────────────────────────────────────────────────────────────────
 
-SessionType = Literal["weekly_setup", "trade_session", "weekend_review", "weekend_trading", "spot_monthly", "spot_weekly"]
+SessionType = Literal["weekly_setup", "trade_session", "weekend_review", "weekend_trading", "swing_setup", "spot_monthly", "spot_weekly"]
 
 SESSION_LABELS: dict[str, str] = {
     "weekly_setup": "Weekly Setup",
@@ -89,6 +89,7 @@ SESSION_LABELS: dict[str, str] = {
     "trade_session": "Trade Session",
     "weekend_review": "Weekend Review",
     "weekend_trading": "Weekend Trading",
+    "swing_setup": "Swing Setup",
     "spot_monthly": "Spot Monthly Review",
     "spot_weekly": "Spot Weekly Check",
 }
@@ -98,8 +99,7 @@ SESSION_EMOJIS: dict[str, str] = {
     "daily_prep": "☀️",
     "trade_session": "🎯",
     "weekend_review": "📊",
-    "weekend_trading": "⚡",
-    "spot_monthly": "🪙",
+    "weekend_trading": "⚡",    "swing_setup": "🌊",    "spot_monthly": "🪙",
     "spot_weekly": "�",
 }
 
@@ -271,6 +271,8 @@ DISCIPLINE_POINTS: dict[str, int] = {
     "weekend_trading_done": 5,
     "vol_too_low_trade": -20,  # penalty
     "trade_outside_session": -15,  # penalty (future — Phase 5)
+    # Swing session
+    "swing_setup_done": 15,  # ad-hoc HTF scan — less than weekly_setup but more than trade_session
     # Spot session discipline points
     "spot_monthly_done": 20,
     "spot_weekly_done": 20,  # 1W+1D+4H = same effort as weekly_setup
@@ -319,6 +321,7 @@ DEFAULT_RITUAL_CONFIG: dict[str, Any] = {
         "trade_session": 50,
         "weekend_review": 50,
         "weekend_trading": 50,
+        "swing_setup": 50,
         "spot_monthly": 50,
         "spot_weekly": 50,
     },
@@ -445,6 +448,38 @@ DEFAULT_STEPS: dict[str, list[dict]] = {
             "position": 4, "step_type": "tv_analysis",
             "label": "Analyse in TradingView", "est_minutes": 15,
             "is_mandatory": True, "linked_module": None,
+            "cadence_hours": None, "config": {},
+        },
+        {
+            "position": 5, "step_type": "outcome", "label": "Session Outcome",
+            "est_minutes": 1, "is_mandatory": True, "linked_module": None,
+            "cadence_hours": None, "config": {},
+        },
+    ],
+    # ── Swing session template ─────────────────────────────────────────────────
+    "swing_setup": [
+        {
+            "position": 1, "step_type": "vi_check",
+            "label": "Check VI Scores (trend bias HTF)", "est_minutes": 2,
+            "is_mandatory": True, "linked_module": "volatility",
+            "cadence_hours": None, "config": {},
+        },
+        {
+            "position": 2, "step_type": "smart_wl",
+            "label": "Generate Swing Watchlist (1W + 1D + 4H)",
+            "est_minutes": 2, "is_mandatory": True, "linked_module": None,
+            "cadence_hours": None, "config": {"timeframes": ["1W", "1D", "4H"]},
+        },
+        {
+            "position": 3, "step_type": "tv_analysis",
+            "label": "Analyse swing candidates in TradingView", "est_minutes": 25,
+            "is_mandatory": True, "linked_module": None,
+            "cadence_hours": None, "config": {},
+        },
+        {
+            "position": 4, "step_type": "pin_pairs",
+            "label": "Pin swing candidates", "est_minutes": 3,
+            "is_mandatory": False, "linked_module": None,
             "cadence_hours": None, "config": {},
         },
         {

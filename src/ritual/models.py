@@ -127,7 +127,7 @@ class RitualStep(Base):
     __tablename__ = "ritual_steps"
     __table_args__ = (
         CheckConstraint(
-            "session_type IN ('weekly_setup', 'daily_prep', 'trade_session', 'weekend_review', 'weekend_trading', 'spot_monthly', 'spot_weekly')",
+            "session_type IN ('weekly_setup', 'daily_prep', 'trade_session', 'weekend_review', 'weekend_trading', 'swing_setup', 'spot_monthly', 'spot_weekly')",
             name="ck_ritual_steps_session_type",
         ),
         CheckConstraint("position >= 1", name="ck_ritual_steps_position_positive"),
@@ -171,7 +171,7 @@ class RitualSession(Base):
     __tablename__ = "ritual_sessions"
     __table_args__ = (
         CheckConstraint(
-            "session_type IN ('weekly_setup', 'daily_prep', 'trade_session', 'weekend_review', 'weekend_trading', 'spot_monthly', 'spot_weekly')",
+            "session_type IN ('weekly_setup', 'daily_prep', 'trade_session', 'weekend_review', 'weekend_trading', 'swing_setup', 'spot_monthly', 'spot_weekly')",
             name="ck_ritual_sessions_session_type",
         ),
         CheckConstraint(

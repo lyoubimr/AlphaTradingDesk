@@ -34,6 +34,13 @@ const SESSION_TYPES = [
     desc: 'Sat/Sun — Analytics + Trade Journal + Goals + Learning note',
     est: '~35 min',
   },
+  {
+    type: 'swing_setup',
+    emoji: '🌊',
+    label: 'Swing Setup',
+    desc: 'Anytime — VI check + HTF Watchlist (1W/1D/4H) + Pin swing candidates',
+    est: '~30 min',
+  },
 ] as const
 
 type SessionKey = (typeof SESSION_TYPES)[number]['type']
