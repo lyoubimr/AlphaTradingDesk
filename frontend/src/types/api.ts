@@ -1283,7 +1283,7 @@ export interface AIGenerateOut {
 
 // ── Ritual (Phase 6B) ──────────────────────────────────────────────────────
 
-export type SessionType = 'weekly_setup' | 'trade_session' | 'weekend_review' | 'weekend_trading' | 'spot_monthly' | 'spot_weekly'
+export type SessionType = 'weekly_setup' | 'trade_session' | 'weekend_review' | 'weekend_trading' | 'swing_setup' | 'spot_monthly' | 'spot_weekly'
 export type SessionOutcome = 'trade_opened' | 'pairs_pinned' | 'no_opportunity' | 'abandoned' | 'vol_too_low'
 export type PinnedTF = '1W' | '1D' | '4H' | '1H' | '15m'
 

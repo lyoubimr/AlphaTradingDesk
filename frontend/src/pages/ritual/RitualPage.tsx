@@ -1373,10 +1373,10 @@ export function RitualPage() {
                       }}
                     />
                   </div>
-                  <div className={`grid gap-1 ${isSpot ? 'grid-cols-2' : 'grid-cols-4'}`}>
+                  <div className={`grid gap-1 ${isSpot ? 'grid-cols-2' : 'grid-cols-5'}`}>
                     {(isSpot
                       ? (['spot_monthly', 'spot_weekly'] as SessionType[])
-                      : (['weekly_setup', 'trade_session', 'weekend_review', 'weekend_trading'] as SessionType[])
+                      : (['weekly_setup', 'trade_session', 'weekend_review', 'weekend_trading', 'swing_setup'] as SessionType[])
                     ).map(st => {
                       const info = SESSION_TYPES.find(s => s.type === st)!
                       const count = (score.details as Record<string, Record<string, number>>)?.sessions?.[st] ?? 0
