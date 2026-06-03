@@ -80,6 +80,17 @@ const SESSION_TYPES: { type: SessionType; emoji: string; label: string; when: st
     gradient: 'from-orange-950/60 to-surface-800/40',
     steps: ['VI Check', 'Pins Review', 'Smart WL 1H+15m', 'TradingView', 'Outcome'],
   },
+  {
+    type: 'swing_setup',
+    emoji: '🌊',
+    label: 'Swing Setup',
+    when: 'Anytime',
+    desc: 'HTF-only scan (1W/1D/4H) + pin swing candidates',
+    est: '~30 min',
+    accent: '#8b5cf6',
+    gradient: 'from-violet-950/60 to-surface-800/40',
+    steps: ['VI Check', 'Swing WL 1W+1D+4H', 'TradingView', 'Pin Pairs', 'Outcome'],
+  },
   // ── Spot sessions (shown for spot profiles) ──────────────────────────────
   {
     type: 'spot_monthly',
