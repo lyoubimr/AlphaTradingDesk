@@ -276,10 +276,12 @@ def _compute_size_info(
             margin_required = (notional / lev).quantize(Decimal("0.01"))
             safe_margin = (margin_required * MARGIN_SAFETY_FACTOR).quantize(Decimal("0.01"))
             margin_warning = profile.capital_current < safe_margin
+            # Use per-instrument MMR from Kraken API if available; fallback to constant.
+            mmr = Decimal(str(instrument.mmr)) if instrument and instrument.mmr else CRYPTO_MMR
             if direction == "long":
-                liq_price = (data.entry_price * (1 - 1 / lev + CRYPTO_MMR)).quantize(_price_quant(data.entry_price))
+                liq_price = (data.entry_price * (1 - 1 / lev + mmr)).quantize(_price_quant(data.entry_price))
             else:
-                liq_price = (data.entry_price * (1 + 1 / lev - CRYPTO_MMR)).quantize(_price_quant(data.entry_price))
+                liq_price = (data.entry_price * (1 + 1 / lev - mmr)).quantize(_price_quant(data.entry_price))
         else:
             margin_required = None
             safe_margin = None
@@ -915,10 +917,12 @@ def _recompute_size_info_from_trade(trade: Trade, db: Session) -> TradeSizeResul
             safe_margin = (margin_required * MARGIN_SAFETY_FACTOR).quantize(Decimal("0.01"))
             margin_warning = profile.capital_current < safe_margin
             if lev and lev > 0:
+                # Use per-instrument MMR from Kraken API if available; fallback to constant.
+                mmr = Decimal(str(instrument.mmr)) if instrument and instrument.mmr else CRYPTO_MMR
                 if direction == "long":
-                    liq_price = (trade.entry_price * (1 - 1 / lev + CRYPTO_MMR)).quantize(_price_quant(trade.entry_price))
+                    liq_price = (trade.entry_price * (1 - 1 / lev + mmr)).quantize(_price_quant(trade.entry_price))
                 else:
-                    liq_price = (trade.entry_price * (1 + 1 / lev - CRYPTO_MMR)).quantize(_price_quant(trade.entry_price))
+                    liq_price = (trade.entry_price * (1 + 1 / lev - mmr)).quantize(_price_quant(trade.entry_price))
             else:
                 liq_price = None
         else:

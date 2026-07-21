@@ -70,6 +70,10 @@ class Instrument(Base):
     # Positive = decimal places (e.g. 4 → step 0.0001 for BTC)
     # Negative = integer multiples (e.g. -3 → step 1000 for BONK)
     contract_value_precision: Mapped[int | None] = mapped_column(Integer)
+    # Maintenance Margin Rate from Kraken API (retailMarginLevels[0].maintenanceMargin).
+    # NULL = fallback to CRYPTO_MMR constant in trades/service.py.
+    # Example: PF_USUALUSD → 0.05 (5%), PF_XBTUSD → 0.01 (1%)
+    mmr: Mapped[Decimal | None] = mapped_column(Numeric(6, 4))
     is_predefined: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_at: Mapped[datetime] = mapped_column(
