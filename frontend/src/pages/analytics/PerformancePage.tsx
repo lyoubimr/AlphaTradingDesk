@@ -107,8 +107,10 @@ function DirectionBias({ rows }: { rows: DirectionRow[] }) {
 
 function PairLeaderboard({ rows }: { rows: WRByStat[] }) {
   if (!rows.length) return <div className="text-slate-600 text-sm py-4 text-center">No data</div>
+  // Sort by |total_pnl| desc — surfaces the most financially impactful pairs
+  // (both winners and losers), regardless of trade count.
   const active = rows.filter(r => r.trades > 0)
-    .sort((a, b) => (b.trades * (b.wr_pct ?? 50)) - (a.trades * (a.wr_pct ?? 50)))
+    .sort((a, b) => Math.abs(b.total_pnl ?? 0) - Math.abs(a.total_pnl ?? 0))
     .slice(0, 12)
   const maxTrades = active[0]?.trades ?? 1
   return (
