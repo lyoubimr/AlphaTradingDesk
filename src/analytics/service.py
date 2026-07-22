@@ -204,7 +204,7 @@ def compute_performance_report(profile_id: int, period: str, db: Session) -> Per
     wr_by_session = _compute_wr_by_session(trades)
     wr_by_hour = _compute_wr_by_hour(trades)
     wr_by_day_hour = _compute_wr_by_day_hour(trades)
-    pair_leaderboard = _compute_pair_leaderboard(trades, float(profile.capital_current))
+    pair_leaderboard = _compute_pair_leaderboard(trades, float(profile.capital_start))
     tp_hit_rates = _compute_tp_hit_rates(profile_id, period, cutoff, db, params, date_filter)
     trade_type_dist = _compute_trade_type_dist(trades)
     rr_scatter = _compute_rr_scatter(trades)
@@ -652,7 +652,9 @@ def _compute_wr_by_strategy_session(
 # ── Pair leaderboard ──────────────────────────────────────────────────────────
 
 def _compute_pair_leaderboard(trades: list[dict], capital: float) -> list[WRByStat]:
-    """capital = profile.capital_current — used to express avg P&L as % of equity."""
+    """capital = profile.capital_start — used to express avg P&L as % of initial equity.
+    Using capital_start (not capital_current) avoids division near-zero when capital
+    has been depleted (e.g. after a liquidation)."""
     pairs: dict[str, dict] = {}
     for t in trades:
         label = t["pair"]
