@@ -268,9 +268,41 @@ class KrakenClient:
                     "max_leverage": self._retail_max_leverage(inst),
                     # Phase 5: quantity precision for automation (None if not present)
                     "contract_value_precision": inst.get("contractValueTradePrecision"),
+                    "mmr": KrakenClient._retail_mmr(inst),
                 }
             )
         return result
+
+    @staticmethod
+    def _retail_mmr(instrument: dict) -> float | None:
+        """Extract the tier-0 maintenanceMargin rate from the instrument API response.
+
+        Uses the same schedule resolution as _retail_max_leverage:
+        marginSchedules[schedule][client_type][0].maintenanceMargin
+        Falls back to retailMarginLevels → marginLevels (legacy format).
+
+        Returns None if the field is absent (caller falls back to CRYPTO_MMR constant).
+        """
+        from src.core.config import settings  # noqa: PLC0415, I001
+
+        schedules: dict = instrument.get("marginSchedules") or {}
+        schedule_levels = (
+            schedules
+            .get(settings.kraken_margin_schedule, {})
+            .get(settings.kraken_client_type, [])
+        )
+        levels: list[dict] = (
+            schedule_levels
+            or instrument.get("retailMarginLevels")
+            or instrument.get("marginLevels")
+            or []
+        )
+        if not levels:
+            return None
+        raw = levels[0].get("maintenanceMargin")
+        if raw is None:
+            return None
+        return float(raw)
 
     @staticmethod
     def _retail_max_leverage(instrument: dict) -> int:

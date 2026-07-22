@@ -397,6 +397,15 @@ def sync_open_positions(self: Task) -> dict:
                 settings_row = get_automation_settings(profile_id, db)
                 with _make_client(settings_row) as client:
                     fills = client.get_fills()
+                    # ── Fetch live open orders from Kraken ────────────────────────
+                    # Used below to detect SL/TP orders that Kraken has cancelled
+                    # (e.g. after a liquidation) with no fill → they disappear from
+                    # Kraken's open book but still show as 'open' in our DB.
+                    kraken_live_order_ids: set[str] = {
+                        str(o["order_id"]) for o in client.get_open_orders()
+                        if o.get("order_id")
+                    }
+
                 fill_by_order_id = {
                     (f.get("order_id") or f.get("orderId")): f
                     for f in fills
@@ -405,7 +414,27 @@ def sync_open_positions(self: Task) -> dict:
 
                 for order in orders:
                     fill = fill_by_order_id.get(order.kraken_order_id)
+
                     if fill is None:
+                        # ── Cancelled-order detection (liquidation guard) ──────────
+                        # If the order is not in Kraken's live open orders AND has no
+                        # fill, Kraken cancelled it (liquidation, margin call, manual
+                        # cancel on exchange, etc.).  Mark it cancelled so the orphaned
+                        # sweeper below can detect the trade and close it in ATD.
+                        if (
+                            order.kraken_order_id not in kraken_live_order_ids
+                            and not order.kraken_order_id.startswith("NO-ID-")  # skip synthetic error rows
+                        ):
+                            order.status = "cancelled"
+                            order.cancelled_at = datetime.now(UTC)
+                            db.commit()
+                            logger.warning(
+                                "sl_tp_order_cancelled_on_kraken",
+                                trade_id=order.trade_id,
+                                role=order.role,
+                                kraken_order_id=order.kraken_order_id,
+                                reason="Order absent from Kraken open book with no fill — likely liquidation",
+                            )
                         continue
 
                     fill_id = fill.get("fill_id") or fill.get("uid", "")
