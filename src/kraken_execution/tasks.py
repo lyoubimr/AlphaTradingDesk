@@ -402,7 +402,7 @@ def sync_open_positions(self: Task) -> dict:
                     # (e.g. after a liquidation) with no fill → they disappear from
                     # Kraken's open book but still show as 'open' in our DB.
                     kraken_live_order_ids: set[str] = {
-                        o.get("order_id") for o in client.get_open_orders()
+                        str(o["order_id"]) for o in client.get_open_orders()
                         if o.get("order_id")
                     }
 
