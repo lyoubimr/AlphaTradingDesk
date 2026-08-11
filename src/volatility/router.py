@@ -372,7 +372,7 @@ def list_watchlists(days: int = 7, db: Session = Depends(get_db)) -> list[Watchl
         db.query(WatchlistSnapshot)
         .filter(WatchlistSnapshot.generated_at >= since)
         .order_by(WatchlistSnapshot.generated_at.desc())
-        .limit(500)
+        .limit(5000)
         .all()
     )
     return [
