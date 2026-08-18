@@ -140,10 +140,10 @@ class TestCreateProfile:
         resp = client.post("/api/profiles", json=_profile_payload(capital_start="0"))
         assert resp.status_code == 422
 
-    def test_rejects_risk_pct_above_10(self, client: TestClient):
+    def test_rejects_risk_pct_above_100(self, client: TestClient):
         resp = client.post(
             "/api/profiles",
-            json=_profile_payload(risk_percentage_default="11"),
+            json=_profile_payload(risk_percentage_default="101"),
         )
         assert resp.status_code == 422
 

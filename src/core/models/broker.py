@@ -107,7 +107,7 @@ class Profile(Base):
         CheckConstraint("capital_start > 0", name="ck_profiles_capital_start_positive"),
         CheckConstraint("capital_current > 0", name="ck_profiles_capital_current_positive"),
         CheckConstraint(
-            "risk_percentage_default > 0 AND risk_percentage_default <= 10",
+            "risk_percentage_default > 0 AND risk_percentage_default <= 100",
             name="ck_profiles_risk_pct_range",
         ),
         CheckConstraint(

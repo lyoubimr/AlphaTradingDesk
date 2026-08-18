@@ -899,7 +899,7 @@ function ProfileModal({ profile, brokers, onClose, onSaved }: ProfileModalProps)
                 type="number"
                 step="0.01"
                 min="0.01"
-                max="10"
+                max="100"
                 value={form.risk_percentage_default}
                 onChange={(e) => set('risk_percentage_default', e.target.value)}
                 className={inputCls}
