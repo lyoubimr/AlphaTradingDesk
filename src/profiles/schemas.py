@@ -24,7 +24,7 @@ class ProfileCreate(BaseModel):
     broker_id: int | None = None
     currency: str | None = Field(default=None, max_length=10)
     capital_start: Decimal = Field(..., gt=0)
-    risk_percentage_default: Decimal = Field(default=Decimal("2.0"), gt=0, le=10)
+    risk_percentage_default: Decimal = Field(default=Decimal("2.0"), gt=0, le=100)
     max_concurrent_risk_pct: Decimal = Field(default=Decimal("2.0"), gt=0)
     min_pnl_pct_for_stats: Decimal = Field(
         default=Decimal("0.100"),
@@ -46,7 +46,7 @@ class ProfileUpdate(BaseModel):
     currency: str | None = Field(default=None, max_length=10)
     capital_start: Decimal | None = Field(default=None, gt=0)
     capital_current: Decimal | None = Field(default=None, gt=0)
-    risk_percentage_default: Decimal | None = Field(default=None, gt=0, le=10)
+    risk_percentage_default: Decimal | None = Field(default=None, gt=0, le=100)
     max_concurrent_risk_pct: Decimal | None = Field(default=None, gt=0)
     min_pnl_pct_for_stats: Decimal | None = Field(default=None, ge=0, le=100)
     description: str | None = None
