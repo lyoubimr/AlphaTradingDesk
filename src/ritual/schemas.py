@@ -302,6 +302,7 @@ DEFAULT_RITUAL_CONFIG: dict[str, Any] = {
     ],
     "vol_gate_weekend": True,
     "notif_best_hours": True,
+    "notify_before_min": 15,
     "notif_weekly_reminder": True,
     "market_analysis_pairs": [
         "CRYPTOCAP:BTC.D",

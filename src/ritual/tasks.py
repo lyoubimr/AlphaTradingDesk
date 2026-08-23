@@ -12,14 +12,32 @@ Dedup: Redis key  atd:tw_notif:{profile_id}:{label}:{YYYYMMDD_HHMM}  (TTL 20min)
 from __future__ import annotations
 
 import logging
+import os
 from datetime import UTC, datetime
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from src.core.celery_app import celery_app
 from src.core.database import get_session_factory
 
 logger = logging.getLogger(__name__)
 
-_WINDOW_TOLERANCE_MIN = 15  # notify if window starts within next N minutes
+_WINDOW_BEAT_SLOT_MIN = 15  # Celery beat interval — minutes between each beat firing
+
+
+def _get_app_tz() -> ZoneInfo:
+    """Return the configured app timezone (APP_TIMEZONE env var, default UTC).
+
+    Mirrors the same helper in src/volatility/telegram.py so all time-based
+    logic uses the same timezone throughout the app.
+    """
+    tz_name = os.getenv("APP_TIMEZONE", "UTC")
+    try:
+        return ZoneInfo(tz_name)
+    except (ZoneInfoNotFoundError, KeyError):
+        logger.warning(
+            "notify_trading_windows: unknown APP_TIMEZONE=%r, falling back to UTC", tz_name
+        )
+        return ZoneInfo("UTC")
 
 
 @celery_app.task(
@@ -45,7 +63,9 @@ def notify_trading_windows(self) -> dict:  # type: ignore[override]
     skipped = 0
 
     now_utc: datetime = datetime.now(tz=UTC)
-    today_dow: int = now_utc.weekday()  # 0=Mon, 6=Sun
+    app_tz = _get_app_tz()
+    now_local = now_utc.astimezone(app_tz)
+    today_dow: int = now_local.weekday()  # 0=Mon, 6=Sun — evaluated in local timezone
 
     with session_factory() as db:
         # Fetch all ritual settings rows that have notif_best_hours enabled
@@ -82,16 +102,22 @@ def notify_trading_windows(self) -> dict:  # type: ignore[override]
                 except ValueError:
                     continue
 
-                # Build window start datetime for today (UTC)
-                window_start = now_utc.replace(hour=h, minute=m, second=0, microsecond=0)
-                delta = (window_start - now_utc).total_seconds() / 60.0
+                # Build window start in local time (APP_TIMEZONE) — hours in config are local
+                window_start = now_local.replace(hour=h, minute=m, second=0, microsecond=0)
+                delta = (window_start - now_local).total_seconds() / 60.0
 
-                # Fire only if window_start is between now and now+15min (current beat slot)
-                if not (0 <= delta < _WINDOW_TOLERANCE_MIN):
+                # Per-profile advance notice setting (default 15 min)
+                notify_before_min: int = int(cfg.get("notify_before_min", 15))
+
+                # Fire in the beat slot where the advance notice falls:
+                #   notify_before_min=15 → fire when window is 15–30 min away (notif 15 min early)
+                #   notify_before_min=0  → fire when window is 0–15 min away (at window start)
+                #   notify_before_min=30 → fire when window is 30–45 min away
+                if not (notify_before_min <= delta < notify_before_min + _WINDOW_BEAT_SLOT_MIN):
                     continue
 
-                # Dedup via Redis — key unique per profile + label + 15-minute slot
-                slot = now_utc.strftime("%Y%m%d_%H%M")
+                # Dedup via Redis — key based on window start time (stable across late beats/retries)
+                slot = window_start.strftime("%Y%m%d_%H%M")
                 redis_key = f"atd:tw_notif:{row.profile_id}:{label}:{slot}"
                 try:
                     r = _get_redis()

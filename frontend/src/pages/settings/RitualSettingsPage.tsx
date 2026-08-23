@@ -59,6 +59,16 @@ const DAYS = [
 
 type TradingWindow = { label: string; start: string; end: string; days: number[] }
 
+const HOURS = Array.from({ length: 24 }, (_, i) => String(i).padStart(2, '0'))
+const MINUTES = ['00', '05', '10', '15', '20', '25', '30', '35', '40', '45', '50', '55']
+const NOTIFY_BEFORE_OPTIONS = [
+  { value: 0,  label: 'At window start' },
+  { value: 5,  label: '5 min before' },
+  { value: 10, label: '10 min before' },
+  { value: 15, label: '15 min before' },
+  { value: 30, label: '30 min before' },
+]
+
 const TF_COLORS: Record<string, string> = {
   '1W': 'text-purple-400 border-purple-700/40 bg-purple-900/20',
   '1D': 'text-blue-400 border-blue-700/40 bg-blue-900/20',
@@ -149,10 +159,11 @@ export function RitualSettingsPage() {
   const [customSymbol, setCustomSymbol]   = useState('')
 
   // Trading windows
-  const [windows, setWindows]             = useState<TradingWindow[]>([])
+  const [windows, setWindows]               = useState<TradingWindow[]>([])
   const [notifBestHours, setNotifBestHours] = useState(true)
-  const [savingWindows, setSavingWindows] = useState(false)
-  const [windowsSaved, setWindowsSaved]   = useState(false)
+  const [notifyBeforeMin, setNotifyBeforeMin] = useState(15)
+  const [savingWindows, setSavingWindows]   = useState(false)
+  const [windowsSaved, setWindowsSaved]     = useState(false)
 
   // ── Load all ────────────────────────────────────────────────────────────────
   const loadAll = useCallback(async () => {
@@ -187,6 +198,7 @@ export function RitualSettingsPage() {
       const rawWindows = (settingsData.config?.trading_windows as TradingWindow[]) ?? []
       setWindows(rawWindows)
       setNotifBestHours((settingsData.config?.notif_best_hours as boolean) ?? true)
+      setNotifyBeforeMin((settingsData.config?.notify_before_min as number) ?? 15)
     } finally {
       setLoading(false)
     }
@@ -261,7 +273,7 @@ export function RitualSettingsPage() {
     }
   }
 
-  const saveWindows = async (newWindows: TradingWindow[], newNotif?: boolean) => {
+  const saveWindows = async (newWindows: TradingWindow[], newNotif?: boolean, newBefore?: number) => {
     if (!profileId) return
     setSavingWindows(true)
     try {
@@ -270,6 +282,7 @@ export function RitualSettingsPage() {
         ...cfg,
         trading_windows: newWindows,
         notif_best_hours: newNotif ?? notifBestHours,
+        notify_before_min: newBefore ?? notifyBeforeMin,
       })
       setSettings(updated)
       setWindowsSaved(true)
@@ -308,6 +321,11 @@ export function RitualSettingsPage() {
   const toggleNotifBestHours = (val: boolean) => {
     setNotifBestHours(val)
     void saveWindows(windows, val)
+  }
+
+  const changeNotifyBefore = (val: number) => {
+    setNotifyBeforeMin(val)
+    void saveWindows(windows, undefined, val)
   }
 
   const toggleMarketPair = (symbol: string) => {
@@ -682,6 +700,26 @@ export function RitualSettingsPage() {
                     </button>
                   </div>
 
+                  {/* Advance notice select */}
+                  <div className="flex items-center justify-between">
+                    <span className={cn('text-sm', notifBestHours ? 'text-slate-400' : 'text-slate-600')}>
+                      Send notification
+                    </span>
+                    <select
+                      value={notifyBeforeMin}
+                      onChange={e => changeNotifyBefore(Number(e.target.value))}
+                      disabled={!notifBestHours}
+                      className={cn(
+                        'bg-surface-700 border border-surface-600 rounded-lg px-2 py-1 text-xs focus:outline-none focus:border-brand-500 disabled:opacity-40',
+                        notifBestHours ? 'text-slate-200' : 'text-slate-600',
+                      )}
+                    >
+                      {NOTIFY_BEFORE_OPTIONS.map(o => (
+                        <option key={o.value} value={o.value}>{o.label}</option>
+                      ))}
+                    </select>
+                  </div>
+
                   {/* Window list */}
                   {windows.length === 0 ? (
                     <p className="text-xs text-slate-600 italic">No windows configured. Add one below.</p>
@@ -699,19 +737,43 @@ export function RitualSettingsPage() {
                               placeholder="Label"
                               className="w-28 bg-surface-700 border border-surface-600 rounded-lg px-2 py-1 text-xs text-slate-200 focus:outline-none focus:border-brand-500"
                             />
-                            <input
-                              type="time"
-                              value={w.start}
-                              onChange={e => { const next = updateWindow(idx, { start: e.target.value }); void saveWindows(next) }}
-                              className="bg-surface-700 border border-surface-600 rounded-lg px-2 py-1 text-xs text-slate-200 focus:outline-none focus:border-brand-500"
-                            />
+                            {/* Start time — hour + minute selects */}
+                            <div className="flex items-center gap-0.5">
+                              <select
+                                value={w.start.split(':')[0] ?? '19'}
+                                onChange={e => { const next = updateWindow(idx, { start: `${e.target.value}:${w.start.split(':')[1] ?? '00'}` }); void saveWindows(next) }}
+                                className="bg-surface-700 border border-surface-600 rounded-lg px-1.5 py-1 text-xs text-slate-200 focus:outline-none focus:border-brand-500"
+                              >
+                                {HOURS.map(hr => <option key={hr} value={hr}>{hr}</option>)}
+                              </select>
+                              <span className="text-xs text-slate-500">:</span>
+                              <select
+                                value={w.start.split(':')[1] ?? '00'}
+                                onChange={e => { const next = updateWindow(idx, { start: `${w.start.split(':')[0] ?? '19'}:${e.target.value}` }); void saveWindows(next) }}
+                                className="bg-surface-700 border border-surface-600 rounded-lg px-1.5 py-1 text-xs text-slate-200 focus:outline-none focus:border-brand-500"
+                              >
+                                {MINUTES.map(mn => <option key={mn} value={mn}>{mn}</option>)}
+                              </select>
+                            </div>
                             <span className="text-xs text-slate-600">→</span>
-                            <input
-                              type="time"
-                              value={w.end}
-                              onChange={e => { const next = updateWindow(idx, { end: e.target.value }); void saveWindows(next) }}
-                              className="bg-surface-700 border border-surface-600 rounded-lg px-2 py-1 text-xs text-slate-200 focus:outline-none focus:border-brand-500"
-                            />
+                            {/* End time */}
+                            <div className="flex items-center gap-0.5">
+                              <select
+                                value={w.end.split(':')[0] ?? '21'}
+                                onChange={e => { const next = updateWindow(idx, { end: `${e.target.value}:${w.end.split(':')[1] ?? '00'}` }); void saveWindows(next) }}
+                                className="bg-surface-700 border border-surface-600 rounded-lg px-1.5 py-1 text-xs text-slate-200 focus:outline-none focus:border-brand-500"
+                              >
+                                {HOURS.map(hr => <option key={hr} value={hr}>{hr}</option>)}
+                              </select>
+                              <span className="text-xs text-slate-500">:</span>
+                              <select
+                                value={w.end.split(':')[1] ?? '00'}
+                                onChange={e => { const next = updateWindow(idx, { end: `${w.end.split(':')[0] ?? '21'}:${e.target.value}` }); void saveWindows(next) }}
+                                className="bg-surface-700 border border-surface-600 rounded-lg px-1.5 py-1 text-xs text-slate-200 focus:outline-none focus:border-brand-500"
+                              >
+                                {MINUTES.map(mn => <option key={mn} value={mn}>{mn}</option>)}
+                              </select>
+                            </div>
                             <button
                               onClick={() => removeWindow(idx)}
                               className="ml-auto text-slate-600 hover:text-red-400 transition-colors p-1 rounded"
