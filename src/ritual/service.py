@@ -303,17 +303,21 @@ def _seed_steps(profile_id: int, db: Session) -> None:
 
 
 def _sync_step_labels(profile_id: int, session_type: str, rows: list, db: Session) -> None:
-    """Silently update step labels/configs that differ from current DEFAULT_STEPS.
+    """Silently update step labels/step_type that differ from current DEFAULT_STEPS.
 
     Also inserts any new step positions that exist in DEFAULT_STEPS but not yet
     in the DB (e.g. when a new step is added to an existing session template).
+
+    NOTE: `config` (e.g. timeframes) is intentionally NOT synced here — it is
+    user-configurable and must survive app updates.  Only structural fields
+    (label, step_type) are auto-corrected.
     """
     defaults = DEFAULT_STEPS.get(session_type, [])
     default_by_pos: dict[int, dict] = {d["position"]: d for d in defaults}
     existing_positions = {row.position for row in rows}
     changed = False
 
-    # Update labels/configs/step_type of existing rows
+    # Update label/step_type of existing rows (never touch config — user owns it)
     for row in rows:
         default = default_by_pos.get(row.position)
         if not default:
@@ -323,10 +327,6 @@ def _sync_step_labels(profile_id: int, session_type: str, rows: list, db: Sessio
             changed = True
         if row.label != default["label"]:
             row.label = default["label"]
-            changed = True
-        default_config = default.get("config", {})
-        if row.config != default_config:
-            row.config = default_config
             changed = True
 
     # Insert new steps for positions not yet in DB

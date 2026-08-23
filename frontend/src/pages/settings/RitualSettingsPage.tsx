@@ -178,17 +178,8 @@ export function RitualSettingsPage() {
       const map: Record<string, RitualStep[]> = {}
       SESSION_TYPES.forEach((t, i) => { map[t.type] = stepsArrays[i] })
       setStepsMap(map)
-      const TOP_N_MAX = 25
       const tnRaw = ((settingsData.config?.top_n) as Record<string, number>) ?? {}
-      const tnMap = Object.fromEntries(
-        Object.entries(tnRaw).map(([k, v]) => [k, Math.min(v, TOP_N_MAX)])
-      )
-      setTopNLocal(tnMap)
-      // Auto-persist clamped values if any were above the new max
-      const needsClamp = Object.entries(tnRaw).some(([, v]) => v > TOP_N_MAX)
-      if (needsClamp && profileId) {
-        await ritualApi.updateSettings(profileId, { ...settingsData.config, top_n: tnMap })
-      }
+      setTopNLocal(tnRaw)
       const sf = (settingsData.config?.smart_filter as Record<string, unknown>) ?? {}
       setWeights((sf.weights as Record<string, number>) ?? DEFAULT_WEIGHTS)
       setTrendBonus((sf.trend_bonus as number) ?? 1.2)
@@ -933,28 +924,41 @@ export function RitualSettingsPage() {
                     Pinned pairs are always included on top of this limit.
                     <br />
                     <span className="text-[10px] text-slate-600">
-                      TV file is capped at 100 lines total — with 5 active TFs the effective max is ≈ 19 pairs / TF.
+                      TV file is capped at 100 lines. Max = floor((100 − 2 − market pairs − TF section headers) / active TFs).
+                      Active pins are not counted here but further reduce the real cap at generation time.
                     </span>
                   </p>
                 </div>
                 <div className="px-4 py-4 space-y-3">
-                  {SESSION_TYPES.map(st => (
-                    <div key={st.type} className="flex items-center gap-3">
-                      <span className="text-base shrink-0">{st.emoji}</span>
-                      <span className="text-sm text-slate-400 w-32 shrink-0">{st.label}</span>
-                      <input
-                        type="range" min={5} max={25} step={5}
-                        value={Math.min(topNLocal[st.type] ?? 20, 25)}
-                        onChange={e => updateTopN(st.type, Number(e.target.value))}
-                        className="flex-1 accent-brand-500 max-w-[200px]"
-                        disabled={savingTopN}
-                      />
-                      <span className="text-sm text-slate-300 w-8 text-right shrink-0">
-                        {Math.min(topNLocal[st.type] ?? 20, 25)}
-                      </span>
-                      <span className="text-xs text-slate-600 shrink-0">pairs</span>
-                    </div>
-                  ))}
+                  {SESSION_TYPES.map(st => {
+                    const wlStep = (stepsMap[st.type] ?? []).find(
+                      s => s.step_type === 'smart_wl' || s.step_type === 'watchlist_htf_spot'
+                    )
+                    const nTfs = ((wlStep?.config?.timeframes as string[]) ?? []).length || 5
+                    // Mirror backend overhead formula (without pins — dynamic at generation time):
+                    //   2 (market section header+blank) + n_market_pairs + n_tfs×2 (section headers+blanks)
+                    const nMarket = marketPairs.length || 7
+                    const staticOverhead = 2 + nMarket + nTfs * 2
+                    const maxTopN = Math.max(5, Math.floor((100 - staticOverhead) / nTfs))
+                    const curVal = Math.min(topNLocal[st.type] ?? 20, maxTopN)
+                    return (
+                      <div key={st.type} className="flex items-center gap-3">
+                        <span className="text-base shrink-0">{st.emoji}</span>
+                        <span className="text-sm text-slate-400 w-32 shrink-0">{st.label}</span>
+                        <input
+                          type="range" min={5} max={maxTopN} step={5}
+                          value={curVal}
+                          onChange={e => updateTopN(st.type, Number(e.target.value))}
+                          className="flex-1 accent-brand-500 max-w-[200px]"
+                          disabled={savingTopN}
+                        />
+                        <span className="text-sm text-slate-300 w-8 text-right shrink-0">
+                          {curVal}
+                        </span>
+                        <span className="text-xs text-slate-600 shrink-0">/ {maxTopN}</span>
+                      </div>
+                    )
+                  })}
                 </div>
               </div>
 
