@@ -121,6 +121,9 @@ class TradeOpen(BaseModel):
     # This value is stored on the trade and used when placing the trailing stop order.
     # If None, the profile's runner_trailing_pct_default (from automation_settings) is used.
     runner_trailing_pct: Decimal | None = Field(default=None, gt=0, le=50)
+    # Market Analysis session used for DRS ma_direction calculation — stored for audit trail.
+    # The DRS engine auto-fetches the latest session when this is None, but the link is lost.
+    market_analysis_session_id: int | None = None
 
     @model_validator(mode="after")
     def normalise_and_validate(self) -> TradeOpen:
