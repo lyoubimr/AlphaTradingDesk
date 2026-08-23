@@ -924,7 +924,8 @@ export function RitualSettingsPage() {
                     Pinned pairs are always included on top of this limit.
                     <br />
                     <span className="text-[10px] text-slate-600">
-                      TV file is capped at 100 lines — the slider max adjusts automatically to the number of active TFs for each session.
+                      TV file is capped at 100 lines. Max = floor((100 − 2 − market pairs − TF section headers) / active TFs).
+                      Active pins are not counted here but further reduce the real cap at generation time.
                     </span>
                   </p>
                 </div>
@@ -934,7 +935,11 @@ export function RitualSettingsPage() {
                       s => s.step_type === 'smart_wl' || s.step_type === 'watchlist_htf_spot'
                     )
                     const nTfs = ((wlStep?.config?.timeframes as string[]) ?? []).length || 5
-                    const maxTopN = Math.floor(100 / nTfs)
+                    // Mirror backend overhead formula (without pins — dynamic at generation time):
+                    //   2 (market section header+blank) + n_market_pairs + n_tfs×2 (section headers+blanks)
+                    const nMarket = marketPairs.length || 7
+                    const staticOverhead = 2 + nMarket + nTfs * 2
+                    const maxTopN = Math.max(5, Math.floor((100 - staticOverhead) / nTfs))
                     const curVal = Math.min(topNLocal[st.type] ?? 20, maxTopN)
                     return (
                       <div key={st.type} className="flex items-center gap-3">
