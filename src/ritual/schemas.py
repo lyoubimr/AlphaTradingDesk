@@ -298,7 +298,7 @@ MAX_WEEKLY_SCORE_SPOT = MAX_MONTHLY_SCORE_SPOT
 
 DEFAULT_RITUAL_CONFIG: dict[str, Any] = {
     "trading_windows": [
-        {"label": "Evening", "start": "20:00", "end": "23:00", "days": [0, 1, 2, 3, 4]},
+        {"label": "Evening", "start": "19:00", "end": "21:00", "days": [0, 1, 2, 3, 4]},
     ],
     "vol_gate_weekend": True,
     "notif_best_hours": True,

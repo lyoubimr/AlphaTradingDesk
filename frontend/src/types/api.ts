@@ -258,6 +258,8 @@ export interface TradeOpen {
   be_on_tp1?: boolean
   /** Trailing stop % for the runner position (last TP). If null, profile default is used. */
   runner_trailing_pct?: number | null
+  /** Market Analysis session ID used to compute ma_direction in DRS — stored for audit trail. */
+  market_analysis_session_id?: number | null
 }
 
 export interface TradeSizeResult {

@@ -1563,8 +1563,9 @@ export function NewTradePage() {
         confidence_score:     confidence ? Number(confidence) : null,
         force:                forceOpen || undefined,
         dynamic_risk_snapshot: advisorSnapshot ?? undefined,
-        be_on_tp1:            automateOnCreate && beOnTp1 ? true : undefined,
-        runner_trailing_pct:  runnerEnabled ? (Number(runnerTrailingPct) || 5) : undefined,
+        be_on_tp1:                    automateOnCreate && beOnTp1 ? true : undefined,
+        runner_trailing_pct:          runnerEnabled ? (Number(runnerTrailingPct) || 5) : undefined,
+        market_analysis_session_id:   latestMaSessionId ?? null,
       })
       // Upload entry screenshots sequentially (fire-and-forget errors — non-blocking)
       for (const file of entryScreenshots) {
