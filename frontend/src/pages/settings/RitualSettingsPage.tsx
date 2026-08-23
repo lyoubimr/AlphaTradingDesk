@@ -3,7 +3,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { Link } from 'react-router-dom'
 import {
   ArrowLeft, Loader2, RefreshCw, CheckCircle2,
-  Pencil, Save, X, Settings, Layers, Plus,
+  Pencil, Save, X, Settings, Layers, Plus, Bell, Trash2,
 } from 'lucide-react'
 import { PageHeader } from '../../components/ui/PageHeader'
 import { useProfile } from '../../context/ProfileContext'
@@ -46,6 +46,18 @@ const SESSION_TYPES = [
 type SessionKey = (typeof SESSION_TYPES)[number]['type']
 
 const AVAILABLE_TFS = ['1W', '1D', '4H', '1H', '15m'] as const
+
+const DAYS = [
+  { label: 'Mon', value: 0 },
+  { label: 'Tue', value: 1 },
+  { label: 'Wed', value: 2 },
+  { label: 'Thu', value: 3 },
+  { label: 'Fri', value: 4 },
+  { label: 'Sat', value: 5 },
+  { label: 'Sun', value: 6 },
+] as const
+
+type TradingWindow = { label: string; start: string; end: string; days: number[] }
 
 const TF_COLORS: Record<string, string> = {
   '1W': 'text-purple-400 border-purple-700/40 bg-purple-900/20',
@@ -136,6 +148,12 @@ export function RitualSettingsPage() {
   const [pairsSaved, setPairsSaved]       = useState(false)
   const [customSymbol, setCustomSymbol]   = useState('')
 
+  // Trading windows
+  const [windows, setWindows]             = useState<TradingWindow[]>([])
+  const [notifBestHours, setNotifBestHours] = useState(true)
+  const [savingWindows, setSavingWindows] = useState(false)
+  const [windowsSaved, setWindowsSaved]   = useState(false)
+
   // ── Load all ────────────────────────────────────────────────────────────────
   const loadAll = useCallback(async () => {
     if (!profileId) return
@@ -166,6 +184,9 @@ export function RitualSettingsPage() {
       setEmaBonusThreshold((sf.ema_bonus_threshold as number) ?? 70)
       setEmaBonusFactor((sf.ema_bonus_factor as number) ?? 1.1)
       setMarketPairs((settingsData.config?.market_analysis_pairs as string[]) ?? [])
+      const rawWindows = (settingsData.config?.trading_windows as TradingWindow[]) ?? []
+      setWindows(rawWindows)
+      setNotifBestHours((settingsData.config?.notif_best_hours as boolean) ?? true)
     } finally {
       setLoading(false)
     }
@@ -238,6 +259,55 @@ export function RitualSettingsPage() {
     } finally {
       setSavingPairs(false)
     }
+  }
+
+  const saveWindows = async (newWindows: TradingWindow[], newNotif?: boolean) => {
+    if (!profileId) return
+    setSavingWindows(true)
+    try {
+      const cfg = settings?.config ?? {}
+      const updated = await ritualApi.updateSettings(profileId, {
+        ...cfg,
+        trading_windows: newWindows,
+        notif_best_hours: newNotif ?? notifBestHours,
+      })
+      setSettings(updated)
+      setWindowsSaved(true)
+      setTimeout(() => setWindowsSaved(false), 1500)
+    } finally {
+      setSavingWindows(false)
+    }
+  }
+
+  const addWindow = () => {
+    const w: TradingWindow = { label: 'Evening', start: '19:00', end: '21:00', days: [0, 1, 2, 3, 4] }
+    const next = [...windows, w]
+    setWindows(next)
+    void saveWindows(next)
+  }
+
+  const removeWindow = (idx: number) => {
+    const next = windows.filter((_, i) => i !== idx)
+    setWindows(next)
+    void saveWindows(next)
+  }
+
+  const updateWindow = (idx: number, patch: Partial<TradingWindow>) => {
+    const next = windows.map((w, i) => i === idx ? { ...w, ...patch } : w)
+    setWindows(next)
+    return next
+  }
+
+  const toggleWindowDay = (idx: number, day: number) => {
+    const w = windows[idx]
+    const days = w.days.includes(day) ? w.days.filter(d => d !== day) : [...w.days, day].sort()
+    const next = updateWindow(idx, { days })
+    void saveWindows(next)
+  }
+
+  const toggleNotifBestHours = (val: boolean) => {
+    setNotifBestHours(val)
+    void saveWindows(windows, val)
   }
 
   const toggleMarketPair = (symbol: string) => {
@@ -573,6 +643,124 @@ export function RitualSettingsPage() {
           ══════════════════════════════════════════════════════════════════════ */}
           {activeTab === 'config' && (
             <div className="space-y-4">
+
+              {/* ── Trading Windows ──────────────────────────────────────────── */}
+              <div className="rounded-xl border border-surface-700 bg-surface-800/40 overflow-hidden">
+                <div className="px-4 py-3 border-b border-surface-700 bg-surface-800/60 flex items-center justify-between">
+                  <div>
+                    <h3 className="text-sm font-semibold text-slate-200">Trading Windows</h3>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      Telegram notification sent at the start of each window (Celery beat, every 15 min).
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    {savingWindows && <Loader2 size={12} className="animate-spin text-slate-500" />}
+                    {!savingWindows && windowsSaved && <CheckCircle2 size={12} className="text-green-400" />}
+                  </div>
+                </div>
+                <div className="px-4 py-4 space-y-4">
+
+                  {/* Notif toggle */}
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Bell size={13} className={notifBestHours ? 'text-brand-400' : 'text-slate-600'} />
+                      <span className="text-sm text-slate-300">Notify at window start (Telegram)</span>
+                    </div>
+                    <button
+                      onClick={() => toggleNotifBestHours(!notifBestHours)}
+                      className={cn(
+                        'relative w-10 h-5 rounded-full border transition-all',
+                        notifBestHours
+                          ? 'bg-brand-700/60 border-brand-600/60'
+                          : 'bg-surface-700 border-surface-600',
+                      )}
+                    >
+                      <span className={cn(
+                        'absolute top-0.5 w-4 h-4 rounded-full transition-all',
+                        notifBestHours ? 'left-5 bg-brand-400' : 'left-0.5 bg-slate-500',
+                      )} />
+                    </button>
+                  </div>
+
+                  {/* Window list */}
+                  {windows.length === 0 ? (
+                    <p className="text-xs text-slate-600 italic">No windows configured. Add one below.</p>
+                  ) : (
+                    <div className="space-y-3">
+                      {windows.map((w, idx) => (
+                        <div key={idx} className="rounded-lg border border-surface-700 bg-surface-800/60 p-3 space-y-3">
+                          {/* Label + times + delete */}
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <input
+                              type="text"
+                              value={w.label}
+                              onChange={e => setWindows(prev => prev.map((x, i) => i === idx ? { ...x, label: e.target.value } : x))}
+                              onBlur={() => void saveWindows(windows)}
+                              placeholder="Label"
+                              className="w-28 bg-surface-700 border border-surface-600 rounded-lg px-2 py-1 text-xs text-slate-200 focus:outline-none focus:border-brand-500"
+                            />
+                            <input
+                              type="time"
+                              value={w.start}
+                              onChange={e => { const next = updateWindow(idx, { start: e.target.value }); void saveWindows(next) }}
+                              className="bg-surface-700 border border-surface-600 rounded-lg px-2 py-1 text-xs text-slate-200 focus:outline-none focus:border-brand-500"
+                            />
+                            <span className="text-xs text-slate-600">→</span>
+                            <input
+                              type="time"
+                              value={w.end}
+                              onChange={e => { const next = updateWindow(idx, { end: e.target.value }); void saveWindows(next) }}
+                              className="bg-surface-700 border border-surface-600 rounded-lg px-2 py-1 text-xs text-slate-200 focus:outline-none focus:border-brand-500"
+                            />
+                            <button
+                              onClick={() => removeWindow(idx)}
+                              className="ml-auto text-slate-600 hover:text-red-400 transition-colors p-1 rounded"
+                              title="Remove window"
+                            >
+                              <Trash2 size={13} />
+                            </button>
+                          </div>
+                          {/* Days */}
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            {DAYS.map(d => {
+                              const active = w.days.includes(d.value)
+                              return (
+                                <button
+                                  key={d.value}
+                                  onClick={() => toggleWindowDay(idx, d.value)}
+                                  className={cn(
+                                    'text-[10px] px-2 py-0.5 rounded border transition-all font-medium',
+                                    active
+                                      ? d.value >= 5
+                                        ? 'border-amber-700/60 text-amber-400 bg-amber-900/20'
+                                        : 'border-brand-700/60 text-brand-400 bg-brand-900/20'
+                                      : 'border-surface-600 text-slate-600 hover:border-slate-500',
+                                  )}
+                                >
+                                  {d.label}
+                                </button>
+                              )
+                            })}
+                            {w.days.some(d => d >= 5) && (
+                              <span className="text-[10px] text-amber-500/70 ml-1">⚠ Weekend</span>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Add button */}
+                  <button
+                    onClick={addWindow}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-brand-700/40 text-brand-400 bg-brand-900/20 text-xs hover:bg-brand-900/30 transition-colors"
+                  >
+                    <Plus size={11} />
+                    Add window
+                  </button>
+
+                </div>
+              </div>
 
               {/* ── Market Context Pairs ─────────────────────────────────────── */}
               <div className="rounded-xl border border-surface-700 bg-surface-800/40 overflow-hidden">
