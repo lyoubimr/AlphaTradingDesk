@@ -1,7 +1,7 @@
 // ── VIHistoryChart ────────────────────────────────────────────────────────
 // Recharts AreaChart for Market VI historical snapshots.
 // Fetches /volatility/market/{timeframe}/history with a `since` param derived
-// from the selected range (1h | 6h | 24h | 3d | 7d | 30d | 60d | 90d).
+// from the selected range (1h | 6h | 24h | 3d | 7d | 30d | 60d | 90d | 180d | 365d).
 
 import { useEffect, useState, useMemo, useRef, useCallback } from 'react'
 import {
@@ -21,7 +21,7 @@ import type { MarketVIOut } from '../../types/api'
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
-type Range = '1h' | '6h' | '24h' | '3d' | '7d' | '30d' | '60d' | '90d'
+type Range = '1h' | '6h' | '24h' | '3d' | '7d' | '30d' | '60d' | '90d' | '180d' | '365d'
 
 interface ChartPoint {
   ts: number
@@ -63,6 +63,8 @@ const RANGE_MS: Record<Range, number> = {
   '30d': 30 * 24 * 60 * 60 * 1000,
   '60d': 60 * 24 * 60 * 60 * 1000,
   '90d': 90 * 24 * 60 * 60 * 1000,
+  '180d': 180 * 24 * 60 * 60 * 1000,
+  '365d': 365 * 24 * 60 * 60 * 1000,
 }
 
 // Regime thresholds on 0-100 scale
@@ -117,7 +119,7 @@ function formatXTick(ts: number, range: Range): string {
     if (d.getHours() === 0) return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
     return d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hour12: false })
   }
-  // 7d / 30d / 60d / 90d → date only
+  // 7d / 30d / 60d / 90d / 180d / 365d → date only
   return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
 }
 
@@ -425,8 +427,8 @@ export function VIHistoryChart({ timeframe, defaultColor = '#a1a1aa', compact = 
     setError(null)
 
     const since = new Date(Date.now() - RANGE_MS[range]).toISOString()
-    // Wide ranges need more rows: 1h-resolution data → 7d=168, 30d=720, 90d=2160
-    const limit = (['7d', '30d', '60d', '90d'] as Range[]).includes(range) ? 2000 : 500
+    // Wide ranges need more rows: 1h-resolution data → 7d=168, 30d=720, 90d=2160, 365d=8760
+    const limit = (['7d', '30d', '60d', '90d', '180d', '365d'] as Range[]).includes(range) ? 9000 : 500
     volatilityApi.getMarketVIHistory(timeframe, limit, since)
       .then((snaps: MarketVIOut[]) => {
         if (cancelled) return
@@ -829,7 +831,7 @@ export function VIHistoryChart({ timeframe, defaultColor = '#a1a1aa', compact = 
 
         {/* Range selector */}
         <div className="flex gap-0.5 bg-zinc-900 border border-zinc-800 rounded-md p-0.5 overflow-x-auto max-w-[220px] sm:max-w-none scrollbar-none">
-          {(['1h', '6h', '24h', '3d', '7d', '30d', '60d', '90d'] as Range[]).map((r) => (
+          {(['1h', '6h', '24h', '3d', '7d', '30d', '60d', '90d', '180d', '365d'] as Range[]).map((r) => (
             <button
               key={r}
               onClick={() => setRange(r)}

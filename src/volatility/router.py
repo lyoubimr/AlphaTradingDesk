@@ -175,7 +175,7 @@ def get_market_vi_history(
     """Return Market VI snapshots for a timeframe, oldest first.
 
     Query params:
-      limit  — max rows to return (default 96, max 500)
+      limit  — max rows to return (default 96, max 10000)
       since  — ISO-8601 datetime string; if provided, return rows after this
                timestamp (takes precedence over limit for date filtering)
 
@@ -195,7 +195,7 @@ def get_market_vi_history(
 
     rows = (
         q.order_by(MarketVISnapshot.timestamp.desc())
-        .limit(min(limit, 2000))
+        .limit(min(limit, 10000))
         .all()
     )
     return [
