@@ -536,6 +536,11 @@ function ProfileCard({ profile, isActive, onSelect, onEdit, onDelete }: ProfileC
                 Spot
               </span>
             )}
+            {profile.is_test && (
+              <span className="px-1.5 py-0.5 rounded text-[9px] font-semibold border text-amber-300 bg-amber-500/15 border-amber-500/40">
+                🧪 TEST
+              </span>
+            )}
           </div>
           {profile.description && (
             <p className="text-xs text-slate-500 mt-0.5 truncate">{profile.description}</p>
@@ -622,6 +627,7 @@ interface ProfileFormData {
   max_concurrent_risk_pct: string
   min_pnl_pct_for_stats: string
   description: string
+  is_test: boolean
 }
 
 const EMPTY_FORM: ProfileFormData = {
@@ -635,6 +641,7 @@ const EMPTY_FORM: ProfileFormData = {
   max_concurrent_risk_pct: '2.0',
   min_pnl_pct_for_stats: '0.1',
   description: '',
+  is_test: false,
 }
 
 function profileToForm(p: Profile): ProfileFormData {
@@ -649,6 +656,7 @@ function profileToForm(p: Profile): ProfileFormData {
     max_concurrent_risk_pct: p.max_concurrent_risk_pct,
     min_pnl_pct_for_stats: p.min_pnl_pct_for_stats,
     description: p.description ?? '',
+    is_test: p.is_test,
   }
 }
 
@@ -715,6 +723,7 @@ function ProfileModal({ profile, brokers, onClose, onSaved }: ProfileModalProps)
           max_concurrent_risk_pct: form.max_concurrent_risk_pct,
           min_pnl_pct_for_stats: form.min_pnl_pct_for_stats,
           description: form.description || null,
+          is_test: form.is_test,
         }
         await profilesApi.update(profile.id, update)
       } else {
@@ -729,6 +738,7 @@ function ProfileModal({ profile, brokers, onClose, onSaved }: ProfileModalProps)
           max_concurrent_risk_pct: form.max_concurrent_risk_pct,
           min_pnl_pct_for_stats: form.min_pnl_pct_for_stats,
           description: form.description || null,
+          is_test: form.is_test,
         }
         await profilesApi.create(create)
       }
@@ -805,6 +815,45 @@ function ProfileModal({ profile, brokers, onClose, onSaved }: ProfileModalProps)
                 </div>
               </div>
             )}
+          </Field>
+
+          {/* Test profile toggle */}
+          <Field label="Test profile">
+            <button
+              type="button"
+              role="switch"
+              aria-checked={form.is_test}
+              onClick={() => setForm((f) => ({ ...f, is_test: !f.is_test }))}
+              className={cn(
+                'w-full flex items-center justify-between gap-3 px-3 py-2 rounded-lg border transition-colors',
+                form.is_test
+                  ? 'bg-amber-500/10 border-amber-500/40'
+                  : 'bg-surface-700 border-surface-600 hover:border-surface-500',
+              )}
+            >
+              <span className="text-left">
+                <span className={cn('text-xs font-medium', form.is_test ? 'text-amber-300' : 'text-slate-300')}>
+                  🧪 Sandbox / testing
+                </span>
+                <span className="block text-[10px] text-slate-600 mt-0.5">
+                  Auto-appends "(TEST)" to the name. Never affects the global win-rate
+                  or shared (global) strategy stats.
+                </span>
+              </span>
+              <span
+                className={cn(
+                  'relative shrink-0 w-9 h-5 rounded-full transition-colors',
+                  form.is_test ? 'bg-amber-500' : 'bg-surface-600',
+                )}
+              >
+                <span
+                  className={cn(
+                    'absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white transition-transform',
+                    form.is_test && 'translate-x-4',
+                  )}
+                />
+              </span>
+            </button>
           </Field>
 
           {/* Market type */}

@@ -27,6 +27,8 @@ Full close flow:
      c. profile.trades_count += 1  (if not BE)
      d. profile.win_count    += 1  (if pnl_pct > 0 and not BE)
      e. ALL linked strategies (via trade_strategies) get trades_count/win_count updated
+        -- except GLOBAL strategies (profile_id IS NULL) when profile.is_test=True,
+           to keep test profiles from polluting stats shared with real profiles.
 
 Capital is ALWAYS updated in the same DB transaction as trade close.
 """
@@ -579,6 +581,11 @@ def _update_wr_stats(db: Session, trade: Trade, profile: Profile) -> None:
             .all()
         )
         for strategy in strategies:
+            # Test profiles never update GLOBAL strategies (profile_id IS NULL) —
+            # those counters are shared across all profiles. Profile-specific
+            # strategies (already scoped to this test profile) are unaffected.
+            if profile.is_test and strategy.profile_id is None:
+                continue
             strategy.trades_count += 1
             if is_win:
                 strategy.win_count += 1

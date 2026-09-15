@@ -50,11 +50,19 @@ def get_winrate_stats(
 
     The global WR (average across all profiles) is intentionally computed
     in the frontend to keep this endpoint simple and cacheable.
+
+    Test profiles (is_test=True) are excluded from the aggregate list (no
+    profile_id given, used to compute the cross-profile Global WR) so they
+    never influence it — but are still returned when profile_id explicitly
+    targets that test profile, so its own page can display its own stats.
     """
     q = db.query(Profile).filter(Profile.status != "deleted")
     if profile_id is not None:
         q = q.filter(Profile.id == profile_id)
+    else:
+        q = q.filter(Profile.is_test.is_(False))
     profiles = q.order_by(Profile.id).all()
+
 
     result: list[ProfileWinRate] = []
     for p in profiles:

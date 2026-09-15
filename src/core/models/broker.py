@@ -168,6 +168,10 @@ class Profile(Base):
     description: Mapped[str | None] = mapped_column(Text)
     notes: Mapped[str | None] = mapped_column(Text)
     status: Mapped[str] = mapped_column(String(50), nullable=False, default="active")
+    # Sandbox profile for testing — excluded from cross-profile aggregates
+    # (global WR average, global strategy stat updates). See src/stats/router.py
+    # and src/trades/service.py::_update_wr_stats.
+    is_test: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(

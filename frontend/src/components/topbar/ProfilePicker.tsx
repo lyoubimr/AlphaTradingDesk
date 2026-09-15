@@ -134,6 +134,11 @@ export function ProfilePicker() {
                     >
                       {p.market_type}
                     </span>
+                    {p.is_test && (
+                      <span className="px-1.5 py-0.5 rounded text-[9px] font-semibold border shrink-0 text-amber-300 bg-amber-500/15 border-amber-500/40">
+                        🧪 TEST
+                      </span>
+                    )}
                   </div>
                   <div className="flex items-center gap-1 mt-0.5">
                     <TrendingUp size={10} className="text-slate-600" />
