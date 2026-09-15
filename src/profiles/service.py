@@ -71,6 +71,13 @@ def is_spot_profile(profile: Profile) -> bool:
     """Return True if this is a spot/investment profile (Phase 7)."""
     return getattr(profile, "account_type", "contracts") == "spot"
 
+
+def _with_test_suffix(name: str) -> str:
+    """Append ' (TEST)' to the profile name if not already present (case-insensitive)."""
+    if "(test)" in name.lower():
+        return name
+    return f"{name} (TEST)"
+
 def get_all(db: Session) -> list[Profile]:
     """Return all non-deleted profiles, most recent first."""
     return (
@@ -90,7 +97,7 @@ def create(db: Session, data: ProfileCreate) -> Profile:
         _validate_broker(db, data.broker_id, data.market_type)
 
     profile = Profile(
-        name=data.name,
+        name=_with_test_suffix(data.name) if data.is_test else data.name,
         market_type=data.market_type,
         account_type=data.account_type,
         broker_id=data.broker_id,
@@ -103,6 +110,7 @@ def create(db: Session, data: ProfileCreate) -> Profile:
         description=data.description,
         notes=data.notes,
         status="active",
+        is_test=data.is_test,
     )
     db.add(profile)
     db.commit()
@@ -123,6 +131,11 @@ def update(db: Session, profile_id: int, data: ProfileUpdate) -> Profile:
     # Apply only the fields explicitly provided in the request body
     for field, value in data.model_dump(exclude_unset=True).items():
         setattr(profile, field, value)
+
+    # Toggling is_test ON auto-appends the ' (TEST)' suffix (unless the name
+    # already has it or a new name was also provided in this same request).
+    if data.is_test and "name" not in data.model_fields_set:
+        profile.name = _with_test_suffix(profile.name)
 
     db.commit()
     db.refresh(profile)

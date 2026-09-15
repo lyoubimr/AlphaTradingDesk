@@ -25,6 +25,8 @@ export interface Profile {
   description: string | null
   notes: string | null
   status: 'active' | 'archived' | 'deleted'
+  // Sandbox profile — excluded from cross-profile aggregates (global WR, global strategy stats)
+  is_test: boolean
 }
 
 export interface ProfileCreate {
@@ -39,6 +41,7 @@ export interface ProfileCreate {
   min_pnl_pct_for_stats?: string
   description?: string | null
   notes?: string | null
+  is_test?: boolean
 }
 
 export interface ProfileUpdate {
@@ -55,6 +58,7 @@ export interface ProfileUpdate {
   description?: string | null
   notes?: string | null
   status?: 'active' | 'archived' | 'deleted'
+  is_test?: boolean
 }
 
 // ── Investment / Spot (Phase 7) ───────────────────────────────────────────

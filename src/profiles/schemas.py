@@ -34,6 +34,10 @@ class ProfileCreate(BaseModel):
     )
     description: str | None = None
     notes: str | None = None
+    is_test: bool = Field(
+        default=False,
+        description="Sandbox profile — excluded from cross-profile aggregates (global WR, global strategy stats).",
+    )
 
 
 class ProfileUpdate(BaseModel):
@@ -52,6 +56,7 @@ class ProfileUpdate(BaseModel):
     description: str | None = None
     notes: str | None = None
     status: str | None = Field(default=None, pattern="^(active|archived|deleted)$")
+    is_test: bool | None = None
 
 
 class ProfileOut(BaseModel):
@@ -75,6 +80,7 @@ class ProfileOut(BaseModel):
     description: str | None
     notes: str | None
     status: str
+    is_test: bool
 
 
 # ── Strategy schemas ──────────────────────────────────────────────────────────
