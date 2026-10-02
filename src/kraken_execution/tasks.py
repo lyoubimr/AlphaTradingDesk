@@ -213,17 +213,25 @@ def poll_pending_orders(self: Task) -> dict:
                     entry.kraken_fill_id = fill_id
 
                     trade = db.query(Trade).filter(Trade.id == entry.trade_id).first()
+                    filled_price = entry.filled_price
                     if trade:
                         if trade.status != "open":
                             trade.status = "open"
-                        # LIMIT filled → capital is now at risk.
-                        # Always activate current_risk on fill, regardless of whether
-                        # trade.status was already "open" (e.g. manually patched in UI).
-                        if trade.risk_amount:
+                        # LIMIT filled → capital is now at risk. The order was sized
+                        # against the PLANNED entry price, so if the actual fill price
+                        # differs (slippage/price improvement), risk_amount/current_risk
+                        # must be recomputed from the REAL executed quantity × the REAL
+                        # distance to stop_loss — not just copied from the stale planned
+                        # risk_amount, which would misreport the live Portfolio Risk.
+                        filled_qty = Decimal(str(entry.filled_size or entry.size or 0))
+                        if filled_price and filled_qty > 0:
+                            actual_entry = Decimal(str(filled_price))
+                            real_risk = (filled_qty * abs(actual_entry - trade.stop_loss)).quantize(Decimal("0.01"))
+                            trade.entry_price = actual_entry
+                            trade.risk_amount = real_risk
+                            trade.current_risk = real_risk
+                        elif trade.risk_amount:
                             trade.current_risk = trade.risk_amount
-                    filled_price = entry.filled_price
-                    if trade and filled_price:
-                        trade.entry_price = Decimal(str(filled_price))
 
                     db.commit()  # ← commit fill first — SL/TP failure must NOT undo this
 
