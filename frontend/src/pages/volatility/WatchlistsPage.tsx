@@ -14,6 +14,7 @@ import { PageHeader } from '../../components/ui/PageHeader'
 import { Tooltip } from '../../components/ui/Tooltip'
 import { VolatilityLegendPanel } from '../../components/volatility/VolatilityLegendPanel'
 import { volatilityApi, spotVolatilityApi } from '../../lib/api'
+import { formatPair, toTradingViewSymbol } from '../../lib/krakenSymbols'
 import { useProfile } from '../../context/ProfileContext'
 import type { WatchlistOut, WatchlistPairOut, WatchlistMetaOut, SpotWatchlistOut, SpotWatchlistMetaOut, SpotWatchlistPairOut } from '../../types/api'
 
@@ -85,28 +86,13 @@ type SortKey = 'vi_score' | 'change_24h' | 'pair' | 'ema_score' | 'tf_sup_vi'
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 
-function formatPair(symbol: string): { base: string; quote: string } {
-  // Kraken Futures: PF_XBTUSD, PI_ETHUSD, FF_SOLUSD, etc.
-  const kf = symbol.match(/^(?:PF|PI|FF)_([A-Z0-9]+?)(USD|USDT|EUR|GBP|XBT)$/)
-  if (kf) return { base: kf[1].replace('XBT', 'BTC'), quote: kf[2] }
-  if (symbol.endsWith('USDT')) return { base: symbol.slice(0, -4), quote: 'USDT' }
-  if (symbol.endsWith('BUSD')) return { base: symbol.slice(0, -4), quote: 'BUSD' }
-  // Plain Kraken perps: XBTUSD, ETHUSD, SOLUSD, etc.
-  if (symbol.endsWith('USD'))  return { base: symbol.slice(0, -3).replace('XBT', 'BTC'), quote: 'USD' }
-  if (symbol.endsWith('EUR'))  return { base: symbol.slice(0, -3).replace('XBT', 'BTC'), quote: 'EUR' }
-  return { base: symbol.replace('XBT', 'BTC'), quote: '' }
-}
-
 function downloadKraken(pairs: WatchlistPairOut[], tf: string, dateStr: string) {
-  // TradingView Kraken Futures format: strip PF_/PI_/FF_ prefix, XBT→BTC, add .PM suffix
-  const toTV = (sym: string) =>
-    `KRAKEN:${sym.replace(/^(?:PF|PI|FF)_/, '').replace('XBT', 'BTC').replace('XBT', 'BTC')}.PM`
-  const lines = pairs.map((p) => toTV(p.pair)).join('\n')
+  // TradingView Kraken Futures format: KRAKEN:BTCUSD.PM (XBT→BTC, PF_/PI_/FF_ stripped, .PM added)
+  const lines = pairs.map((p) => toTradingViewSymbol(p.pair)).join('\n')
 
   // Derive quote currency from first pair (e.g. BTCUSD → USD, ETHUSD → USD)
   const firstSym = pairs[0]?.pair ?? ''
-  const quoteMatch = firstSym.replace(/^(?:PF|PI|FF)_/, '').match(/(USDT|USDC|USD|EUR|GBP)$/)
-  const devise = quoteMatch ? quoteMatch[1] : 'USD'
+  const devise = firstSym ? formatPair(firstSym).quote || 'USD' : 'USD'
 
   // Filename: kraken_1h_2026-03-15_1430_USD.txt
   const now = new Date()
@@ -123,13 +109,10 @@ function downloadKraken(pairs: WatchlistPairOut[], tf: string, dateStr: string) 
 
 function downloadKrakenSpot(pairs: WatchlistPairOut[], tf: string, dateStr: string) {
   // TradingView Kraken Spot format: KRAKEN:BTCUSD (no .PM, no PF_/PI_ prefix)
-  // XBT is Kraken's internal ticker; TradingView uses the standard BTC symbol
-  const toTV = (sym: string) => `KRAKEN:${sym.replace(/^XBT/, 'BTC')}`
-  const lines = pairs.map((p) => toTV(p.pair)).join('\n')
+  const lines = pairs.map((p) => toTradingViewSymbol(p.pair)).join('\n')
 
   const firstSym = pairs[0]?.pair ?? ''
-  const quoteMatch = firstSym.match(/(USDT|USDC|USD|EUR|GBP)$/)
-  const devise = quoteMatch ? quoteMatch[1] : 'USD'
+  const devise = firstSym ? formatPair(firstSym).quote || 'USD' : 'USD'
 
   const now = new Date()
   const hhmm = `${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}`
@@ -221,7 +204,7 @@ export function WatchlistsPage() {
   const [regimeFilters, setRegimeFilters] = useState<Set<string>>(new Set(['ALL']))
   const [emaFilters, setEmaFilters]       = useState<Set<string>>(new Set(['ALL']))
   const [topNFilter, setTopNFilter]       = useState<number | null>(null)
-  const [sortKey, setSortKey]             = useState<SortKey>('vi_score')
+  const [sortKey, setSortKey]             = useState<SortKey>('ema_score')
   const [sortDesc, setSortDesc]           = useState(true)
   const [showGenerateModal, setShowGenerateModal] = useState(false)
   const [modalViMin, setModalViMin]       = useState(0)

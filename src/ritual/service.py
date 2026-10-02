@@ -23,6 +23,8 @@ from typing import Any
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
+from src.core.kraken_symbols import display_name as _display_name
+from src.core.kraken_symbols import to_tv_symbol as _to_tv_symbol
 from src.core.models.broker import Broker, Profile
 from src.core.models.trade import Trade
 from src.ritual.models import (
@@ -150,37 +152,6 @@ def _deep_merge(base: dict, patch: dict) -> dict:
             result[key] = val
     return result
 
-
-def _display_name(pair: str) -> str:
-    """Derive a short human-readable label from a Kraken pair symbol.
-
-    'PF_ORCAUSD' → 'ORCA'   'PI_XBTUSD' → 'XBT'
-    'XBT/USD'    → 'XBT'    'ETH/USDT'  → 'ETH'
-    """
-    p = pair.upper()
-    if p.startswith(("PF_", "PI_")):
-        p = p[3:]
-    if "/" in p:
-        return p.split("/")[0]
-    for suffix in ("USDT", "USD", "BTC", "ETH"):
-        if p.endswith(suffix) and len(p) > len(suffix):
-            return p[: -len(suffix)]
-    return p
-
-
-def _to_tv_symbol(pair: str, exchange: str = "KRAKEN") -> str:
-    """Convert ATD pair format to TradingView symbol.
-
-    'XBT/USD'    → 'KRAKEN:XBTUSD'
-    'ETH/BTC'    → 'KRAKEN:ETHBTC'
-    'PF_ORCAUSD' → 'KRAKEN:ORCAUSD.PM'  (Kraken perpetual — .PM suffix)
-    'PI_XBTUSD'  → 'KRAKEN:XBTUSD.PM'   (Kraken perpetual — .PM suffix)
-    """
-    p = pair.upper()
-    if p.startswith(("PF_", "PI_")):
-        return f"KRAKEN:{p[3:]}.PM"  # strip PF_/PI_ prefix, add .PM suffix
-    clean = p.replace("/", "").replace("-", "").replace(".", "")
-    return f"{exchange}:{clean}"
 
 
 def _get_profile_or_404(db: Session, profile_id: int) -> Profile:
@@ -1072,6 +1043,7 @@ def generate_smart_watchlist(
                     vi_score=round(float(tf_info.get("vi_score", 0)), 3),
                     regime=tf_info.get("regime", ""),
                     ema_signal=tf_info.get("ema_signal", ""),
+                    ema_score=round(float(tf_info.get("ema_score", 0)), 3),
                     score=round(pair_scores.get(p, 0.0), 3),
                     is_pinned=is_pinned_here,
                     pin_note=pin.note if (is_pinned_here and pin is not None) else None,
@@ -1250,7 +1222,9 @@ def generate_watchlist_file(result: SmartWLResult) -> bytes:
     seen: set[str] = set(pinned_seen)  # start with pinned already excluded
     sectioned: dict[str, list[str]] = {tf: [] for tf in _CANONICAL}
     for tf in _CANONICAL:
-        for entry in result.timeframes.get(tf, []):
+        # Export order: EMA% desc (display-only — doesn't affect TF assignment above)
+        tf_entries = sorted(result.timeframes.get(tf, []), key=lambda e: e.ema_score, reverse=True)
+        for entry in tf_entries:
             sym = entry.tv_symbol
             if sym in seen:
                 continue

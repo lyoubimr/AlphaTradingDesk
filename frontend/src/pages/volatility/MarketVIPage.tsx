@@ -17,6 +17,7 @@ import { VISparkline } from '../../components/volatility/VISparkline'
 import { VIHistoryChart } from '../../components/volatility/VIHistoryChart'
 import { VolatilityLegendPanel } from '../../components/volatility/VolatilityLegendPanel'
 import { volatilityApi } from '../../lib/api'
+import { formatPair } from '../../lib/krakenSymbols'
 import { useProfile } from '../../context/ProfileContext'
 import type { AggregatedMarketVIOut, MarketVIOut, PairVIOut, TFComponentOut } from '../../types/api'
 
@@ -67,18 +68,6 @@ const REGIME_DESCRIPTION: Record<string, string> = {
 }
 
 // ── Sub-components ─────────────────────────────────────────────────────────
-
-// ── Pair symbol formatter (Kraken Futures: PF_XBTUSD → XBT/USD) ──────────
-function formatPair(symbol: string): { base: string; quote: string } {
-  const kf = symbol.match(/^(?:PF|PI|FF)_([A-Z0-9]+?)(USD|USDT|EUR|GBP|XBT)$/)
-  if (kf) return { base: kf[1].replace('XBT', 'BTC'), quote: kf[2] }
-  if (symbol.endsWith('USDT')) return { base: symbol.slice(0, -4), quote: 'USDT' }
-  if (symbol.endsWith('BTC'))  return { base: symbol.slice(0, -3), quote: 'BTC'  }
-  // Plain Kraken perps: XBTUSD, ETHUSD, etc.
-  if (symbol.endsWith('USD'))  return { base: symbol.slice(0, -3).replace('XBT', 'BTC'), quote: 'USD' }
-  if (symbol.endsWith('EUR'))  return { base: symbol.slice(0, -3).replace('XBT', 'BTC'), quote: 'EUR' }
-  return { base: symbol.replace('XBT', 'BTC'), quote: '' }
-}
 
 // ── TF mini-card (used in aggregated view) ───────────────────────────────
 

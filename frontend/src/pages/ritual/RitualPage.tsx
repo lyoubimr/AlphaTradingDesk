@@ -766,7 +766,10 @@ function SmartWLPanel({
             .filter(([, pairs]) => pairs.length > 0)
             .map(([tf, pairs]) => {
             const isExpanded = expandedTFs.has(tf)
-            const filteredPairs = emaFilter === 'ALL' ? pairs : pairs.filter(p => p.ema_signal === emaFilter)
+            const filteredPairs = (emaFilter === 'ALL' ? pairs : pairs.filter(p => p.ema_signal === emaFilter))
+              // Display order: pinned first, then EMA% desc (selection/top_n is untouched)
+              .slice()
+              .sort((a, b) => (Number(b.is_pinned) - Number(a.is_pinned)) || (b.ema_score - a.ema_score))
             const visible = isExpanded ? filteredPairs : filteredPairs.slice(0, PREVIEW)
             const hidden = filteredPairs.length - PREVIEW
             if (filteredPairs.length === 0) return null
