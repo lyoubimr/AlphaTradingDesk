@@ -738,7 +738,11 @@ def format_execution_event_message(event: str, **ctx) -> str:
             except (ValueError, TypeError):
                 pass
     elif event == "BE_MOVED" and ctx.get("stop_price") is not None:
+        if ctx.get("old_stop_price") is not None:
+            lines.append(f"🔓 Old SL: <code>{ctx['old_stop_price']}</code>")
         lines.append(f"🔒 New SL (BE): <code>{ctx['stop_price']}</code>")
+        if ctx.get("size") is not None:
+            lines.append(f"📦 Size: <code>{ctx['size']}</code>")
     elif event in ("ORDER_FAILED", "ORDER_ERROR") and ctx.get("error_message"):
         lines.append(f"⚠️ Reason: <code>{_he(str(ctx['error_message']))}</code>")
     elif event == "PNL_STATUS":
@@ -782,8 +786,6 @@ def format_execution_event_message(event: str, **ctx) -> str:
                 except (TypeError, ValueError, ZeroDivisionError):
                     pass
             lines.append(sl_line)
-    elif event == "ORDER_ERROR" and ctx.get("error_message") is not None:
-        lines.append(f"❌ Error: {_he(str(ctx['error_message']))[:200]}")
 
     if ctx.get("trade_id") is not None:
         lines.append(f"🆔 Trade: <code>{ctx['trade_id']}</code>")
