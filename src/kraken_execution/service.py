@@ -1021,10 +1021,20 @@ def _journal_automated_close(
 
 
 def move_to_breakeven(trade_id: int, db: Session) -> KrakenOrder:
-    """Cancel the existing SL order and place a new one at entry_price (breakeven).
+    """Place a new SL at entry_price (breakeven), THEN cancel the old one.
+
+    CRITICAL ordering: the new SL is placed and confirmed BEFORE the old SL is
+    cancelled. If the new SL is rejected by Kraken (bad precision, API error,
+    etc. — even after the stop_limit→stop_market fallback), the OLD SL is left
+    untouched so the position is NEVER left without a stop. (Previously the old
+    SL was cancelled first, so a failed replacement could wipe out the only
+    protection on a live position — see incident 2026-10-02.)
 
     The new SL size is computed from the currently open positions — NOT the
     original SL size — to avoid oversizing after partial TP fills.
+
+    On success, also syncs trade.stop_loss/current_risk in the DB so callers
+    (manual button + be_on_tp1 auto-trigger) never need a separate DB update.
 
     Returns:
         The new SL KrakenOrder row.
@@ -1034,11 +1044,15 @@ def move_to_breakeven(trade_id: int, db: Session) -> KrakenOrder:
     trade = _get_trade_or_404(trade_id, db)
     if not trade.automation_enabled:
         raise AutomationNotEnabledError(f"Trade {trade_id} does not have automation enabled.")
+    if trade.stop_loss == trade.entry_price:
+        raise ValueError(f"Trade {trade_id} is already at breakeven (stop_loss == entry_price).")
+
+    old_stop_price = trade.stop_loss  # captured before mutation — KrakenOrder has no stop_price column
 
     instrument = _resolve_instrument(trade, db)
     settings_row = get_automation_settings(trade.profile_id, db)
 
-    # Find existing open SL order
+    # Find existing open SL order — kept alive until the new one is confirmed
     sl_order = (
         db.query(KrakenOrder)
         .filter(
@@ -1073,13 +1087,8 @@ def move_to_breakeven(trade_id: int, db: Session) -> KrakenOrder:
         remaining_size = sl_full_size
 
     with _make_client(settings_row) as client:
-        # Cancel old SL
-        if sl_order:
-            client.cancel_order(sl_order.kraken_order_id)
-            sl_order.status = "cancelled"
-
-        # Place new SL at entry_price with correct remaining size
-        # Honour sl_order_type setting (stop_limit vs stop_market)
+        # Place new SL at entry_price with correct remaining size — BEFORE
+        # touching the old one. Honour sl_order_type (stop_limit vs stop_market).
         _be_sl_type = settings_row.config.get("sl_order_type", "stop_limit")
         _be_offset_pct = float(settings_row.config.get("sl_limit_offset_pct", 1.5))
         _be_stop_price = Decimal(str(trade.entry_price))
@@ -1152,11 +1161,40 @@ def move_to_breakeven(trade_id: int, db: Session) -> KrakenOrder:
                 _be_placement_status = "fallback_failed"
 
         if _be_placement_status != "placed":
+            # New SL rejected — the OLD SL was never touched, position is still
+            # protected. Notify loudly so the user knows the BE move did NOT happen.
+            _notify_execution_event(
+                profile_id=trade.profile_id,
+                event="ORDER_ERROR",
+                db=db,
+                trade_id=trade_id,
+                pair=trade.pair,
+                direction=trade.direction,
+                error_message=(
+                    f"Move to breakeven FAILED (status={_be_placement_status!r}) — "
+                    f"original SL at {old_stop_price} was kept untouched, position remains protected."
+                ),
+            )
             raise KrakenAPIError(
                 0,
                 f"BE SL rejected by Kraken — status={_be_placement_status!r} | "
                 f"symbol={instrument.symbol} stop={_be_stop_price} size={remaining_size}",
             )
+
+        # New SL confirmed placed — now safe to cancel the old one.
+        if sl_order:
+            try:
+                client.cancel_order(sl_order.kraken_order_id)
+            except Exception as _cancel_err:
+                # New SL is live (double protection briefly) — log but don't fail
+                # the whole operation over a cancel error on the now-redundant order.
+                logger.warning(
+                    "automation_be_old_sl_cancel_failed",
+                    trade_id=trade_id,
+                    kraken_order_id=sl_order.kraken_order_id,
+                    error=str(_cancel_err),
+                )
+            sl_order.status = "cancelled"
 
     new_order_id = _be_send_status.get("order_id", "")
     new_sl = KrakenOrder(
@@ -1172,6 +1210,11 @@ def move_to_breakeven(trade_id: int, db: Session) -> KrakenOrder:
         limit_price=float(_be_limit_price) if _be_limit_price is not None else None,
     )
     db.add(new_sl)
+
+    # Sync DB risk state now that Kraken confirms the position is at breakeven.
+    trade.stop_loss = trade.entry_price
+    trade.current_risk = Decimal("0.00")
+
     db.commit()
     db.refresh(new_sl)
 
@@ -1193,6 +1236,8 @@ def move_to_breakeven(trade_id: int, db: Session) -> KrakenOrder:
         pair=trade.pair,
         direction=trade.direction,
         stop_price=str(trade.entry_price),
+        old_stop_price=str(old_stop_price),
+        size=str(remaining_size),
     )
 
     return new_sl

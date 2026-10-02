@@ -841,9 +841,10 @@ def _handle_fill(order: KrakenOrder, db: Session) -> None:
                     from src.kraken_execution.service import (
                         move_to_breakeven as _kraken_be,  # noqa: PLC0415
                     )
-                    from src.trades.service import move_to_breakeven as _db_be  # noqa: PLC0415
-                    _db_be(db, trade.id)         # update stop_loss + current_risk in DB
-                    _kraken_be(trade.id, db)     # cancel/replace SL on Kraken + BE_MOVED notif
+                    # _kraken_be places+confirms the new SL on Kraken THEN syncs
+                    # trade.stop_loss/current_risk in the DB — single source of
+                    # truth, no separate DB-only update needed here.
+                    _kraken_be(trade.id, db)
                     logger.info("be_on_tp1_triggered", trade_id=trade.id)
             except Exception:  # noqa: BLE001
                 logger.exception("be_on_tp1_auto_failed", trade_id=trade.id)
