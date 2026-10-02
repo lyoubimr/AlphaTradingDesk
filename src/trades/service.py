@@ -43,6 +43,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import update as sa_update
 from sqlalchemy.orm import Session, joinedload
 
+from src.core.kraken_symbols import to_tv_symbol
 from src.core.models.broker import Instrument, Profile
 from src.core.models.trade import Position, Strategy, Trade, TradeStrategy
 from src.kraken_execution.models import KrakenOrder
@@ -103,11 +104,7 @@ def _auto_pin_trade(db: Session, trade: Trade) -> None:
 
         now = datetime.now(tz=UTC)
         ttl_h = TTL_HOURS.get(tf, 72)
-        p = pair
-        if p.startswith(("PF_", "PI_")):
-            tv_symbol = f"KRAKEN:{p[3:]}.PM"
-        else:
-            tv_symbol = f"KRAKEN:{p.replace('/', '')}"
+        tv_symbol = to_tv_symbol(pair)
 
         pin = RitualPinnedPair(
             profile_id=trade.profile_id,
