@@ -1374,6 +1374,7 @@ export interface SmartWLPairEntry {
   vi_score: number
   regime: string
   ema_signal: string
+  ema_score: number
   score: number
   is_pinned: boolean
   pin_note: string | null

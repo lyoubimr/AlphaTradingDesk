@@ -228,6 +228,7 @@ class SmartWLPairEntry(BaseModel):
     vi_score: float
     regime: str
     ema_signal: str
+    ema_score: float
     score: float
     is_pinned: bool
     pin_note: str | None = None

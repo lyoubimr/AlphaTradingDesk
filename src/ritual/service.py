@@ -1043,6 +1043,7 @@ def generate_smart_watchlist(
                     vi_score=round(float(tf_info.get("vi_score", 0)), 3),
                     regime=tf_info.get("regime", ""),
                     ema_signal=tf_info.get("ema_signal", ""),
+                    ema_score=round(float(tf_info.get("ema_score", 0)), 3),
                     score=round(pair_scores.get(p, 0.0), 3),
                     is_pinned=is_pinned_here,
                     pin_note=pin.note if (is_pinned_here and pin is not None) else None,
@@ -1221,7 +1222,9 @@ def generate_watchlist_file(result: SmartWLResult) -> bytes:
     seen: set[str] = set(pinned_seen)  # start with pinned already excluded
     sectioned: dict[str, list[str]] = {tf: [] for tf in _CANONICAL}
     for tf in _CANONICAL:
-        for entry in result.timeframes.get(tf, []):
+        # Export order: EMA% desc (display-only — doesn't affect TF assignment above)
+        tf_entries = sorted(result.timeframes.get(tf, []), key=lambda e: e.ema_score, reverse=True)
+        for entry in tf_entries:
             sym = entry.tv_symbol
             if sym in seen:
                 continue

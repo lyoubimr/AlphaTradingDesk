@@ -204,7 +204,7 @@ export function WatchlistsPage() {
   const [regimeFilters, setRegimeFilters] = useState<Set<string>>(new Set(['ALL']))
   const [emaFilters, setEmaFilters]       = useState<Set<string>>(new Set(['ALL']))
   const [topNFilter, setTopNFilter]       = useState<number | null>(null)
-  const [sortKey, setSortKey]             = useState<SortKey>('vi_score')
+  const [sortKey, setSortKey]             = useState<SortKey>('ema_score')
   const [sortDesc, setSortDesc]           = useState(true)
   const [showGenerateModal, setShowGenerateModal] = useState(false)
   const [modalViMin, setModalViMin]       = useState(0)
