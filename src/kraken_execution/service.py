@@ -861,7 +861,13 @@ def place_sl_tp_orders(
 
 
 def close_automated_trade(trade_id: int, db: Session) -> KrakenOrder:
-    """Cancel all open SL/TP orders, place a market close order, and journal the trade.
+    """Place a market close order for the REMAINING open size, then cancel SL/TP.
+
+    Size is derived from currently-open Position rows (not the original entry
+    size) so a trade that already had TP1 filled closes only what's actually
+    left. The close order is placed and confirmed BEFORE cancelling SL/TP —
+    if Kraken rejects it, the SL/TP orders are left untouched so the position
+    is never left unprotected, and the trade is NOT journaled as closed.
 
     Captures the actual fill price via get_fills() immediately after the market
     close order is sent (market orders fill near-instantly). Falls back to the
@@ -884,8 +890,80 @@ def close_automated_trade(trade_id: int, db: Session) -> KrakenOrder:
         .all()
     )
 
+    # Close size = REMAINING open position only. Using the original full entry
+    # size here would over-request a reduce_only close after any TP has already
+    # partially closed the position (e.g. TP1 hit → only ~67% left), causing
+    # Kraken to reject the order or fill an unexpected size — and the journal
+    # would then be based on a close that doesn't match reality.
+    from src.core.models.trade import Position  # noqa: PLC0415
+    from src.kraken_execution.precision import quantize_size as _qs_close  # noqa: PLC0415
+
+    open_positions = (
+        db.query(Position)
+        .filter(Position.trade_id == trade_id, Position.status == "open")
+        .all()
+    )
+    open_lot_pct = sum(Decimal(str(p.lot_percentage)) for p in open_positions)
+
+    _entry_for_size = (
+        db.query(KrakenOrder)
+        .filter(KrakenOrder.trade_id == trade_id, KrakenOrder.role == "entry")
+        .order_by(KrakenOrder.sent_at.asc())
+        .first()
+    )
+    entry_full_size = Decimal(str(_entry_for_size.size)) if _entry_for_size else Decimal("0")
+    if open_lot_pct > 0 and entry_full_size > 0:
+        close_size_dec = _qs_close(
+            (open_lot_pct / Decimal("100")) * entry_full_size,
+            instrument.contract_value_precision if instrument.contract_value_precision is not None else 2,
+        )
+    else:
+        close_size_dec = entry_full_size
+    close_size = str(close_size_dec)
+
     with _make_client(settings_row) as client:
-        # Cancel all open SL/TP orders
+        # Place market close order FIRST — confirm it's accepted BEFORE touching
+        # SL/TP. If this close is rejected, the SL/TP orders stay untouched so
+        # the position is never left unprotected (same principle as
+        # move_to_breakeven — see incident 2026-10-02).
+        try:
+            close_result = client.send_order(
+                order_type="mkt",
+                symbol=instrument.symbol,
+                side=_exit_side(trade),
+                size=close_size,
+                reduce_only=True,
+                raise_on_rejection=False,
+            )
+        except Exception as _close_api_err:
+            logger.error("automation_close_api_hard_error", trade_id=trade_id, error=str(_close_api_err))
+            close_result = {"sendStatus": {"status": "apiError", "order_id": ""}}
+
+        _close_send_status = close_result.get("sendStatus", {})
+        _close_placement_status = _close_send_status.get("status", "unknown")
+        _close_oid = _close_send_status.get("order_id", "")
+
+        if _close_placement_status != "placed":
+            _notify_execution_event(
+                profile_id=trade.profile_id,
+                event="ORDER_ERROR",
+                db=db,
+                trade_id=trade_id,
+                pair=trade.pair,
+                direction=trade.direction,
+                error_message=(
+                    f"Manual close FAILED (status={_close_placement_status!r}) — "
+                    "SL/TP orders were kept untouched, position remains protected. Retry the close."
+                ),
+            )
+            raise KrakenAPIError(
+                0,
+                f"Close order rejected by Kraken — status={_close_placement_status!r} | "
+                f"symbol={instrument.symbol} size={close_size}",
+            )
+
+        # Close confirmed accepted — now safe to cancel the remaining SL/TP
+        # orders (redundant protection once the position is flat).
         for order in open_orders:
             if order.role in ("sl", "tp1", "tp2", "tp3", "runner"):
                 try:
@@ -898,29 +976,9 @@ def close_automated_trade(trade_id: int, db: Session) -> KrakenOrder:
                         kraken_order_id=order.kraken_order_id,
                     )
 
-        # Place market close order
-        # Entry order is 'filled' (not 'open') for trades that were activated — query
-        # separately so close_size is never "0" due to the status filter above.
-        _entry_for_size = (
-            db.query(KrakenOrder)
-            .filter(KrakenOrder.trade_id == trade_id, KrakenOrder.role == "entry")
-            .order_by(KrakenOrder.sent_at.asc())
-            .first()
-        )
-        close_size = str(_entry_for_size.size) if _entry_for_size else "0"
-
-        close_result = client.send_order(
-            order_type="mkt",
-            symbol=instrument.symbol,
-            side=_exit_side(trade),
-            size=close_size,
-            reduce_only=True,
-        )
-
         # Capture actual fill price while the authenticated client is still open.
         # Market close orders fill near-instantly so the fill appears at once.
         exit_fill_price: Decimal | None = None
-        _close_oid = close_result.get("sendStatus", {}).get("order_id", "")
         if _close_oid:
             try:
                 _close_fills = client.get_fills()
