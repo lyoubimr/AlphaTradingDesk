@@ -209,6 +209,13 @@ def _resolve_instrument(trade: Trade, db: Session) -> Instrument:
     return instrument
 
 
+# Kraken's real margin requirement runs slightly above the naive notional/leverage
+# figure (fees, fill-price variance on MARKET orders, internal risk buffers) — a
+# bare >= check regularly passes ATD's preflight then gets rejected by Kraken
+# anyway (insufficientAvailableFunds) once headroom is thin. Block earlier instead.
+_PREFLIGHT_MARGIN_BUFFER = Decimal("1.08")  # require 8% headroom above the raw IM estimate
+
+
 def _compute_lot_size(trade: Trade, instrument: Instrument) -> Decimal:
     """Calculate and quantize the entry lot size.
 
@@ -376,14 +383,17 @@ def open_automated_trade(
                     trade_id=trade_id,
                     error=str(pos_err),
                 )
-            if available >= 0 and available < required_margin:
-                shortfall = (required_margin - available).quantize(Decimal("0.01"))
+            if available >= 0 and available < required_margin * _PREFLIGHT_MARGIN_BUFFER:
+                buffered_required = (required_margin * _PREFLIGHT_MARGIN_BUFFER).quantize(Decimal("0.01"))
+                shortfall = (buffered_required - available).quantize(Decimal("0.01"))
                 raise KrakenAPIError(
                     0,
                     f"Insufficient Kraken margin for this trade (isolated margin): "
                     f"you have {float(available):.2f} USD available, "
-                    f"but {float(required_margin):.2f} USD are required "
-                    f"({float(lot_size):.4f} units × {float(entry_price):.2f} / x{int(leverage)} leverage). "
+                    f"but ~{float(buffered_required):.2f} USD are needed "
+                    f"({float(lot_size):.4f} units × {float(entry_price):.2f} / x{int(leverage)} leverage, "
+                    f"+{float((_PREFLIGHT_MARGIN_BUFFER - 1) * 100):.0f}% safety buffer — Kraken's real "
+                    f"requirement runs above the raw notional/leverage figure). "
                     f"Add at least {float(shortfall):.2f} USD to your Kraken account "
                     f"or reduce risk % to lower position size.",
                 )
