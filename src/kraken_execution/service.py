@@ -209,11 +209,18 @@ def _resolve_instrument(trade: Trade, db: Session) -> Instrument:
     return instrument
 
 
-# Kraken's real margin requirement runs slightly above the naive notional/leverage
-# figure (fees, fill-price variance on MARKET orders, internal risk buffers) — a
-# bare >= check regularly passes ATD's preflight then gets rejected by Kraken
-# anyway (insufficientAvailableFunds) once headroom is thin. Block earlier instead.
-_PREFLIGHT_MARGIN_BUFFER = Decimal("1.08")  # require 8% headroom above the raw IM estimate
+# Kraken's real margin requirement runs above the naive notional/leverage figure
+# (fees, fill-price variance on MARKET orders, internal risk buffers) — a bare >=
+# check regularly passes ATD's preflight then gets rejected by Kraken anyway
+# (insufficientAvailableFunds). Block earlier instead.
+#
+# Empirically calibrated from incident 2026-10-10 (PF_OPUSD, profile 6): 9
+# consecutive attempts were all rejected by Kraken, including one with
+# required=43.87 vs available=48.92 — i.e. ~11.5% apparent headroom still
+# wasn't enough. This is NOT a precise replica of Kraken's internal formula
+# (unknown exact composition of fees/buffers) — 25% is a deliberately
+# conservative floor given a real rejection was observed above 11%.
+_PREFLIGHT_MARGIN_BUFFER = Decimal("1.25")  # require 25% headroom above the raw IM estimate
 
 
 def _compute_lot_size(trade: Trade, instrument: Instrument) -> Decimal:
