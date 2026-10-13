@@ -52,6 +52,7 @@ export function AutomationSettings({ profileId }: Props) {
   const [apiSecret,        setApiSecret]        = useState('')
   const [guardEnabled,     setGuardEnabled]     = useState(false)
   const [guardMultiplier,  setGuardMultiplier]  = useState(2.0)
+  const [preflightBufferPct, setPreflightBufferPct] = useState(20)
 
   const [saving,  setSaving]  = useState(false)
   const [saveMsg, setSaveMsg] = useState<{ ok: boolean; text: string } | null>(null)
@@ -74,6 +75,7 @@ export function AutomationSettings({ profileId }: Props) {
     setPnlInterval(settings.config.pnl_status_interval_minutes)
     setGuardEnabled(settings.config.max_loss_guard?.enabled ?? false)
     setGuardMultiplier(settings.config.max_loss_guard?.multiplier ?? 2.0)
+    setPreflightBufferPct(settings.config.preflight_margin_buffer_pct ?? 20)
   }, [settings])
 
   async function handleSave() {
@@ -84,6 +86,7 @@ export function AutomationSettings({ profileId }: Props) {
       const patch: AutomationSettingsUpdateIn = {
         enabled,
         pnl_status_interval_minutes: pnlInterval,
+        preflight_margin_buffer_pct: preflightBufferPct,
         max_loss_guard: { enabled: guardEnabled, multiplier: guardMultiplier },
       }
       if (apiKey.trim())    patch.kraken_api_key    = apiKey.trim()
@@ -254,6 +257,46 @@ export function AutomationSettings({ profileId }: Props) {
               )}
             />
             <span className="text-[11px] text-slate-600">min</span>
+          </div>
+        </div>
+
+        {/* Preflight margin safety buffer — gauge */}
+        <div className="flex items-start justify-between gap-4 py-3 border-t border-surface-700/60">
+          <div className="min-w-0">
+            <div className="flex items-center gap-1.5">
+              <p className="text-xs font-medium text-slate-300">Preflight margin safety buffer</p>
+              <InfoBubble text="Kraken's real required margin runs above the raw notional/leverage estimate (fees, fill-price variance, internal buffers). ATD blocks a trade BEFORE sending it to Kraken if available margin doesn't clear the required margin by at least this %. Lower it to free up more capital on small accounts (more retries if Kraken still rejects); raise it to reduce retries at the cost of blocking more borderline trades." />
+            </div>
+            <p className="text-[11px] text-slate-600 mt-0.5">Default 20% — required headroom above the raw margin estimate</p>
+          </div>
+          <span className="text-brand-300 text-sm font-mono font-bold shrink-0 tabular-nums">{preflightBufferPct}%</span>
+        </div>
+        <div className="space-y-1.5 pb-1">
+          <input
+            type="range"
+            min={0}
+            max={50}
+            step={1}
+            value={preflightBufferPct}
+            onChange={(e) => setPreflightBufferPct(Number(e.target.value))}
+            className="w-full accent-brand-500 cursor-pointer"
+          />
+          <div className="flex gap-1 flex-wrap">
+            {[0, 10, 15, 20, 25, 30, 40, 50].map((v) => (
+              <button
+                key={v}
+                type="button"
+                onClick={() => setPreflightBufferPct(v)}
+                className={cn(
+                  'px-2 py-0.5 rounded text-[10px] font-mono border transition-all',
+                  preflightBufferPct === v
+                    ? 'bg-brand-600/20 border-brand-500/50 text-brand-300'
+                    : 'bg-surface-700 border-surface-600 text-slate-500 hover:text-slate-300',
+                )}
+              >
+                {v}%
+              </button>
+            ))}
           </div>
         </div>
       </section>

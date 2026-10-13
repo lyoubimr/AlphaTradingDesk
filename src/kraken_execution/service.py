@@ -220,7 +220,15 @@ def _resolve_instrument(trade: Trade, db: Session) -> Instrument:
 # wasn't enough. This is NOT a precise replica of Kraken's internal formula
 # (unknown exact composition of fees/buffers) — 25% is a deliberately
 # conservative floor given a real rejection was observed above 11%.
-_PREFLIGHT_MARGIN_BUFFER = Decimal("1.25")  # require 25% headroom above the raw IM estimate
+# Empirically calibrated from incident 2026-10-10 (PF_OPUSD, profile 6): 9
+# consecutive attempts were all rejected by Kraken, including one with
+# required=43.87 vs available=48.92 — i.e. ~11.5% apparent headroom still
+# wasn't enough. This is NOT a precise replica of Kraken's internal formula
+# (unknown exact composition of fees/buffers) — 20% is a deliberately
+# conservative default floor given a real rejection was observed above 11%.
+# Configurable per-profile via automation settings (small accounts may want
+# to lower it to free up more of their capital, at the cost of more retries).
+_DEFAULT_PREFLIGHT_MARGIN_BUFFER_PCT = 20.0
 
 
 def _compute_lot_size(trade: Trade, instrument: Instrument) -> Decimal:
@@ -390,8 +398,10 @@ def open_automated_trade(
                     trade_id=trade_id,
                     error=str(pos_err),
                 )
-            if available >= 0 and available < required_margin * _PREFLIGHT_MARGIN_BUFFER:
-                buffered_required = (required_margin * _PREFLIGHT_MARGIN_BUFFER).quantize(Decimal("0.01"))
+            buffer_pct = Decimal(str(settings_row.config.get("preflight_margin_buffer_pct", _DEFAULT_PREFLIGHT_MARGIN_BUFFER_PCT)))
+            preflight_buffer = Decimal("1") + buffer_pct / Decimal("100")
+            if available >= 0 and available < required_margin * preflight_buffer:
+                buffered_required = (required_margin * preflight_buffer).quantize(Decimal("0.01"))
                 shortfall = (buffered_required - available).quantize(Decimal("0.01"))
                 raise KrakenAPIError(
                     0,
@@ -399,7 +409,7 @@ def open_automated_trade(
                     f"you have {float(available):.2f} USD available, "
                     f"but ~{float(buffered_required):.2f} USD are needed "
                     f"({float(lot_size):.4f} units × {float(entry_price):.2f} / x{int(leverage)} leverage, "
-                    f"+{float((_PREFLIGHT_MARGIN_BUFFER - 1) * 100):.0f}% safety buffer — Kraken's real "
+                    f"+{float(buffer_pct):.0f}% safety buffer — Kraken's real "
                     f"requirement runs above the raw notional/leverage figure). "
                     f"Add at least {float(shortfall):.2f} USD to your Kraken account "
                     f"or reduce risk % to lower position size.",
