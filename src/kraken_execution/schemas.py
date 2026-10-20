@@ -31,6 +31,7 @@ class AutomationConfigOut(BaseModel):
     max_leverage_override: int | None = None
     sl_order_type: str = "stop_limit"
     sl_limit_offset_pct: float = 1.5
+    preflight_margin_buffer_pct: float = 20.0
     max_loss_guard: MaxLossGuardConfigOut = Field(default_factory=MaxLossGuardConfigOut)
 
 
@@ -78,6 +79,7 @@ class AutomationSettingsUpdateIn(BaseModel):
     max_leverage_override: int | None = Field(None, ge=1, le=100)
     sl_order_type: str | None = Field(None, pattern="^(stop_limit|stop_market)$")
     sl_limit_offset_pct: float | None = Field(None, ge=0.1, le=10.0)
+    preflight_margin_buffer_pct: float | None = Field(None, ge=0.0, le=100.0)
     max_loss_guard: MaxLossGuardConfigIn | None = None
     # Write-only — never returned in responses
     kraken_api_key: str | None = Field(None, description="Plaintext API key (write-only).")

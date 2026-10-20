@@ -42,6 +42,7 @@ DEFAULT_AUTOMATION_CONFIG: dict = {
     "max_leverage_override": None,  # None = use instrument max_leverage from DB
     "sl_order_type": "stop_limit",  # "stop_limit" (default) | "stop_market"
     "sl_limit_offset_pct": 1.5,     # max slippage % accepted when SL triggers
+    "preflight_margin_buffer_pct": 20.0,  # safety headroom required above the raw IM estimate before sending to Kraken
     "max_loss_guard": {"enabled": False, "multiplier": 2.0},  # force-close at N×risk_amount loss
 }
 
