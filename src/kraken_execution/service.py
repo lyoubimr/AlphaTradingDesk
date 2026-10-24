@@ -251,6 +251,33 @@ def _exit_side(trade: Trade) -> str:
     return "sell" if trade.direction == "long" else "buy"
 
 
+def _remaining_position_size(trade_id: int, db: Session) -> Decimal | None:
+    """Entry size minus filled TP sizes — the real size still open on Kraken.
+
+    Unlike open_lot_pct x entry_size, this has no per-TP rounding drift.
+    Returns None when no entry order exists.
+    """
+    entry = (
+        db.query(KrakenOrder)
+        .filter(KrakenOrder.trade_id == trade_id, KrakenOrder.role == "entry")
+        .order_by(KrakenOrder.sent_at.asc())
+        .first()
+    )
+    if entry is None:
+        return None
+    filled_tps = (
+        db.query(KrakenOrder)
+        .filter(
+            KrakenOrder.trade_id == trade_id,
+            KrakenOrder.role.in_(["tp1", "tp2", "tp3"]),
+            KrakenOrder.status == "filled",
+        )
+        .all()
+    )
+    remaining = Decimal(str(entry.size)) - sum((Decimal(str(o.size)) for o in filled_tps), Decimal("0"))
+    return remaining if remaining > 0 else Decimal("0")
+
+
 def _kraken_order_type(atd_order_type: str) -> str:
     """Map ATD order type to Kraken API wire format."""
     return "lmt" if atd_order_type == "LIMIT" else "mkt"
@@ -817,11 +844,21 @@ def place_sl_tp_orders(
     ]
     role_map = {1: "tp1", 2: "tp2", 3: "tp3"}
 
-    for pos in open_positions:
-        tp_size = (Decimal(str(pos.lot_percentage)) / Decimal("100")) * entry_size
-        # Quantize TP size — use same precision
-        from src.kraken_execution.precision import quantize_size as _qs  # noqa: PLC0415
-        tp_size = _qs(tp_size, instrument.contract_value_precision if instrument.contract_value_precision is not None else 2)
+    # Each TP is floored independently, so the sum can fall short of entry_size
+    # (ZEC 0.38 → 0.17 + 0.20 = 0.37). The last position takes the remainder so
+    # no dust is left open on Kraken once every TP is filled.
+    from src.kraken_execution.precision import quantize_size as _qs  # noqa: PLC0415
+    _prec = instrument.contract_value_precision if instrument.contract_value_precision is not None else 2
+    _allocated = Decimal("0")
+
+    for _idx, pos in enumerate(open_positions):
+        if _idx == len(open_positions) - 1 and _allocated > 0:
+            tp_size = entry_size - _allocated
+        else:
+            tp_size = _qs(
+                (Decimal(str(pos.lot_percentage)) / Decimal("100")) * entry_size, _prec,
+            )
+        _allocated += tp_size
 
         if pos.is_runner:
             # Runner trailing stop is NOT placed at entry fill — it is placed later,
@@ -939,7 +976,10 @@ def close_automated_trade(trade_id: int, db: Session) -> KrakenOrder:
         .first()
     )
     entry_full_size = Decimal(str(_entry_for_size.size)) if _entry_for_size else Decimal("0")
-    if open_lot_pct > 0 and entry_full_size > 0:
+    _real_remaining = _remaining_position_size(trade_id, db)
+    if open_lot_pct > 0 and _real_remaining:
+        close_size_dec = _real_remaining
+    elif open_lot_pct > 0 and entry_full_size > 0:
         close_size_dec = _qs_close(
             (open_lot_pct / Decimal("100")) * entry_full_size,
             instrument.contract_value_precision if instrument.contract_value_precision is not None else 2,
@@ -1163,7 +1203,10 @@ def move_to_breakeven(trade_id: int, db: Session) -> KrakenOrder:
 
     # Fallback: use original SL size if we can't derive from positions
     sl_full_size = Decimal(str(sl_order.size)) if sl_order else Decimal("0")
-    if open_lot_pct > 0 and sl_full_size > 0:
+    _real_remaining = _remaining_position_size(trade_id, db)
+    if open_lot_pct > 0 and _real_remaining:
+        remaining_size = _real_remaining
+    elif open_lot_pct > 0 and sl_full_size > 0:
         remaining_size = _qs(
             (open_lot_pct / Decimal("100")) * sl_full_size,
             instrument.contract_value_precision if instrument.contract_value_precision is not None else 2,
@@ -1663,11 +1706,26 @@ def sync_sl_tp_fills(trade_id: int, db: Session) -> dict:
     with _make_client(settings_row) as client:
         fills = client.get_fills()
 
-    fill_by_order_id = {
-        (f.get("order_id") or f.get("orderId")): f
-        for f in fills
-        if (f.get("order_id") or f.get("orderId"))
-    }
+    # One order can be filled in several chunks — aggregate (size-weighted price)
+    # instead of keeping only the last chunk.
+    fills_by_order: dict[str, list[dict]] = {}
+    for f in fills:
+        oid = f.get("order_id") or f.get("orderId")
+        if oid:
+            fills_by_order.setdefault(oid, []).append(f)
+
+    fill_by_order_id: dict[str, dict] = {}
+    for oid, chunks in fills_by_order.items():
+        total = sum(Decimal(str(c.get("size", 0))) for c in chunks)
+        vwap = (
+            sum(Decimal(str(c.get("price", 0))) * Decimal(str(c.get("size", 0))) for c in chunks) / total
+            if total > 0 else Decimal(str(chunks[-1].get("price", 0)))
+        )
+        fill_by_order_id[oid] = {
+            "fill_id": chunks[-1].get("fill_id") or chunks[-1].get("uid", ""),
+            "price": vwap,
+            "size": total,
+        }
 
     processed = 0
     events: list[dict] = []
@@ -1683,6 +1741,15 @@ def sync_sl_tp_fills(trade_id: int, db: Session) -> dict:
 
         fill_price = Decimal(str(fill.get("price", 0)))
         fill_size = float(fill.get("size", order.size or 0))
+
+        # Partially filled so far — wait for the rest before closing anything in ATD.
+        if Decimal(str(fill_size)) < Decimal(str(order.size or 0)):
+            logger.info(
+                "sync_sl_tp: partial_fill_waiting",
+                trade_id=trade_id, role=order.role,
+                filled=fill_size, order_size=float(order.size or 0),
+            )
+            continue
 
         order.status = "filled"
         order.filled_price = float(fill_price)
@@ -1808,7 +1875,7 @@ def sync_sl_tp_fills(trade_id: int, db: Session) -> dict:
                 sl_full_size = Decimal(str(sl_kr_order.size)) if sl_kr_order else Decimal("0")
                 runner_size = (Decimal(str(runner_pos.lot_percentage)) / Decimal("100")) * sl_full_size
                 from src.kraken_execution.precision import quantize_size as _qs  # noqa: PLC0415
-                runner_size = _qs(
+                runner_size = _remaining_position_size(trade_id, db) or _qs(
                     runner_size,
                     instrument.contract_value_precision if instrument.contract_value_precision is not None else 2,
                 )
@@ -1966,7 +2033,7 @@ def activate_runner_trailing(trade_id: int, db: Session) -> dict:
         raise HTTPException(500, detail=f"Cannot determine position size for trade {trade_id} — no SL order found.")
 
     runner_size = (Decimal(str(runner_pos.lot_percentage)) / Decimal("100")) * sl_full_size
-    runner_size = _qs(
+    runner_size = _remaining_position_size(trade_id, db) or _qs(
         runner_size,
         instrument.contract_value_precision if instrument.contract_value_precision is not None else 2,
     )
@@ -2169,7 +2236,10 @@ def retry_sl_placement(trade_id: int, db: Session) -> KrakenOrder:
         raise ValueError(f"No entry order found for trade {trade_id}.")
 
     entry_size = Decimal(str(entry_order.size))
-    if open_lot_pct > 0:
+    _real_remaining = _remaining_position_size(trade_id, db)
+    if open_lot_pct > 0 and _real_remaining:
+        remaining_size = _real_remaining
+    elif open_lot_pct > 0:
         remaining_size = quantize_size(
             (open_lot_pct / Decimal("100")) * entry_size,
             instrument.contract_value_precision if instrument.contract_value_precision is not None else 2,
