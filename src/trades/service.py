@@ -538,31 +538,37 @@ def _update_wr_stats(db: Session, trade: Trade, profile: Profile) -> None:
     # Compute R-multiple: realized_pnl expressed as a fraction of risk_amount.
     # e.g. -$1.69 on $12.75 risk = -0.133R
     # realized_pnl is set by the close flow before this helper is called — never None here.
-    realized_pnl: Decimal = trade.realized_pnl or Decimal("0")
-
-    if trade.risk_amount and trade.risk_amount > 0:
-        pnl_r = (realized_pnl / trade.risk_amount).quantize(Decimal("0.001"))
-    else:
-        # Edge case: risk_amount is 0 (should not happen for real trades).
-        # Fall back to raw PnL sign — at least profile WR won't be wrong.
-        pnl_r = Decimal("1") if realized_pnl > 0 else (
-            Decimal("-1") if realized_pnl < 0 else Decimal("0")
-        )
-
-    be_threshold = profile.min_pnl_pct_for_stats  # stored as R, e.g. 0.200
+    is_win = _wr_outcome(trade.realized_pnl, trade.risk_amount, profile.min_pnl_pct_for_stats)
 
     # BE trade — skip entirely, zero impact on WR
-    if abs(pnl_r) < be_threshold:
+    if is_win is None:
         return
 
-    is_win = pnl_r > 0
+    _apply_wr_delta(db, trade, profile, trades_delta=1, wins_delta=1 if is_win else 0)
 
-    # ── Profile stats ────────────────────────────────────────────────────
-    profile.trades_count += 1
-    if is_win:
-        profile.win_count += 1
 
-    # ── All linked strategies ────────────────────────────────────────────
+def _wr_outcome(
+    realized_pnl: Decimal | None, risk_amount: Decimal | None, be_threshold: Decimal
+) -> bool | None:
+    """True = win, False = loss, None = break-even (excluded from stats)."""
+    pnl = realized_pnl or Decimal("0")
+    if risk_amount and risk_amount > 0:
+        pnl_r = (pnl / risk_amount).quantize(Decimal("0.001"))
+    else:
+        # Edge case: risk_amount is 0 (should not happen for real trades).
+        pnl_r = Decimal("1") if pnl > 0 else (Decimal("-1") if pnl < 0 else Decimal("0"))
+    if abs(pnl_r) < be_threshold:
+        return None
+    return pnl_r > 0
+
+
+def _apply_wr_delta(
+    db: Session, trade: Trade, profile: Profile, trades_delta: int, wins_delta: int
+) -> None:
+    """Add (or subtract) a trade outcome on the profile + ALL linked strategies."""
+    profile.trades_count += trades_delta
+    profile.win_count += wins_delta
+
     # Fetch all strategy IDs from the junction table (many-to-many).
     rows = (
         db.query(TradeStrategy.strategy_id)
@@ -583,9 +589,22 @@ def _update_wr_stats(db: Session, trade: Trade, profile: Profile) -> None:
             # strategies (already scoped to this test profile) are unaffected.
             if profile.is_test and strategy.profile_id is None:
                 continue
-            strategy.trades_count += 1
-            if is_win:
-                strategy.win_count += 1
+            strategy.trades_count += trades_delta
+            strategy.win_count += wins_delta
+
+
+def reclassify_wr_stats(
+    db: Session, trade: Trade, profile: Profile, old_pnl: Decimal | None
+) -> None:
+    """Re-balance WR counters when a closed trade's realized_pnl is corrected."""
+    threshold = profile.min_pnl_pct_for_stats
+    old = _wr_outcome(old_pnl, trade.risk_amount, threshold)
+    new = _wr_outcome(trade.realized_pnl, trade.risk_amount, threshold)
+    if old == new:
+        return
+    trades_delta = (1 if new is not None else 0) - (1 if old is not None else 0)
+    wins_delta = (1 if new else 0) - (1 if old else 0)
+    _apply_wr_delta(db, trade, profile, trades_delta=trades_delta, wins_delta=wins_delta)
 
 
 # -- Public service functions --------------------------------------------------

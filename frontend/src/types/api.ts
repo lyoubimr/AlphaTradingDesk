@@ -367,6 +367,10 @@ export interface TradeOut extends TradeListItem {
   runner_trailing_pct: string | null
   /** When the trailing stop was activated (runner status entered) */
   runner_activated_at: string | null
+  /** Costs behind realized_pnl once reconciled with Kraken (positive = paid) */
+  fees_paid: string | null
+  funding_paid: string | null
+  pnl_source: string | null
 }
 
 export interface TradeClose {

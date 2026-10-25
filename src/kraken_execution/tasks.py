@@ -25,6 +25,7 @@ from sqlalchemy.orm import Session
 from src.core.celery_app import celery_app
 from src.core.models.trade import Position, Trade
 from src.kraken_execution import KrakenAPIError, MissingAPIKeysError
+from src.kraken_execution.fills import aggregate_fills_by_order, is_fully_filled
 from src.kraken_execution.models import KrakenOrder
 from src.kraken_execution.service import (
     _make_client,
@@ -414,11 +415,8 @@ def sync_open_positions(self: Task) -> dict:
                         if o.get("order_id")
                     }
 
-                fill_by_order_id = {
-                    (f.get("order_id") or f.get("orderId")): f
-                    for f in fills
-                    if (f.get("order_id") or f.get("orderId"))
-                }
+                # Aggregate every chunk of an order — a plain dict keeps only the last one.
+                fill_by_order_id = aggregate_fills_by_order(fills)
 
                 for order in orders:
                     fill = fill_by_order_id.get(order.kraken_order_id)
@@ -448,6 +446,9 @@ def sync_open_positions(self: Task) -> dict:
                     fill_id = fill.get("fill_id") or fill.get("uid", "")
                     if order.kraken_fill_id == fill_id:
                         continue  # idempotence guard
+
+                    if not is_fully_filled(fill, order.size):
+                        continue  # partially filled — wait for the remaining chunks
 
                     order.status = "filled"
                     order.filled_price = float(fill.get("price", 0))
@@ -878,6 +879,98 @@ def _handle_fill(order: KrakenOrder, db: Session) -> None:
             pnl_pct=_compute_pnl_pct(trade.direction, fill_price, trade.entry_price),
             trade_pnl=str(trade.realized_pnl) if trade.realized_pnl is not None else None,
         )
+
+# ── reconcile_closed_trades ───────────────────────────────────────────────────
+
+@celery_app.task(
+    bind=True,
+    name="src.kraken_execution.tasks.reconcile_closed_trades",
+    max_retries=0,
+)
+def reconcile_closed_trades(self: Task) -> dict:  # noqa: ARG001
+    """Replace ATD's computed PnL of recently closed automated trades by Kraken's real net PnL.
+
+    Also alerts once when Kraken still holds a position on a symbol whose trade is
+    closed in ATD (e.g. rounding dust left after the last TP).
+    """
+    from datetime import timedelta  # noqa: PLC0415
+
+    from src.kraken_execution.reconcile import (  # noqa: PLC0415
+        MAX_AGE,
+        MIN_AGE,
+        reconcile_trade_pnl,
+    )
+
+    db = _get_db()
+    counts = {"reconciled": 0, "pending": 0, "residual": 0}
+    try:
+        now = datetime.now(UTC).replace(tzinfo=None)
+        candidates: list[Trade] = (
+            db.query(Trade)
+            .filter(
+                Trade.status == "closed",
+                Trade.automation_enabled.is_(True),
+                Trade.pnl_source.is_(None),
+                Trade.closed_at <= now - MIN_AGE,
+                Trade.closed_at >= now - MAX_AGE,
+            )
+            .order_by(Trade.profile_id, Trade.closed_at)
+            .all()
+        )
+        by_profile: dict[int, list[Trade]] = {}
+        for t in candidates:
+            by_profile.setdefault(t.profile_id, []).append(t)
+
+        for profile_id, trades in by_profile.items():
+            try:
+                settings_row = get_automation_settings(profile_id, db)
+                with _make_client(settings_row) as client:
+                    for trade in trades:
+                        result = reconcile_trade_pnl(trade, db, client)
+                        if result in counts:
+                            counts[result] += 1
+                        # First pass only (task runs every 5 min) → a single alert per trade.
+                        first_pass = now - (trade.closed_at or now) < MIN_AGE + timedelta(minutes=5)
+                        if result == "residual" and first_pass:
+                            other_open = (
+                                db.query(Trade.id)
+                                .filter(
+                                    Trade.profile_id == profile_id,
+                                    Trade.id != trade.id,
+                                    Trade.instrument_id == trade.instrument_id,
+                                    Trade.status.in_(["open", "partial", "runner", "pending"]),
+                                )
+                                .first()
+                            )
+                            if other_open is None:
+                                _notify_event(
+                                    profile_id,
+                                    "ORDER_ERROR",
+                                    db,
+                                    trade_id=trade.id,
+                                    pair=trade.pair,
+                                    direction=trade.direction,
+                                    error_message=(
+                                        f"Trade #{trade.id} is closed in ATD but Kraken still holds "
+                                        f"a {trade.pair} position (leftover size, no SL/TP). Close it manually."
+                                    ),
+                                )
+            except MissingAPIKeysError:
+                logger.warning("reconcile_closed_trades: missing API keys", profile_id=profile_id)
+            except KrakenAPIError as exc:
+                db.rollback()
+                logger.warning(
+                    "reconcile_closed_trades: Kraken API error — retry next run",
+                    profile_id=profile_id,
+                    status_code=exc.status_code,
+                )
+            except Exception as exc:  # noqa: BLE001
+                db.rollback()
+                logger.exception("reconcile_closed_trades: unexpected error", profile_id=profile_id, exc=exc)
+        return counts
+    finally:
+        db.close()
+
 
 # ── send_pnl_status ───────────────────────────────────────────────────────────────
 

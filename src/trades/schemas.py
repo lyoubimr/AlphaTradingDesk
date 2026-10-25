@@ -336,6 +336,10 @@ class TradeOut(BaseModel):
     current_risk: Decimal | None
     status: str
     realized_pnl: Decimal | None
+    # Costs behind realized_pnl once reconciled with Kraken (positive = cost paid)
+    fees_paid: Decimal | None = None
+    funding_paid: Decimal | None = None
+    pnl_source: str | None = None
     # Sum of realized_pnl from already-closed positions (partial trades).
     # Populated by _trade_to_out — not a DB column.
     booked_pnl: Decimal | None = None

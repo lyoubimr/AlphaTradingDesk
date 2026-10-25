@@ -17,6 +17,7 @@ import base64
 import hashlib
 import hmac as _hmac
 import time
+from datetime import datetime
 from typing import Any
 from urllib.parse import urlencode
 
@@ -27,6 +28,10 @@ from src.core.config import settings
 from src.kraken_execution import KrakenAPIError
 
 logger = structlog.get_logger()
+
+
+def _iso_to_ms(iso: str) -> int:
+    return int(datetime.fromisoformat(iso.replace("Z", "+00:00")).timestamp() * 1000)
 
 
 class KrakenExecutionClient:
@@ -320,6 +325,34 @@ class KrakenExecutionClient:
             params["lastFillTime"] = last_fill_time
         data = self._get("/derivatives/api/v3/fills", params=params)
         return data.get("fills", [])  # type: ignore[return-value]
+
+    def get_account_log(self, since_ms: int, before_ms: int | None = None, page_size: int = 500) -> list[dict]:
+        """Return account-log entries (trades, funding, fees, transfers) in [since, before].
+
+        Uses the history API (no /derivatives prefix). Query params MUST be part of
+        the signature, which the generic _get() does not do.
+        Entries carry old_balance/new_balance, so new-old is the exact balance effect.
+        Raises KrakenAPIError (status 429) when rate-limited — caller should retry later.
+        """
+        path = "/api/history/v2/account-log"
+        entries: dict[int, dict] = {}
+        cursor_before = before_ms
+        for _ in range(20):
+            params: dict[str, str] = {"count": str(page_size), "sort": "desc", "since": str(since_ms)}
+            if cursor_before is not None:
+                params["before"] = str(cursor_before)
+            query = urlencode(params)
+            resp = self._http.get(f"{path}?{query}", headers=self._auth_headers(path, query))
+            if not resp.is_success:
+                raise KrakenAPIError(resp.status_code, resp.text)
+            batch = resp.json().get("logs", [])
+            for e in batch:
+                entries[e["id"]] = e
+            if len(batch) < page_size:
+                break
+            oldest = min(batch, key=lambda e: e["id"])
+            cursor_before = _iso_to_ms(oldest["date"])
+        return sorted(entries.values(), key=lambda e: e["id"])
 
     def get_open_positions(self) -> list[dict]:
         """Return all current open positions.
