@@ -196,6 +196,10 @@ class Trade(Base):
     # cancelled = LIMIT order cancelled before it triggered (no capital impact)
     status: Mapped[str] = mapped_column(String(50), nullable=False, default="open")
     realized_pnl: Mapped[Decimal | None] = mapped_column(Numeric(20, 2))
+    # Costs breakdown filled by kraken_execution.reconcile (pnl_source NULL = ATD-computed PnL)
+    fees_paid: Mapped[Decimal | None] = mapped_column(Numeric(20, 4))
+    funding_paid: Mapped[Decimal | None] = mapped_column(Numeric(20, 4))
+    pnl_source: Mapped[str | None] = mapped_column(String(20))  # 'kraken' once reconciled
 
     # VI adjustment (Phase 2+) — stored but not computed in Phase 1
     market_vi_at_entry: Mapped[Decimal | None] = mapped_column(Numeric(5, 3))

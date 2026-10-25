@@ -1695,6 +1695,14 @@ export function TradeDetailPage() {
               />
             )}
             {slDist != null && <InfoRow label="SL distance" value={`${fmt(slDist, 4)} (${fmt(slPct, 2)}%)`} />}
+            {trade.pnl_source === 'kraken' && (
+              <>
+                <InfoRow label="Fees (Kraken)"    value={`${fmt(trade.fees_paid ?? '0', 2)} USD`} />
+                <InfoRow label="Funding (Kraken)" value={`${fmt(trade.funding_paid ?? '0', 2)} USD`} />
+                <InfoRow label="Net P&L (Kraken)" value={`${fmt(trade.realized_pnl ?? '0', 2)} USD`}
+                  accent={trade.realized_pnl != null && parseFloat(trade.realized_pnl) < 0 ? 'red' : 'green'} />
+              </>
+            )}
             <InfoRow label="Direction"
               value={trade.direction}
               accent={trade.direction === 'LONG' ? 'green' : 'red'} />

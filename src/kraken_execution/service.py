@@ -34,6 +34,7 @@ from src.kraken_execution import (
     MissingPrecisionError,
 )
 from src.kraken_execution.client import KrakenExecutionClient
+from src.kraken_execution.fills import aggregate_fills_by_order, is_fully_filled
 from src.kraken_execution.models import DEFAULT_AUTOMATION_CONFIG, AutomationSettings, KrakenOrder
 from src.kraken_execution.precision import quantize_size
 from src.risk_management.engine import _deep_merge
@@ -1706,26 +1707,8 @@ def sync_sl_tp_fills(trade_id: int, db: Session) -> dict:
     with _make_client(settings_row) as client:
         fills = client.get_fills()
 
-    # One order can be filled in several chunks — aggregate (size-weighted price)
-    # instead of keeping only the last chunk.
-    fills_by_order: dict[str, list[dict]] = {}
-    for f in fills:
-        oid = f.get("order_id") or f.get("orderId")
-        if oid:
-            fills_by_order.setdefault(oid, []).append(f)
-
-    fill_by_order_id: dict[str, dict] = {}
-    for oid, chunks in fills_by_order.items():
-        total = sum(Decimal(str(c.get("size", 0))) for c in chunks)
-        vwap = (
-            sum(Decimal(str(c.get("price", 0))) * Decimal(str(c.get("size", 0))) for c in chunks) / total
-            if total > 0 else Decimal(str(chunks[-1].get("price", 0)))
-        )
-        fill_by_order_id[oid] = {
-            "fill_id": chunks[-1].get("fill_id") or chunks[-1].get("uid", ""),
-            "price": vwap,
-            "size": total,
-        }
+    # One order can be filled in several chunks — aggregate instead of keeping the last one.
+    fill_by_order_id = aggregate_fills_by_order(fills)
 
     processed = 0
     events: list[dict] = []
@@ -1743,7 +1726,7 @@ def sync_sl_tp_fills(trade_id: int, db: Session) -> dict:
         fill_size = float(fill.get("size", order.size or 0))
 
         # Partially filled so far — wait for the rest before closing anything in ATD.
-        if Decimal(str(fill_size)) < Decimal(str(order.size or 0)):
+        if not is_fully_filled(fill, order.size):
             logger.info(
                 "sync_sl_tp: partial_fill_waiting",
                 trade_id=trade_id, role=order.role,

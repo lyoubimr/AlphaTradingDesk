@@ -137,6 +137,10 @@ celery_app.conf.update(
             "task": "src.kraken_execution.tasks.sync_open_positions",
             "schedule": 60.0,  # every 60 s — detect SL/TP fills
         },
+        "reconcile-closed-trades": {
+            "task": "src.kraken_execution.tasks.reconcile_closed_trades",
+            "schedule": 300.0,  # every 5 min — real net PnL from the Kraken account log
+        },
         "send-pnl-status": {
             "task": "src.kraken_execution.tasks.send_pnl_status",
             "schedule": 3600.0,  # every 60 min — default; per-profile config not yet dynamic
