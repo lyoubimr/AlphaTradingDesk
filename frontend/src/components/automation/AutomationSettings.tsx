@@ -343,7 +343,7 @@ export function AutomationSettings({ profileId }: Props) {
                   type="number"
                   min={0.1}
                   max={10}
-                  step={0.1}
+                  step={0.01}
                   value={slOffsetPct}
                   onChange={(e) => setSlOffsetPct(Number(e.target.value))}
                   className="w-16 rounded-lg bg-surface-700 border border-surface-600 px-2 py-1.5
@@ -407,7 +407,7 @@ export function AutomationSettings({ profileId }: Props) {
                   type="number"
                   min={1.0}
                   max={10.0}
-                  step={0.5}
+                  step={0.01}
                   value={guardMultiplier}
                   onChange={(e) => setGuardMultiplier(Number(e.target.value))}
                   className="w-16 rounded-lg bg-surface-700 border border-surface-600 px-2 py-1.5

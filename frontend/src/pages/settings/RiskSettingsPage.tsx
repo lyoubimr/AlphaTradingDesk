@@ -559,7 +559,7 @@ export function RiskSettingsPage() {
               <div className="flex items-center gap-1.5 shrink-0">
                 <input
                   type="number"
-                  min={1} max={100} step={0.5}
+                  min={1} max={100} step={0.01}
                   value={config.risk_guard.max_risk_pct_override}
                   onChange={e => upd(c => ({ ...c, risk_guard: { ...c.risk_guard, max_risk_pct_override: parseFloat(e.target.value) || 10 } }))}
                   className="w-16 px-2 py-1.5 rounded-lg text-center text-xs text-slate-300 tabular-nums bg-surface-700 border border-surface-600 focus:outline-none focus:border-brand-500/60 transition-colors"
@@ -710,7 +710,7 @@ export function RiskSettingsPage() {
               <div>
                 <label className="block text-xs text-slate-500 mb-1.5">Base Risk %</label>
                 <input
-                  type="number" min={0.01} max={10} step={0.1}
+                  type="number" min={0.01} max={10} step={0.01}
                   value={sim.base_risk}
                   onChange={e => setSim(s => ({ ...s, base_risk: parseFloat(e.target.value) || 0 }))}
                   className={cn(factorInputCls, 'w-full')}

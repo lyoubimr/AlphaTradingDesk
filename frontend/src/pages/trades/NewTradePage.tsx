@@ -1078,7 +1078,7 @@ export function NewTradePage() {
     // Pre-fill the risk % field with the advisor's suggestion
     const cap = activeProfile ? Number(activeProfile.capital_current) : null
     setRiskSyncDir('pct')
-    setRiskPct(String(suggestedRiskPct))
+    setRiskPct(String(Number(suggestedRiskPct.toFixed(2))))
     if (cap) setRiskAmt(String(((cap * suggestedRiskPct) / 100).toFixed(2)))
     setAdvisorSnapshot(snapshot)
   }, [activeProfile])
@@ -1556,7 +1556,9 @@ export function NewTradePage() {
             ...(isRunnerPos && { is_runner: true }),
           }
         }),
-        risk_pct_override:    riskPct || null,
+        risk_pct_override:    riskSyncDir === 'amt' && riskAmt && capital
+          ? ((Number(riskAmt) / capital) * 100).toFixed(4)   // exact, so the amount typed is the amount risked
+          : (riskPct || null),
         ...(isCrypto && effectiveLeverage > 1 && { leverage: effectiveLeverage }),
         // Margin Kraken really locks = notional / leverage — keeps margin_used linked to the leverage sent
         ...(isCrypto && (cryptoMarginRequired ?? effectiveMargin ?? 0) > 0 && { margin_used: cryptoMarginRequired ?? effectiveMargin }),
@@ -2120,9 +2122,10 @@ export function NewTradePage() {
                       type="number"
                       min={0.1}
                       max={10}
-                      step={0.1}
+                      step={0.01}
                       value={slOffsetPct}
                       onChange={(e) => setSlOffsetPct(e.target.value)}
+                      onBlur={() => { if (slOffsetPct) setSlOffsetPct(String(Number(Number(slOffsetPct).toFixed(2)))) }}
                       className="w-16 rounded-lg bg-surface-700/80 border border-surface-600 px-2 py-1.5
                         text-right text-xs text-slate-200 font-mono
                         focus:outline-none focus:border-emerald-500/50 transition-colors"
@@ -2146,6 +2149,7 @@ export function NewTradePage() {
                     setRiskSyncDir('pct'); setRiskPct(e.target.value)
                     if (capital && e.target.value) setRiskAmt(String((capital * Number(e.target.value) / 100).toFixed(2)))
                   }}
+                  onBlur={() => { if (riskPct) setRiskPct(String(Number(Number(riskPct).toFixed(2)))) }}
                   placeholder={profileRisk ? String(profileRisk) : '2.0'}
                   className={cn(inputCls, 'rounded-r-none border-r-0')} />
                 <span className="shrink-0 px-2.5 py-2 rounded-r-lg border border-surface-600 bg-surface-700/60 text-xs text-slate-500 font-medium">%</span>
@@ -2158,7 +2162,7 @@ export function NewTradePage() {
                 value={riskAmt}
                 onChange={(v) => {
                   setRiskSyncDir('amt'); setRiskAmt(v)
-                  if (capital && v) setRiskPct(String(((Number(v) / capital) * 100).toFixed(4)))
+                  if (capital && v) setRiskPct(String(Number(((Number(v) / capital) * 100).toFixed(2))))
                 }}
                 ccy={ccy} className="border-red-500/20"
                 placeholder={calc.risk_amount != null ? fmt(calc.risk_amount, 2).replace(/,/g, '') : '—'} />
@@ -2526,7 +2530,7 @@ export function NewTradePage() {
             <div className="flex items-center gap-2">
               <span className="text-xs text-slate-500 shrink-0">Trailing stop:</span>
               <input
-                type="number" step="0.1" min="0.5" max="50"
+                type="number" step="0.01" min="0.5" max="50"
                 value={runnerTrailingPct}
                 onChange={(e) => setRunnerTrailingPct(e.target.value)}
                 className={cn(inputCls, 'w-20')}

@@ -570,7 +570,7 @@ function EditTradeModal({ trade, onClose, onSuccess }: {
                     </span>
                     {isRunnerRow ? (
                       <div className="col-span-2 flex items-center gap-2">
-                        <input type="number" step="0.5" min="0.5" max="50"
+                        <input type="number" step="0.01" min="0.5" max="50"
                           value={runnerTrailingPct}
                           onChange={(e) => setRunnerTrailingPct(e.target.value)}
                           disabled={runnerActivated}
