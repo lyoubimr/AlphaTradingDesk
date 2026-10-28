@@ -354,6 +354,19 @@ class KrakenExecutionClient:
             cursor_before = _iso_to_ms(oldest["date"])
         return sorted(entries.values(), key=lambda e: e["id"])
 
+    def get_order_events(self, since_ms: int, count: int = 500) -> list[dict]:
+        """Return order lifecycle events (placed/rejected/cancelled…) since a timestamp.
+
+        Needed to learn WHY an order vanished from the open book: Kraken only reports
+        rejections of triggered stops here (e.g. insufficient_closing_margin).
+        """
+        path = "/api/history/v2/orders"
+        query = urlencode({"since": str(since_ms), "count": str(count), "sort": "desc"})
+        resp = self._http.get(f"{path}?{query}", headers=self._auth_headers(path, query))
+        if not resp.is_success:
+            raise KrakenAPIError(resp.status_code, resp.text)
+        return resp.json().get("elements", [])  # type: ignore[no-any-return]
+
     def get_open_positions(self) -> list[dict]:
         """Return all current open positions.
 

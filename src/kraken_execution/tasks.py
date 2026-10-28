@@ -15,7 +15,7 @@ Idempotence:
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import structlog
 from celery import Task
@@ -25,7 +25,11 @@ from sqlalchemy.orm import Session
 from src.core.celery_app import celery_app
 from src.core.models.trade import Position, Trade
 from src.kraken_execution import KrakenAPIError, MissingAPIKeysError
-from src.kraken_execution.fills import aggregate_fills_by_order, is_fully_filled
+from src.kraken_execution.fills import (
+    aggregate_fills_by_order,
+    find_order_end_reason,
+    is_fully_filled,
+)
 from src.kraken_execution.models import KrakenOrder
 from src.kraken_execution.service import (
     _make_client,
@@ -414,6 +418,10 @@ def sync_open_positions(self: Task) -> dict:
                         str(o["order_id"]) for o in client.get_open_orders()
                         if o.get("order_id")
                     }
+                    # Used to tell if a vanished SL leaves a position unprotected.
+                    kraken_open_symbols: set[str] = {
+                        str(p["symbol"]) for p in client.get_open_positions() if p.get("symbol")
+                    }
 
                 # Aggregate every chunk of an order — a plain dict keeps only the last one.
                 fill_by_order_id = aggregate_fills_by_order(fills)
@@ -433,14 +441,17 @@ def sync_open_positions(self: Task) -> dict:
                         ):
                             order.status = "cancelled"
                             order.cancelled_at = datetime.now(UTC)
+                            reason = _vanished_order_reason(settings_row, order)
+                            order.error_message = f"Left Kraken's book without a fill — {reason}"
                             db.commit()
                             logger.warning(
                                 "sl_tp_order_cancelled_on_kraken",
                                 trade_id=order.trade_id,
                                 role=order.role,
                                 kraken_order_id=order.kraken_order_id,
-                                reason="Order absent from Kraken open book with no fill — likely liquidation",
+                                reason=reason,
                             )
+                            _alert_if_unprotected(order, reason, kraken_open_symbols, db)
                         continue
 
                     fill_id = fill.get("fill_id") or fill.get("uid", "")
@@ -756,6 +767,50 @@ def sync_open_positions(self: Task) -> dict:
 
 
 # ── Fill handler ──────────────────────────────────────────────────────────────
+
+def _vanished_order_reason(settings_row, order: KrakenOrder) -> str:
+    """Ask Kraken's order history why an order left the book with no fill."""
+    try:
+        since_ms = int((order.sent_at.replace(tzinfo=UTC) - timedelta(minutes=1)).timestamp() * 1000)
+        with _make_client(settings_row) as client:
+            reason = find_order_end_reason(client.get_order_events(since_ms), order.kraken_order_id)
+        return reason or "no matching event in Kraken order history"
+    except Exception as exc:  # noqa: BLE001
+        return f"reason unavailable ({exc.__class__.__name__})"
+
+
+def _alert_if_unprotected(
+    order: KrakenOrder, reason: str, open_symbols: set[str], db: Session
+) -> None:
+    """Critical alert when a stop vanished while the position is still open on Kraken."""
+    if order.role not in ("sl", "runner") or order.symbol not in open_symbols:
+        return
+    # A replacement SL (e.g. break-even move) means the position is still protected.
+    replacement = (
+        db.query(KrakenOrder.id)
+        .filter(
+            KrakenOrder.trade_id == order.trade_id,
+            KrakenOrder.role.in_(["sl", "runner"]),
+            KrakenOrder.status == "open",
+            KrakenOrder.id != order.id,
+        )
+        .first()
+    )
+    trade = db.query(Trade).filter(Trade.id == order.trade_id).first()
+    if replacement is not None or trade is None or trade.status not in ("open", "partial", "runner"):
+        return
+    _notify_event(
+        order.profile_id,
+        "ORDER_ERROR",
+        db,
+        trade_id=trade.id,
+        pair=trade.pair,
+        direction=trade.direction,
+        error_message=(
+            f"🚨 STOP-LOSS LOST on {trade.pair} (trade #{trade.id}): {reason}. "
+            "The position is STILL OPEN on Kraken with NO stop. Act now."
+        ),
+    )
 
 def _handle_fill(order: KrakenOrder, db: Session) -> None:
     """Update Trade/Position state based on a freshly-detected fill.
