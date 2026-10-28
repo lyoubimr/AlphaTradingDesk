@@ -2140,7 +2140,7 @@ export function NewTradePage() {
               label={<>Risk % <Tip text="% of capital you accept to lose. Changes this recalculates max loss." /></>}
               hint={`Profile default: ${profileRisk ?? '—'}%`}>
               <div className="flex">
-                <input type="number" step="0.01" min="0.01" max="100"
+                <input type="number" step="any" min="0.01" max="100"
                   value={riskPct}
                   onChange={(e) => {
                     setRiskSyncDir('pct'); setRiskPct(e.target.value)
