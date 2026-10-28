@@ -72,6 +72,7 @@ def _settings_to_out(row: AutomationSettings) -> AutomationSettingsOut:
         max_leverage_override=row.config.get("max_leverage_override"),
         sl_order_type=row.config.get("sl_order_type", "stop_limit"),
         sl_limit_offset_pct=row.config.get("sl_limit_offset_pct", 1.5),
+        preflight_margin_buffer_pct=row.config.get("preflight_margin_buffer_pct", 20.0),
         max_loss_guard=MaxLossGuardConfigOut(
             enabled=guard_raw.get("enabled", False),
             multiplier=guard_raw.get("multiplier", 2.0),

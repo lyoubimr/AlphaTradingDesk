@@ -53,6 +53,8 @@ export function AutomationSettings({ profileId }: Props) {
   const [guardEnabled,     setGuardEnabled]     = useState(false)
   const [guardMultiplier,  setGuardMultiplier]  = useState(2.0)
   const [preflightBufferPct, setPreflightBufferPct] = useState(20)
+  const [slOrderType, setSlOrderType] = useState<'stop_limit' | 'stop_market'>('stop_limit')
+  const [slOffsetPct, setSlOffsetPct] = useState(1.5)
 
   const [saving,  setSaving]  = useState(false)
   const [saveMsg, setSaveMsg] = useState<{ ok: boolean; text: string } | null>(null)
@@ -76,6 +78,8 @@ export function AutomationSettings({ profileId }: Props) {
     setGuardEnabled(settings.config.max_loss_guard?.enabled ?? false)
     setGuardMultiplier(settings.config.max_loss_guard?.multiplier ?? 2.0)
     setPreflightBufferPct(settings.config.preflight_margin_buffer_pct ?? 20)
+    setSlOrderType(settings.config.sl_order_type ?? 'stop_limit')
+    setSlOffsetPct(settings.config.sl_limit_offset_pct ?? 1.5)
   }, [settings])
 
   async function handleSave() {
@@ -87,6 +91,8 @@ export function AutomationSettings({ profileId }: Props) {
         enabled,
         pnl_status_interval_minutes: pnlInterval,
         preflight_margin_buffer_pct: preflightBufferPct,
+        sl_order_type: slOrderType,
+        sl_limit_offset_pct: Math.min(10, Math.max(0.1, slOffsetPct || 1.5)),
         max_loss_guard: { enabled: guardEnabled, multiplier: guardMultiplier },
       }
       if (apiKey.trim())    patch.kraken_api_key    = apiKey.trim()
@@ -299,6 +305,56 @@ export function AutomationSettings({ profileId }: Props) {
             ))}
           </div>
         </div>
+
+        {/* Default stop-loss order — pre-fills the new-trade form */}
+        <div className="flex items-start justify-between gap-4 py-3 border-t border-surface-700/60">
+          <div className="min-w-0">
+            <div className="flex items-center gap-1.5">
+              <p className="text-xs font-medium text-slate-300">Default stop-loss order</p>
+              <InfoBubble text="Stop-limit: when the stop triggers, ATD sends a limit order at the trigger price ± the offset (the worst price you accept). Too wide = a larger worst-case loss than planned; too tight = it may not fill in a fast spike. Stop-market fills at any price. Each trade can still override this in the new-trade form." />
+            </div>
+            <p className="text-[11px] text-slate-600 mt-0.5">
+              {slOrderType === 'stop_limit'
+                ? `Worst fill = trigger ± ${slOffsetPct}% — keep it close to your usual SL distance`
+                : 'No price cap — exposed to slippage in spikes'}
+            </p>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <div className="flex rounded-lg border border-surface-600 overflow-hidden">
+              {(['stop_limit', 'stop_market'] as const).map((t) => (
+                <button
+                  key={t}
+                  type="button"
+                  onClick={() => setSlOrderType(t)}
+                  className={cn(
+                    'px-2.5 py-1 text-[11px] font-semibold transition-colors',
+                    slOrderType === t
+                      ? t === 'stop_limit' ? 'bg-emerald-500 text-white' : 'bg-amber-500 text-white'
+                      : 'bg-surface-700 text-slate-400 hover:text-slate-200',
+                  )}
+                >
+                  {t === 'stop_limit' ? 'Limit' : 'Market'}
+                </button>
+              ))}
+            </div>
+            {slOrderType === 'stop_limit' && (
+              <div className="flex items-center gap-1">
+                <input
+                  type="number"
+                  min={0.1}
+                  max={10}
+                  step={0.01}
+                  value={slOffsetPct}
+                  onChange={(e) => setSlOffsetPct(Number(e.target.value))}
+                  className="w-16 rounded-lg bg-surface-700 border border-surface-600 px-2 py-1.5
+                    text-right text-xs text-slate-300 font-mono
+                    focus:outline-none focus:border-brand-500/60 transition-colors"
+                />
+                <span className="text-[11px] text-slate-600">%</span>
+              </div>
+            )}
+          </div>
+        </div>
       </section>
       <section>
         <div className="flex items-center gap-2 mb-3">
@@ -351,7 +407,7 @@ export function AutomationSettings({ profileId }: Props) {
                   type="number"
                   min={1.0}
                   max={10.0}
-                  step={0.5}
+                  step={0.01}
                   value={guardMultiplier}
                   onChange={(e) => setGuardMultiplier(Number(e.target.value))}
                   className="w-16 rounded-lg bg-surface-700 border border-surface-600 px-2 py-1.5

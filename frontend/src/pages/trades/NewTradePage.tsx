@@ -1078,7 +1078,7 @@ export function NewTradePage() {
     // Pre-fill the risk % field with the advisor's suggestion
     const cap = activeProfile ? Number(activeProfile.capital_current) : null
     setRiskSyncDir('pct')
-    setRiskPct(String(suggestedRiskPct))
+    setRiskPct(String(Number(suggestedRiskPct.toFixed(2))))
     if (cap) setRiskAmt(String(((cap * suggestedRiskPct) / 100).toFixed(2)))
     setAdvisorSnapshot(snapshot)
   }, [activeProfile])
@@ -1112,6 +1112,9 @@ export function NewTradePage() {
         const enabled = s.config.enabled ?? false
         setProfileAutomationEnabled(enabled)
         setAutomateOnCreate(enabled)   // default ON when profile automation is active
+        // Pre-fill the per-trade SL order from the profile defaults (still editable per trade)
+        setSlOrderType(s.config.sl_order_type ?? 'stop_limit')
+        setSlOffsetPct(String(s.config.sl_limit_offset_pct ?? 1.5))
       })
       .catch(() => {
         setProfileAutomationEnabled(false)
@@ -1553,9 +1556,12 @@ export function NewTradePage() {
             ...(isRunnerPos && { is_runner: true }),
           }
         }),
-        risk_pct_override:    riskPct || null,
+        risk_pct_override:    riskSyncDir === 'amt' && riskAmt && capital
+          ? ((Number(riskAmt) / capital) * 100).toFixed(4)   // exact, so the amount typed is the amount risked
+          : (riskPct || null),
         ...(isCrypto && effectiveLeverage > 1 && { leverage: effectiveLeverage }),
-        ...(isCrypto && effectiveMargin != null && effectiveMargin > 0 && { margin_used: effectiveMargin }),
+        // Margin Kraken really locks = notional / leverage — keeps margin_used linked to the leverage sent
+        ...(isCrypto && (cryptoMarginRequired ?? effectiveMargin ?? 0) > 0 && { margin_used: cryptoMarginRequired ?? effectiveMargin }),
         strategy_ids:         strategyIds.length > 0 ? strategyIds : undefined,
         strategy_id:          strategyIds[0] ?? null,
         session_tag:          (sessionTag || detectSession()) || null,
@@ -2116,9 +2122,10 @@ export function NewTradePage() {
                       type="number"
                       min={0.1}
                       max={10}
-                      step={0.1}
+                      step={0.01}
                       value={slOffsetPct}
                       onChange={(e) => setSlOffsetPct(e.target.value)}
+                      onBlur={() => { if (slOffsetPct) setSlOffsetPct(String(Number(Number(slOffsetPct).toFixed(2)))) }}
                       className="w-16 rounded-lg bg-surface-700/80 border border-surface-600 px-2 py-1.5
                         text-right text-xs text-slate-200 font-mono
                         focus:outline-none focus:border-emerald-500/50 transition-colors"
@@ -2136,12 +2143,13 @@ export function NewTradePage() {
               label={<>Risk % <Tip text="% of capital you accept to lose. Changes this recalculates max loss." /></>}
               hint={`Profile default: ${profileRisk ?? '—'}%`}>
               <div className="flex">
-                <input type="number" step="0.01" min="0.01" max="100"
+                <input type="number" step="any" min="0.01" max="100"
                   value={riskPct}
                   onChange={(e) => {
                     setRiskSyncDir('pct'); setRiskPct(e.target.value)
                     if (capital && e.target.value) setRiskAmt(String((capital * Number(e.target.value) / 100).toFixed(2)))
                   }}
+                  onBlur={() => { if (riskPct) setRiskPct(String(Number(Number(riskPct).toFixed(2)))) }}
                   placeholder={profileRisk ? String(profileRisk) : '2.0'}
                   className={cn(inputCls, 'rounded-r-none border-r-0')} />
                 <span className="shrink-0 px-2.5 py-2 rounded-r-lg border border-surface-600 bg-surface-700/60 text-xs text-slate-500 font-medium">%</span>
@@ -2154,12 +2162,56 @@ export function NewTradePage() {
                 value={riskAmt}
                 onChange={(v) => {
                   setRiskSyncDir('amt'); setRiskAmt(v)
-                  if (capital && v) setRiskPct(String(((Number(v) / capital) * 100).toFixed(4)))
+                  if (capital && v) setRiskPct(String(Number(((Number(v) / capital) * 100).toFixed(2))))
                 }}
                 ccy={ccy} className="border-red-500/20"
                 placeholder={calc.risk_amount != null ? fmt(calc.risk_amount, 2).replace(/,/g, '') : '—'} />
             </Field>
           </div>
+
+          {/* ── Target risk vs max risk (worst fill of the stop-limit) — Crypto ── */}
+          {isCrypto && calc.risk_amount != null && calc.lot_size != null && slNum != null && (() => {
+            const target = calc.risk_amount
+            const capped = automateOnCreate && profileAutomationEnabled && slOrderType === 'stop_limit'
+            const uncapped = automateOnCreate && profileAutomationEnabled && slOrderType === 'stop_market'
+            const offset = Number(slOffsetPct) || 0
+            const extra = capped ? calc.lot_size * slNum * (offset / 100) : 0
+            const maxRisk = target + extra
+            const limitPrice = direction === 'LONG' ? slNum * (1 - offset / 100) : slNum * (1 + offset / 100)
+            const wide = capped && slDistancePct != null && offset > slDistancePct
+            return (
+              <div className="rounded-lg border border-surface-600 bg-surface-700/40 px-4 py-3 space-y-1.5">
+                <div className="flex items-center justify-between gap-3 text-xs">
+                  <span className="text-slate-400">Target risk <span className="text-slate-600">(SL hit at trigger)</span></span>
+                  <span className="font-mono font-semibold text-slate-200">
+                    {fmt(target, 2)} {ccy}
+                    {capital ? <span className="text-slate-500 font-normal"> · {fmt((target / capital) * 100, 2)}%</span> : null}
+                  </span>
+                </div>
+                {capped && (
+                  <div className="flex items-center justify-between gap-3 text-xs">
+                    <span className="text-slate-400">
+                      Max risk <span className="text-slate-600">(worst fill {fmtPrice(limitPrice)}, offset {offset}%)</span>
+                    </span>
+                    <span className={cn('font-mono font-semibold', wide ? 'text-amber-400' : 'text-red-400')}>
+                      {fmt(maxRisk, 2)} {ccy}
+                      {capital ? <span className="font-normal opacity-70"> · {fmt((maxRisk / capital) * 100, 2)}%</span> : null}
+                      <span className="font-normal opacity-70"> · ×{fmt(maxRisk / target, 1)}</span>
+                    </span>
+                  </div>
+                )}
+                {uncapped && (
+                  <p className="text-[11px] text-amber-400">Stop-market: max risk is not capped (slippage in a spike).</p>
+                )}
+                {wide && slDistancePct != null && (
+                  <p className="text-[11px] text-amber-400 flex items-center gap-1">
+                    <AlertTriangle size={10} className="shrink-0" />
+                    Offset {offset}% is wider than your SL distance ({fmt(slDistancePct, 2)}%) — worst case is {fmt(maxRisk / target, 1)}× the target risk. Lower the offset.
+                  </p>
+                )}
+              </div>
+            )
+          })()}
 
           {/* ── Leverage + Margin — CRYPTO profiles ─────────────────────────── */}
           {isCrypto && (<>
@@ -2478,7 +2530,7 @@ export function NewTradePage() {
             <div className="flex items-center gap-2">
               <span className="text-xs text-slate-500 shrink-0">Trailing stop:</span>
               <input
-                type="number" step="0.1" min="0.5" max="50"
+                type="number" step="0.01" min="0.5" max="50"
                 value={runnerTrailingPct}
                 onChange={(e) => setRunnerTrailingPct(e.target.value)}
                 className={cn(inputCls, 'w-20')}

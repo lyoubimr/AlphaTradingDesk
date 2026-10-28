@@ -230,7 +230,7 @@ function GoalRow({
             <div className="grid grid-cols-2 gap-2">
               <div className="space-y-1">
                 <label className="text-[10px] font-medium text-slate-500">Avg R min</label>
-                <input type="number" step="0.1" min="0.1" placeholder="e.g. 2.0"
+                <input type="number" step="0.01" min="0.1" placeholder="e.g. 2.0"
                   value={avgRMin} onChange={(e) => setAvgRMin(e.target.value)} className={inputCls}
                 />
               </div>
@@ -454,7 +454,7 @@ function NewGoalModal({
           <div className="grid grid-cols-2 gap-2">
             <div className="space-y-1">
               <label className="text-xs font-medium text-slate-400">Avg R min</label>
-              <input type="number" step="0.1" min="0.1" placeholder="e.g. 2.0"
+              <input type="number" step="0.01" min="0.1" placeholder="e.g. 2.0"
                 value={avgRMin} onChange={(e) => setAvgRMin(e.target.value)} className={inputCls}
               />
             </div>

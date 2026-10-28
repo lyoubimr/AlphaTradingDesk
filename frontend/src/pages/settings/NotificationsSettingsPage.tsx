@@ -925,7 +925,7 @@ export function NotificationsSettingsPage() {
                               <div>
                                 <p className="text-[10px] text-slate-500 mb-1">Tolerance (±)</p>
                                 <input
-                                  type="number" min={0} max={10} step={0.5}
+                                  type="number" min={0} max={10} step={0.01}
                                   value={editDraft.toleranceStr ?? '0.5'}
                                   onChange={e => setEditDraft(d => ({ ...d, toleranceStr: e.target.value }))}
                                   className={cn(inputCls)}
@@ -1062,7 +1062,7 @@ export function NotificationsSettingsPage() {
                     <div>
                       <p className="text-[10px] text-slate-500 mb-1">Tolerance (±) <span className="text-zinc-700">e.g. 0.5 → triggers at value±0.5</span></p>
                       <input
-                        type="number" min={0} max={10} step={0.5}
+                        type="number" min={0} max={10} step={0.01}
                         value={vlTolerance} onChange={e => setVlTolerance(e.target.value)}
                         placeholder="0.5"
                         className={cn(inputCls)}

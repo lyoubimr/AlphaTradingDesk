@@ -43,3 +43,22 @@ def aggregate_fills_by_order(fills: list[dict]) -> dict[str, dict]:
 def is_fully_filled(fill: dict, order_size) -> bool:
     """False while an aggregated fill is still smaller than the order size."""
     return Decimal(str(fill.get("size", 0))) >= Decimal(str(order_size or 0))
+
+
+def find_order_end_reason(events: list[dict], order_id: str) -> str | None:
+    """Explain why an order left Kraken's book without a fill, from order-history events."""
+    for el in events:
+        ev = el.get("event") or {}
+        rejected = ev.get("OrderRejected")
+        if rejected and (rejected.get("order") or {}).get("uid") == order_id:
+            return (
+                f"rejected by Kraken: {rejected.get('orderError')} "
+                f"(reason: {rejected.get('reason')})"
+            )
+        cancelled = ev.get("OrderCancelled")
+        if cancelled and (cancelled.get("order") or {}).get("uid") == order_id:
+            return (
+                f"cancelled on Kraken (reason: {cancelled.get('reason')}, "
+                f"origin: {cancelled.get('origin')})"
+            )
+    return None

@@ -91,3 +91,25 @@ class TestAllocate:
         positions = [_pos(1, 1, "33.33"), _pos(2, 2, "33.33"), _pos(3, 3, "33.34")]
         out = allocate_to_positions(positions, {}, D("-8.8771"))
         assert sum(out.values()) == D("-8.88")
+
+
+class TestOrderEndReason:
+    def test_rejected_triggered_stop(self):
+        from src.kraken_execution.fills import find_order_end_reason
+
+        events = [{"event": {"OrderRejected": {
+            "order": {"uid": "sl-1"}, "orderError": "insufficient_closing_margin",
+            "reason": "stop_order_triggered",
+        }}}]
+        assert find_order_end_reason(events, "sl-1") == (
+            "rejected by Kraken: insufficient_closing_margin (reason: stop_order_triggered)"
+        )
+
+    def test_cancelled_and_unknown(self):
+        from src.kraken_execution.fills import find_order_end_reason
+
+        events = [{"event": {"OrderCancelled": {
+            "order": {"uid": "tp-1"}, "reason": "would_not_reduce_position", "origin": "Rest API",
+        }}}]
+        assert "would_not_reduce_position" in find_order_end_reason(events, "tp-1")
+        assert find_order_end_reason(events, "other") is None

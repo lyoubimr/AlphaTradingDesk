@@ -1410,7 +1410,7 @@ export function NewSpotTradePage() {
                   <div className="pl-2 space-y-2">
                     <div className="flex items-center gap-2">
                       <span className="text-xs text-slate-500 shrink-0">Trailing %:</span>
-                      <input type="number" step="0.5" min="0.5" max="50"
+                      <input type="number" step="0.01" min="0.5" max="50"
                         value={trailingPct}
                         onChange={(e) => setTrailingPct(e.target.value)}
                         className={cn(inputCls, 'w-24')} />
