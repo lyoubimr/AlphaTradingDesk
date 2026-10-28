@@ -193,6 +193,12 @@ class TestPutSettings:
         assert resp.status_code == 200
         assert resp.json()["config"]["pnl_status_interval_minutes"] == 30
 
+    def test_preflight_buffer_is_returned_after_update(self, client: TestClient, profile: Profile):
+        # Regression: the response used to fall back to 20 whatever was stored.
+        client.put(f"{_PREFIX}/settings/{profile.id}", json={"preflight_margin_buffer_pct": 35})
+        resp = client.get(f"{_PREFIX}/settings/{profile.id}")
+        assert resp.json()["config"]["preflight_margin_buffer_pct"] == 35
+
     def test_has_api_keys_true_after_setting_keys(self, client: TestClient, profile: Profile):
         resp = client.put(
             f"{_PREFIX}/settings/{profile.id}",

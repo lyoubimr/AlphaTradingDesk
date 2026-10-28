@@ -1112,6 +1112,9 @@ export function NewTradePage() {
         const enabled = s.config.enabled ?? false
         setProfileAutomationEnabled(enabled)
         setAutomateOnCreate(enabled)   // default ON when profile automation is active
+        // Pre-fill the per-trade SL order from the profile defaults (still editable per trade)
+        setSlOrderType(s.config.sl_order_type ?? 'stop_limit')
+        setSlOffsetPct(String(s.config.sl_limit_offset_pct ?? 1.5))
       })
       .catch(() => {
         setProfileAutomationEnabled(false)
@@ -1555,7 +1558,8 @@ export function NewTradePage() {
         }),
         risk_pct_override:    riskPct || null,
         ...(isCrypto && effectiveLeverage > 1 && { leverage: effectiveLeverage }),
-        ...(isCrypto && effectiveMargin != null && effectiveMargin > 0 && { margin_used: effectiveMargin }),
+        // Margin Kraken really locks = notional / leverage — keeps margin_used linked to the leverage sent
+        ...(isCrypto && (cryptoMarginRequired ?? effectiveMargin ?? 0) > 0 && { margin_used: cryptoMarginRequired ?? effectiveMargin }),
         strategy_ids:         strategyIds.length > 0 ? strategyIds : undefined,
         strategy_id:          strategyIds[0] ?? null,
         session_tag:          (sessionTag || detectSession()) || null,
@@ -2160,6 +2164,50 @@ export function NewTradePage() {
                 placeholder={calc.risk_amount != null ? fmt(calc.risk_amount, 2).replace(/,/g, '') : '—'} />
             </Field>
           </div>
+
+          {/* ── Target risk vs max risk (worst fill of the stop-limit) — Crypto ── */}
+          {isCrypto && calc.risk_amount != null && calc.lot_size != null && slNum != null && (() => {
+            const target = calc.risk_amount
+            const capped = automateOnCreate && profileAutomationEnabled && slOrderType === 'stop_limit'
+            const uncapped = automateOnCreate && profileAutomationEnabled && slOrderType === 'stop_market'
+            const offset = Number(slOffsetPct) || 0
+            const extra = capped ? calc.lot_size * slNum * (offset / 100) : 0
+            const maxRisk = target + extra
+            const limitPrice = direction === 'LONG' ? slNum * (1 - offset / 100) : slNum * (1 + offset / 100)
+            const wide = capped && slDistancePct != null && offset > slDistancePct
+            return (
+              <div className="rounded-lg border border-surface-600 bg-surface-700/40 px-4 py-3 space-y-1.5">
+                <div className="flex items-center justify-between gap-3 text-xs">
+                  <span className="text-slate-400">Target risk <span className="text-slate-600">(SL hit at trigger)</span></span>
+                  <span className="font-mono font-semibold text-slate-200">
+                    {fmt(target, 2)} {ccy}
+                    {capital ? <span className="text-slate-500 font-normal"> · {fmt((target / capital) * 100, 2)}%</span> : null}
+                  </span>
+                </div>
+                {capped && (
+                  <div className="flex items-center justify-between gap-3 text-xs">
+                    <span className="text-slate-400">
+                      Max risk <span className="text-slate-600">(worst fill {fmtPrice(limitPrice)}, offset {offset}%)</span>
+                    </span>
+                    <span className={cn('font-mono font-semibold', wide ? 'text-amber-400' : 'text-red-400')}>
+                      {fmt(maxRisk, 2)} {ccy}
+                      {capital ? <span className="font-normal opacity-70"> · {fmt((maxRisk / capital) * 100, 2)}%</span> : null}
+                      <span className="font-normal opacity-70"> · ×{fmt(maxRisk / target, 1)}</span>
+                    </span>
+                  </div>
+                )}
+                {uncapped && (
+                  <p className="text-[11px] text-amber-400">Stop-market: max risk is not capped (slippage in a spike).</p>
+                )}
+                {wide && slDistancePct != null && (
+                  <p className="text-[11px] text-amber-400 flex items-center gap-1">
+                    <AlertTriangle size={10} className="shrink-0" />
+                    Offset {offset}% is wider than your SL distance ({fmt(slDistancePct, 2)}%) — worst case is {fmt(maxRisk / target, 1)}× the target risk. Lower the offset.
+                  </p>
+                )}
+              </div>
+            )
+          })()}
 
           {/* ── Leverage + Margin — CRYPTO profiles ─────────────────────────── */}
           {isCrypto && (<>
