@@ -135,9 +135,9 @@ function CalcPill({ label, value, sub, color = 'default' }: {
 // ── Price input with currency suffix ─────────────────────────────────────────
 
 function PriceInput({
-  value, onChange, placeholder, className, ccy, required,
+  value, onChange, onBlur, placeholder, className, ccy, required,
 }: {
-  value: string; onChange: (v: string) => void
+  value: string; onChange: (v: string) => void; onBlur?: () => void
   placeholder?: string; className?: string; ccy?: string; required?: boolean
 }) {
   return (
@@ -147,6 +147,7 @@ function PriceInput({
         type="number" step="any" min="0"
         value={value}
         onChange={(e) => onChange(e.target.value)}
+        onBlur={onBlur}
         placeholder={placeholder ?? '0.00'}
         className={cn(inputCls, ccy ? 'rounded-r-none border-r-0' : '', className)}
       />
@@ -1391,12 +1392,23 @@ export function NewTradePage() {
     return notional / effectiveLeverage
   }, [isCrypto, notional, effectiveLeverage])
 
+  // Margin and leverage are one linked pair: margin = notional / leverage.
+  // While the user is typing a margin we show what they typed; otherwise the margin
+  // always follows the (possibly capped) leverage, so ×10 can never sit next to a
+  // margin that only makes sense at ×39.
   const displayedMargin = useMemo((): number | null => {
     if (!isCrypto) return null
-    if (lastEdit === 'leverage') return derivedMarginFromLeverage
     if (marginInput !== '' && Number(marginInput) > 0) return Number(marginInput)
+    if (derivedMarginFromLeverage != null) return derivedMarginFromLeverage
     return proposedMargin
-  }, [isCrypto, lastEdit, derivedMarginFromLeverage, marginInput, proposedMargin])
+  }, [isCrypto, derivedMarginFromLeverage, marginInput, proposedMargin])
+
+  // True when the wanted margin would need more leverage than the instrument allows
+  const leverageCapped = useMemo((): boolean => {
+    if (!isCrypto || notional == null || lastEdit !== 'margin') return false
+    const target = marginInput !== '' && Number(marginInput) > 0 ? Number(marginInput) : proposedMargin
+    return target != null && target > 0 && notional / target > maxLeverage + 0.5
+  }, [isCrypto, notional, lastEdit, marginInput, proposedMargin, maxLeverage])
 
   // Estimated liquidation price (Crypto only — isolated margin formula)
   const liqPrice = useMemo((): number | null => {
@@ -2313,6 +2325,14 @@ export function NewTradePage() {
                       }
                     }
                   }}
+                  onBlur={() => {
+                    // Typed margin → snap to the linked leverage so margin = notional / leverage
+                    if (marginInput !== '') {
+                      setLeverage(String(effectiveLeverage))
+                      setLastEdit('leverage')
+                      setMarginInput('')
+                    }
+                  }}
                   ccy={ccy}
                   className={
                     marginVsCapital === 'exceeds' ? 'border-red-500/50'
@@ -2331,15 +2351,21 @@ export function NewTradePage() {
                     ×{marginMultiplier.toFixed(1)} × {fmt(calc.risk_amount, 2)} ={' '}
                     <span className="text-brand-400">{fmt(proposedMargin, 2)} {ccy}</span>
                     {proposedLeverage != null && slDistancePct != null && (
-                      <span className="text-slate-600 ml-1">→ ×{proposedLeverage}</span>
+                      <span className="text-slate-600 ml-1">→ ×{effectiveLeverage}</span>
                     )}
+                  </p>
+                )}
+                {leverageCapped && notional != null && displayedMargin != null && (
+                  <p className="text-[10px] text-amber-400 mt-1 flex items-center gap-1">
+                    <AlertTriangle size={9} className="shrink-0" />
+                    This margin needs ×{Math.round(notional / ((marginInput !== '' && Number(marginInput) > 0 ? Number(marginInput) : proposedMargin) ?? 1))} — max is ×{maxLeverage}, so margin is set to {fmt(displayedMargin, 2)} {ccy} (notional ÷ ×{maxLeverage})
                   </p>
                 )}
                 {/* Warning: margin > capital */}
                 {marginVsCapital === 'exceeds' && displayedMargin != null && capital != null && (
                   <p className="text-[10px] text-red-400 mt-1 flex items-center gap-1">
                     <AlertTriangle size={9} className="shrink-0" />
-                    Margin {fmt(displayedMargin, 2)} {ccy} &gt; capital — increase leverage or reduce risk %
+                    Margin {fmt(displayedMargin, 2)} {ccy} &gt; capital — {effectiveLeverage >= maxLeverage ? 'leverage is at max: reduce risk % or widen the SL' : 'increase leverage or reduce risk %'}
                   </p>
                 )}
               </Field>
