@@ -7,15 +7,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Poetry
-RUN pip install --no-cache-dir poetry
+# Poetry lives in its own venv: installed next to the app it shares anyio/certifi/cffi/
+# cryptography/idna with it, and `poetry install` then breaks while downgrading them
+# to the locked versions (CI failure 2026-10-28).
+RUN python -m venv /opt/poetry \
+    && /opt/poetry/bin/pip install --no-cache-dir poetry==2.3.2 poetry-plugin-export
 
 # Copy dependency files first (layer cache)
 COPY pyproject.toml poetry.lock* ./
 
-# Install dependencies only (no project package yet)
-RUN poetry config virtualenvs.create false \
-    && poetry install --no-root --no-interaction --no-ansi
+# Install exactly the locked versions (dev group included, as before) into the system Python
+RUN /opt/poetry/bin/poetry export --with dev --without-hashes -f requirements.txt -o /tmp/requirements.txt \
+    && pip install --no-cache-dir -r /tmp/requirements.txt \
+    && rm /tmp/requirements.txt
 
 # Copy source + Alembic config + entrypoint
 COPY src/ ./src/
