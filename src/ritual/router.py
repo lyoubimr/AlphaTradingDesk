@@ -9,7 +9,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
@@ -23,6 +23,7 @@ from src.ritual.schemas import (
     RitualSettingsRead,
     SessionComplete,
     SessionCreate,
+    SessionHeartbeat,
     SessionRead,
     SmartWLResult,
     StepComplete,
@@ -35,6 +36,17 @@ from src.ritual.schemas import (
 router = APIRouter(prefix="/profiles/{profile_id}/ritual", tags=["ritual"])
 
 DbDep = Annotated[Session, Depends(get_db)]
+
+_VALID_TFS = {"1W", "1D", "4H", "1H", "15M"}
+
+
+def _parse_tfs(raw: str | None) -> list[str] | None:
+    if not raw:
+        return None
+    tfs = [t.strip().upper() for t in raw.split(",") if t.strip()]
+    if any(t not in _VALID_TFS for t in tfs):
+        raise HTTPException(status_code=422, detail="timeframes must be among 1W,1D,4H,1H,15m")
+    return ["15m" if t == "15M" else t for t in tfs]
 
 
 # ── Settings ─────────────────────────────────────────────────────────────────
@@ -215,6 +227,18 @@ def complete_step(
 
 
 @router.post(
+    "/sessions/{session_id}/heartbeat",
+    summary="Add active seconds to a session",
+)
+def session_heartbeat(
+    profile_id: int, session_id: int, payload: SessionHeartbeat, db: DbDep
+) -> dict[str, int]:
+    """Frontend reports time spent with the ritual page visible."""
+    total = service.add_session_heartbeat(profile_id, session_id, payload.seconds, db)
+    return {"active_seconds": total}
+
+
+@router.post(
     "/sessions/{session_id}/complete",
     response_model=SessionRead,
     summary="Complete a session",
@@ -251,9 +275,14 @@ def generate_smart_watchlist(
     db: DbDep,
     session_type: str = Query("trade_session"),
     top_n: int | None = Query(None, ge=5, le=100),
+    timeframes: str | None = Query(
+        None, description="Comma-separated TF override, e.g. 4H,1H (no session needed)"
+    ),
 ) -> SmartWLResult:
     """Compute cascade cross-TF scoring and return ranked watchlist."""
-    return service.generate_smart_watchlist(profile_id, session_type, top_n, db)
+    return service.generate_smart_watchlist(
+        profile_id, session_type, top_n, db, timeframes=_parse_tfs(timeframes)
+    )
 
 
 @router.get(
@@ -265,9 +294,12 @@ def download_smart_watchlist(
     db: DbDep,
     session_type: str = Query("trade_session"),
     top_n: int | None = Query(None, ge=5, le=100),
+    timeframes: str | None = Query(None),
 ) -> Response:
     """Generate and download a TradingView-importable watchlist file."""
-    result = service.generate_smart_watchlist(profile_id, session_type, top_n, db)
+    result = service.generate_smart_watchlist(
+        profile_id, session_type, top_n, db, timeframes=_parse_tfs(timeframes)
+    )
     now_str = datetime.now().strftime("%Y%m%d_%H%M")
     filename = f"ATD_TOP{result.top_n}_{now_str}_{result.broker_name}.txt"
     content = service.generate_watchlist_file(result)

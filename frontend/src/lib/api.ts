@@ -13,7 +13,7 @@ import type {
   TradingStyle,
   GoalOut, GoalCreate, GoalUpdate, GoalProgressItem, GoalHistoryItem, GoalOverrideCreate, GoalOverrideOut,
   MAModule, MAIndicator, MAIndicatorConfig, MAIndicatorConfigOut, MAIndicatorUpdate, MAIndicatorCreate,
-  MASessionCreate, MASessionOut, MASessionListItem, MAStalenessItem, MATradeConclusion,
+  MASessionCreate, MASessionOut, MASessionListItem, MAStalenessItem, MATradeConclusion, MATimeframeLink,
   MarketVIOut, AggregatedMarketVIOut, PairsVIOut, WatchlistOut, WatchlistMetaOut, LivePricesResponse,
   VolatilitySettingsOut, NotificationSettingsOut,
   RiskBudgetOut, RiskAdvisorOut, RiskSettingsOut, PairVIOut,
@@ -428,6 +428,14 @@ export const maApi = {
   listIndicators: (moduleId: number): Promise<MAIndicator[]> =>
     request(`/market-analysis/modules/${moduleId}/indicators`),
 
+  /** PATCH /api/market-analysis/modules/{id} — freshness windows */
+  patchModule: (moduleId: number, data: { stale_hours?: number | null; warn_hours?: number | null }): Promise<MAModule> =>
+    request(`/market-analysis/modules/${moduleId}`, { method: 'PATCH', body: JSON.stringify(data) }),
+
+  /** GET /api/profiles/{id}/market-analysis/for-timeframe — session a trade on this TF should use */
+  forTimeframe: (profileId: number, timeframe: string): Promise<MATimeframeLink> =>
+    request(`/profiles/${profileId}/market-analysis/for-timeframe?timeframe=${encodeURIComponent(timeframe)}`),
+
   /** GET /api/market-analysis/sessions?profile_id=&module_id=&limit= */
   listSessions: (moduleId?: number, limit = 50, profileId?: number): Promise<MASessionListItem[]> => {
     const qs = new URLSearchParams({ limit: String(limit) })
@@ -755,6 +763,13 @@ export const analyticsApi = {
 
 const R = (profileId: number) => `/profiles/${profileId}/ritual`
 
+const wlQuery = (sessionType: string, topN?: number, timeframes?: string[]): string => {
+  const p = new URLSearchParams({ session_type: sessionType })
+  if (topN) p.set('top_n', String(topN))
+  if (timeframes && timeframes.length > 0) p.set('timeframes', timeframes.join(','))
+  return `?${p.toString()}`
+}
+
 export const ritualApi = {
   getSettings:  (pid: number): Promise<RitualSettings> =>
     request(`${R(pid)}/settings`),
@@ -795,15 +810,13 @@ export const ritualApi = {
     }),
   abandonSession: (pid: number, sessionId: number): Promise<RitualSession> =>
     request(`${R(pid)}/sessions/${sessionId}/abandon`, { method: 'POST' }),
+  sessionHeartbeat: (pid: number, sessionId: number, seconds: number): Promise<{ active_seconds: number }> =>
+    request(`${R(pid)}/sessions/${sessionId}/heartbeat`, { method: 'POST', body: JSON.stringify({ seconds }) }),
 
-  generateWatchlist: (pid: number, sessionType: string, topN?: number): Promise<SmartWLResult> => {
-    const q = topN ? `?session_type=${sessionType}&top_n=${topN}` : `?session_type=${sessionType}`
-    return request(`${R(pid)}/smart-watchlist/generate${q}`, { method: 'POST' })
-  },
-  downloadWatchlistUrl: (pid: number, sessionType: string, topN?: number): string => {
-    const q = topN ? `?session_type=${sessionType}&top_n=${topN}` : `?session_type=${sessionType}`
-    return `/api${R(pid)}/smart-watchlist/download${q}`
-  },
+  generateWatchlist: (pid: number, sessionType: string, topN?: number, timeframes?: string[]): Promise<SmartWLResult> =>
+    request(`${R(pid)}/smart-watchlist/generate${wlQuery(sessionType, topN, timeframes)}`, { method: 'POST' }),
+  downloadWatchlistUrl: (pid: number, sessionType: string, topN?: number, timeframes?: string[]): string =>
+    `/api${R(pid)}/smart-watchlist/download${wlQuery(sessionType, topN, timeframes)}`,
 
   getScore: (pid: number): Promise<WeeklyScore> =>
     request(`${R(pid)}/score`),

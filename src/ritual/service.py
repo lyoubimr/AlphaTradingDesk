@@ -16,6 +16,7 @@ import io
 
 # ── Internal helpers ──────────────────────────────────────────────────────────
 import logging
+import re
 from copy import deepcopy
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
@@ -36,6 +37,7 @@ from src.ritual.models import (
     RitualWeeklyScore,
 )
 from src.ritual.schemas import (
+    CANONICAL_TFS,
     DEFAULT_RITUAL_CONFIG,
     DEFAULT_STEPS,
     DISCIPLINE_POINTS,
@@ -178,6 +180,27 @@ def _monday_of(dt: date) -> date:
     return dt - timedelta(days=dt.weekday())
 
 
+_TF_SUFFIX_RE = re.compile(
+    r"\(\s*(?:1W|1D|4H|1H|15m)(?:\s*\+\s*(?:1W|1D|4H|1H|15m))*\s*\)", re.IGNORECASE
+)
+
+
+def _normalise_tfs(tfs: list[str]) -> list[str]:
+    """Canonical casing, de-duplicated, ordered high → low timeframe."""
+    wanted = {str(t).upper() if str(t).lower() != "15m" else "15m" for t in tfs}
+    return [tf for tf in CANONICAL_TFS if tf in wanted]
+
+
+def _label_with_timeframes(step: RitualStep) -> str:
+    """Keep the "(1H + 4H)" suffix of watchlist steps in sync with config.timeframes."""
+    if step.step_type not in ("smart_wl", "watchlist_htf_spot"):
+        return step.label
+    tfs = _normalise_tfs((step.config or {}).get("timeframes") or [])
+    if not tfs or not _TF_SUFFIX_RE.search(step.label):
+        return step.label
+    return _TF_SUFFIX_RE.sub(f"({' + '.join(tfs)})", step.label, count=1)
+
+
 def _month_start(dt: date) -> date:
     return dt.replace(day=1)
 
@@ -187,6 +210,7 @@ def _enrich_step(step: RitualStep) -> StepRead:
     data.emoji = STEP_EMOJIS.get(step.step_type, "🔷")
     if step.linked_module:
         data.module_path = MODULE_PATHS.get(step.linked_module)
+    data.label = _label_with_timeframes(step)
     return data
 
 
@@ -200,9 +224,8 @@ def _enrich_session(session: RitualSession) -> SessionRead:
     data = SessionRead.model_validate(session)
     data.session_label = SESSION_LABELS.get(session.session_type, session.session_type)
     data.session_emoji = SESSION_EMOJIS.get(session.session_type, "📋")
-    if session.ended_at and session.started_at:
-        delta = session.ended_at - session.started_at
-        data.duration_minutes = round(delta.total_seconds() / 60, 1)
+    if session.active_seconds:
+        data.duration_minutes = round(session.active_seconds / 60, 1)
     data.step_logs = [_enrich_step_log(log) for log in session.step_logs]
     return data
 
@@ -274,35 +297,17 @@ def _seed_steps(profile_id: int, db: Session) -> None:
 
 
 def _sync_step_labels(profile_id: int, session_type: str, rows: list, db: Session) -> None:
-    """Silently update step labels/step_type that differ from current DEFAULT_STEPS.
+    """Insert default step positions missing from the DB.
 
-    Also inserts any new step positions that exist in DEFAULT_STEPS but not yet
-    in the DB (e.g. when a new step is added to an existing session template).
-
-    NOTE: `config` (e.g. timeframes) is intentionally NOT synced here — it is
-    user-configurable and must survive app updates.  Only structural fields
-    (label, step_type) are auto-corrected.
+    Existing rows (label, step_type, config) are user-owned and never touched —
+    templates evolve through "Reset defaults", not silent rewrites.
     """
     defaults = DEFAULT_STEPS.get(session_type, [])
-    default_by_pos: dict[int, dict] = {d["position"]: d for d in defaults}
     existing_positions = {row.position for row in rows}
     changed = False
 
-    # Update label/step_type of existing rows (never touch config — user owns it)
-    for row in rows:
-        default = default_by_pos.get(row.position)
-        if not default:
-            continue
-        if row.step_type != default["step_type"]:
-            row.step_type = default["step_type"]
-            changed = True
-        if row.label != default["label"]:
-            row.label = default["label"]
-            changed = True
-
-    # Insert new steps for positions not yet in DB
-    for pos, default in default_by_pos.items():
-        if pos not in existing_positions:
+    for default in defaults:
+        if default["position"] not in existing_positions:
             db.add(RitualStep(profile_id=profile_id, session_type=session_type, **default))
             changed = True
 
@@ -522,10 +527,51 @@ def generate_pinned_tv_export(profile_id: int, db: Session) -> bytes:
 
 # ── Sessions ─────────────────────────────────────────────────────────────────
 
+_STALE_SESSION_HOURS = 12
+
+
+def _abandon_stale_sessions(profile_id: int, db: Session) -> None:
+    """Abandon in_progress sessions left open for more than _STALE_SESSION_HOURS."""
+    cutoff = _utcnow() - timedelta(hours=_STALE_SESSION_HOURS)
+    stale = (
+        db.query(RitualSession)
+        .filter(
+            RitualSession.profile_id == profile_id,
+            RitualSession.status == "in_progress",
+            RitualSession.started_at < cutoff,
+        )
+        .all()
+    )
+    for s in stale:
+        s.status = "abandoned"
+        s.ended_at = _utcnow()
+    if stale:
+        db.commit()
+
+
+def add_session_heartbeat(
+    profile_id: int, session_id: int, seconds: int, db: Session
+) -> int:
+    """Add active seconds to an in_progress session; returns the new total."""
+    session = (
+        db.query(RitualSession)
+        .filter_by(id=session_id, profile_id=profile_id)
+        .first()
+    )
+    if not session:
+        raise HTTPException(status_code=404, detail=f"Session {session_id} not found.")
+    if session.status != "in_progress":
+        raise HTTPException(status_code=400, detail="Session is not in progress.")
+    session.active_seconds = (session.active_seconds or 0) + seconds
+    db.commit()
+    return session.active_seconds
+
+
 def list_sessions(
     profile_id: int, db: Session, limit: int = 20
 ) -> list[SessionRead]:
     _get_profile_or_404(db, profile_id)
+    _abandon_stale_sessions(profile_id, db)
     rows = (
         db.query(RitualSession)
         .filter_by(profile_id=profile_id)
@@ -538,6 +584,7 @@ def list_sessions(
 
 def get_active_session(profile_id: int, db: Session) -> SessionRead | None:
     """Return the current in_progress session if any."""
+    _abandon_stale_sessions(profile_id, db)
     row = (
         db.query(RitualSession)
         .filter_by(profile_id=profile_id, status="in_progress")
@@ -846,6 +893,7 @@ def generate_smart_watchlist(
     session_type: str,
     top_n: int | None,
     db: Session,
+    timeframes: list[str] | None = None,
 ) -> SmartWLResult:
     """Compute the Smart Watchlist based on cascade cross-TF scoring.
 
@@ -859,7 +907,7 @@ def generate_smart_watchlist(
     settings_row = get_ritual_settings(profile_id, db)
     cfg = settings_row.config
 
-    # Determine timeframes from step config
+    # Determine timeframes: explicit override > step config > session defaults
     steps = (
         db.query(RitualStep)
         .filter_by(profile_id=profile_id, session_type=session_type)
@@ -868,15 +916,20 @@ def generate_smart_watchlist(
     smart_step = next(
         (s for s in steps if s.step_type in ("smart_wl", "watchlist_htf_spot")), None
     )
-    if smart_step and smart_step.config.get("timeframes"):
-        tfs: list[str] = smart_step.config["timeframes"]
+    override_tfs = _normalise_tfs(timeframes) if timeframes else []
+    if override_tfs:
+        tfs: list[str] = override_tfs
+    elif smart_step and smart_step.config.get("timeframes"):
+        tfs = _normalise_tfs(smart_step.config["timeframes"]) or list(
+            smart_step.config["timeframes"]
+        )
     else:
         tfs = {
             "weekly_setup": ["1W", "1D", "4H", "1H", "15m"],
-            "trade_session": ["1D", "4H", "1H", "15m"],
+            "trade_session": ["4H", "1H"],
             "weekend_review": ["1D", "4H"],
             "weekend_trading": ["1H", "15m"],
-            "swing_setup": ["1W", "1D", "4H"],
+            "swing_setup": ["1D", "4H"],
             "spot_monthly": ["1W", "1D", "4H"],
             "spot_weekly": ["1D", "4H"],
         }.get(session_type, ["4H", "1H"])
@@ -905,6 +958,8 @@ def generate_smart_watchlist(
     )
     trend_bonus: float = sf.get("trend_bonus", 1.2)
     ema_bonus_threshold: float = sf.get("ema_bonus_threshold", 0.70)
+    if ema_bonus_threshold > 1:  # legacy UI saved 0-100; ema_score is 0-1
+        ema_bonus_threshold /= 100
     ema_bonus_factor: float = sf.get("ema_bonus_factor", 1.1)
 
     pair_scores: dict[str, float] = {}

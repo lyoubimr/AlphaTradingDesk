@@ -4,7 +4,7 @@
 // Layout (desktop): 2-col — main (steps + WL) | sidebar (pinned pairs)
 // Layout (mobile):  1-col — sections stack vertically
 
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { Link } from 'react-router-dom'
 import {
   Star, Pin, PinOff, Plus, Download, RefreshCw,
@@ -17,6 +17,7 @@ import { PageHeader } from '../../components/ui/PageHeader'
 import { useProfile } from '../../context/ProfileContext'
 import { ritualApi } from '../../lib/api'
 import { cn } from '../../lib/cn'
+import { maAgeLabel } from '../../utils/maAge'
 import type {
   RitualSession, RitualStep, PinnedPair,
   SmartWLResult, WeeklyScore, StepLog,
@@ -33,7 +34,17 @@ import type {
 const _wlCache = new Map<string, SmartWLResult>()
 
 // inline type for market analysis staleness (field names match backend StalenessItem)
-type MAStaleness = { module_name: string; last_analyzed_at: string | null; days_old: number | null; is_stale: boolean }
+type MAStaleness = {
+  module_id: number
+  module_name: string
+  last_analyzed_at: string | null
+  days_old: number | null
+  hours_old?: number | null
+  is_stale: boolean
+}
+
+// Intraday sessions need the 1H Pulse; the others need the HTF (1D/4H) context.
+const PULSE_SESSIONS = new Set<string>(['trade_session', 'weekend_trading'])
 
 const SESSION_TYPES: { type: SessionType; emoji: string; label: string; when: string; desc: string; est: string; accent: string; gradient: string; steps: string[] }[] = [
   {
@@ -52,11 +63,11 @@ const SESSION_TYPES: { type: SessionType; emoji: string; label: string; when: st
     emoji: '🎯',
     label: 'Trade Session',
     when: 'Before each session',
-    desc: 'Quick VI check + pins + trade decision',
-    est: '~30 min',
+    desc: 'Pulse 1H + pins + watchlist 4H/1H + trade decision',
+    est: '~25 min',
     accent: '#f59e0b',
     gradient: 'from-amber-950/60 to-surface-800/40',
-    steps: ['VI Check', 'Pins Review', 'Smart WL', 'Outcome'],
+    steps: ['Pulse 1H', 'Pins Review', 'Smart WL 4H+1H', 'TradingView', 'Outcome'],
   },
   {
     type: 'weekend_review',
@@ -85,11 +96,11 @@ const SESSION_TYPES: { type: SessionType; emoji: string; label: string; when: st
     emoji: '🌊',
     label: 'Swing Setup',
     when: 'Anytime',
-    desc: 'HTF-only scan (1W/1D/4H) + pin swing candidates',
+    desc: 'HTF context (1D/4H) + swing watchlist + pin swing candidates',
     est: '~30 min',
     accent: '#8b5cf6',
     gradient: 'from-violet-950/60 to-surface-800/40',
-    steps: ['VI Check', 'Swing WL 1W+1D+4H', 'TradingView', 'Pin Pairs', 'Outcome'],
+    steps: ['HTF 1D/4H', 'Swing WL 1D+4H', 'TradingView', 'Pin Pairs', 'Outcome'],
   },
   // ── Spot sessions (shown for spot profiles) ──────────────────────────────
   {
@@ -202,21 +213,42 @@ function gradeColor(grade: string): string {
   }
 }
 
-function useElapsed(startedAt: string | null): string {
-  const [elapsed, setElapsed] = useState('')
+// Counts only while this view is mounted AND the tab is visible; reports to the
+// backend in small chunks so leaving the page never inflates the session time.
+function SessionTimer({ profileId, sessionId, initialSeconds }: {
+  profileId: number
+  sessionId: number
+  initialSeconds: number
+}) {
+  const [seconds, setSeconds] = useState(initialSeconds)
+  const unsent = useRef(0)
+
   useEffect(() => {
-    if (!startedAt) return
-    const update = () => {
-      const sec = Math.floor((Date.now() - new Date(startedAt).getTime()) / 1000)
-      const m = Math.floor(sec / 60).toString().padStart(2, '0')
-      const s = (sec % 60).toString().padStart(2, '0')
-      setElapsed(`${m}:${s}`)
+    const flush = () => {
+      const n = Math.min(unsent.current, 120)
+      if (n <= 0) return
+      unsent.current -= n
+      ritualApi.sessionHeartbeat(profileId, sessionId, n).catch(() => { /* best effort */ })
     }
-    update()
-    const id = setInterval(update, 1000)
-    return () => clearInterval(id)
-  }, [startedAt])
-  return elapsed
+    const tick = setInterval(() => {
+      if (document.visibilityState !== 'visible') return
+      setSeconds(s => s + 1)
+      unsent.current += 1
+      if (unsent.current >= 15) flush()
+    }, 1000)
+    const onVisibility = () => { if (document.visibilityState === 'hidden') flush() }
+    document.addEventListener('visibilitychange', onVisibility)
+    return () => {
+      clearInterval(tick)
+      document.removeEventListener('visibilitychange', onVisibility)
+      flush()
+    }
+  }, [profileId, sessionId])
+
+  const h = Math.floor(seconds / 3600)
+  const m = Math.floor((seconds % 3600) / 60).toString().padStart(2, '0')
+  const s = (seconds % 60).toString().padStart(2, '0')
+  return <>{h > 0 ? `${h}:${m}:${s}` : `${m}:${s}`}</>
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -277,17 +309,18 @@ function ScoreRing({ score, maxScore, pct, grade, period = 'week' }: { score: nu
 
 // ── Market Analysis step panel ───────────────────────────────────────────────
 function MarketAnalysisPanel({
-  profileId, logId, onComplete,
+  profileId, logId, sessionType, onComplete,
 }: {
   profileId: number
   logId: number
+  sessionType: string
   onComplete: (logId: number, status: 'done' | 'skipped', output?: Record<string, unknown>) => void
 }) {
   const { activeProfile } = useProfile()
   const [staleness, setStaleness] = useState<MAStaleness[] | null>(null)
   const [loading, setLoading] = useState(true)
 
-  useEffect(() => {
+  const load = useCallback(() => {
     fetch(`/api/profiles/${profileId}/market-analysis/staleness`)
       .then(r => r.ok ? r.json() as Promise<MAStaleness[]> : [])
       .then(setStaleness)
@@ -295,13 +328,31 @@ function MarketAnalysisPanel({
       .finally(() => setLoading(false))
   }, [profileId])
 
-  // Modules the profile has actually used before → these matter
-  const relevantStaleness = staleness?.filter(s => s.last_analyzed_at !== null) ?? []
+  // Re-check when coming back from the analysis tab
+  useEffect(() => {
+    load()
+    const onVisible = () => { if (document.visibilityState === 'visible') load() }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => document.removeEventListener('visibilitychange', onVisible)
+  }, [load])
+
+  // Crypto profiles: the step targets one module (Pulse 1H or HTF 1D/4H)
+  const primaryPrefix = PULSE_SESSIONS.has(sessionType) ? 'Crypto Pulse' : 'Crypto HTF'
+  const primary = activeProfile?.market_type === 'Crypto'
+    ? staleness?.find(s => s.module_name.startsWith(primaryPrefix))
+    : undefined
+  // Otherwise: modules the profile has actually used before → these matter
+  const relevantStaleness = primary ? [primary] : (staleness?.filter(s => s.last_analyzed_at !== null) ?? [])
   // Modules never analyzed → optional, informational only
-  const neverDone = staleness?.filter(s => s.last_analyzed_at === null) ?? []
-  // Only alarming: previously-used modules now stale
+  const neverDone = primary ? [] : (staleness?.filter(s => s.last_analyzed_at === null) ?? [])
+  // Only alarming: targeted/previously-used modules now stale
   const trueStale = relevantStaleness.filter(s => s.is_stale)
   const allFresh = staleness !== null && staleness.length > 0 && trueStale.length === 0
+  const runUrl = (() => {
+    const id = (primary ?? trueStale[0])?.module_id
+    return id ? `/market-analysis/new?module=${id}` : '/market-analysis'
+  })()
+  const ageOf = (s: MAStaleness) => (s.last_analyzed_at ? maAgeLabel(s) : 'never run')
 
   return (
     <div className="mt-2 rounded-lg border border-surface-700 bg-surface-900/60 p-3 space-y-2">
@@ -325,7 +376,9 @@ function MarketAnalysisPanel({
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-1.5">
               <CheckCircle2 size={14} className="text-green-500" />
-              <span className="text-xs text-green-400 font-medium">Market Analysis up to date</span>
+              <span className="text-xs text-green-400 font-medium">
+                {primary ? `${primary.module_name} fresh · ${ageOf(primary)}` : 'Market Analysis up to date'}
+              </span>
               {activeProfile?.market_type && (
                 <span className="text-[10px] text-slate-600">({activeProfile.market_type})</span>
               )}
@@ -338,10 +391,10 @@ function MarketAnalysisPanel({
             </button>
           </div>
           <button
-            onClick={() => window.open('/market-analysis', '_blank')}
+            onClick={() => window.open(primary ? runUrl : '/market-analysis', '_blank')}
             className="flex items-center gap-1 text-[11px] text-slate-500 hover:text-brand-400 transition-colors"
           >
-            <ExternalLink size={10} /> Open Market Analysis →
+            <ExternalLink size={10} /> {primary ? 'Run it again →' : 'Open Market Analysis →'}
           </button>
           {neverDone.length > 0 && (
             <p className="text-[10px] text-slate-600">
@@ -354,7 +407,9 @@ function MarketAnalysisPanel({
           <div className="flex items-center gap-1.5">
             <span className="text-amber-400 text-sm">⚠</span>
             <span className="text-xs text-amber-400 font-medium">
-              {trueStale.length} module(s) not updated this week
+              {primary
+                ? `${primary.module_name} ${primary.last_analyzed_at ? 'is stale' : 'not run yet'}`
+                : `${trueStale.length} module(s) not updated this week`}
             </span>
           </div>
           <div className="space-y-1 rounded-lg border border-surface-700 bg-surface-900 p-2">
@@ -362,7 +417,7 @@ function MarketAnalysisPanel({
               <div key={s.module_name} className="flex items-center justify-between">
                 <span className="text-xs text-slate-400">{s.module_name}</span>
                 <span className={cn('text-[10px] font-medium', s.is_stale ? 'text-amber-400' : 'text-green-400')}>
-                  {s.is_stale ? `${s.days_old ?? '?'}d ago` : '✓ OK'}
+                  {s.is_stale ? ageOf(s) : '✓ OK'}
                 </span>
               </div>
             ))}
@@ -374,11 +429,11 @@ function MarketAnalysisPanel({
           </div>
           <div className="flex gap-2">
             <button
-              onClick={() => window.open('/market-analysis', '_blank')}
+              onClick={() => window.open(runUrl, '_blank')}
               className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-brand-700/20 border border-brand-600/40 text-brand-400 text-xs font-medium hover:bg-brand-700/30 transition-colors"
             >
               <ExternalLink size={11} />
-              Open Market Analysis
+              {primary ? `Run ${primary.module_name}` : 'Open Market Analysis'}
             </button>
             <button
               onClick={() => onComplete(logId, 'done', { market_analysis: 'skip_update' })}
@@ -399,6 +454,7 @@ interface StepItemProps {
   step?: RitualStep
   isCurrent: boolean
   profileId: number
+  sessionType: string
   onComplete: (logId: number, status: 'done' | 'skipped', output?: Record<string, unknown>) => void
   onGenerateWL?: () => void
   wlResult?: SmartWLResult | null
@@ -410,7 +466,7 @@ interface StepItemProps {
 }
 
 function StepItem({
-  log, step, isCurrent, profileId,
+  log, step, isCurrent, profileId, sessionType,
   onComplete, onGenerateWL, wlResult, wlLoading, downloadUrl, topN, setTopN, onPin,
 }: StepItemProps) {
   const isDone = log.status === 'done'
@@ -495,6 +551,7 @@ function StepItem({
             <MarketAnalysisPanel
               profileId={profileId}
               logId={log.id}
+              sessionType={sessionType}
               onComplete={onComplete}
             />
           )}
@@ -880,6 +937,107 @@ function SmartWLPanel({
   )
 }
 
+// ── Quick watchlist (no session needed) ───────────────────────────────────────
+const QUICK_TFS_DEFAULT: PinnedTF[] = ['4H', '1H']
+
+function QuickWatchlist({ profileId, isSpot, onPinned }: {
+  profileId: number
+  isSpot: boolean
+  onPinned: () => void
+}) {
+  const cacheKey = `${profileId}_quick`
+  const [tfs, setTfs] = useState<PinnedTF[]>(QUICK_TFS_DEFAULT)
+  const [topN, setTopN] = useState<number | null>(null)
+  const [result, setResult] = useState<SmartWLResult | null>(() => _wlCache.get(cacheKey) ?? null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const sessionType: SessionType = isSpot ? 'spot_weekly' : 'trade_session'
+
+  useEffect(() => {
+    ritualApi.getSettings(profileId)
+      .then(s => {
+        const saved = (s.config?.watchlist_quick as { timeframes?: PinnedTF[] } | undefined)?.timeframes
+        if (saved && saved.length > 0) setTfs(TF_OPTIONS.filter(t => saved.includes(t)))
+      })
+      .catch(() => { /* keep defaults */ })
+  }, [profileId])
+
+  const toggleTf = (tf: PinnedTF) => {
+    const next = TF_OPTIONS.filter(t => (t === tf ? !tfs.includes(t) : tfs.includes(t)))
+    if (next.length === 0) return
+    setTfs(next)
+    ritualApi.updateSettings(profileId, { watchlist_quick: { timeframes: next } }).catch(() => { /* non-blocking */ })
+  }
+
+  const generate = async () => {
+    setLoading(true)
+    setError(null)
+    try {
+      const r = await ritualApi.generateWatchlist(profileId, sessionType, topN ?? undefined, tfs)
+      setResult(r)
+      if (r.top_n) setTopN(r.top_n)
+      _wlCache.set(cacheKey, r)
+    } catch {
+      setError('Watchlist generation failed. Please retry.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const pin = async (pair: string, tf: string) => {
+    await ritualApi.addPinned(profileId, { pair, timeframe: tf as PinnedTF, note: null, source: 'watchlist' })
+    setResult(prev => {
+      if (!prev) return prev
+      const updated = {
+        ...prev,
+        timeframes: Object.fromEntries(
+          Object.entries(prev.timeframes).map(([t, pairs]) => [
+            t,
+            pairs.map(p => p.pair === pair && t === tf ? { ...p, is_pinned: true } : p),
+          ]),
+        ),
+      }
+      _wlCache.set(cacheKey, updated)
+      return updated
+    })
+    onPinned()
+  }
+
+  return (
+    <div className="rounded-xl border border-surface-700 bg-surface-800/50 p-4">
+      <div className="flex items-center gap-2 flex-wrap">
+        <RefreshCw size={14} className="text-brand-400" />
+        <h3 className="text-sm font-semibold text-slate-200">Quick Watchlist</h3>
+        <span className="text-[10px] text-slate-500">no session needed</span>
+        <div className="ml-auto flex items-center gap-1">
+          {TF_OPTIONS.map(tf => (
+            <button
+              key={tf}
+              onClick={() => toggleTf(tf)}
+              className={cn(
+                'text-[11px] px-2 py-0.5 rounded border font-medium transition-colors',
+                tfs.includes(tf) ? TF_COLORS[tf] : 'border-surface-600 text-slate-600 hover:border-slate-500',
+              )}
+            >
+              {tf}
+            </button>
+          ))}
+        </div>
+      </div>
+      {error && <p className="mt-2 text-[11px] text-red-400">{error}</p>}
+      <SmartWLPanel
+        result={result}
+        loading={loading}
+        downloadUrl={ritualApi.downloadWatchlistUrl(profileId, sessionType, topN ?? undefined, tfs)}
+        topN={topN}
+        setTopN={setTopN}
+        onGenerate={generate}
+        onPin={pin}
+      />
+    </div>
+  )
+}
+
 // ── Pinned pair card ──────────────────────────────────────────────────────────
 interface PinnedCardProps {
   pin: PinnedPair
@@ -1220,8 +1378,6 @@ export function RitualPage() {
   const [topN, setTopN] = useState<number | null>(null)  // null = auto-computed by backend
   const [pinnedKey, setPinnedKey] = useState(0)
 
-  const elapsed = useElapsed(activeSession?.started_at ?? null)
-
   const reload = useCallback(async () => {
     if (!profileId) return
     const [sess, sc, recent] = await Promise.all([
@@ -1345,7 +1501,11 @@ export function RitualPage() {
   const visibleLogs = activeSession?.step_logs.filter(l => l.step_type !== 'ai_brief') ?? []
   const doneCount = visibleLogs.filter(l => l.status !== 'pending').length
   const totalCount = visibleLogs.length
-  const allDone = activeSession && totalCount > 0 && doneCount === totalCount
+  const mandatoryPending = visibleLogs.some(l =>
+    l.status === 'pending' &&
+    (steps.find(s => s.id === l.step_id || s.position === l.position)?.is_mandatory ?? true),
+  )
+  const allDone = activeSession && totalCount > 0 && !mandatoryPending
 
   // Outcome from outcome step log if done
   const outcomeLog = activeSession?.step_logs.find(l => l.step_type === 'outcome' && l.status === 'done')
@@ -1407,6 +1567,14 @@ export function RitualPage() {
             </div>
           )}
 
+          {/* ── Quick watchlist (works with or without a session) ─────────── */}
+          <QuickWatchlist
+            key={profileId}
+            profileId={profileId}
+            isSpot={isSpot}
+            onPinned={() => setPinnedKey(k => k + 1)}
+          />
+
           {/* ── Active session ────────────────────────────────────────────── */}
           {activeSession ? (
             <div className="rounded-xl border border-brand-600/40 bg-brand-950/20 overflow-hidden">
@@ -1425,7 +1593,12 @@ export function RitualPage() {
                   <div className="flex items-center gap-2 mt-0.5">
                     <span className="flex items-center gap-1 text-[11px] text-slate-400">
                       <Timer size={10} />
-                      {elapsed}
+                      <SessionTimer
+                        key={activeSession.id}
+                        profileId={profileId}
+                        sessionId={activeSession.id}
+                        initialSeconds={activeSession.active_seconds ?? 0}
+                      />
                     </span>
                     <div className="flex-1 bg-surface-800 rounded-full h-1">
                       <div
@@ -1473,6 +1646,7 @@ export function RitualPage() {
                       step={step}
                       isCurrent={isCurrent}
                       profileId={profileId}
+                      sessionType={activeSession.session_type}
                       onComplete={handleCompleteStep}
                       onGenerateWL={handleGenerateWL}
                       wlResult={wlResult}

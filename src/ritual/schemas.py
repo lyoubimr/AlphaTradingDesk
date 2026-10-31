@@ -193,11 +193,16 @@ class SessionRead(BaseModel):
     outcome: str | None
     discipline_points: int
     notes: str | None
+    active_seconds: int = 0
     step_logs: list[StepLogRead] = []
     # computed
     session_label: str = ""
     session_emoji: str = ""
     duration_minutes: float | None = None
+
+
+class SessionHeartbeat(BaseModel):
+    seconds: int = Field(..., ge=1, le=120)
 
 
 class SessionComplete(BaseModel):
@@ -333,7 +338,11 @@ DEFAULT_RITUAL_CONFIG: dict[str, Any] = {
         "ema_bonus_threshold": 0.70,
         "ema_bonus_factor": 1.1,
     },
+    # Session-less watchlist generator (RitualPage quick card).
+    "watchlist_quick": {"timeframes": ["4H", "1H"]},
 }
+
+CANONICAL_TFS: tuple[str, ...] = ("1W", "1D", "4H", "1H", "15m")
 
 
 # ── Default Steps ─────────────────────────────────────────────────────────────
@@ -342,7 +351,7 @@ DEFAULT_STEPS: dict[str, list[dict]] = {
     "weekly_setup": [
         {
             "position": 1, "step_type": "market_analysis",
-            "label": "Update Market Analysis", "est_minutes": 10,
+            "label": "Run HTF context (1D/4H)", "est_minutes": 4,
             "is_mandatory": True, "linked_module": "market_analysis",
             "cadence_hours": None, "config": {},
         },
@@ -366,9 +375,9 @@ DEFAULT_STEPS: dict[str, list[dict]] = {
     ],
     "trade_session": [
         {
-            "position": 1, "step_type": "vi_check",
-            "label": "Check Volatility Index", "est_minutes": 1,
-            "is_mandatory": True, "linked_module": "volatility",
+            "position": 1, "step_type": "market_analysis",
+            "label": "Run Pulse 1H (USDT.D · BTC · TOTAL2 · BTC.D)", "est_minutes": 3,
+            "is_mandatory": True, "linked_module": "market_analysis",
             "cadence_hours": None, "config": {},
         },
         {
@@ -379,13 +388,13 @@ DEFAULT_STEPS: dict[str, list[dict]] = {
         },
         {
             "position": 3, "step_type": "smart_wl",
-            "label": "Generate Smart Watchlist (1D + 4H + 1H + 15m)",
+            "label": "Generate Smart Watchlist (4H + 1H)",
             "est_minutes": 1, "is_mandatory": True, "linked_module": None,
-            "cadence_hours": None, "config": {"timeframes": ["1D", "4H", "1H", "15m"]},
+            "cadence_hours": None, "config": {"timeframes": ["4H", "1H"]},
         },
         {
             "position": 4, "step_type": "tv_analysis",
-            "label": "Analyse watchlist in TradingView", "est_minutes": 20,
+            "label": "Analyse in TradingView (S/R 4H + 1H)", "est_minutes": 20,
             "is_mandatory": True, "linked_module": None,
             "cadence_hours": None, "config": {},
         },
@@ -461,16 +470,16 @@ DEFAULT_STEPS: dict[str, list[dict]] = {
     # ── Swing session template ─────────────────────────────────────────────────
     "swing_setup": [
         {
-            "position": 1, "step_type": "vi_check",
-            "label": "Check VI Scores (trend bias HTF)", "est_minutes": 2,
-            "is_mandatory": True, "linked_module": "volatility",
+            "position": 1, "step_type": "market_analysis",
+            "label": "Run HTF context (1D/4H)", "est_minutes": 4,
+            "is_mandatory": True, "linked_module": "market_analysis",
             "cadence_hours": None, "config": {},
         },
         {
             "position": 2, "step_type": "smart_wl",
-            "label": "Generate Swing Watchlist (1W + 1D + 4H)",
+            "label": "Generate Swing Watchlist (1D + 4H)",
             "est_minutes": 2, "is_mandatory": True, "linked_module": None,
-            "cadence_hours": None, "config": {"timeframes": ["1W", "1D", "4H"]},
+            "cadence_hours": None, "config": {"timeframes": ["1D", "4H"]},
         },
         {
             "position": 3, "step_type": "tv_analysis",
