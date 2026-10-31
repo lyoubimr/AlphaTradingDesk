@@ -666,3 +666,224 @@ class TestStaleness:
         names = [m["module_name"] for m in resp.json()]
         assert "AllModA" in names
         assert "AllModB" in names
+
+    def test_module_stale_hours_window(self, client: TestClient, db_session: Session):
+        from datetime import UTC, datetime, timedelta
+
+        broker = _make_broker(db_session, name="WindowBroker")
+        profile = _make_profile(db_session, broker)
+        mod = _make_module(db_session, name="PulseWindowMod")
+        mod.stale_hours = 4
+        ind = _make_indicator(db_session, mod, key="window_ind")
+
+        payload = _session_payload(profile, mod, [ind])
+        payload["analyzed_at"] = (datetime.now(UTC) - timedelta(hours=5)).isoformat()
+        client.post("/api/market-analysis/sessions", json=payload)
+
+        resp = client.get(f"/api/profiles/{profile.id}/market-analysis/staleness")
+        item = next(m for m in resp.json() if m["module_name"] == "PulseWindowMod")
+        assert item["stale_after_hours"] == 4
+        assert item["is_stale"] is True
+        assert 4.9 <= item["hours_old"] <= 5.2
+
+    def test_default_window_is_seven_days(self, client: TestClient, db_session: Session):
+        broker = _make_broker(db_session, name="DefaultWindowBroker")
+        profile = _make_profile(db_session, broker)
+        _make_module(db_session, name="DefaultWindowMod")
+
+        resp = client.get(f"/api/profiles/{profile.id}/market-analysis/staleness")
+        item = next(m for m in resp.json() if m["module_name"] == "DefaultWindowMod")
+        assert item["stale_after_hours"] == 168
+
+
+# ── Tests: Pulse verdict ─────────────────────────────────────────────────────
+
+
+class TestPulseConclusion:
+    @pytest.mark.parametrize(
+        ("btc", "btcd", "label"),
+        [
+            (2, 2, "Alts Long-Friendly"),
+            (2, 0, "BTC Only — Alts Risky"),
+            (0, 0, "Risk-Off — Shorts or Stand Aside"),
+            (0, 2, "Alts Fragile — Low Conviction"),
+        ],
+    )
+    def test_matrix(self, btc: int, btcd: int, label: str):
+        from src.market_analysis.service import get_pulse_conclusion
+
+        verdict = get_pulse_conclusion({"pulse_btc_structure": btc, "pulse_btcd_levels": btcd})
+        assert verdict is not None
+        assert verdict.label == label
+
+    def test_neutral_btc_falls_back_to_composite(self):
+        from src.market_analysis.service import get_pulse_conclusion
+
+        assert get_pulse_conclusion({"pulse_btc_structure": 1, "pulse_btcd_levels": 2}) is None
+
+    def test_non_pulse_session_returns_none(self):
+        from src.market_analysis.service import get_pulse_conclusion
+
+        assert get_pulse_conclusion({"btc_htf_structure": 2}) is None
+
+
+# ── Tests: trade timeframe ↔ MA session link ─────────────────────────────────
+
+PULSE = "Crypto Pulse (1H)"
+HTF = "Crypto HTF (1D/4H)"
+
+
+def _post_session(client: TestClient, profile: Profile, module, indicators, *, hours_ago: float, score: int = 2) -> int:
+    from datetime import UTC, datetime, timedelta
+
+    payload = _session_payload(profile, module, indicators, score=score)
+    payload["analyzed_at"] = (datetime.now(UTC) - timedelta(hours=hours_ago)).isoformat()
+    resp = client.post("/api/market-analysis/sessions", json=payload)
+    assert resp.status_code == 201, resp.text
+    return resp.json()["id"]
+
+
+def _pulse_module(db: Session, *, stale: int = 48, warn: int | None = 30):
+    mod = _make_module(db, name=PULSE, is_dual=True, asset_b="Alts")
+    mod.stale_hours, mod.warn_hours = stale, warn
+    inds = [
+        _make_indicator(db, mod, key="pulse_btc_structure", asset_target="a", timeframe_level="ltf", sort_order=1),
+        _make_indicator(db, mod, key="pulse_btcd_levels", asset_target="b", timeframe_level="ltf", sort_order=2),
+    ]
+    for ind in inds:
+        ind.tv_timeframe = "1H"
+    db.flush()
+    return mod, inds
+
+
+class TestForTimeframe:
+    def _url(self, profile: Profile, tf: str | None) -> str:
+        q = f"?timeframe={tf}" if tf else ""
+        return f"/api/profiles/{profile.id}/market-analysis/for-timeframe{q}"
+
+    def test_ltf_uses_pulse_and_is_fresh(self, client: TestClient, db_session: Session):
+        profile = _make_profile(db_session, _make_broker(db_session, name="FtBroker1"))
+        mod, inds = _pulse_module(db_session)
+        sid = _post_session(client, profile, mod, inds, hours_ago=2)
+
+        data = client.get(self._url(profile, "1H")).json()
+        assert data["session_id"] == sid
+        assert data["module_name"] == PULSE
+        assert data["freshness"] == "fresh"
+        assert data["verdict"]["label"] == "Alts Long-Friendly"
+
+    def test_htf_timeframes_use_htf_module_not_pulse(self, client: TestClient, db_session: Session):
+        profile = _make_profile(db_session, _make_broker(db_session, name="FtBroker2"))
+        pulse, pulse_inds = _pulse_module(db_session)
+        htf = _make_module(db_session, name=HTF)
+        htf_inds = [_make_indicator(db_session, htf, key="htf_btc_structure_1d")]
+        _post_session(client, profile, pulse, pulse_inds, hours_ago=1)
+        htf_sid = _post_session(client, profile, htf, htf_inds, hours_ago=5)
+
+        for tf in ("4H", "1D", "1W"):
+            data = client.get(self._url(profile, tf)).json()
+            assert data["session_id"] == htf_sid
+            assert data["module_name"] == HTF
+
+    def test_aging_session_is_still_linked(self, client: TestClient, db_session: Session):
+        profile = _make_profile(db_session, _make_broker(db_session, name="FtBroker3"))
+        mod, inds = _pulse_module(db_session)
+        sid = _post_session(client, profile, mod, inds, hours_ago=35)
+
+        data = client.get(self._url(profile, "15m")).json()
+        assert data["freshness"] == "aging"
+        assert data["session_id"] == sid
+
+    def test_stale_session_is_not_linked(self, client: TestClient, db_session: Session):
+        profile = _make_profile(db_session, _make_broker(db_session, name="FtBroker4"))
+        mod, inds = _pulse_module(db_session)
+        _post_session(client, profile, mod, inds, hours_ago=60)
+
+        data = client.get(self._url(profile, "1H")).json()
+        assert data["freshness"] == "stale"
+        assert data["session_id"] is None
+        assert data["verdict"] is None
+
+    def test_never_run_and_missing_timeframe(self, client: TestClient, db_session: Session):
+        profile = _make_profile(db_session, _make_broker(db_session, name="FtBroker5"))
+        _pulse_module(db_session)
+
+        never = client.get(self._url(profile, "1H")).json()
+        assert never["session_id"] is None and never["freshness"] == "none"
+        assert client.get(self._url(profile, None)).json()["session_id"] is None
+        assert client.get(self._url(profile, "2h")).json()["session_id"] is None
+
+    def test_non_crypto_profile_uses_latest_session(self, client: TestClient, db_session: Session):
+        profile = _make_profile(db_session, _make_broker(db_session, name="FtBroker6"))
+        profile.market_type = "CFD"
+        mod = _make_module(db_session, name="GoldLike")
+        ind = _make_indicator(db_session, mod, key="gold_like_ind")
+        sid = _post_session(client, profile, mod, [ind], hours_ago=3)
+
+        data = client.get(self._url(profile, "1H")).json()
+        assert data["session_id"] == sid
+
+    def test_unknown_profile_is_404(self, client: TestClient):
+        assert client.get("/api/profiles/99999/market-analysis/for-timeframe?timeframe=1H").status_code == 404
+
+
+class TestModuleWindows:
+    def test_patch_windows(self, client: TestClient, db_session: Session):
+        mod = _make_module(db_session, name="WindowPatchMod")
+        resp = client.patch(
+            f"/api/market-analysis/modules/{mod.id}", json={"stale_hours": 72, "warn_hours": 24}
+        )
+        assert resp.status_code == 200
+        assert resp.json()["stale_hours"] == 72 and resp.json()["warn_hours"] == 24
+
+    def test_warn_cannot_exceed_stale(self, client: TestClient, db_session: Session):
+        mod = _make_module(db_session, name="WindowPatchBad")
+        resp = client.patch(
+            f"/api/market-analysis/modules/{mod.id}", json={"stale_hours": 24, "warn_hours": 48}
+        )
+        assert resp.status_code == 422
+
+    def test_seed_does_not_overwrite_user_windows(self, db_session: Session):
+        from database.migrations.seeds.seed_market_analysis import seed_market_analysis
+
+        seed_market_analysis(db_session)
+        pulse = db_session.query(MarketAnalysisModule).filter_by(name=PULSE).one()
+        assert (pulse.stale_hours, pulse.warn_hours) == (48, 30)
+
+        pulse.stale_hours, pulse.warn_hours = 99, 50
+        db_session.flush()
+        seed_market_analysis(db_session)
+        db_session.refresh(pulse)
+        assert (pulse.stale_hours, pulse.warn_hours) == (99, 50)
+        assert db_session.query(MarketAnalysisModule).filter_by(name=HTF).one().stale_hours == 72
+
+
+class TestPulseDirection:
+    @pytest.mark.parametrize(
+        ("code", "is_btc", "direction", "expected"),
+        [
+            ("alts_long_friendly", False, "long", "aligned"),
+            ("alts_long_friendly", False, "short", "opposed"),
+            ("btc_only", False, "long", "neutral"),
+            ("btc_only", True, "long", "aligned"),
+            ("risk_off", False, "long", "opposed"),
+            ("risk_off", True, "short", "aligned"),
+            ("alts_fragile", True, "long", "opposed"),
+            ("alts_fragile", False, "short", "neutral"),
+        ],
+    )
+    def test_table(self, code: str, is_btc: bool, direction: str, expected: str):
+        from src.market_analysis.service import pulse_direction_match
+
+        assert pulse_direction_match(code, is_btc_pair=is_btc, direction=direction) == expected
+
+    def test_risk_engine_uses_pulse_verdict(self, client: TestClient, db_session: Session):
+        from src.risk_management.service import _resolve_ma_direction_match
+
+        profile = _make_profile(db_session, _make_broker(db_session, name="PulseRiskBroker"))
+        mod, inds = _pulse_module(db_session)
+        sid = _post_session(client, profile, mod, inds, hours_ago=1, score=0)  # BTC weak + BTC.D rising
+
+        assert _resolve_ma_direction_match(sid, "long", db_session, "1H", pair="PF_SOLUSD") == "opposed"
+        assert _resolve_ma_direction_match(sid, "short", db_session, "1H", pair="PF_SOLUSD") == "aligned"
+        assert _resolve_ma_direction_match(sid, "short", db_session, "1H", pair="PF_XBTUSD") == "aligned"
