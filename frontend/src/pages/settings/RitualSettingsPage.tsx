@@ -17,7 +17,7 @@ const SESSION_TYPES = [
     type: 'weekly_setup',
     emoji: '📅',
     label: 'Weekly Setup',
-    desc: 'Monday — Market Analysis + Full Watchlist (1W/1D/4H/1H/15m) → Pin key pairs',
+    desc: 'Monday — HTF context (1D/4H) + Watchlist (1D + 4H) → Pin key pairs',
     est: '~45 min',
   },
   {
@@ -31,8 +31,15 @@ const SESSION_TYPES = [
     type: 'weekend_review',
     emoji: '📊',
     label: 'Weekend Review',
-    desc: 'Sat/Sun — Analytics + Trade Journal + Goals + Learning note',
+    desc: 'Sat/Sun — Analytics + Trade Journal + Goals + Learning note (review only, no trading)',
     est: '~35 min',
+  },
+  {
+    type: 'weekend_trading',
+    emoji: '⚡',
+    label: 'Weekend Trading',
+    desc: 'Sat/Sun (optional) — Pulse 1H + Pinned pairs + WL (4H + 1H) → Log outcome',
+    est: '~20 min',
   },
   {
     type: 'swing_setup',

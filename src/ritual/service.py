@@ -925,10 +925,10 @@ def generate_smart_watchlist(
         )
     else:
         tfs = {
-            "weekly_setup": ["1W", "1D", "4H", "1H", "15m"],
+            "weekly_setup": ["1D", "4H"],
             "trade_session": ["4H", "1H"],
             "weekend_review": ["1D", "4H"],
-            "weekend_trading": ["1H", "15m"],
+            "weekend_trading": ["4H", "1H"],
             "swing_setup": ["1D", "4H"],
             "spot_monthly": ["1W", "1D", "4H"],
             "spot_weekly": ["1D", "4H"],

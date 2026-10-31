@@ -357,9 +357,9 @@ DEFAULT_STEPS: dict[str, list[dict]] = {
         },
         {
             "position": 2, "step_type": "smart_wl",
-            "label": "Generate Smart Watchlist (1W + 1D + 4H + 1H + 15m)",
+            "label": "Generate Smart Watchlist (1D + 4H)",
             "est_minutes": 1, "is_mandatory": True, "linked_module": None,
-            "cadence_hours": None, "config": {"timeframes": ["1W", "1D", "4H", "1H", "15m"]},
+            "cadence_hours": None, "config": {"timeframes": ["1D", "4H"]},
         },
         {
             "position": 3, "step_type": "tv_analysis",
@@ -431,16 +431,16 @@ DEFAULT_STEPS: dict[str, list[dict]] = {
         },
         {
             "position": 5, "step_type": "smart_wl",
-            "label": "Generate Watchlist (1W + 1D + 4H)", "est_minutes": 1,
+            "label": "Generate Watchlist for next week (1D + 4H)", "est_minutes": 1,
             "is_mandatory": False, "linked_module": None,
-            "cadence_hours": None, "config": {"timeframes": ["1W", "1D", "4H"]},
+            "cadence_hours": None, "config": {"timeframes": ["1D", "4H"]},
         },
     ],
     "weekend_trading": [
         {
-            "position": 1, "step_type": "vi_check",
-            "label": "Check Volatility Index", "est_minutes": 1,
-            "is_mandatory": True, "linked_module": "volatility",
+            "position": 1, "step_type": "market_analysis",
+            "label": "Run Pulse 1H (USDT.D · BTC · TOTAL2 · BTC.D)", "est_minutes": 3,
+            "is_mandatory": True, "linked_module": "market_analysis",
             "cadence_hours": None, "config": {},
         },
         {
@@ -451,13 +451,13 @@ DEFAULT_STEPS: dict[str, list[dict]] = {
         },
         {
             "position": 3, "step_type": "smart_wl",
-            "label": "Generate Smart Watchlist (1H + 15m)",
+            "label": "Generate Smart Watchlist (4H + 1H)",
             "est_minutes": 1, "is_mandatory": True, "linked_module": None,
-            "cadence_hours": None, "config": {"timeframes": ["1H", "15m"]},
+            "cadence_hours": None, "config": {"timeframes": ["4H", "1H"]},
         },
         {
             "position": 4, "step_type": "tv_analysis",
-            "label": "Analyse in TradingView", "est_minutes": 15,
+            "label": "Analyse in TradingView (S/R 4H + 1H)", "est_minutes": 15,
             "is_mandatory": True, "linked_module": None,
             "cadence_hours": None, "config": {},
         },
