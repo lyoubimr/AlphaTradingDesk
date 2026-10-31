@@ -621,6 +621,8 @@ export interface MAModule {
   asset_b: string | null    // e.g. "Alts"
   is_active: boolean
   sort_order: number
+  stale_hours?: number | null
+  warn_hours?: number | null
 }
 
 export type TFLevel = 'htf' | 'mtf' | 'ltf'
@@ -772,6 +774,10 @@ export interface MAStalenessItem {
   last_analyzed_at: string | null
   days_old: number | null
   is_stale: boolean
+  hours_old?: number | null
+  stale_after_hours?: number
+  warn_after_hours?: number | null
+  freshness?: 'none' | 'fresh' | 'aging' | 'stale'
 }
 
 // ── Trade Conclusion (v2) ─────────────────────────────────────────────────
@@ -783,6 +789,20 @@ export interface MATradeConclusion {
   trade_types: string[]
   size_advice: string // "normal (100%)" | "reduced (50%)"
   color: 'green' | 'amber' | 'red' | 'neutral'
+}
+
+/** GET /profiles/{id}/market-analysis/for-timeframe */
+export interface MATimeframeLink {
+  timeframe: string
+  session_id: number | null
+  module_id: number | null
+  module_name: string | null
+  freshness: 'none' | 'fresh' | 'aging' | 'stale'
+  hours_old: number | null
+  stale_after_hours: number | null
+  warn_after_hours: number | null
+  verdict: MATradeConclusion | null
+  reason: string | null
 }
 
 // ── Volatility (Phase 2) ──────────────────────────────────────────────────
@@ -1369,6 +1389,7 @@ export interface RitualSession {
   outcome: SessionOutcome | null
   discipline_points: number
   notes: string | null
+  active_seconds: number
   step_logs: StepLog[]
   session_label: string
   session_emoji: string

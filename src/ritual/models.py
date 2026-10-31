@@ -201,6 +201,10 @@ class RitualSession(Base):
     outcome: Mapped[str | None] = mapped_column(String(30), nullable=True)
     discipline_points: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Seconds with the ritual page visible — reported by the frontend heartbeat.
+    active_seconds: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
 
     # Relationships
     step_logs: Mapped[list[RitualStepLog]] = relationship(

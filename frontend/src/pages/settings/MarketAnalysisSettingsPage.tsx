@@ -39,6 +39,7 @@ const TF_LABELS: Record<string, { label: string; color: string; dot: string }> =
 
 const MODULE_EMOJIS: Record<string, string> = {
   Crypto: '₿', Gold: '🥇', Forex: '💱', Indices: '📊',
+  'Crypto Pulse (1H)': '⚡', 'Crypto HTF (1D/4H)': '🌊',
 }
 const moduleEmoji = (name: string) => MODULE_EMOJIS[name] ?? '🧭'
 
@@ -529,8 +530,49 @@ function AddIndicatorForm({
 // ModuleSection
 // ─────────────────────────────────────────────────────────────────────────────
 
+function FreshnessWindows({ module, onSave }: {
+  module: MAModule
+  onSave: (id: number, patch: { stale_hours: number | null; warn_hours: number | null }) => Promise<void>
+}) {
+  const [stale, setStale] = useState(module.stale_hours != null ? String(module.stale_hours) : '')
+  const [warn, setWarn] = useState(module.warn_hours != null ? String(module.warn_hours) : '')
+  const [saving, setSaving] = useState(false)
+  const toNum = (v: string) => (v.trim() === '' ? null : Number(v))
+  const dirty = toNum(stale) !== (module.stale_hours ?? null) || toNum(warn) !== (module.warn_hours ?? null)
+  const inputCls = 'w-16 bg-surface-900 border border-surface-600 rounded px-2 py-1 text-xs text-slate-200 text-right focus:outline-none focus:border-brand-500'
+
+  return (
+    <div className="flex items-center gap-3 flex-wrap px-5 py-2.5 border-b border-surface-700 bg-surface-900/30 text-[11px] text-slate-500">
+      <span className="font-medium text-slate-400">Freshness</span>
+      <label className="flex items-center gap-1.5">
+        amber after
+        <input type="number" min={1} max={720} value={warn} placeholder="—" onChange={(e) => setWarn(e.target.value)} className={inputCls} />
+        h
+      </label>
+      <label className="flex items-center gap-1.5">
+        stale (not linked to trades) after
+        <input type="number" min={1} max={720} value={stale} placeholder="168" onChange={(e) => setStale(e.target.value)} className={inputCls} />
+        h
+      </label>
+      {dirty && (
+        <button
+          type="button"
+          disabled={saving}
+          onClick={async () => {
+            setSaving(true)
+            try { await onSave(module.id, { stale_hours: toNum(stale), warn_hours: toNum(warn) }) } finally { setSaving(false) }
+          }}
+          className="ml-auto px-2.5 py-1 rounded-lg border border-brand-500/30 text-brand-400 bg-brand-500/10 hover:bg-brand-500/15 disabled:opacity-50"
+        >
+          {saving ? 'Saving…' : 'Save'}
+        </button>
+      )}
+    </div>
+  )
+}
+
 function ModuleSection({
-  module, indicators, configs, onToggleProfile, onSave, onDelete, onCreate, savingId,
+  module, indicators, configs, onToggleProfile, onSave, onDelete, onCreate, onPatchModule, savingId,
 }: {
   module: MAModule
   indicators: MAIndicator[]
@@ -539,6 +581,7 @@ function ModuleSection({
   onSave: (id: number, patch: Partial<MAIndicator>) => Promise<void>
   onDelete: (id: number) => void
   onCreate: (moduleId: number, ind: MAIndicator) => void
+  onPatchModule: (id: number, patch: { stale_hours: number | null; warn_hours: number | null }) => Promise<void>
   savingId: number | null
 }) {
   const [showAdd, setShowAdd] = useState(false)
@@ -581,6 +624,8 @@ function ModuleSection({
       </div>
 
       {/* Add indicator form — top so it's immediately visible */}
+      <FreshnessWindows key={`${module.stale_hours}-${module.warn_hours}`} module={module} onSave={onPatchModule} />
+
       {showAdd && (
         <div className="px-4 pt-4">
           <AddIndicatorForm
@@ -750,6 +795,19 @@ export function MarketAnalysisSettingsPage() {
     }))
   }, [])
 
+  const handlePatchModule = useCallback(async (
+    moduleId: number,
+    patch: { stale_hours: number | null; warn_hours: number | null },
+  ) => {
+    try {
+      const updated = await maApi.patchModule(moduleId, patch)
+      setModules((prev) => prev.map((m) => (m.id === moduleId ? updated : m)))
+      setError(null)
+    } catch (e: unknown) {
+      setError((e as Error).message)
+    }
+  }, [])
+
   const allIndicators = Object.values(indicators).flat()
   const totalEnabled  = allIndicators.filter((i) => configs[i.id] !== false).length
 
@@ -823,6 +881,7 @@ export function MarketAnalysisSettingsPage() {
               onSave={handleSaveIndicator}
               onDelete={handleDeleteIndicator}
               onCreate={handleCreateIndicator}
+              onPatchModule={handlePatchModule}
               savingId={savingId}
             />
           ))}

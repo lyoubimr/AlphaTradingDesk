@@ -16,6 +16,8 @@ Routes:
   GET  /api/profiles/{profile_id}/indicator-config
   PUT  /api/profiles/{profile_id}/indicator-config
   GET  /api/profiles/{profile_id}/market-analysis/staleness  (profile-scoped, kept for compat)
+  GET  /api/profiles/{profile_id}/market-analysis/for-timeframe?timeframe=1H
+  PATCH /api/market-analysis/modules/{module_id}   (freshness windows)
 """
 
 from __future__ import annotations
@@ -32,10 +34,12 @@ from src.market_analysis.schemas import (
     IndicatorOut,
     IndicatorUpdate,
     ModuleOut,
+    ModuleUpdate,
     SessionCreate,
     SessionListItem,
     SessionOut,
     StalenessItem,
+    TimeframeLinkOut,
     TradeConclusion,
 )
 
@@ -57,6 +61,14 @@ def list_modules(db: Session = Depends(get_db)) -> list:
 def list_indicators(module_id: int, db: Session = Depends(get_db)) -> list:
     """Return all indicators for a given module (read-only catalogue)."""
     return service.list_indicators(db, module_id)
+
+
+@ma_router.patch("/modules/{module_id}", response_model=ModuleOut)
+def patch_module(
+    module_id: int, data: ModuleUpdate, db: Session = Depends(get_db)
+) -> object:
+    """Edit a module's freshness windows (stale_hours / warn_hours)."""
+    return service.patch_module(db, module_id, data)
 
 
 @ma_router.get("/modules/{module_id}/thresholds")
@@ -197,6 +209,22 @@ def save_indicator_config(
 
 
 # ── Staleness ─────────────────────────────────────────────────────────────────
+
+
+@profiles_ma_router.get(
+    "/{profile_id}/market-analysis/for-timeframe",
+    response_model=TimeframeLinkOut,
+)
+def get_session_for_timeframe(
+    profile_id: int,
+    timeframe: str | None = Query(default=None, description="Trade timeframe, e.g. 1H"),
+    db: Session = Depends(get_db),
+) -> object:
+    """
+    MA session a trade on this timeframe should use (LTF → Pulse, HTF → HTF module).
+    session_id is null when the matching module is stale or never run.
+    """
+    return service.resolve_session_for_timeframe(db, profile_id, timeframe)
 
 
 @profiles_ma_router.get(

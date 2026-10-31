@@ -37,6 +37,15 @@ class ModuleOut(BaseModel):
     asset_b: str | None
     is_active: bool
     sort_order: int
+    stale_hours: int | None = None
+    warn_hours: int | None = None
+
+
+class ModuleUpdate(BaseModel):
+    """PATCH /api/market-analysis/modules/{id} — freshness windows only."""
+
+    stale_hours: int | None = Field(default=None, ge=1, le=720)
+    warn_hours: int | None = Field(default=None, ge=1, le=720)
 
 
 # ── Indicators ────────────────────────────────────────────────────────────────
@@ -231,7 +240,12 @@ class StalenessItem(BaseModel):
     module_name: str
     last_analyzed_at: datetime | None
     days_old: int | None  # None if no session exists yet
-    is_stale: bool  # True if days_old > 7 (or no session at all)
+    is_stale: bool  # True if older than the module window (default 7d) or no session at all
+    hours_old: float | None = None
+    stale_after_hours: int = 168
+    warn_after_hours: int | None = None
+    # none | fresh | aging | stale
+    freshness: str = "none"
 
 
 # ── Trade Conclusion (v2) ─────────────────────────────────────────────────────
@@ -249,3 +263,21 @@ class TradeConclusion(BaseModel):
     trade_types: list[str]  # e.g. ["swing", "position"]
     size_advice: str  # "normal (100%)" | "reduced (50%)"
     color: str  # "green" | "amber" | "red" | "neutral"
+
+
+# ── Session ↔ trade timeframe link ────────────────────────────────────────────
+
+
+class TimeframeLinkOut(BaseModel):
+    """Which MA session a trade on a given timeframe should use (None = neutral)."""
+
+    timeframe: str
+    session_id: int | None = None  # None when no usable (fresh / aging) session
+    module_id: int | None = None
+    module_name: str | None = None
+    freshness: str = "none"  # none | fresh | aging | stale
+    hours_old: float | None = None
+    stale_after_hours: int | None = None
+    warn_after_hours: int | None = None
+    verdict: TradeConclusion | None = None
+    reason: str | None = None

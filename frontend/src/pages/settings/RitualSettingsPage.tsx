@@ -17,28 +17,35 @@ const SESSION_TYPES = [
     type: 'weekly_setup',
     emoji: '📅',
     label: 'Weekly Setup',
-    desc: 'Monday — Market Analysis + Full Watchlist (1W/1D/4H/1H/15m) → Pin key pairs',
+    desc: 'Monday — HTF context (1D/4H) + Watchlist (1D + 4H) → Pin key pairs',
     est: '~45 min',
   },
   {
     type: 'trade_session',
     emoji: '🎯',
     label: 'Trade Session',
-    desc: 'Trading window — VI check + Pinned pairs + WL (1D→15m) → Log outcome',
-    est: '~30 min',
+    desc: 'Trading window — Pulse 1H + Pinned pairs + WL (4H + 1H) → Log outcome',
+    est: '~25 min',
   },
   {
     type: 'weekend_review',
     emoji: '📊',
     label: 'Weekend Review',
-    desc: 'Sat/Sun — Analytics + Trade Journal + Goals + Learning note',
+    desc: 'Sat/Sun — Analytics + Trade Journal + Goals + Learning note (review only, no trading)',
     est: '~35 min',
+  },
+  {
+    type: 'weekend_trading',
+    emoji: '⚡',
+    label: 'Weekend Trading',
+    desc: 'Sat/Sun (optional) — Pulse 1H + Pinned pairs + WL (4H + 1H) → Log outcome',
+    est: '~20 min',
   },
   {
     type: 'swing_setup',
     emoji: '🌊',
     label: 'Swing Setup',
-    desc: 'Anytime — VI check + HTF Watchlist (1W/1D/4H) + Pin swing candidates',
+    desc: 'Anytime — HTF context (1D/4H) + Swing WL (1D + 4H) + Pin swing candidates',
     est: '~30 min',
   },
 ] as const
@@ -147,7 +154,7 @@ export function RitualSettingsPage() {
   const DEFAULT_WEIGHTS: Record<string, number> = { '1W': 4.0, '1D': 3.0, '4H': 2.0, '1H': 1.0, '15m': 0.5 }
   const [weights, setWeights]                 = useState<Record<string, number>>(DEFAULT_WEIGHTS)
   const [trendBonus, setTrendBonus]           = useState(1.2)
-  const [emaBonusThreshold, setEmaBonusThreshold] = useState(70)
+  const [emaBonusThreshold, setEmaBonusThreshold] = useState(0.7)
   const [emaBonusFactor, setEmaBonusFactor]   = useState(1.1)
   const [savingWeights, setSavingWeights]     = useState(false)
   const [weightsSaved, setWeightsSaved]       = useState(false)
@@ -183,7 +190,8 @@ export function RitualSettingsPage() {
       const sf = (settingsData.config?.smart_filter as Record<string, unknown>) ?? {}
       setWeights((sf.weights as Record<string, number>) ?? DEFAULT_WEIGHTS)
       setTrendBonus((sf.trend_bonus as number) ?? 1.2)
-      setEmaBonusThreshold((sf.ema_bonus_threshold as number) ?? 70)
+      const rawThreshold = (sf.ema_bonus_threshold as number) ?? 0.7
+      setEmaBonusThreshold(rawThreshold > 1 ? rawThreshold / 100 : rawThreshold)
       setEmaBonusFactor((sf.ema_bonus_factor as number) ?? 1.1)
       setMarketPairs((settingsData.config?.market_analysis_pairs as string[]) ?? [])
       const rawWindows = (settingsData.config?.trading_windows as TradingWindow[]) ?? []
@@ -1019,16 +1027,16 @@ export function RitualSettingsPage() {
                     <div className="flex items-center gap-3">
                       <span className="text-xs text-slate-400 w-40 shrink-0">
                         EMA bonus threshold
-                        <span className="ml-1 text-[10px] text-slate-600">(ema_score ≥ N)</span>
+                        <span className="ml-1 text-[10px] text-slate-600">(ema_score ≥ N, 0–1)</span>
                       </span>
                       <input
-                        type="range" min={40} max={95} step={5}
+                        type="range" min={0.4} max={0.95} step={0.05}
                         value={emaBonusThreshold}
                         onChange={e => setEmaBonusThreshold(Number(e.target.value))}
                         className="flex-1 accent-brand-500 max-w-[200px]"
                       />
                       <span className="text-sm font-mono text-slate-300 w-10 text-right shrink-0">
-                        {emaBonusThreshold}
+                        {emaBonusThreshold.toFixed(2)}
                       </span>
                     </div>
 

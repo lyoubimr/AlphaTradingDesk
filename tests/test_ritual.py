@@ -444,3 +444,105 @@ class TestDisciplineScore:
     def test_score_unknown_profile(self, client: TestClient):
         resp = client.get(f"{BASE}/99999/ritual/score")
         assert resp.status_code == 404
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Dynamic step labels, active-time heartbeat, session-less watchlist
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _wl_step(client: TestClient, profile_id: int) -> dict:
+    steps = client.get(f"{_ritual(profile_id)}/steps/trade_session").json()
+    return next(s for s in steps if s["step_type"] == "smart_wl")
+
+
+class TestStepLabels:
+    def test_label_follows_timeframes_config(self, client: TestClient, db_session: Session):
+        profile = _make_profile(db_session)
+        step = _wl_step(client, profile.id)
+        assert step["label"].endswith("(4H + 1H)")
+
+        resp = client.patch(
+            f"{_ritual(profile.id)}/steps/{step['id']}",
+            json={"config": {"timeframes": ["1H", "1D"]}},
+        )
+        assert resp.status_code == 200
+        assert _wl_step(client, profile.id)["label"].endswith("(1D + 1H)")
+
+    def test_custom_label_survives_reload(self, client: TestClient, db_session: Session):
+        profile = _make_profile(db_session)
+        step = _wl_step(client, profile.id)
+        client.patch(
+            f"{_ritual(profile.id)}/steps/{step['id']}",
+            json={"label": "My watchlist"},
+        )
+        assert _wl_step(client, profile.id)["label"] == "My watchlist"
+
+
+class TestSessionHeartbeat:
+    def _start(self, client: TestClient, profile_id: int) -> dict:
+        return client.post(
+            f"{_ritual(profile_id)}/sessions", json={"session_type": "trade_session"}
+        ).json()
+
+    def test_heartbeat_accumulates_active_time(self, client: TestClient, db_session: Session):
+        profile = _make_profile(db_session)
+        session = self._start(client, profile.id)
+        url = f"{_ritual(profile.id)}/sessions/{session['id']}/heartbeat"
+        assert client.post(url, json={"seconds": 15}).json() == {"active_seconds": 15}
+        assert client.post(url, json={"seconds": 45}).json() == {"active_seconds": 60}
+        active = client.get(f"{_ritual(profile.id)}/sessions/active").json()
+        assert active["active_seconds"] == 60
+        assert active["duration_minutes"] == 1.0
+
+    def test_heartbeat_rejects_oversized_chunk(self, client: TestClient, db_session: Session):
+        profile = _make_profile(db_session)
+        session = self._start(client, profile.id)
+        resp = client.post(
+            f"{_ritual(profile.id)}/sessions/{session['id']}/heartbeat", json={"seconds": 500}
+        )
+        assert resp.status_code == 422
+
+    def test_heartbeat_on_closed_session_is_400(self, client: TestClient, db_session: Session):
+        profile = _make_profile(db_session)
+        session = self._start(client, profile.id)
+        client.post(f"{_ritual(profile.id)}/sessions/{session['id']}/abandon")
+        resp = client.post(
+            f"{_ritual(profile.id)}/sessions/{session['id']}/heartbeat", json={"seconds": 10}
+        )
+        assert resp.status_code == 400
+
+    def test_stale_session_is_abandoned_on_read(self, client: TestClient, db_session: Session):
+        from datetime import UTC, datetime, timedelta
+
+        from src.ritual.models import RitualSession
+
+        profile = _make_profile(db_session)
+        session = self._start(client, profile.id)
+        row = db_session.get(RitualSession, session["id"])
+        row.started_at = datetime.now(tz=UTC) - timedelta(hours=13)
+        db_session.flush()
+
+        assert client.get(f"{_ritual(profile.id)}/sessions/active").json() is None
+
+
+class TestWatchlistWithoutSession:
+    def test_invalid_timeframes_rejected(self, client: TestClient, db_session: Session):
+        profile = _make_profile(db_session)
+        resp = client.post(
+            f"{_ritual(profile.id)}/smart-watchlist/generate?timeframes=4H,2D"
+        )
+        assert resp.status_code == 422
+
+    def test_timeframes_override_drives_sections(self, client: TestClient, db_session: Session):
+        profile = _make_profile(db_session)
+        resp = client.post(
+            f"{_ritual(profile.id)}/smart-watchlist/generate?timeframes=1h,4h"
+        )
+        assert resp.status_code == 200
+        assert list(resp.json()["timeframes"].keys()) == ["4H", "1H"]
+
+    def test_default_config_has_quick_watchlist(self, client: TestClient, db_session: Session):
+        profile = _make_profile(db_session)
+        cfg = client.get(f"{_ritual(profile.id)}/settings").json()["config"]
+        assert cfg["watchlist_quick"]["timeframes"] == ["4H", "1H"]

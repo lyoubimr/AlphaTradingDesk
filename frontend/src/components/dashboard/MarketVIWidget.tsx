@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { AlertTriangle, BarChart3, ChevronRight, ExternalLink, Loader2, RefreshCw } from 'lucide-react'
 import { maApi, volatilityApi } from '../../lib/api'
+import { maAgeLabel } from '../../utils/maAge'
 import { RegimeBadge } from '../volatility/RegimeBadge'
 import type {
   AggregatedMarketVIOut,
@@ -289,9 +290,7 @@ export function MarketVIWidget({ profileId }: { profileId: number }) {
               const sess = lastByMod[s.module_id]
               const age  = s.last_analyzed_at === null
                 ? 'Never'
-                : s.days_old === 0 ? 'Today'
-                : s.days_old === 1 ? '1d ago'
-                : `${s.days_old}d ago`
+                : maAgeLabel(s)
               const isDual = mod?.is_dual ?? false
               return (
                 <div

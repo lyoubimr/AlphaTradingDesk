@@ -20,6 +20,7 @@ import { StatCard }    from '../../components/ui/StatCard'
 import { useProfile }  from '../../context/ProfileContext'
 import { maApi }       from '../../lib/api'
 import type { MAModule, MASessionListItem, MAStalenessItem, MABias, MATradeConclusion } from '../../types/api'
+import { maAgeLabel } from '../../utils/maAge'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -32,6 +33,7 @@ function fmt(iso: string): string {
 }
 function fmtShort(iso: string): string {
   return new Date(iso).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' })
+    + ' ' + new Date(iso).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })
 }
 function daysAgo(days: number | null): string {
   if (days === null) return '—'
@@ -42,6 +44,7 @@ function daysAgo(days: number | null): string {
 
 const MODULE_EMOJIS: Record<string, string> = {
   Crypto: '₿', Gold: '🥇', 'Gold (XAU)': '🥇', Forex: '💱', Indices: '📊',
+  'Crypto Pulse (1H)': '⚡', 'Crypto HTF (1D/4H)': '🌊',
 }
 const moduleEmoji = (name: string) => MODULE_EMOJIS[name] ?? '🧭'
 
@@ -125,13 +128,13 @@ function FreshnessPill({ item }: { item: MAStalenessItem | undefined }) {
   if (item.is_stale) {
     return (
       <span className="inline-flex items-center gap-1 text-[9px] font-medium text-amber-400 bg-amber-500/10 border border-amber-500/20 rounded-full px-2 py-0.5">
-        <AlertTriangle size={8} /> Stale · {daysAgo(item.days_old)}
+        <AlertTriangle size={8} /> Stale · {maAgeLabel(item)}
       </span>
     )
   }
   return (
     <span className="inline-flex items-center gap-1 text-[9px] font-medium text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 rounded-full px-2 py-0.5">
-      <CheckCircle2 size={8} /> Fresh · {daysAgo(item.days_old)}
+      <CheckCircle2 size={8} /> Fresh · {maAgeLabel(item)}
     </span>
   )
 }

@@ -23,6 +23,11 @@ from sqlalchemy.orm import Session
 from src.core.models.broker import Profile
 from src.core.models.market_analysis import MarketAnalysisIndicator, MarketAnalysisSession
 from src.core.models.trade import Strategy, Trade
+from src.market_analysis.service import (
+    pulse_direction_match,
+    pulse_scores_for_session,
+    pulse_verdict_code,
+)
 from src.risk_management.defaults import DEFAULT_RISK_CONFIG
 from src.risk_management.engine import _deep_merge, compute_risk_multiplier
 from src.risk_management.models import RiskSettings
@@ -293,6 +298,14 @@ def _resolve_ma_direction_match(
     if session is None:
         return None
 
+    pair_upper = (pair or "").upper()
+    is_btc = any(x in pair_upper for x in ("XBT", "BTC"))
+
+    # Crypto Pulse: the BTC x BTC.D verdict decides, per pair type and direction
+    pulse_code = pulse_verdict_code(pulse_scores_for_session(session))
+    if pulse_code is not None:
+        return pulse_direction_match(pulse_code, is_btc_pair=is_btc, direction=direction)
+
     tier: str | None = None
     if timeframe:
         indicator = (
@@ -307,9 +320,6 @@ def _resolve_ma_direction_match(
         tier = indicator  # "ltf" | "mtf" | "htf" | None
 
     # BTC/XBT pairs → use Asset A bias; everything else → Asset B (Alts) with _a fallback
-    pair_upper = (pair or "").upper()
-    is_btc = any(x in pair_upper for x in ("XBT", "BTC"))
-
     if is_btc:
         if tier == "ltf":
             bias = session.bias_ltf_a or session.bias_composite_a or session.bias_htf_a

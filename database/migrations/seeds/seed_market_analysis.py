@@ -63,6 +63,13 @@ import logging
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
+from database.migrations.seeds.seed_ma_intraday import (
+    HTF_INDICATORS,
+    HTF_MODULE_NAME,
+    NEW_MODULES,
+    PULSE_INDICATORS,
+    PULSE_MODULE_NAME,
+)
 from src.core.models.market_analysis import MarketAnalysisIndicator, MarketAnalysisModule
 
 logger = logging.getLogger(__name__)
@@ -73,14 +80,17 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 MODULES: list[dict] = [
+    *NEW_MODULES,
     {
         "name": "Crypto",
-        "description": "",
+        "description": "Deep analysis — 25 questions across 1D / 4H / 1H / 15m",
         "is_dual": True,
         "asset_a": "BTC",
         "asset_b": "Alts",
         "is_active": True,
-        "sort_order": 1,
+        "sort_order": 10,
+        "stale_hours": None,
+        "warn_hours": None,
     },
     {
         "name": "Gold",
@@ -89,7 +99,9 @@ MODULES: list[dict] = [
         "asset_a": "XAUUSD",
         "asset_b": None,
         "is_active": True,
-        "sort_order": 2,
+        "sort_order": 20,
+        "stale_hours": None,
+        "warn_hours": None,
     },
 ]
 
@@ -1512,6 +1524,7 @@ def seed_market_analysis(session: Session) -> None:
     - Rows in the DB that no longer exist in the seed are left untouched.
     """
     # ── Step 1 — modules (upsert description / flags) ──────────────────
+    # stale_hours / warn_hours are user-tunable — only written when the module is created
     set_module = {
         col: getattr(insert(MarketAnalysisModule).excluded, col)
         for col in ["description", "is_dual", "asset_a", "asset_b", "is_active", "sort_order"]
@@ -1536,8 +1549,10 @@ def seed_market_analysis(session: Session) -> None:
     # ── Step 3 — indicators (insert all fields; update structural fields only) ──
     crypto_rows = [{**ind, "module_id": crypto_id} for ind in CRYPTO_INDICATORS]
     gold_rows   = [{**ind, "module_id": gold_id}   for ind in GOLD_INDICATORS]
+    pulse_rows  = [{**ind, "module_id": module_ids[PULSE_MODULE_NAME]} for ind in PULSE_INDICATORS]
+    htf_rows    = [{**ind, "module_id": module_ids[HTF_MODULE_NAME]} for ind in HTF_INDICATORS]
 
-    for batch in (crypto_rows, gold_rows):
+    for batch in (crypto_rows, gold_rows, pulse_rows, htf_rows):
         ins = insert(MarketAnalysisIndicator).values(batch)
         set_ind = {col: getattr(ins.excluded, col) for col in _UPSERT_SYNC_FIELDS}
         stmt = ins.on_conflict_do_update(
@@ -1548,7 +1563,9 @@ def seed_market_analysis(session: Session) -> None:
 
     session.flush()
     logger.info(
-        "Market analysis seeded (upsert) — Crypto: %d indicators, Gold: %d indicators",
+        "Market analysis seeded (upsert) — Crypto: %d, Gold: %d, Pulse: %d, HTF: %d indicators",
         len(crypto_rows),
         len(gold_rows),
+        len(pulse_rows),
+        len(htf_rows),
     )

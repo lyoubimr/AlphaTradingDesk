@@ -46,6 +46,9 @@ class MarketAnalysisModule(Base):
     asset_b: Mapped[str | None] = mapped_column(String(50))
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
+    # Freshness windows in hours; NULL stale = 7 days, NULL warn = no "aging" phase
+    stale_hours: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    warn_hours: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     # Relationships
     indicators: Mapped[list[MarketAnalysisIndicator]] = relationship(back_populates="module")
