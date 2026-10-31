@@ -47,8 +47,10 @@ from src.market_analysis.schemas import (
     IndicatorConfigItem,
     IndicatorCreate,
     IndicatorUpdate,
+    ModuleUpdate,
     SessionCreate,
     StalenessItem,
+    TimeframeLinkOut,
     TradeConclusion,
 )
 
@@ -415,6 +417,93 @@ def get_trade_conclusion(
 # ── Public service functions ──────────────────────────────────────────────────
 
 
+_PULSE_VERDICTS: dict[str, TradeConclusion] = {
+    "alts_long_friendly": TradeConclusion(
+        emoji="🟢",
+        label="Alts Long-Friendly",
+        detail="BTC structure holding and BTC.D rejected — rotation into alts. Long S/R setups on alts.",
+        trade_types=["long_alts"],
+        size_advice="normal (100%)",
+        color="green",
+    ),
+    "btc_only": TradeConclusion(
+        emoji="🟡",
+        label="BTC Only — Alts Risky",
+        detail="BTC strong but BTC.D accepted above resistance — alts bleed. Prefer BTC or A+ alt setups.",
+        trade_types=["long_btc"],
+        size_advice="reduced (50–75%)",
+        color="amber",
+    ),
+    "risk_off": TradeConclusion(
+        emoji="🔴",
+        label="Risk-Off — Shorts or Stand Aside",
+        detail="BTC weak and BTC.D rising — alts bleed hardest. No longs; short only on confirmed breakdowns.",
+        trade_types=["short"],
+        size_advice="shorts only (50–100%) or cash",
+        color="red",
+    ),
+    "alts_fragile": TradeConclusion(
+        emoji="🟡",
+        label="Alts Fragile — Low Conviction",
+        detail="BTC weak but BTC.D rejected — alts may hold, but conviction is low. A+ setups only.",
+        trade_types=["day_trading"],
+        size_advice="reduced (50%)",
+        color="amber",
+    ),
+}
+
+# verdict → {(is_btc_pair, direction): aligned | neutral | opposed}
+_PULSE_DIRECTION: dict[str, dict[tuple[bool, str], str]] = {
+    "alts_long_friendly": {
+        (False, "long"): "aligned", (False, "short"): "opposed",
+        (True, "long"): "aligned", (True, "short"): "opposed",
+    },
+    "btc_only": {
+        (False, "long"): "neutral", (False, "short"): "neutral",
+        (True, "long"): "aligned", (True, "short"): "opposed",
+    },
+    "risk_off": {
+        (False, "long"): "opposed", (False, "short"): "aligned",
+        (True, "long"): "opposed", (True, "short"): "aligned",
+    },
+    "alts_fragile": {
+        (False, "long"): "neutral", (False, "short"): "neutral",
+        (True, "long"): "opposed", (True, "short"): "aligned",
+    },
+}
+
+
+def pulse_verdict_code(scores: dict[str, int]) -> str | None:
+    """BTC structure × BTC.D reaction → verdict code (None if either answer is neutral/absent)."""
+    btc = scores.get("pulse_btc_structure")
+    btcd = scores.get("pulse_btcd_levels")
+    return {
+        (2, 2): "alts_long_friendly",
+        (2, 0): "btc_only",
+        (0, 0): "risk_off",
+        (0, 2): "alts_fragile",
+    }.get((btc, btcd))  # type: ignore[arg-type]
+
+
+def pulse_direction_match(code: str, *, is_btc_pair: bool, direction: str) -> str | None:
+    """aligned | neutral | opposed for a trade, given a Pulse verdict code."""
+    return _PULSE_DIRECTION.get(code, {}).get((is_btc_pair, direction))
+
+
+def pulse_scores_for_session(session: MarketAnalysisSession) -> dict[str, int]:
+    return {a.indicator.key: a.score for a in session.answers}
+
+
+def get_pulse_conclusion(scores: dict[str, int]) -> TradeConclusion | None:
+    """Verdict for the Crypto Pulse module (answer scores keyed by indicator key).
+
+    Returns None when BTC or BTC.D is neutral → caller falls back to the generic
+    composite conclusion.
+    """
+    code = pulse_verdict_code(scores)
+    return _PULSE_VERDICTS[code] if code else None
+
+
 def list_modules(db: Session) -> list[MarketAnalysisModule]:
     return (
         db.query(MarketAnalysisModule)
@@ -644,6 +733,10 @@ def get_session_conclusion(db: Session, session_id: int) -> TradeConclusion:
     participation = session.score_participation_a
     bias = session.bias_composite_a or "neutral"
 
+    pulse = get_pulse_conclusion(pulse_scores_for_session(session))
+    if pulse is not None:
+        return pulse
+
     return get_trade_conclusion(
         trend=trend or Decimal("50"),
         momentum=momentum or Decimal("50"),
@@ -657,6 +750,7 @@ def _staleness_item(
     last_session: MarketAnalysisSession | None,
     now: datetime,
 ) -> StalenessItem:
+    window_h = mod.stale_hours or STALE_DAYS * 24
     if last_session is None:
         return StalenessItem(
             module_id=mod.id,
@@ -664,17 +758,31 @@ def _staleness_item(
             last_analyzed_at=None,
             days_old=None,
             is_stale=True,
+            stale_after_hours=window_h,
+            warn_after_hours=mod.warn_hours,
+            freshness="none",
         )
     last_dt = last_session.analyzed_at
     if last_dt.tzinfo is None:
         last_dt = last_dt.replace(tzinfo=UTC)
-    days_old = (now - last_dt).days
+    age = now - last_dt
+    hours_old = round(age.total_seconds() / 3600, 1)
+    if hours_old > window_h:
+        freshness = "stale"
+    elif mod.warn_hours is not None and hours_old > mod.warn_hours:
+        freshness = "aging"
+    else:
+        freshness = "fresh"
     return StalenessItem(
         module_id=mod.id,
         module_name=mod.name,
         last_analyzed_at=last_session.analyzed_at,
-        days_old=days_old,
-        is_stale=days_old > STALE_DAYS,
+        days_old=age.days,
+        is_stale=freshness == "stale",
+        hours_old=hours_old,
+        stale_after_hours=window_h,
+        warn_after_hours=mod.warn_hours,
+        freshness=freshness,
     )
 
 
@@ -721,3 +829,105 @@ def get_staleness_global(db: Session) -> list[StalenessItem]:
         )
         result.append(_staleness_item(mod, last_session, now))
     return result
+
+
+# ── Module freshness windows ──────────────────────────────────────────────────
+
+
+def patch_module(db: Session, module_id: int, data: ModuleUpdate) -> MarketAnalysisModule:
+    module = _get_module_or_404(db, module_id)
+    changes = data.model_dump(exclude_unset=True)
+    stale = changes.get("stale_hours", module.stale_hours)
+    warn = changes.get("warn_hours", module.warn_hours)
+    if warn is not None and warn > (stale or STALE_DAYS * 24):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="warn_hours must be ≤ stale_hours.",
+        )
+    for field, value in changes.items():
+        setattr(module, field, value)
+    db.commit()
+    db.refresh(module)
+    return module
+
+
+# ── Trade timeframe ↔ MA session link ─────────────────────────────────────────
+
+_LTF_TIMEFRAMES = {"1m", "5m", "15m", "30m", "1h"}
+_HTF_TIMEFRAMES = {"4h", "1d", "1w"}
+_PULSE_PREFIX = "Crypto Pulse"
+_HTF_PREFIX = "Crypto HTF"
+
+
+def resolve_session_for_timeframe(
+    db: Session, profile_id: int, timeframe: str | None
+) -> TimeframeLinkOut:
+    """Pick the MA session a trade on `timeframe` should use.
+
+    Crypto profiles: LTF (15m/1H) → Pulse module, HTF (4H/1D/1W) → HTF module.
+    Other profiles keep "latest session of the profile". A session older than the
+    module's stale window is never linked (the DRS criterion stays neutral).
+    """
+    profile = _get_profile_or_404(db, profile_id)
+    tf = (timeframe or "").strip().lower()
+    out = TimeframeLinkOut(timeframe=timeframe or "")
+    now = datetime.now(UTC)
+
+    module: MarketAnalysisModule | None
+    if profile.market_type == "Crypto":
+        if tf in _LTF_TIMEFRAMES:
+            prefix = _PULSE_PREFIX
+        elif tf in _HTF_TIMEFRAMES:
+            prefix = _HTF_PREFIX
+        else:
+            out.reason = "No timeframe selected" if not tf else f"No MA module for {timeframe}"
+            return out
+        module = (
+            db.query(MarketAnalysisModule)
+            .filter(
+                MarketAnalysisModule.is_active.is_(True),
+                MarketAnalysisModule.name.startswith(prefix),
+            )
+            .order_by(MarketAnalysisModule.sort_order)
+            .first()
+        )
+        if module is None:
+            out.reason = f"Module '{prefix}' not available"
+            return out
+        last = (
+            db.query(MarketAnalysisSession)
+            .filter(
+                MarketAnalysisSession.profile_id == profile_id,
+                MarketAnalysisSession.module_id == module.id,
+            )
+            .order_by(MarketAnalysisSession.analyzed_at.desc())
+            .first()
+        )
+    else:
+        last = (
+            db.query(MarketAnalysisSession)
+            .filter(MarketAnalysisSession.profile_id == profile_id)
+            .order_by(MarketAnalysisSession.analyzed_at.desc())
+            .first()
+        )
+        module = last.module if last else None
+        if module is None:
+            out.reason = "No analysis yet"
+            return out
+
+    item = _staleness_item(module, last, now)
+    out.module_id = module.id
+    out.module_name = module.name
+    out.freshness = item.freshness
+    out.hours_old = item.hours_old
+    out.stale_after_hours = item.stale_after_hours
+    out.warn_after_hours = item.warn_after_hours
+    if last is None:
+        out.reason = f"{module.name} not run yet"
+        return out
+    if item.freshness == "stale":
+        out.reason = f"{module.name} is stale"
+        return out
+    out.session_id = last.id
+    out.verdict = get_session_conclusion(db, last.id)
+    return out

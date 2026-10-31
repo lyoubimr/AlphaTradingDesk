@@ -34,7 +34,8 @@ import { instrumentsApi, tradesApi, strategiesApi, statsApi, goalsApi, maApi, au
 import { useRiskCalc } from '../../hooks/useRiskCalc'
 import type { RiskCalcResult } from '../../hooks/useRiskCalc'
 import { cn } from '../../lib/cn'
-import type { Instrument, InstrumentCreate, Profile, Strategy, WinRateStats, GoalProgressItem } from '../../types/api'
+import type { Instrument, InstrumentCreate, Profile, Strategy, WinRateStats, GoalProgressItem, MATimeframeLink } from '../../types/api'
+import { maAgeLabel } from '../../utils/maAge'
 import { formatSessionRange, tzLabel } from '../../utils/sessionUtils'
 import { RiskAdvisorPanel } from '../../components/risk/RiskAdvisorPanel'
 
@@ -95,6 +96,43 @@ function Tip({ text }: { text: string }) {
         </span>
       )}
     </span>
+  )
+}
+
+/** Which Market Analysis session feeds the risk advisor for the selected timeframe. */
+function MaLinkBadge({ link }: { link: MATimeframeLink | null }) {
+  if (!link) return null
+  const linked = link.session_id !== null
+  const tone = !linked
+    ? 'border-surface-600 bg-surface-800/60 text-slate-500'
+    : link.freshness === 'aging'
+      ? 'border-amber-600/40 bg-amber-900/10 text-amber-300'
+      : 'border-green-700/40 bg-green-900/10 text-green-300'
+  return (
+    <div className={cn('flex items-center gap-2 flex-wrap rounded-lg border px-3 py-1.5 text-[11px]', tone)}>
+      <span className="font-semibold">📊 MA</span>
+      {linked ? (
+        <>
+          <span>{link.module_name} · {maAgeLabel({ hours_old: link.hours_old, days_old: null })}</span>
+          {link.verdict && <span className="font-medium">{link.verdict.emoji} {link.verdict.label}</span>}
+          {link.freshness === 'aging' && <span className="opacity-80">(aging — consider re-running)</span>}
+        </>
+      ) : (
+        <>
+          <span>{link.reason ?? 'No analysis'} — MA criterion neutral</span>
+          {link.module_id && (
+            <a
+              href={`/market-analysis/new?module=${link.module_id}`}
+              target="_blank"
+              rel="noreferrer"
+              className="text-brand-400 hover:text-brand-300 underline underline-offset-2"
+            >
+              Run now
+            </a>
+          )}
+        </>
+      )}
+    </div>
   )
 }
 
@@ -1067,13 +1105,18 @@ export function NewTradePage() {
 
   // Latest Market Analysis session — auto-fetched for ma_direction in Risk Advisor
   // Filtered by activeProfile.id so a Gold analysis doesn't bleed into a Crypto trade form.
-  const [latestMaSessionId, setLatestMaSessionId] = useState<number | null>(null)
+  // MA session for the selected timeframe (LTF → Pulse, HTF → HTF module); null = neutral
+  const [maLink, setMaLink] = useState<MATimeframeLink | null>(null)
+  const latestMaSessionId = maLink?.session_id ?? null
 
   useEffect(() => {
-    maApi.listSessions(undefined, 1, activeProfile?.id)
-      .then((sessions) => setLatestMaSessionId(sessions[0]?.id ?? null))
-      .catch(() => setLatestMaSessionId(null))
-  }, [activeProfile?.id])
+    if (!activeProfile?.id) return
+    let cancelled = false
+    maApi.forTimeframe(activeProfile.id, timeframe)
+      .then((link) => { if (!cancelled) setMaLink(link) })
+      .catch(() => { if (!cancelled) setMaLink(null) })
+    return () => { cancelled = true }
+  }, [activeProfile?.id, timeframe])
 
   const handleAdvisorAccept = useCallback((suggestedRiskPct: number, snapshot: Record<string, unknown>) => {
     // Pre-fill the risk % field with the advisor's suggestion
@@ -2020,6 +2063,7 @@ export function NewTradePage() {
         </Section>
 
         {/* ══════════════ 3b. RISK ADVISOR ═══════════════════════════════ */}
+        <MaLinkBadge link={maLink} />
         <RiskAdvisorPanel
           profileId={activeProfile.id}
           pair={instrument?.symbol ?? null}

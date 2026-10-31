@@ -51,6 +51,7 @@ const TF_ORDER = ['htf', 'mtf', 'ltf']
 
 const MODULE_EMOJIS: Record<string, string> = {
   Crypto: '₿', Gold: '🥇', 'Gold (XAU)': '🥇', Forex: '💱', Indices: '📊',
+  'Crypto Pulse (1H)': '⚡', 'Crypto HTF (1D/4H)': '🌊',
 }
 const moduleEmoji = (name: string) => MODULE_EMOJIS[name] ?? '🧭'
 
