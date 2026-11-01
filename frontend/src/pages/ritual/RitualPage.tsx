@@ -15,13 +15,14 @@ import {
 } from 'lucide-react'
 import { PageHeader } from '../../components/ui/PageHeader'
 import { useProfile } from '../../context/ProfileContext'
-import { ritualApi } from '../../lib/api'
+import { maApi, ritualApi } from '../../lib/api'
 import { cn } from '../../lib/cn'
 import { maAgeLabel } from '../../utils/maAge'
 import type {
   RitualSession, RitualStep, PinnedPair,
   SmartWLResult, WeeklyScore, StepLog,
   SessionType, SessionOutcome, PinnedTF,
+  MASessionListItem, MAEvaluation,
 } from '../../types/api'
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -449,6 +450,85 @@ function MarketAnalysisPanel({
 }
 
 // ── Step item ──────────────────────────────────────────────────────────────────
+// Analyses older than 24h without a verdict — one click each, from the weekend review
+function MaReviewPanel({ profileId }: { profileId: number }) {
+  const [rows, setRows] = useState<MASessionListItem[] | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    const cutoff = Date.now() - 24 * 3_600_000
+    maApi.listSessions(undefined, 50, profileId)
+      .then((list) => {
+        if (!cancelled) {
+          setRows(list.filter((s) => !s.evaluation && new Date(s.analyzed_at).getTime() < cutoff).slice(0, 8))
+        }
+      })
+      .catch(() => { if (!cancelled) setRows([]) })
+    return () => { cancelled = true }
+  }, [profileId])
+
+  const verdict = async (s: MASessionListItem, v: MAEvaluation) => {
+    setError(null)
+    try {
+      await maApi.updateSession(s.id, { evaluation: v })
+      setRows((prev) => (prev ?? []).filter((r) => r.id !== s.id))
+    } catch (e: unknown) {
+      setError((e as Error).message)
+    }
+  }
+
+  const buttons: { v: MAEvaluation; label: string; cls: string }[] = [
+    { v: 'correct', label: '✅ True',    cls: 'hover:border-green-600/50 hover:text-green-300' },
+    { v: 'wrong',   label: '❌ False',   cls: 'hover:border-red-600/50 hover:text-red-300' },
+    { v: 'neutral', label: '⚪ Neutral', cls: 'hover:border-slate-400/50 hover:text-slate-200' },
+  ]
+
+  return (
+    <div className="mt-2 rounded-lg border border-surface-700 bg-surface-900/60 p-3 space-y-2">
+      {rows === null ? (
+        <div className="flex items-center gap-2">
+          <Loader2 size={12} className="animate-spin text-slate-500" />
+          <span className="text-xs text-slate-500">Loading analyses…</span>
+        </div>
+      ) : rows.length === 0 ? (
+        <p className="text-xs text-green-400">✓ All analyses older than 24h are reviewed.</p>
+      ) : (
+        <>
+          <p className="text-[11px] text-slate-500">Was my read right? One click each — add captures from the analysis page.</p>
+          {rows.map((s) => (
+            <div key={s.id} className="flex items-center gap-2 flex-wrap rounded-lg border border-surface-700 px-2.5 py-1.5">
+              <span className="text-[11px] text-slate-400 font-mono">
+                {new Date(s.analyzed_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}{' '}
+                {new Date(s.analyzed_at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}
+              </span>
+              <span className="text-xs text-slate-300 truncate">{s.verdict_emoji} {s.verdict_label ?? 'Analysis'}</span>
+              <a
+                href={`/market-analysis/new?session=${s.id}`} target="_blank" rel="noreferrer"
+                className="text-[10px] text-brand-400 hover:text-brand-300 flex items-center gap-0.5"
+              >
+                <ExternalLink size={9} /> open
+              </a>
+              <div className="ml-auto flex gap-1">
+                {buttons.map((b) => (
+                  <button
+                    key={b.v} type="button" onClick={() => void verdict(s, b.v)}
+                    className={`px-2 py-0.5 rounded border border-surface-600 text-[11px] text-slate-400 transition-colors ${b.cls}`}
+                  >
+                    {b.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ))}
+        </>
+      )}
+      {error && <p className="text-[11px] text-red-400">⚠️ {error}</p>}
+    </div>
+  )
+}
+
+// Step item props
 interface StepItemProps {
   log: StepLog
   step?: RitualStep
@@ -554,6 +634,11 @@ function StepItem({
               sessionType={sessionType}
               onComplete={onComplete}
             />
+          )}
+
+          {/* Review recent analyses (weekend review) */}
+          {log.step_type === 'ma_review' && isCurrent && !isDoneOrSkipped && (
+            <MaReviewPanel profileId={profileId} />
           )}
 
           {/* Smart WL panel — for both contracts (smart_wl) and spot (watchlist_htf_spot) */}

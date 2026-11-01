@@ -112,6 +112,7 @@ STEP_EMOJIS: dict[str, str] = {
     "pin_pairs": "📌",
     "outcome": "🏁",
     "market_analysis": "📊",
+    "ma_review": "🧭",
     "goals_review": "🎯",
     "analytics": "📉",
     "journal": "📓",
@@ -434,6 +435,12 @@ DEFAULT_STEPS: dict[str, list[dict]] = {
             "label": "Generate Watchlist for next week (1D + 4H)", "est_minutes": 1,
             "is_mandatory": False, "linked_module": None,
             "cadence_hours": None, "config": {"timeframes": ["1D", "4H"]},
+        },
+        {
+            "position": 6, "step_type": "ma_review",
+            "label": "Review recent analyses (verdict + captures)", "est_minutes": 3,
+            "is_mandatory": False, "linked_module": "market_analysis",
+            "cadence_hours": None, "config": {},
         },
     ],
     "weekend_trading": [
