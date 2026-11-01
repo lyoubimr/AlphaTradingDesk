@@ -27,13 +27,13 @@ import { maAgeLabel } from '../../utils/maAge'
 // ─────────────────────────────────────────────────────────────────────────────
 
 function fmt(iso: string): string {
-  return new Date(iso).toLocaleDateString('fr-FR', {
+  return new Date(iso).toLocaleDateString('en-GB', {
     day: '2-digit', month: 'short', year: 'numeric',
   })
 }
 function fmtShort(iso: string): string {
-  return new Date(iso).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' })
-    + ' ' + new Date(iso).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })
+  return new Date(iso).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })
+    + ' ' + new Date(iso).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })
 }
 function daysAgo(days: number | null): string {
   if (days === null) return '—'
