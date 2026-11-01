@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import base64
 
-from fastapi import APIRouter, Depends, File, Query, Response, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, Query, Response, UploadFile, status
 from sqlalchemy.orm import Session
 
 from src.core.deps import get_db
@@ -43,6 +43,7 @@ from src.market_analysis.schemas import (
     SessionListItem,
     SessionOut,
     SessionUpdate,
+    ShotCaptionUpdate,
     StalenessItem,
     TimeframeLinkOut,
     TradeConclusion,
@@ -145,10 +146,11 @@ def list_sessions(
     limit: int = Query(default=50, ge=1, le=200),
     db: Session = Depends(get_db),
 ) -> list:
-    """Return analysis history (most recent first)."""
-    return service.list_sessions(
+    """Return analysis history (most recent first), with verdict and follow-up time."""
+    sessions = service.list_sessions(
         db, profile_id=profile_id, module_id=module_id, offset=offset, limit=limit
     )
+    return [service.build_list_item(s) for s in sessions]
 
 
 @ma_router.get("/sessions/{session_id}", response_model=SessionOut)
@@ -183,10 +185,19 @@ def upload_session_screenshot(
     session_id: int,
     kind: str,
     file: UploadFile = File(...),
+    caption: str | None = Form(default=None, max_length=40),
     db: Session = Depends(get_db),
 ) -> object:
     """Attach a 'before' or 'after' chart screenshot (jpeg/png/webp/gif, max 10 MB)."""
-    return service.add_session_screenshot(db, session_id, kind, file)
+    return service.add_session_screenshot(db, session_id, kind, file, caption)
+
+
+@ma_router.patch("/sessions/{session_id}/screenshots/{kind}", response_model=SessionOut)
+def update_session_screenshot_caption(
+    session_id: int, kind: str, data: ShotCaptionUpdate, db: Session = Depends(get_db)
+) -> object:
+    """Set or clear the caption (e.g. 'BTC.D 1H') of a capture."""
+    return service.set_screenshot_caption(db, session_id, kind, data.url, data.caption)
 
 
 @ma_router.delete("/sessions/{session_id}/screenshots/{kind}/{url_b64}", response_model=SessionOut)

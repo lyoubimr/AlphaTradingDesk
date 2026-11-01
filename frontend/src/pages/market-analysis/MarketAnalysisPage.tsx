@@ -7,13 +7,13 @@
 //   ④ History table — last 30 sessions with full TF breakdown
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { useEffect, useState, useCallback } from 'react'
+import { Fragment, useEffect, useState, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   Plus, RefreshCw, Loader2, AlertTriangle,
-  CheckCircle2, Clock, BarChart2,
+  CheckCircle2, Clock, BarChart2, Camera,
   TrendingUp, TrendingDown, Minus, Activity,
-  ChevronRight, Zap,
+  ChevronRight,
 } from 'lucide-react'
 import { PageHeader }  from '../../components/ui/PageHeader'
 import { StatCard }    from '../../components/ui/StatCard'
@@ -21,6 +21,8 @@ import { useProfile }  from '../../context/ProfileContext'
 import { maApi }       from '../../lib/api'
 import type { MAModule, MASessionListItem, MAStalenessItem, MABias, MATradeConclusion, MAEvaluationStats, MAEvaluationBucket } from '../../types/api'
 import { maAgeLabel } from '../../utils/maAge'
+import { CompareModal } from './SessionReview'
+import { fmtElapsed } from './shotFormat'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -379,56 +381,128 @@ function ReviewCell({ s }: { s: MASessionListItem }) {
   )
 }
 
-function HistoryRow({ s, modules, onView }: { s: MASessionListItem; modules: MAModule[]; onView: () => void }) {
-  const mod = modules.find((m) => m.id === s.module_id)
+const VERDICT_TONE: Record<string, string> = {
+  green: 'text-emerald-300 border-emerald-500/25 bg-emerald-500/10',
+  amber: 'text-amber-300 border-amber-500/25 bg-amber-500/10',
+  red: 'text-red-300 border-red-500/25 bg-red-500/10',
+  neutral: 'text-slate-400 border-surface-600 bg-surface-700',
+}
+
+function ScoreCell({ score, bias }: { score: string | null; bias: string | null }) {
+  if (score == null) return <span className="text-slate-700 text-[10px]">—</span>
   return (
-    <tr onClick={onView} className="border-b border-surface-700/40 hover:bg-surface-700/20 transition-colors cursor-pointer">
-      <td className="px-4 py-3 whitespace-nowrap">
-        <span className="text-[11px] text-slate-500 font-mono">{fmtShort(s.analyzed_at)}</span>
-      </td>
-      <td className="px-4 py-3">
-        <div className="flex items-center gap-2">
-          <span className="text-sm">{mod ? moduleEmoji(mod.name) : '🧭'}</span>
-          <span className="text-xs font-medium text-slate-200">{mod ? mod.name : `Module #${s.module_id}`}</span>
-        </div>
-      </td>
-      <td className="px-4 py-3">
-        <div className="flex items-center gap-2">
-          <ScoreBar score={s.score_htf_a} bias={s.bias_htf_a as MABias | null} />
-          <BiasBadge bias={s.bias_htf_a as MABias | null} xs />
-        </div>
-      </td>
-      <td className="px-4 py-3">
-        <div className="flex items-center gap-2">
-          <ScoreBar score={s.score_mtf_a} bias={s.bias_mtf_a as MABias | null} />
-          <BiasBadge bias={s.bias_mtf_a as MABias | null} xs />
-        </div>
-      </td>
-      {/* v2 composite */}
-      <td className="px-4 py-3">
-        {s.score_composite_a != null ? (
-          <div className="flex items-center gap-1.5">
-            <Zap size={9} className="text-brand-400 shrink-0" />
-            <ScoreBar score={s.score_composite_a} bias={s.bias_composite_a as MABias | null} />
-            <BiasBadge bias={s.bias_composite_a as MABias | null} xs />
-          </div>
-        ) : <span className="text-slate-700 text-[10px]">—</span>}
-      </td>
-      <td className="px-4 py-3">
-        {s.score_htf_b != null ? (
+    <div className="flex items-center gap-2">
+      <ScoreBar score={score} bias={bias as MABias | null} />
+      <BiasBadge bias={bias as MABias | null} xs />
+    </div>
+  )
+}
+
+function HistoryRow({ s, modules, onView, onCompare }: {
+  s: MASessionListItem
+  modules: MAModule[]
+  onView: () => void
+  onCompare: () => void
+}) {
+  const [open, setOpen] = useState(false)
+  const mod = modules.find((m) => m.id === s.module_id)
+  const nBefore = s.screenshots_before?.length ?? 0
+  const nAfter = s.screenshots_after?.length ?? 0
+
+  // v2 composite first; older v1-only sessions fall back to their best timeframe score
+  const sideA = s.score_composite_a != null
+    ? { score: s.score_composite_a, bias: s.bias_composite_a }
+    : s.score_htf_a != null ? { score: s.score_htf_a, bias: s.bias_htf_a }
+    : s.score_mtf_a != null ? { score: s.score_mtf_a, bias: s.bias_mtf_a }
+    : { score: s.score_ltf_a, bias: s.bias_ltf_a }
+  const sideB = s.score_composite_b != null
+    ? { score: s.score_composite_b, bias: s.bias_composite_b }
+    : s.score_htf_b != null ? { score: s.score_htf_b, bias: s.bias_htf_b }
+    : s.score_mtf_b != null ? { score: s.score_mtf_b, bias: s.bias_mtf_b }
+    : { score: s.score_ltf_b, bias: s.bias_ltf_b }
+
+  type TfRow = { label: string; a: [string | null, string | null]; b: [string | null, string | null] }
+  const tf = ([
+    { label: 'HTF', a: [s.score_htf_a, s.bias_htf_a], b: [s.score_htf_b, s.bias_htf_b] },
+    { label: 'MTF', a: [s.score_mtf_a, s.bias_mtf_a], b: [s.score_mtf_b, s.bias_mtf_b] },
+    { label: 'LTF', a: [s.score_ltf_a, s.bias_ltf_a], b: [s.score_ltf_b, s.bias_ltf_b] },
+  ] as TfRow[]).filter((r) => r.a[0] != null || r.b[0] != null)
+
+  return (
+    <>
+      <tr onClick={onView} className="border-b border-surface-700/40 hover:bg-surface-700/20 transition-colors cursor-pointer">
+        <td className="pl-3 pr-1 py-3 w-6">
+          {tf.length > 0 && (
+            <button
+              type="button" title="Score per timeframe"
+              onClick={(e) => { e.stopPropagation(); setOpen((v) => !v) }}
+              className="text-slate-600 hover:text-slate-300"
+            >
+              <ChevronRight size={12} className={`transition-transform ${open ? 'rotate-90' : ''}`} />
+            </button>
+          )}
+        </td>
+        <td className="px-3 py-3 whitespace-nowrap">
+          <p className="text-[11px] text-slate-400 font-mono">{fmtShort(s.analyzed_at)}</p>
+          <p className="text-[10px] text-slate-600 font-mono">
+            {s.after_at
+              ? `→ ${fmtShort(s.after_at)} (${fmtElapsed(s.analyzed_at, s.after_at)})`
+              : '→ no follow-up yet'}
+          </p>
+        </td>
+        <td className="px-3 py-3">
           <div className="flex items-center gap-2">
-            <ScoreBar score={s.score_htf_b} bias={s.bias_htf_b as MABias | null} />
-            <BiasBadge bias={s.bias_htf_b as MABias | null} xs />
+            <span className="text-sm">{mod ? moduleEmoji(mod.name) : '🧭'}</span>
+            <span className="text-xs font-medium text-slate-200">{mod ? mod.name : `Module #${s.module_id}`}</span>
           </div>
-        ) : <span className="text-slate-700 text-[10px]">—</span>}
-      </td>
-      <td className="px-4 py-3 max-w-[200px]">
-        {s.notes
-          ? <p className="text-[11px] text-slate-500 truncate" title={s.notes}>{s.notes}</p>
-          : <span className="text-slate-700 text-[10px]">—</span>}
-      </td>
-      <td className="px-4 py-3"><ReviewCell s={s} /></td>
-    </tr>
+        </td>
+        <td className="px-3 py-3">
+          {s.verdict_label ? (
+            <span className={`inline-flex items-center gap-1 text-[10px] font-medium border rounded-full px-2 py-0.5 whitespace-nowrap ${VERDICT_TONE[s.verdict_color ?? 'neutral']}`}>
+              {s.verdict_emoji} {s.verdict_label}
+            </span>
+          ) : <span className="text-slate-700 text-[10px]">—</span>}
+        </td>
+        <td className="px-3 py-3"><ScoreCell score={sideA.score} bias={sideA.bias} /></td>
+        <td className="px-3 py-3"><ScoreCell score={sideB.score} bias={sideB.bias} /></td>
+        <td className="px-3 py-3 max-w-[180px]">
+          {s.notes
+            ? <p className="text-[11px] text-slate-500 truncate" title={s.notes}>{s.notes}</p>
+            : <span className="text-slate-700 text-[10px]">—</span>}
+        </td>
+        <td className="px-3 py-3">
+          {nBefore + nAfter > 0 ? (
+            <button
+              type="button" title="Compare before / after captures"
+              onClick={(e) => { e.stopPropagation(); onCompare() }}
+              className="flex items-center gap-1 text-[10px] text-brand-400 hover:text-brand-300 whitespace-nowrap"
+            >
+              <Camera size={13} /> {nBefore}/{nAfter}
+            </button>
+          ) : <span className="text-slate-700 text-[10px]">—</span>}
+        </td>
+        <td className="px-3 py-3"><ReviewCell s={s} /></td>
+      </tr>
+      {open && (
+        <tr className="border-b border-surface-700/40 bg-surface-900/40">
+          <td />
+          <td colSpan={8} className="px-3 py-2">
+            <div className="grid grid-cols-[40px_1fr_1fr] gap-x-4 gap-y-1.5 max-w-xl items-center">
+              <span />
+              <span className="text-[9px] uppercase tracking-wider text-slate-600">{mod?.asset_a ?? 'A'}</span>
+              <span className="text-[9px] uppercase tracking-wider text-slate-600">{mod?.asset_b ?? 'B'}</span>
+              {tf.map((r) => (
+                <Fragment key={r.label}>
+                  <span className="text-[9px] text-slate-600">{r.label}</span>
+                  <ScoreCell score={r.a[0]} bias={r.a[1]} />
+                  <ScoreCell score={r.b[0]} bias={r.b[1]} />
+                </Fragment>
+              ))}
+            </div>
+          </td>
+        </tr>
+      )}
+    </>
   )
 }
 
@@ -444,6 +518,7 @@ export function MarketAnalysisPage() {
   const [staleness, setStaleness] = useState<MAStalenessItem[]>([])
   const [sessions,  setSessions]  = useState<MASessionListItem[]>([])
   const [evalStats, setEvalStats] = useState<MAEvaluationStats | null>(null)
+  const [compareSession, setCompareSession] = useState<MASessionListItem | null>(null)
   const [loading,   setLoading]   = useState(false)
   const [error,     setError]     = useState<string | null>(null)
 
@@ -673,15 +748,20 @@ export function MarketAnalysisPage() {
                 <table className="w-full">
                   <thead>
                     <tr className="border-b border-surface-700 bg-surface-800/80">
-                      {['Date', 'Module', 'HTF Score', 'MTF Score', 'Composite ⚡', 'Dual HTF', 'Notes', 'Review'].map((h) => (
-                        <th key={h} className="px-4 py-3 text-left text-[10px] font-semibold text-slate-600 uppercase tracking-wider whitespace-nowrap">
+                      {['', 'Date → follow-up', 'Module', 'Verdict', 'Market / BTC', 'Alts', 'Notes', '📷 before/after', 'Review'].map((h, i) => (
+                        <th key={`${h}-${i}`} className="px-3 py-3 text-left text-[10px] font-semibold text-slate-600 uppercase tracking-wider whitespace-nowrap">
                           {h}
                         </th>
                       ))}
                     </tr>
                   </thead>
                   <tbody>
-                    {sessions.map((s) => <HistoryRow key={s.id} s={s} modules={modules} onView={() => goView(s.id)} />)}
+                    {sessions.map((s) => (
+                      <HistoryRow
+                        key={s.id} s={s} modules={modules}
+                        onView={() => goView(s.id)} onCompare={() => setCompareSession(s)}
+                      />
+                    ))}
                   </tbody>
                 </table>
               </div>
@@ -689,6 +769,14 @@ export function MarketAnalysisPage() {
           </div>
 
           {/* Legend */}
+          {compareSession && (
+            <CompareModal
+              before={compareSession.screenshots_before ?? []}
+              after={compareSession.screenshots_after ?? []}
+              analyzedAt={compareSession.analyzed_at}
+              onClose={() => setCompareSession(null)}
+            />
+          )}
           <div className="flex items-center gap-4 text-[10px] text-slate-600 px-1">
             <span>Score legend (v1 HTF/MTF):</span>
             <span className="text-red-400">▌ 0–39 Bearish</span>

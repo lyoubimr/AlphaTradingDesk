@@ -740,12 +740,19 @@ export interface MASessionOut {
   notes: string | null
   analyzed_at: string
   created_at: string
-  screenshots_before: string[]
-  screenshots_after: string[]
+  screenshots_before: MAShot[]
+  screenshots_after: MAShot[]
   after_notes: string | null
   evaluation: MAEvaluation | null
   reviewed_at: string | null
   answers: MAAnswerOut[]
+}
+
+/** One before/after capture with its time and an optional caption (e.g. "BTC.D 1H"). */
+export interface MAShot {
+  url: string
+  at: string | null
+  caption: string | null
 }
 
 export type MAEvaluation = 'correct' | 'wrong' | 'neutral'
@@ -802,9 +809,13 @@ export interface MASessionListItem {
   bias_composite_b: MABias | null
   notes: string | null
   analyzed_at: string
-  screenshots_before?: string[]
-  screenshots_after?: string[]
+  screenshots_before?: MAShot[]
+  screenshots_after?: MAShot[]
   evaluation?: MAEvaluation | null
+  after_at?: string | null
+  verdict_label?: string | null
+  verdict_emoji?: string | null
+  verdict_color?: 'green' | 'amber' | 'red' | 'neutral' | null
 }
 
 export interface MAStalenessItem {

@@ -948,7 +948,7 @@ class TestSessionReview:
         a = client.post(f"/api/market-analysis/sessions/{sid}/screenshots/after", files=files).json()
         assert len(b["screenshots_before"]) == 1 and b["screenshots_after"] == []
         assert len(a["screenshots_after"]) == 1
-        url = b["screenshots_before"][0]
+        url = b["screenshots_before"][0]["url"]
         assert url.startswith(f"/uploads/ma_sessions/{sid}/")
         assert (uploads_tmp / "ma_sessions" / str(sid) / url.rsplit("/", 1)[-1]).exists()
 
@@ -970,6 +970,61 @@ class TestSessionReview:
             f"{base}/after", files={"file": ("x.png", b"0" * (10 * 1024 * 1024 + 1), "image/png")}
         )
         assert too_big.status_code == 413
+
+    def test_multiple_captures_with_caption_and_timestamp(
+        self, client: TestClient, db_session: Session, uploads_tmp
+    ):
+        _, _, sid = _session(client, db_session, "ReviewMod7")
+        base = f"/api/market-analysis/sessions/{sid}/screenshots"
+        client.post(f"{base}/before", files={"file": ("a.png", _PNG, "image/png")}, data={"caption": "BTC 1H"})
+        client.post(f"{base}/before", files={"file": ("b.png", _PNG, "image/png")}, data={"caption": "  "})
+        data = client.post(f"{base}/before", files={"file": ("c.png", _PNG, "image/png")}).json()
+
+        shots = data["screenshots_before"]
+        assert len(shots) == 3 and len({s["url"] for s in shots}) == 3
+        assert [s["caption"] for s in shots] == ["BTC 1H", None, None]
+        assert all(s["at"] is not None for s in shots)
+
+        updated = client.patch(
+            f"{base}/before", json={"url": shots[1]["url"], "caption": "BTC.D 4H"}
+        ).json()
+        assert [s["caption"] for s in updated["screenshots_before"]] == ["BTC 1H", "BTC.D 4H", None]
+        unknown = client.patch(f"{base}/before", json={"url": "/uploads/nope.png", "caption": "x"})
+        assert unknown.status_code == 404
+
+    def test_legacy_string_captures_are_upgraded(self, client: TestClient, db_session: Session):
+        from src.core.models.market_analysis import MarketAnalysisSession
+
+        _, _, sid = _session(client, db_session, "ReviewMod8")
+        row = db_session.get(MarketAnalysisSession, sid)
+        row.screenshots_before = ["/uploads/ma_sessions/1/old.png"]
+        db_session.flush()
+
+        shot = client.get(f"/api/market-analysis/sessions/{sid}").json()["screenshots_before"][0]
+        assert shot == {"url": "/uploads/ma_sessions/1/old.png", "at": None, "caption": None}
+
+    def test_history_row_has_verdict_and_follow_up_time(
+        self, client: TestClient, db_session: Session, uploads_tmp
+    ):
+        profile = _make_profile(db_session, _make_broker(db_session, name="HistBroker"))
+        mod, inds = _pulse_module(db_session)
+        sid = _post_session(client, profile, mod, inds, hours_ago=3)
+
+        def row() -> dict:
+            rows = client.get(f"/api/market-analysis/sessions?profile_id={profile.id}").json()
+            return next(r for r in rows if r["id"] == sid)
+
+        first = row()
+        assert first["verdict_label"] == "Alts Long-Friendly" and first["verdict_emoji"] == "🟢"
+        assert first["after_at"] is None
+
+        client.post(
+            f"/api/market-analysis/sessions/{sid}/screenshots/after",
+            files={"file": ("x.png", _PNG, "image/png")},
+        )
+        second = row()
+        assert second["after_at"] is not None
+        assert second["screenshots_after"][0]["url"].startswith(f"/uploads/ma_sessions/{sid}/")
 
     def test_unknown_session_is_404(self, client: TestClient):
         assert client.patch("/api/market-analysis/sessions/99999", json={"notes": "x"}).status_code == 404

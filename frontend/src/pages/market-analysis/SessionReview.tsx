@@ -7,9 +7,12 @@
 import { useCallback, useEffect, useState } from 'react'
 import { CheckCircle2, Columns2, Loader2, Save, Trash2, Upload, X, XCircle, MinusCircle } from 'lucide-react'
 import { maApi } from '../../lib/api'
-import type { MAEvaluation, MALinkedTrades, MASessionOut } from '../../types/api'
+import type { MAEvaluation, MALinkedTrades, MASessionOut, MAShot } from '../../types/api'
+import { fmtElapsed, fmtShotTime } from './shotFormat'
 
 type Kind = 'before' | 'after'
+
+const CAPTION_PRESETS = ['BTC', 'BTC.D', 'TOTAL2', 'USDT.D', 'Other']
 
 const VERDICTS: { value: MAEvaluation; label: string; hint: string; icon: typeof CheckCircle2; tone: string }[] = [
   { value: 'correct', label: 'True',    hint: 'My read was right',                 icon: CheckCircle2, tone: 'border-green-600/50 bg-green-900/20 text-green-300' },
@@ -17,37 +20,68 @@ const VERDICTS: { value: MAEvaluation; label: string; hint: string; icon: typeof
   { value: 'neutral', label: 'Neutral', hint: "Market didn't move enough to tell", icon: MinusCircle,  tone: 'border-slate-500/50 bg-slate-700/30 text-slate-300' },
 ]
 
-// ── Before / After comparison ────────────────────────────────────────────────
-function CompareModal({ before, after, initial, onClose }: {
-  before: string[]
-  after: string[]
-  initial: { kind: Kind; index: number }
+// ── Before / After comparison (captions with the same name line up) ──────────
+export function CompareModal({ before, after, analyzedAt, initial, onClose }: {
+  before: MAShot[]
+  after: MAShot[]
+  analyzedAt?: string | null
+  initial?: { kind: Kind; index: number }
   onClose: () => void
 }) {
-  const [bi, setBi] = useState(initial.kind === 'before' ? initial.index : 0)
-  const [ai, setAi] = useState(initial.kind === 'after' ? initial.index : 0)
+  const matchIn = (list: MAShot[], caption: string | null) =>
+    caption ? list.findIndex((s) => s.caption === caption) : -1
 
-  const side = (label: string, urls: string[], idx: number, set: (n: number) => void) => (
-    <div className="flex flex-col flex-1 min-w-0">
-      <div className="flex items-center justify-between px-3 py-2 shrink-0">
-        <span className="text-[10px] uppercase tracking-widest text-slate-500 font-semibold">{label}</span>
-        {urls.length > 1 && (
-          <div className="flex items-center gap-1 text-[10px] text-slate-400">
-            <button type="button" disabled={idx === 0} onClick={() => set(idx - 1)}
-              className="px-2 py-0.5 rounded bg-white/10 hover:bg-white/20 disabled:opacity-30">‹</button>
-            {idx + 1}/{urls.length}
-            <button type="button" disabled={idx === urls.length - 1} onClick={() => set(idx + 1)}
-              className="px-2 py-0.5 rounded bg-white/10 hover:bg-white/20 disabled:opacity-30">›</button>
+  const [idx, setIdx] = useState(() => {
+    const start = initial ?? { kind: 'before' as Kind, index: 0 }
+    if (start.kind === 'before') {
+      const m = matchIn(after, before[start.index]?.caption ?? null)
+      return { b: start.index, a: m >= 0 ? m : 0 }
+    }
+    const m = matchIn(before, after[start.index]?.caption ?? null)
+    return { b: m >= 0 ? m : 0, a: start.index }
+  })
+
+  const pickBefore = (i: number) => {
+    const m = matchIn(after, before[i]?.caption ?? null)
+    setIdx((p) => ({ b: i, a: m >= 0 ? m : p.a }))
+  }
+  const pickAfter = (i: number) => {
+    const m = matchIn(before, after[i]?.caption ?? null)
+    setIdx((p) => ({ a: i, b: m >= 0 ? m : p.b }))
+  }
+
+  const side = (label: string, list: MAShot[], i: number, pick: (n: number) => void, extra?: string) => {
+    const shot = list[i]
+    return (
+      <div className="flex flex-col flex-1 min-w-0">
+        <div className="flex items-center justify-between gap-2 px-3 py-2 shrink-0">
+          <div className="flex items-center gap-2 min-w-0">
+            <span className="text-[10px] uppercase tracking-widest text-slate-500 font-semibold">{label}</span>
+            {shot?.caption && <span className="text-[10px] px-1.5 py-0.5 rounded bg-brand-500/20 text-brand-300">{shot.caption}</span>}
+            {shot?.at && <span className="text-[10px] text-slate-500">{fmtShotTime(shot.at)}</span>}
+            {extra && <span className="text-[10px] text-amber-400">{extra}</span>}
           </div>
-        )}
+          {list.length > 1 && (
+            <div className="flex items-center gap-1 text-[10px] text-slate-400 shrink-0">
+              <button type="button" disabled={i === 0} onClick={() => pick(i - 1)}
+                className="px-2 py-0.5 rounded bg-white/10 hover:bg-white/20 disabled:opacity-30">‹</button>
+              {i + 1}/{list.length}
+              <button type="button" disabled={i === list.length - 1} onClick={() => pick(i + 1)}
+                className="px-2 py-0.5 rounded bg-white/10 hover:bg-white/20 disabled:opacity-30">›</button>
+            </div>
+          )}
+        </div>
+        <div className="flex-1 flex items-center justify-center p-4 min-h-0">
+          {shot
+            ? <img src={shot.url} alt={label} className="max-w-full max-h-full object-contain rounded-lg" />
+            : <span className="text-slate-600 text-xs italic">No capture</span>}
+        </div>
       </div>
-      <div className="flex-1 flex items-center justify-center p-4 min-h-0">
-        {urls[idx]
-          ? <img src={urls[idx]} alt={label} className="max-w-full max-h-full object-contain rounded-lg" />
-          : <span className="text-slate-600 text-xs italic">No capture</span>}
-      </div>
-    </div>
-  )
+    )
+  }
+
+  const beforeAt = before[idx.b]?.at ?? analyzedAt
+  const elapsed = fmtElapsed(beforeAt, after[idx.a]?.at)
 
   return (
     <div
@@ -65,25 +99,27 @@ function CompareModal({ before, after, initial, onClose }: {
         </button>
       </div>
       <div className="flex flex-1 min-h-0 divide-x divide-white/10">
-        {side('📸 Before (analysis)', before, bi, setBi)}
-        {side('📸 After (later)', after, ai, setAi)}
+        {side('📸 Before (analysis)', before, idx.b, pickBefore)}
+        {side('📸 After (later)', after, idx.a, pickAfter, elapsed)}
       </div>
     </div>
   )
 }
 
 // ── One capture zone (file picker, drag & drop, Ctrl+V while hovered) ────────
-function ShotZone({ title, hint, urls, busy, onAdd, onDelete, onOpen }: {
+function ShotZone({ title, hint, shots, busy, onAdd, onCaption, onDelete, onOpen }: {
   title: string
   hint: string
-  urls: string[]
+  shots: MAShot[]
   busy: boolean
-  onAdd: (files: File[]) => void
+  onAdd: (files: File[], caption: string | null) => void
+  onCaption: (url: string, caption: string | null) => void
   onDelete: (url: string) => void
   onOpen: (index: number) => void
 }) {
   const [hovered, setHovered] = useState(false)
   const [dragging, setDragging] = useState(false)
+  const [nextCaption, setNextCaption] = useState<string | null>(null)
 
   useEffect(() => {
     if (!hovered) return
@@ -93,11 +129,11 @@ function ShotZone({ title, hint, urls, busy, onAdd, onDelete, onOpen }: {
         .map((i) => i.getAsFile())
         .filter((f): f is File => f !== null)
         .map((f) => new File([f], `paste-${Date.now()}.png`, { type: f.type }))
-      if (files.length > 0) onAdd(files)
+      if (files.length > 0) onAdd(files, nextCaption)
     }
     document.addEventListener('paste', onPaste)
     return () => document.removeEventListener('paste', onPaste)
-  }, [hovered, onAdd])
+  }, [hovered, onAdd, nextCaption])
 
   return (
     <div
@@ -108,7 +144,7 @@ function ShotZone({ title, hint, urls, busy, onAdd, onDelete, onOpen }: {
       onDrop={(e) => {
         e.preventDefault(); setDragging(false)
         const files = Array.from(e.dataTransfer.files).filter((f) => f.type.startsWith('image/'))
-        if (files.length > 0) onAdd(files)
+        if (files.length > 0) onAdd(files, nextCaption)
       }}
       className={`rounded-xl border p-3 space-y-2 transition-colors ${
         dragging ? 'border-brand-500/60 bg-brand-500/5' : 'border-surface-600 bg-surface-800/40'
@@ -116,7 +152,9 @@ function ShotZone({ title, hint, urls, busy, onAdd, onDelete, onOpen }: {
     >
       <div className="flex items-center justify-between">
         <div>
-          <p className="text-xs font-semibold text-slate-300">{title}</p>
+          <p className="text-xs font-semibold text-slate-300">
+            {title} <span className="text-slate-600 font-normal">{shots.length > 0 ? `· ${shots.length}` : ''}</span>
+          </p>
           <p className="text-[10px] text-slate-600">{hint}</p>
         </div>
         <label className="flex items-center gap-1 text-[10px] px-2 py-1 rounded-lg border border-brand-500/30 text-brand-400 bg-brand-500/10 hover:bg-brand-500/15 cursor-pointer">
@@ -126,32 +164,62 @@ function ShotZone({ title, hint, urls, busy, onAdd, onDelete, onOpen }: {
             type="file" accept="image/*" multiple className="hidden"
             onChange={(e) => {
               const files = Array.from(e.target.files ?? [])
-              if (files.length > 0) onAdd(files)
+              if (files.length > 0) onAdd(files, nextCaption)
               e.target.value = ''
             }}
           />
         </label>
       </div>
 
-      {urls.length === 0 ? (
+      {/* Caption applied to the next captures you add */}
+      <div className="flex items-center gap-1 flex-wrap">
+        <span className="text-[9px] uppercase tracking-wider text-slate-600 mr-0.5">next:</span>
+        {CAPTION_PRESETS.map((c) => (
+          <button
+            key={c} type="button" onClick={() => setNextCaption(nextCaption === c ? null : c)}
+            className={`text-[10px] px-1.5 py-0.5 rounded border transition-colors ${
+              nextCaption === c
+                ? 'border-brand-500/60 bg-brand-500/20 text-brand-300'
+                : 'border-surface-600 text-slate-500 hover:text-slate-300'
+            }`}
+          >
+            {c}
+          </button>
+        ))}
+      </div>
+
+      {shots.length === 0 ? (
         <p className="text-[11px] text-slate-600 italic py-3 text-center">
-          Drop images here, or hover and press Ctrl+V to paste
+          Drop images here, or hover and press Ctrl+V to paste — as many as you need
         </p>
       ) : (
-        <div className="grid grid-cols-3 gap-2">
-          {urls.map((url, i) => (
-            <div key={url} className="relative group aspect-video rounded-lg overflow-hidden border border-surface-600 bg-black/30">
-              <img
-                src={url} alt={`${title} ${i + 1}`} loading="lazy"
-                onClick={() => onOpen(i)}
-                className="w-full h-full object-cover cursor-zoom-in"
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+          {shots.map((shot, i) => (
+            <div key={shot.url} className="space-y-1">
+              <div className="relative group aspect-video rounded-lg overflow-hidden border border-surface-600 bg-black/30">
+                <img
+                  src={shot.url} alt={`${title} ${i + 1}`} loading="lazy"
+                  onClick={() => onOpen(i)}
+                  className="w-full h-full object-cover cursor-zoom-in"
+                />
+                <button
+                  type="button" onClick={() => onDelete(shot.url)} title="Remove"
+                  className="absolute top-1 right-1 p-1 rounded bg-black/60 text-slate-400 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"
+                >
+                  <Trash2 size={11} />
+                </button>
+              </div>
+              <input
+                defaultValue={shot.caption ?? ''}
+                placeholder="caption (e.g. BTC.D 1H)"
+                maxLength={40}
+                onBlur={(e) => {
+                  const v = e.target.value.trim() || null
+                  if (v !== shot.caption) onCaption(shot.url, v)
+                }}
+                className="w-full px-1.5 py-0.5 rounded bg-surface-900 border border-surface-700 text-[10px] text-slate-300 placeholder-slate-700 focus:outline-none focus:border-brand-500/60"
               />
-              <button
-                type="button" onClick={() => onDelete(url)} title="Remove"
-                className="absolute top-1 right-1 p-1 rounded bg-black/60 text-slate-400 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"
-              >
-                <Trash2 size={11} />
-              </button>
+              {shot.at && <p className="text-[9px] text-slate-700">{fmtShotTime(shot.at)}</p>}
             </div>
           ))}
         </div>
@@ -197,11 +265,11 @@ export function SessionReview({ session, onChange }: {
     setSaving(false)
   }
 
-  const addFiles = useCallback(async (kind: Kind, files: File[]) => {
+  const addFiles = useCallback(async (kind: Kind, files: File[], caption: string | null) => {
     setBusy(kind); setError(null)
     try {
       let latest: MASessionOut | null = null
-      for (const f of files) latest = await maApi.uploadSessionScreenshot(session.id, kind, f)
+      for (const f of files) latest = await maApi.uploadSessionScreenshot(session.id, kind, f, caption)
       if (latest) onChange(latest)
     } catch (e: unknown) {
       setError((e as Error).message)
@@ -249,22 +317,24 @@ export function SessionReview({ session, onChange }: {
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <ShotZone
           title="Before" hint="Charts at analysis time (S/R 4H + 1H drawn)"
-          urls={before} busy={busy === 'before'}
-          onAdd={(f) => void addFiles('before', f)}
+          shots={before} busy={busy === 'before'}
+          onAdd={(f, c) => void addFiles('before', f, c)}
+          onCaption={(u, c) => void run(() => maApi.setSessionScreenshotCaption(session.id, 'before', u, c))}
           onDelete={(u) => void run(() => maApi.deleteSessionScreenshot(session.id, 'before', u))}
           onOpen={(i) => setCompare({ kind: 'before', index: i })}
         />
         <ShotZone
           title="After" hint="Same charts later — what actually happened"
-          urls={after} busy={busy === 'after'}
-          onAdd={(f) => void addFiles('after', f)}
+          shots={after} busy={busy === 'after'}
+          onAdd={(f, c) => void addFiles('after', f, c)}
+          onCaption={(u, c) => void run(() => maApi.setSessionScreenshotCaption(session.id, 'after', u, c))}
           onDelete={(u) => void run(() => maApi.deleteSessionScreenshot(session.id, 'after', u))}
           onOpen={(i) => setCompare({ kind: 'after', index: i })}
         />
       </div>
-      {before.length > 0 && after.length > 0 && (
+      {(before.length > 0 || after.length > 0) && (
         <button
-          type="button" onClick={() => setCompare({ kind: 'before', index: 0 })}
+          type="button" onClick={() => setCompare({ kind: before.length > 0 ? 'before' : 'after', index: 0 })}
           className="flex items-center gap-1.5 text-[11px] text-brand-400 hover:text-brand-300"
         >
           <Columns2 size={12} /> Compare before / after
@@ -335,7 +405,10 @@ export function SessionReview({ session, onChange }: {
       </div>
 
       {compare && (
-        <CompareModal before={before} after={after} initial={compare} onClose={() => setCompare(null)} />
+        <CompareModal
+          before={before} after={after} analyzedAt={session.analyzed_at}
+          initial={compare} onClose={() => setCompare(null)}
+        />
       )}
     </div>
   )
