@@ -14,6 +14,7 @@ import type {
   GoalOut, GoalCreate, GoalUpdate, GoalProgressItem, GoalHistoryItem, GoalOverrideCreate, GoalOverrideOut,
   MAModule, MAIndicator, MAIndicatorConfig, MAIndicatorConfigOut, MAIndicatorUpdate, MAIndicatorCreate,
   MASessionCreate, MASessionOut, MASessionListItem, MAStalenessItem, MATradeConclusion, MATimeframeLink,
+  MASessionUpdate, MALinkedTrades, MAEvaluationStats,
   MarketVIOut, AggregatedMarketVIOut, PairsVIOut, WatchlistOut, WatchlistMetaOut, LivePricesResponse,
   VolatilitySettingsOut, NotificationSettingsOut,
   RiskBudgetOut, RiskAdvisorOut, RiskSettingsOut, PairVIOut,
@@ -447,6 +448,39 @@ export const maApi = {
   /** GET /api/market-analysis/sessions/{id} */
   getSession: (sessionId: number): Promise<MASessionOut> =>
     request(`/market-analysis/sessions/${sessionId}`),
+
+  /** PATCH /api/market-analysis/sessions/{id} — notes / follow-up notes / verdict only */
+  updateSession: (sessionId: number, data: MASessionUpdate): Promise<MASessionOut> =>
+    request(`/market-analysis/sessions/${sessionId}`, { method: 'PATCH', body: JSON.stringify(data) }),
+
+  /** POST /api/market-analysis/sessions/{id}/screenshots/{before|after} (multipart) */
+  uploadSessionScreenshot: async (sessionId: number, kind: 'before' | 'after', file: File): Promise<MASessionOut> => {
+    const form = new FormData()
+    form.append('file', file)
+    const res = await fetch(`${BASE}/market-analysis/sessions/${sessionId}/screenshots/${kind}`, {
+      method: 'POST',
+      body: form,
+    })
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({ detail: res.statusText }))
+      throw new Error(typeof body.detail === 'string' ? body.detail : JSON.stringify(body.detail))
+    }
+    return res.json() as Promise<MASessionOut>
+  },
+
+  /** DELETE /api/market-analysis/sessions/{id}/screenshots/{kind}/{url_b64} */
+  deleteSessionScreenshot: (sessionId: number, kind: 'before' | 'after', url: string): Promise<MASessionOut> => {
+    const token = btoa(url).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+    return request(`/market-analysis/sessions/${sessionId}/screenshots/${kind}/${token}`, { method: 'DELETE' })
+  },
+
+  /** GET /api/market-analysis/sessions/{id}/linked-trades */
+  getLinkedTrades: (sessionId: number): Promise<MALinkedTrades> =>
+    request(`/market-analysis/sessions/${sessionId}/linked-trades`),
+
+  /** GET /api/market-analysis/evaluation-stats */
+  getEvaluationStats: (profileId?: number): Promise<MAEvaluationStats> =>
+    request(`/market-analysis/evaluation-stats${profileId != null ? `?profile_id=${profileId}` : ''}`),
 
   /** GET /api/market-analysis/sessions/{id}/conclusion — v2 trade recommendation */
   getConclusion: (sessionId: number): Promise<MATradeConclusion> =>

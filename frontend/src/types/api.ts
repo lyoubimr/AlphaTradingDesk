@@ -740,7 +740,43 @@ export interface MASessionOut {
   notes: string | null
   analyzed_at: string
   created_at: string
+  screenshots_before: string[]
+  screenshots_after: string[]
+  after_notes: string | null
+  evaluation: MAEvaluation | null
+  reviewed_at: string | null
   answers: MAAnswerOut[]
+}
+
+export type MAEvaluation = 'correct' | 'wrong' | 'neutral'
+
+export interface MASessionUpdate {
+  notes?: string | null
+  after_notes?: string | null
+  evaluation?: MAEvaluation | null
+}
+
+export interface MALinkedTrades {
+  count: number
+  closed: number
+  wins: number
+  total_pnl: string | number
+  trades: { id: number; pair: string; direction: string; status: string; realized_pnl: string | number | null }[]
+}
+
+export interface MAEvaluationBucket {
+  key: string
+  total: number
+  correct: number
+  wrong: number
+  neutral: number
+  not_evaluated: number
+  hit_rate: number | null
+}
+
+export interface MAEvaluationStats {
+  by_module: MAEvaluationBucket[]
+  by_verdict: MAEvaluationBucket[]
 }
 
 export interface MASessionListItem {
@@ -766,6 +802,9 @@ export interface MASessionListItem {
   bias_composite_b: MABias | null
   notes: string | null
   analyzed_at: string
+  screenshots_before?: string[]
+  screenshots_after?: string[]
+  evaluation?: MAEvaluation | null
 }
 
 export interface MAStalenessItem {

@@ -22,22 +22,27 @@ Routes:
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Query, Response, status
+import base64
+
+from fastapi import APIRouter, Depends, File, Query, Response, UploadFile, status
 from sqlalchemy.orm import Session
 
 from src.core.deps import get_db
 from src.market_analysis import service
 from src.market_analysis.schemas import (
+    EvaluationStatsOut,
     IndicatorConfigItem,
     IndicatorConfigOut,
     IndicatorCreate,
     IndicatorOut,
     IndicatorUpdate,
+    LinkedTradesOut,
     ModuleOut,
     ModuleUpdate,
     SessionCreate,
     SessionListItem,
     SessionOut,
+    SessionUpdate,
     StalenessItem,
     TimeframeLinkOut,
     TradeConclusion,
@@ -163,6 +168,48 @@ def get_conclusion(session_id: int, db: Session = Depends(get_db)) -> object:
     not available (old session without decomposed scoring).
     """
     return service.get_session_conclusion(db, session_id)
+
+
+@ma_router.patch("/sessions/{session_id}", response_model=SessionOut)
+def patch_session(
+    session_id: int, data: SessionUpdate, db: Session = Depends(get_db)
+) -> object:
+    """Edit notes / follow-up notes / verdict. Answers and scores are immutable."""
+    return service.patch_session(db, session_id, data)
+
+
+@ma_router.post("/sessions/{session_id}/screenshots/{kind}", response_model=SessionOut)
+def upload_session_screenshot(
+    session_id: int,
+    kind: str,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+) -> object:
+    """Attach a 'before' or 'after' chart screenshot (jpeg/png/webp/gif, max 10 MB)."""
+    return service.add_session_screenshot(db, session_id, kind, file)
+
+
+@ma_router.delete("/sessions/{session_id}/screenshots/{kind}/{url_b64}", response_model=SessionOut)
+def delete_session_screenshot(
+    session_id: int, kind: str, url_b64: str, db: Session = Depends(get_db)
+) -> object:
+    """Detach a screenshot (base64url-encoded URL). The file stays on disk."""
+    url = base64.urlsafe_b64decode(url_b64 + "==").decode("utf-8")
+    return service.remove_session_screenshot(db, session_id, kind, url)
+
+
+@ma_router.get("/sessions/{session_id}/linked-trades", response_model=LinkedTradesOut)
+def get_linked_trades(session_id: int, db: Session = Depends(get_db)) -> object:
+    """Trades opened under this analysis — count, wins and total PnL."""
+    return service.get_linked_trades(db, session_id)
+
+
+@ma_router.get("/evaluation-stats", response_model=EvaluationStatsOut)
+def get_evaluation_stats(
+    profile_id: int | None = Query(default=None), db: Session = Depends(get_db)
+) -> object:
+    """Hit-rate of evaluated sessions, per module and per Pulse verdict."""
+    return service.get_evaluation_stats(db, profile_id)
 
 
 @ma_router.get("/staleness", response_model=list[StalenessItem])

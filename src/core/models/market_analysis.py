@@ -184,6 +184,19 @@ class MarketAnalysisSession(Base):
     news_model: Mapped[str | None] = mapped_column(String(40))
 
     notes: Mapped[str | None] = mapped_column(Text)
+
+    # Review: before/after screenshots, follow-up notes and a one-click verdict
+    screenshots_before: Mapped[list] = mapped_column(
+        JSONB, nullable=False, default=list, server_default="[]"
+    )
+    screenshots_after: Mapped[list] = mapped_column(
+        JSONB, nullable=False, default=list, server_default="[]"
+    )
+    after_notes: Mapped[str | None] = mapped_column(Text)
+    # correct | wrong | neutral (NULL = not evaluated)
+    evaluation: Mapped[str | None] = mapped_column(String(10))
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
     analyzed_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

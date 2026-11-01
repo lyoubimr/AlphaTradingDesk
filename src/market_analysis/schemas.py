@@ -197,6 +197,11 @@ class SessionOut(BaseModel):
     notes: str | None
     analyzed_at: datetime
     created_at: datetime
+    screenshots_before: list[str] = []
+    screenshots_after: list[str] = []
+    after_notes: str | None = None
+    evaluation: str | None = None
+    reviewed_at: datetime | None = None
 
     answers: list[AnswerOut] = []
 
@@ -228,6 +233,52 @@ class SessionListItem(BaseModel):
     bias_composite_b: str | None = None
     notes: str | None
     analyzed_at: datetime
+    screenshots_before: list[str] = []
+    screenshots_after: list[str] = []
+    evaluation: str | None = None
+
+
+# ── Session review (notes, screenshots, verdict) ──────────────────────────────────────
+
+
+class SessionUpdate(BaseModel):
+    """PATCH /sessions/{id} — answers and scores are immutable; only review fields change."""
+
+    notes: str | None = None
+    after_notes: str | None = None
+    evaluation: Literal["correct", "wrong", "neutral"] | None = None
+
+
+class LinkedTradeItem(BaseModel):
+    id: int
+    pair: str
+    direction: str
+    status: str
+    realized_pnl: Decimal | None = None
+
+
+class LinkedTradesOut(BaseModel):
+    count: int
+    closed: int
+    wins: int
+    total_pnl: Decimal
+    trades: list[LinkedTradeItem] = []
+
+
+class EvaluationBucket(BaseModel):
+    key: str
+    total: int
+    correct: int = 0
+    wrong: int = 0
+    neutral: int = 0
+    not_evaluated: int = 0
+    # correct / (correct + wrong); None until at least one decisive verdict
+    hit_rate: float | None = None
+
+
+class EvaluationStatsOut(BaseModel):
+    by_module: list[EvaluationBucket] = []
+    by_verdict: list[EvaluationBucket] = []
 
 
 # ── Staleness ─────────────────────────────────────────────────────────────────

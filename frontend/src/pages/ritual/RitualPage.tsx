@@ -703,13 +703,20 @@ function SmartWLPanel({
   readOnly?: boolean
 }) {
   const [expandedTFs, setExpandedTFs] = useState<Set<string>>(new Set())
-  const [emaFilter, setEmaFilter] = useState<string>('ALL')
+  // Empty set = show all signals; otherwise show pairs matching ANY selected signal
+  const [emaFilter, setEmaFilter] = useState<Set<string>>(new Set())
   const hasData = result !== null && Object.values(result.timeframes).some(pairs => pairs.length > 0)
   const PREVIEW = 8
   // Unique EMA signals present in the result — drives filter pills
   const activeSignals = result
     ? [...new Set(Object.values(result.timeframes).flat().map(p => p.ema_signal).filter(Boolean))]
     : []
+  const signalCounts: Record<string, number> = {}
+  if (result) {
+    for (const p of Object.values(result.timeframes).flat()) {
+      if (p.ema_signal) signalCounts[p.ema_signal] = (signalCounts[p.ema_signal] ?? 0) + 1
+    }
+  }
 
   const toggleTF = (tf: string) => setExpandedTFs(prev => {
     const next = new Set(prev)
@@ -793,11 +800,17 @@ function SmartWLPanel({
               <span className="text-[9px] text-slate-600 uppercase tracking-wider mr-1">EMA:</span>
               {(['ALL', ...activeSignals] as string[]).map(sig => {
                 const meta = sig === 'ALL' ? null : EMA_DISPLAY_WL[sig]
-                const isActive = emaFilter === sig
+                const isActive = sig === 'ALL' ? emaFilter.size === 0 : emaFilter.has(sig)
+                const count = sig === 'ALL' ? null : signalCounts[sig]
                 return (
                   <button
                     key={sig}
-                    onClick={() => setEmaFilter(sig)}
+                    onClick={() => setEmaFilter(prev => {
+                      if (sig === 'ALL') return new Set()
+                      const next = new Set(prev)
+                      if (next.has(sig)) { next.delete(sig) } else { next.add(sig) }
+                      return next
+                    })}
                     className={cn(
                       'text-[10px] px-1.5 py-0 rounded border transition-colors leading-relaxed',
                       isActive && !meta
@@ -814,6 +827,7 @@ function SmartWLPanel({
                     title={meta ? (EMA_TOOLTIP_WL[sig] ?? sig) : 'Show all signals'}
                   >
                     {meta ? `${meta.symbol} ${meta.label}` : 'ALL'}
+                    {count != null && <span className="ml-1 opacity-60">{count}</span>}
                   </button>
                 )
               })}
@@ -823,7 +837,7 @@ function SmartWLPanel({
             .filter(([, pairs]) => pairs.length > 0)
             .map(([tf, pairs]) => {
             const isExpanded = expandedTFs.has(tf)
-            const filteredPairs = (emaFilter === 'ALL' ? pairs : pairs.filter(p => p.ema_signal === emaFilter))
+            const filteredPairs = (emaFilter.size === 0 ? pairs : pairs.filter(p => emaFilter.has(p.ema_signal)))
               // Display order: pinned first, then EMA% desc (selection/top_n is untouched)
               .slice()
               .sort((a, b) => (Number(b.is_pinned) - Number(a.is_pinned)) || (b.ema_score - a.ema_score))

@@ -21,6 +21,7 @@ import {
 import { PageHeader } from '../../components/ui/PageHeader'
 import { useProfile } from '../../context/ProfileContext'
 import { maApi } from '../../lib/api'
+import { SessionReview } from './SessionReview'
 import type {
   MAModule, MAIndicator,
   MAAnswerIn, MABias, MASessionOut, MATradeConclusion,
@@ -955,7 +956,7 @@ export function NewAnalysisPage() {
       <PageHeader
         icon="🧭"
         title={sessionIdParam ? 'View Analysis' : 'New Analysis'}
-        subtitle={sessionIdParam ? 'Read-only view of a saved analysis session' : 'Complete the indicator checklist to compute your market bias'}
+        subtitle={sessionIdParam ? 'Saved analysis — answers are locked; add captures, notes and a verdict' : 'Complete the indicator checklist to compute your market bias'}
         actions={
           <button type="button" className="atd-btn-ghost" onClick={() => navigate('/market-analysis')}>
             <ArrowLeft size={14} /> Back
@@ -1020,6 +1021,13 @@ export function NewAnalysisPage() {
               savedSession={savedSession}
               conclusion={conclusion}
               thresholds={thresholds}
+            />
+          )}
+
+          {!loading && savedSession && (
+            <SessionReview
+              session={savedSession}
+              onChange={(s) => { setSavedSession(s); setNotes(s.notes ?? '') }}
             />
           )}
         </>

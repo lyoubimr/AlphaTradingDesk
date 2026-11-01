@@ -19,7 +19,7 @@ import { PageHeader }  from '../../components/ui/PageHeader'
 import { StatCard }    from '../../components/ui/StatCard'
 import { useProfile }  from '../../context/ProfileContext'
 import { maApi }       from '../../lib/api'
-import type { MAModule, MASessionListItem, MAStalenessItem, MABias, MATradeConclusion } from '../../types/api'
+import type { MAModule, MASessionListItem, MAStalenessItem, MABias, MATradeConclusion, MAEvaluationStats, MAEvaluationBucket } from '../../types/api'
 import { maAgeLabel } from '../../utils/maAge'
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -27,13 +27,13 @@ import { maAgeLabel } from '../../utils/maAge'
 // ─────────────────────────────────────────────────────────────────────────────
 
 function fmt(iso: string): string {
-  return new Date(iso).toLocaleDateString('fr-FR', {
+  return new Date(iso).toLocaleDateString('en-GB', {
     day: '2-digit', month: 'short', year: 'numeric',
   })
 }
 function fmtShort(iso: string): string {
-  return new Date(iso).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' })
-    + ' ' + new Date(iso).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })
+  return new Date(iso).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })
+    + ' ' + new Date(iso).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })
 }
 function daysAgo(days: number | null): string {
   if (days === null) return '—'
@@ -330,10 +330,59 @@ function ModuleCard({
 // History row
 // ─────────────────────────────────────────────────────────────────────────────
 
-function HistoryRow({ s, modules }: { s: MASessionListItem; modules: MAModule[] }) {
+function HitRateTable({ title, rows }: { title: string; rows: MAEvaluationBucket[] }) {
+  return (
+    <div>
+      <p className="text-[10px] uppercase tracking-wider text-slate-600 mb-1.5">{title}</p>
+      <table className="w-full text-[11px]">
+        <tbody>
+          {rows.map((r) => {
+            const decisive = r.correct + r.wrong
+            return (
+              <tr key={r.key} className="border-b border-surface-700/40 last:border-0">
+                <td className="py-1.5 pr-2 text-slate-300">{r.key}</td>
+                <td className="py-1.5 px-1 text-emerald-400 tabular-nums">✅ {r.correct}</td>
+                <td className="py-1.5 px-1 text-red-400 tabular-nums">❌ {r.wrong}</td>
+                <td className="py-1.5 px-1 text-slate-500 tabular-nums">⚪ {r.neutral}</td>
+                <td className="py-1.5 px-1 text-amber-400/80 tabular-nums" title="not evaluated yet">⏳ {r.not_evaluated}</td>
+                <td className="py-1.5 pl-2 text-right font-semibold tabular-nums text-slate-200">
+                  {r.hit_rate === null ? '—' : `${Math.round(r.hit_rate * 100)}%`}
+                  {decisive > 0 && decisive < 5 && <span className="ml-1 text-[9px] font-normal text-slate-600">small sample</span>}
+                </td>
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+function ReviewCell({ s }: { s: MASessionListItem }) {
+  const [now] = useState(() => Date.now())
+  const ageH = (now - new Date(s.analyzed_at).getTime()) / 3_600_000
+  const shots = (s.screenshots_before?.length ?? 0) + (s.screenshots_after?.length ?? 0)
+  const verdict = s.evaluation === 'correct'
+    ? <span className="text-emerald-400 text-[11px] font-medium">✅ True</span>
+    : s.evaluation === 'wrong'
+      ? <span className="text-red-400 text-[11px] font-medium">❌ False</span>
+      : s.evaluation === 'neutral'
+        ? <span className="text-slate-400 text-[11px] font-medium">⚪ Neutral</span>
+        : ageH > 24
+          ? <span className="text-amber-400 text-[10px] border border-amber-500/30 rounded-full px-2 py-0.5">Not evaluated</span>
+          : <span className="text-slate-700 text-[10px]">—</span>
+  return (
+    <div className="flex items-center gap-2 whitespace-nowrap">
+      {verdict}
+      {shots > 0 && <span className="text-[10px] text-slate-600" title="captures">📸 {shots}</span>}
+    </div>
+  )
+}
+
+function HistoryRow({ s, modules, onView }: { s: MASessionListItem; modules: MAModule[]; onView: () => void }) {
   const mod = modules.find((m) => m.id === s.module_id)
   return (
-    <tr className="border-b border-surface-700/40 hover:bg-surface-700/20 transition-colors">
+    <tr onClick={onView} className="border-b border-surface-700/40 hover:bg-surface-700/20 transition-colors cursor-pointer">
       <td className="px-4 py-3 whitespace-nowrap">
         <span className="text-[11px] text-slate-500 font-mono">{fmtShort(s.analyzed_at)}</span>
       </td>
@@ -378,6 +427,7 @@ function HistoryRow({ s, modules }: { s: MASessionListItem; modules: MAModule[] 
           ? <p className="text-[11px] text-slate-500 truncate" title={s.notes}>{s.notes}</p>
           : <span className="text-slate-700 text-[10px]">—</span>}
       </td>
+      <td className="px-4 py-3"><ReviewCell s={s} /></td>
     </tr>
   )
 }
@@ -393,6 +443,7 @@ export function MarketAnalysisPage() {
   const [modules,   setModules]   = useState<MAModule[]>([])
   const [staleness, setStaleness] = useState<MAStalenessItem[]>([])
   const [sessions,  setSessions]  = useState<MASessionListItem[]>([])
+  const [evalStats, setEvalStats] = useState<MAEvaluationStats | null>(null)
   const [loading,   setLoading]   = useState(false)
   const [error,     setError]     = useState<string | null>(null)
 
@@ -402,12 +453,14 @@ export function MarketAnalysisPage() {
       const mods = await maApi.listModules()
       setModules(mods)
       if (activeProfile) {
-        const [stale, sess] = await Promise.all([
+        const [stale, sess, stats] = await Promise.all([
           maApi.getStaleness(activeProfile.id),
           maApi.listSessions(undefined, 30),   // global — no profile filter
+          maApi.getEvaluationStats(activeProfile.id).catch(() => null),
         ])
         setStaleness(stale)
         setSessions(sess)
+        setEvalStats(stats)
       }
     } catch (e: unknown) {
       setError((e as Error).message)
@@ -577,6 +630,21 @@ export function MarketAnalysisPage() {
             </div>
           )}
 
+          {/* Hit-rate of evaluated analyses */}
+          {evalStats && (evalStats.by_module.length > 0) && (
+            <div className="mb-10 rounded-2xl bg-surface-800 border border-surface-700 p-4">
+              <div className="flex items-center gap-2 mb-3">
+                <Activity size={14} className="text-brand-400" />
+                <h2 className="text-sm font-semibold text-slate-200">Was my read right?</h2>
+                <span className="text-[10px] text-slate-600">hit-rate = true ÷ (true + false) · neutral not counted</span>
+              </div>
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                <HitRateTable title="By module" rows={evalStats.by_module} />
+                {evalStats.by_verdict.length > 0 && <HitRateTable title="By Pulse verdict" rows={evalStats.by_verdict} />}
+              </div>
+            </div>
+          )}
+
           {/* History header */}
           <div className="mb-4 flex items-center justify-between">
             <div className="flex items-center gap-2">
@@ -605,7 +673,7 @@ export function MarketAnalysisPage() {
                 <table className="w-full">
                   <thead>
                     <tr className="border-b border-surface-700 bg-surface-800/80">
-                      {['Date', 'Module', 'HTF Score', 'MTF Score', 'Composite ⚡', 'Dual HTF', 'Notes'].map((h) => (
+                      {['Date', 'Module', 'HTF Score', 'MTF Score', 'Composite ⚡', 'Dual HTF', 'Notes', 'Review'].map((h) => (
                         <th key={h} className="px-4 py-3 text-left text-[10px] font-semibold text-slate-600 uppercase tracking-wider whitespace-nowrap">
                           {h}
                         </th>
@@ -613,7 +681,7 @@ export function MarketAnalysisPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {sessions.map((s) => <HistoryRow key={s.id} s={s} modules={modules} />)}
+                    {sessions.map((s) => <HistoryRow key={s.id} s={s} modules={modules} onView={() => goView(s.id)} />)}
                   </tbody>
                 </table>
               </div>

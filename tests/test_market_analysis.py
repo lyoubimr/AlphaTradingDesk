@@ -887,3 +887,154 @@ class TestPulseDirection:
         assert _resolve_ma_direction_match(sid, "long", db_session, "1H", pair="PF_SOLUSD") == "opposed"
         assert _resolve_ma_direction_match(sid, "short", db_session, "1H", pair="PF_SOLUSD") == "aligned"
         assert _resolve_ma_direction_match(sid, "short", db_session, "1H", pair="PF_XBTUSD") == "aligned"
+
+
+# ── Tests: session review (notes, screenshots, verdict, linked trades, stats) ─
+
+_PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 32
+
+
+@pytest.fixture()
+def uploads_tmp(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    monkeypatch.setattr("src.core.uploads.settings", SimpleNamespace(uploads_dir=str(tmp_path)))
+    return tmp_path
+
+
+def _session(client: TestClient, db_session: Session, name: str, *, score: int = 2):
+    profile = _make_profile(db_session, _make_broker(db_session, name=f"{name}Broker"))
+    mod = _make_module(db_session, name=name)
+    ind = _make_indicator(db_session, mod, key=f"{name}_ind")
+    sid = _post_session(client, profile, mod, [ind], hours_ago=1, score=score)
+    return profile, mod, sid
+
+
+class TestSessionReview:
+    def test_patch_notes_and_verdict_keep_scores(self, client: TestClient, db_session: Session):
+        _, _, sid = _session(client, db_session, "ReviewMod1")
+        before = client.get(f"/api/market-analysis/sessions/{sid}").json()
+
+        resp = client.patch(
+            f"/api/market-analysis/sessions/{sid}",
+            json={"notes": "  BTC held 4H support ", "after_notes": "bounced +2%", "evaluation": "correct"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["notes"] == "BTC held 4H support"
+        assert data["after_notes"] == "bounced +2%"
+        assert data["evaluation"] == "correct" and data["reviewed_at"] is not None
+        assert data["score_composite_a"] == before["score_composite_a"]
+        assert [a["score"] for a in data["answers"]] == [a["score"] for a in before["answers"]]
+
+    def test_clearing_verdict_clears_reviewed_at(self, client: TestClient, db_session: Session):
+        _, _, sid = _session(client, db_session, "ReviewMod2")
+        url = f"/api/market-analysis/sessions/{sid}"
+        client.patch(url, json={"evaluation": "wrong"})
+        data = client.patch(url, json={"evaluation": None}).json()
+        assert data["evaluation"] is None and data["reviewed_at"] is None
+
+    def test_invalid_verdict_rejected(self, client: TestClient, db_session: Session):
+        _, _, sid = _session(client, db_session, "ReviewMod3")
+        resp = client.patch(f"/api/market-analysis/sessions/{sid}", json={"evaluation": "maybe"})
+        assert resp.status_code == 422
+
+    def test_screenshots_before_after_roundtrip(self, client: TestClient, db_session: Session, uploads_tmp):
+        import base64
+
+        _, _, sid = _session(client, db_session, "ReviewMod4")
+        files = {"file": ("chart.png", _PNG, "image/png")}
+        b = client.post(f"/api/market-analysis/sessions/{sid}/screenshots/before", files=files).json()
+        a = client.post(f"/api/market-analysis/sessions/{sid}/screenshots/after", files=files).json()
+        assert len(b["screenshots_before"]) == 1 and b["screenshots_after"] == []
+        assert len(a["screenshots_after"]) == 1
+        url = b["screenshots_before"][0]
+        assert url.startswith(f"/uploads/ma_sessions/{sid}/")
+        assert (uploads_tmp / "ma_sessions" / str(sid) / url.rsplit("/", 1)[-1]).exists()
+
+        token = base64.urlsafe_b64encode(url.encode()).decode().rstrip("=")
+        after_delete = client.delete(
+            f"/api/market-analysis/sessions/{sid}/screenshots/before/{token}"
+        ).json()
+        assert after_delete["screenshots_before"] == []
+        assert len(after_delete["screenshots_after"]) == 1
+
+    def test_screenshot_validation(self, client: TestClient, db_session: Session, uploads_tmp):
+        _, _, sid = _session(client, db_session, "ReviewMod5")
+        base = f"/api/market-analysis/sessions/{sid}/screenshots"
+        bad_type = client.post(f"{base}/before", files={"file": ("x.txt", b"hi", "text/plain")})
+        assert bad_type.status_code == 422
+        bad_kind = client.post(f"{base}/during", files={"file": ("x.png", _PNG, "image/png")})
+        assert bad_kind.status_code == 422
+        too_big = client.post(
+            f"{base}/after", files={"file": ("x.png", b"0" * (10 * 1024 * 1024 + 1), "image/png")}
+        )
+        assert too_big.status_code == 413
+
+    def test_unknown_session_is_404(self, client: TestClient):
+        assert client.patch("/api/market-analysis/sessions/99999", json={"notes": "x"}).status_code == 404
+        assert client.get("/api/market-analysis/sessions/99999/linked-trades").status_code == 404
+
+    def test_linked_trades_summary(self, client: TestClient, db_session: Session):
+        from datetime import UTC, datetime
+        from decimal import Decimal
+
+        from src.core.models.trade import Trade
+
+        profile, _, sid = _session(client, db_session, "ReviewMod6")
+
+        def _trade(pair: str, pnl: Decimal | None) -> Trade:
+            t = Trade(
+                profile_id=profile.id,
+                pair=pair,
+                direction="long",
+                entry_price=Decimal("1"),
+                entry_date=datetime.now(UTC),
+                stop_loss=Decimal("0.9"),
+                initial_stop_loss=Decimal("0.9"),
+                nb_take_profits=1,
+                risk_amount=Decimal("10"),
+                potential_profit=Decimal("20"),
+                market_analysis_session_id=sid,
+                status="closed" if pnl is not None else "open",
+                realized_pnl=pnl,
+                closed_at=datetime.now(UTC) if pnl is not None else None,
+            )
+            db_session.add(t)
+            return t
+
+        _trade("PF_SOLUSD", Decimal("12.5"))
+        _trade("PF_ETHUSD", Decimal("-4.0"))
+        _trade("PF_XRPUSD", None)
+        db_session.flush()
+
+        out = client.get(f"/api/market-analysis/sessions/{sid}/linked-trades").json()
+        assert (out["count"], out["closed"], out["wins"]) == (3, 2, 1)
+        assert Decimal(str(out["total_pnl"])) == Decimal("8.5")
+
+
+class TestEvaluationStats:
+    def test_hit_rate_ignores_neutral_and_pending(self, client: TestClient, db_session: Session):
+        profile = _make_profile(db_session, _make_broker(db_session, name="StatsBroker"))
+        mod = _make_module(db_session, name="StatsMod")
+        ind = _make_indicator(db_session, mod, key="stats_ind")
+        ids = [_post_session(client, profile, mod, [ind], hours_ago=h) for h in (5, 4, 3, 2, 1)]
+        for sid, verdict in zip(ids, ["correct", "correct", "wrong", "neutral", None], strict=True):
+            if verdict:
+                client.patch(f"/api/market-analysis/sessions/{sid}", json={"evaluation": verdict})
+
+        out = client.get(f"/api/market-analysis/evaluation-stats?profile_id={profile.id}").json()
+        bucket = next(b for b in out["by_module"] if b["key"] == "StatsMod")
+        assert (bucket["total"], bucket["correct"], bucket["wrong"]) == (5, 2, 1)
+        assert (bucket["neutral"], bucket["not_evaluated"]) == (1, 1)
+        assert bucket["hit_rate"] == pytest.approx(0.667, abs=0.001)
+
+    def test_by_verdict_groups_pulse_sessions(self, client: TestClient, db_session: Session):
+        profile = _make_profile(db_session, _make_broker(db_session, name="VerdictBroker"))
+        mod, inds = _pulse_module(db_session)
+        sid = _post_session(client, profile, mod, inds, hours_ago=1, score=2)
+        client.patch(f"/api/market-analysis/sessions/{sid}", json={"evaluation": "correct"})
+
+        out = client.get(f"/api/market-analysis/evaluation-stats?profile_id={profile.id}").json()
+        bucket = next(b for b in out["by_verdict"] if b["key"] == "Alts Long-Friendly")
+        assert bucket["correct"] == 1 and bucket["hit_rate"] == 1.0

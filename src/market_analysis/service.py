@@ -29,7 +29,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from decimal import Decimal
 
-from fastapi import HTTPException, status
+from fastapi import HTTPException, UploadFile, status
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
@@ -42,13 +42,20 @@ from src.core.models.market_analysis import (
     MarketAnalysisSession,
     ProfileIndicatorConfig,
 )
+from src.core.models.trade import Trade
+from src.core.uploads import save_image_upload
 from src.market_analysis.schemas import (
     AnswerIn,
+    EvaluationBucket,
+    EvaluationStatsOut,
     IndicatorConfigItem,
     IndicatorCreate,
     IndicatorUpdate,
+    LinkedTradeItem,
+    LinkedTradesOut,
     ModuleUpdate,
     SessionCreate,
+    SessionUpdate,
     StalenessItem,
     TimeframeLinkOut,
     TradeConclusion,
@@ -931,3 +938,123 @@ def resolve_session_for_timeframe(
     out.session_id = last.id
     out.verdict = get_session_conclusion(db, last.id)
     return out
+
+
+# ── Session review: notes, screenshots, verdict, linked trades, hit-rate ──────
+
+_SCREENSHOT_KINDS = {"before": "screenshots_before", "after": "screenshots_after"}
+
+
+def patch_session(db: Session, session_id: int, data: SessionUpdate) -> MarketAnalysisSession:
+    """Edit review fields only — answers and scores stay immutable."""
+    session = _get_session_or_404(db, session_id)
+    changes = data.model_dump(exclude_unset=True)
+    for field in ("notes", "after_notes"):
+        if field in changes:
+            setattr(session, field, (changes[field] or "").strip() or None)
+    if "evaluation" in changes:
+        session.evaluation = changes["evaluation"]
+        session.reviewed_at = datetime.now(UTC) if changes["evaluation"] else None
+    db.commit()
+    db.refresh(session)
+    return session
+
+
+def _screenshot_attr(kind: str) -> str:
+    attr = _SCREENSHOT_KINDS.get(kind)
+    if attr is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="kind must be 'before' or 'after'.",
+        )
+    return attr
+
+
+def add_session_screenshot(
+    db: Session, session_id: int, kind: str, file: UploadFile
+) -> MarketAnalysisSession:
+    attr = _screenshot_attr(kind)
+    session = _get_session_or_404(db, session_id)
+    url = save_image_upload(file, "ma_sessions", str(session_id))
+    setattr(session, attr, [*(getattr(session, attr) or []), url])
+    db.commit()
+    db.refresh(session)
+    return session
+
+
+def remove_session_screenshot(
+    db: Session, session_id: int, kind: str, url: str
+) -> MarketAnalysisSession:
+    """Detach a screenshot URL (the file itself stays on disk)."""
+    attr = _screenshot_attr(kind)
+    session = _get_session_or_404(db, session_id)
+    setattr(session, attr, [u for u in (getattr(session, attr) or []) if u != url])
+    db.commit()
+    db.refresh(session)
+    return session
+
+
+def get_linked_trades(db: Session, session_id: int) -> LinkedTradesOut:
+    """Trades opened under this analysis — a measured verdict next to the subjective one."""
+    _get_session_or_404(db, session_id)
+    rows = (
+        db.query(Trade)
+        .filter(Trade.market_analysis_session_id == session_id)
+        .order_by(Trade.id)
+        .all()
+    )
+    pnls: list[Decimal] = [
+        t.realized_pnl for t in rows if t.status == "closed" and t.realized_pnl is not None
+    ]
+    return LinkedTradesOut(
+        count=len(rows),
+        closed=len(pnls),
+        wins=sum(1 for p in pnls if p > 0),
+        total_pnl=sum(pnls, Decimal("0")),
+        trades=[
+            LinkedTradeItem(
+                id=t.id,
+                pair=t.pair,
+                direction=t.direction,
+                status=t.status,
+                realized_pnl=t.realized_pnl,
+            )
+            for t in rows
+        ],
+    )
+
+
+def _bucket(key: str, evaluations: list[str | None]) -> EvaluationBucket:
+    correct = evaluations.count("correct")
+    wrong = evaluations.count("wrong")
+    decisive = correct + wrong
+    return EvaluationBucket(
+        key=key,
+        total=len(evaluations),
+        correct=correct,
+        wrong=wrong,
+        neutral=evaluations.count("neutral"),
+        not_evaluated=sum(1 for e in evaluations if e is None),
+        hit_rate=round(correct / decisive, 3) if decisive else None,
+    )
+
+
+def get_evaluation_stats(db: Session, profile_id: int | None = None) -> EvaluationStatsOut:
+    """Hit-rate per module and per Pulse verdict (neutral verdicts are not decisive)."""
+    q = db.query(MarketAnalysisSession)
+    if profile_id is not None:
+        q = q.filter(MarketAnalysisSession.profile_id == profile_id)
+    sessions = q.all()
+
+    by_module: dict[str, list[str | None]] = {}
+    by_verdict: dict[str, list[str | None]] = {}
+    for s in sessions:
+        by_module.setdefault(s.module.name, []).append(s.evaluation)
+        code = pulse_verdict_code(pulse_scores_for_session(s))
+        if code is not None:
+            by_verdict.setdefault(_PULSE_VERDICTS[code].label, []).append(s.evaluation)
+
+    return EvaluationStatsOut(
+        by_module=[_bucket(k, v) for k, v in sorted(by_module.items())],
+        by_verdict=[_bucket(k, v) for k, v in sorted(by_verdict.items())],
+    )
