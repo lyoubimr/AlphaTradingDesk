@@ -454,9 +454,10 @@ export const maApi = {
     request(`/market-analysis/sessions/${sessionId}`, { method: 'PATCH', body: JSON.stringify(data) }),
 
   /** POST /api/market-analysis/sessions/{id}/screenshots/{before|after} (multipart) */
-  uploadSessionScreenshot: async (sessionId: number, kind: 'before' | 'after', file: File): Promise<MASessionOut> => {
+  uploadSessionScreenshot: async (sessionId: number, kind: 'before' | 'after', file: File, caption?: string | null): Promise<MASessionOut> => {
     const form = new FormData()
     form.append('file', file)
+    if (caption) form.append('caption', caption)
     const res = await fetch(`${BASE}/market-analysis/sessions/${sessionId}/screenshots/${kind}`, {
       method: 'POST',
       body: form,
@@ -467,6 +468,10 @@ export const maApi = {
     }
     return res.json() as Promise<MASessionOut>
   },
+
+  /** PATCH /api/market-analysis/sessions/{id}/screenshots/{kind} — set or clear a capture caption */
+  setSessionScreenshotCaption: (sessionId: number, kind: 'before' | 'after', url: string, caption: string | null): Promise<MASessionOut> =>
+    request(`/market-analysis/sessions/${sessionId}/screenshots/${kind}`, { method: 'PATCH', body: JSON.stringify({ url, caption }) }),
 
   /** DELETE /api/market-analysis/sessions/{id}/screenshots/{kind}/{url_b64} */
   deleteSessionScreenshot: (sessionId: number, kind: 'before' | 'after', url: string): Promise<MASessionOut> => {

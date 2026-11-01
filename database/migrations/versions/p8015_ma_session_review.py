@@ -4,7 +4,7 @@ Revision ID: p8015_ma_session_review
 Revises: p8014_ma_module_stale_hours
 Create Date: 2026-11-01
 
-screenshots_before / screenshots_after : lists of /uploads/... URLs
+screenshots_before / screenshots_after : lists of captures {url, at, caption}
 after_notes                            : free-text follow-up written when reviewing
 evaluation                             : correct | wrong | neutral (NULL = not evaluated)
 reviewed_at                            : set when evaluation is chosen

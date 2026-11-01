@@ -18,9 +18,22 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 Bias = Literal["bullish", "neutral", "bearish"]
+
+
+class ShotOut(BaseModel):
+    """One before/after capture. Rows stored as plain URLs are upgraded on read."""
+
+    url: str
+    at: datetime | None = None
+    caption: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _from_legacy_url(cls, value: object) -> object:
+        return {"url": value} if isinstance(value, str) else value
 
 
 # ── Modules ───────────────────────────────────────────────────────────────────
@@ -197,8 +210,8 @@ class SessionOut(BaseModel):
     notes: str | None
     analyzed_at: datetime
     created_at: datetime
-    screenshots_before: list[str] = []
-    screenshots_after: list[str] = []
+    screenshots_before: list[ShotOut] = []
+    screenshots_after: list[ShotOut] = []
     after_notes: str | None = None
     evaluation: str | None = None
     reviewed_at: datetime | None = None
@@ -233,12 +246,22 @@ class SessionListItem(BaseModel):
     bias_composite_b: str | None = None
     notes: str | None
     analyzed_at: datetime
-    screenshots_before: list[str] = []
-    screenshots_after: list[str] = []
+    screenshots_before: list[ShotOut] = []
+    screenshots_after: list[ShotOut] = []
     evaluation: str | None = None
+    # computed by the service
+    after_at: datetime | None = None
+    verdict_label: str | None = None
+    verdict_emoji: str | None = None
+    verdict_color: str | None = None
 
 
 # ── Session review (notes, screenshots, verdict) ──────────────────────────────────────
+
+
+class ShotCaptionUpdate(BaseModel):
+    url: str
+    caption: str | None = None
 
 
 class SessionUpdate(BaseModel):

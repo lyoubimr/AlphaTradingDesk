@@ -55,6 +55,7 @@ from src.market_analysis.schemas import (
     LinkedTradesOut,
     ModuleUpdate,
     SessionCreate,
+    SessionListItem,
     SessionUpdate,
     StalenessItem,
     TimeframeLinkOut,
@@ -716,6 +717,21 @@ def get_session(db: Session, session_id: int) -> MarketAnalysisSession:
     return _get_session_or_404(db, session_id)
 
 
+def conclusion_for_session(session: MarketAnalysisSession) -> TradeConclusion | None:
+    """Verdict for a v2 session; None for legacy sessions without block scores."""
+    if session.score_trend_a is None:
+        return None
+    pulse = get_pulse_conclusion(pulse_scores_for_session(session))
+    if pulse is not None:
+        return pulse
+    return get_trade_conclusion(
+        trend=session.score_trend_a or Decimal("50"),
+        momentum=session.score_momentum_a or Decimal("50"),
+        participation=session.score_participation_a or Decimal("50"),
+        bias=session.bias_composite_a or "neutral",
+    )
+
+
 def get_session_conclusion(db: Session, session_id: int) -> TradeConclusion:
     """
     Return the trade conclusion for a session.
@@ -723,33 +739,31 @@ def get_session_conclusion(db: Session, session_id: int) -> TradeConclusion:
     Falls back to a neutral conclusion for legacy sessions.
     """
     session = _get_session_or_404(db, session_id)
-
-    if session.score_trend_a is None:
-        # Legacy session — no decomposed scores
-        return TradeConclusion(
-            emoji="🟡",
-            label="Analysis Needed",
-            detail="This is a legacy session without block scores. Run a new analysis to get a conclusion.",
-            trade_types=[],
-            size_advice="n/a",
-            color="neutral",
-        )
-
-    trend = session.score_trend_a
-    momentum = session.score_momentum_a
-    participation = session.score_participation_a
-    bias = session.bias_composite_a or "neutral"
-
-    pulse = get_pulse_conclusion(pulse_scores_for_session(session))
-    if pulse is not None:
-        return pulse
-
-    return get_trade_conclusion(
-        trend=trend or Decimal("50"),
-        momentum=momentum or Decimal("50"),
-        participation=participation or Decimal("50"),
-        bias=bias,
+    conclusion = conclusion_for_session(session)
+    if conclusion is not None:
+        return conclusion
+    # Legacy session — no decomposed scores
+    return TradeConclusion(
+        emoji="🟡",
+        label="Analysis Needed",
+        detail="This is a legacy session without block scores. Run a new analysis to get a conclusion.",
+        trade_types=[],
+        size_advice="n/a",
+        color="neutral",
     )
+
+
+def build_list_item(session: MarketAnalysisSession) -> SessionListItem:
+    """History row: stored fields + verdict and the time of the first follow-up."""
+    item = SessionListItem.model_validate(session)
+    after_times = [s.at for s in item.screenshots_after if s.at is not None]
+    item.after_at = max(after_times) if after_times else session.reviewed_at
+    conclusion = conclusion_for_session(session)
+    if conclusion is not None:
+        item.verdict_label = conclusion.label
+        item.verdict_emoji = conclusion.emoji
+        item.verdict_color = conclusion.color
+    return item
 
 
 def _staleness_item(
@@ -971,12 +985,40 @@ def _screenshot_attr(kind: str) -> str:
 
 
 def add_session_screenshot(
-    db: Session, session_id: int, kind: str, file: UploadFile
+    db: Session, session_id: int, kind: str, file: UploadFile, caption: str | None = None
 ) -> MarketAnalysisSession:
     attr = _screenshot_attr(kind)
     session = _get_session_or_404(db, session_id)
     url = save_image_upload(file, "ma_sessions", str(session_id))
-    setattr(session, attr, [*(getattr(session, attr) or []), url])
+    shot = {
+        "url": url,
+        "at": datetime.now(UTC).isoformat(),
+        "caption": (caption or "").strip() or None,
+    }
+    setattr(session, attr, [*_shots(session, attr), shot])
+    db.commit()
+    db.refresh(session)
+    return session
+
+
+def _shots(session: MarketAnalysisSession, attr: str) -> list[dict]:
+    """Stored captures as dicts (plain URL strings from older rows are upgraded)."""
+    return [
+        s if isinstance(s, dict) else {"url": s, "at": None, "caption": None}
+        for s in (getattr(session, attr) or [])
+    ]
+
+
+def set_screenshot_caption(
+    db: Session, session_id: int, kind: str, url: str, caption: str | None
+) -> MarketAnalysisSession:
+    attr = _screenshot_attr(kind)
+    session = _get_session_or_404(db, session_id)
+    shots = _shots(session, attr)
+    if not any(s["url"] == url for s in shots):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Screenshot not found.")
+    clean = (caption or "").strip()[:40] or None
+    setattr(session, attr, [{**s, "caption": clean} if s["url"] == url else s for s in shots])
     db.commit()
     db.refresh(session)
     return session
@@ -985,10 +1027,10 @@ def add_session_screenshot(
 def remove_session_screenshot(
     db: Session, session_id: int, kind: str, url: str
 ) -> MarketAnalysisSession:
-    """Detach a screenshot URL (the file itself stays on disk)."""
+    """Detach a screenshot (the file itself stays on disk)."""
     attr = _screenshot_attr(kind)
     session = _get_session_or_404(db, session_id)
-    setattr(session, attr, [u for u in (getattr(session, attr) or []) if u != url])
+    setattr(session, attr, [s for s in _shots(session, attr) if s["url"] != url])
     db.commit()
     db.refresh(session)
     return session
