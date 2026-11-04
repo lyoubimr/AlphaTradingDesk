@@ -78,16 +78,70 @@ def get_analytics_settings(profile_id: int, db: Session) -> AnalyticsSettings:
     return row
 
 
+# AI settings and keys are shared by all profiles: configure once, works everywhere.
+AI_CONFIG_KEYS = ("ai_enabled", "ai_provider", "ai_model", "ai_refresh", "ai_refresh_hours")
+
+# Groq retired these models; saved configs are mapped to the successor.
+GROQ_MODEL_REPLACEMENTS = {
+    "llama-3.3-70b-versatile": "openai/gpt-oss-120b",
+    "llama-3.1-8b-instant": "openai/gpt-oss-20b",
+    "mistral-saba-24b": "openai/gpt-oss-120b",
+    "qwen/qwen3-32b": "openai/gpt-oss-120b",
+    "qwen/qwen3.6-27b": "qwen/qwen3.8-27b",
+    "meta-llama/llama-4-scout-17b-16e-instruct": "openai/gpt-oss-120b",
+}
+
+
+def get_effective_analytics_config(profile_id: int, db: Session) -> dict:
+    """Profile config with the shared AI settings overlaid (own if enabled, else any enabled profile)."""
+    own = get_analytics_settings(profile_id, db)
+    ai_source = own
+    if not (own.config or {}).get("ai_enabled"):
+        other = (
+            db.query(AnalyticsSettings)
+            .filter(
+                AnalyticsSettings.profile_id != profile_id,
+                AnalyticsSettings.config["ai_enabled"].as_boolean().is_(True),
+            )
+            .order_by(AnalyticsSettings.updated_at.desc())
+            .first()
+        )
+        if other is not None:
+            ai_source = other
+    config = dict(own.config or {})
+    for key in AI_CONFIG_KEYS:
+        if key in (ai_source.config or {}):
+            config[key] = ai_source.config[key]
+    if config.get("ai_provider") == "groq":
+        config["ai_model"] = GROQ_MODEL_REPLACEMENTS.get(config.get("ai_model", ""), config.get("ai_model"))
+    return config
+
+
 def update_analytics_settings(profile_id: int, patch: dict, db: Session) -> AnalyticsSettings:
     row = get_analytics_settings(profile_id, db)
+    ai_patch = {k: v for k, v in patch.items() if k in AI_CONFIG_KEYS}
+    now = datetime.now(UTC).replace(tzinfo=None)
     row.config = _deep_merge(row.config, patch)
-    row.updated_at = datetime.now(UTC).replace(tzinfo=None)
+    row.updated_at = now
+    if ai_patch:
+        for other in db.query(AnalyticsSettings).filter(AnalyticsSettings.profile_id != profile_id).all():
+            other.config = _deep_merge(other.config or {}, ai_patch)
+            other.updated_at = now
     db.commit()
     db.refresh(row)
     return row
 
 
 # ── AI keys CRUD ──────────────────────────────────────────────────────────────
+
+AI_KEY_COLUMNS = {
+    "openai": "openai_key_enc",
+    "anthropic": "anthropic_key_enc",
+    "perplexity": "perplexity_key_enc",
+    "groq": "groq_key_enc",
+    "gemini": "gemini_key_enc",
+}
+
 
 def get_ai_keys_row(profile_id: int, db: Session) -> AnalyticsAIKeys:
     row = db.query(AnalyticsAIKeys).filter_by(profile_id=profile_id).first()
@@ -99,15 +153,30 @@ def get_ai_keys_row(profile_id: int, db: Session) -> AnalyticsAIKeys:
     return row
 
 
+def resolve_ai_key_enc(profile_id: int, provider: str, db: Session) -> bytes | None:
+    """Encrypted key for a provider: own if set, else the most recently updated one from any profile."""
+    column = AI_KEY_COLUMNS[provider]
+    own = get_ai_keys_row(profile_id, db)
+    if getattr(own, column) is not None:
+        return getattr(own, column)
+    other = (
+        db.query(AnalyticsAIKeys)
+        .filter(AnalyticsAIKeys.profile_id != profile_id, getattr(AnalyticsAIKeys, column).is_not(None))
+        .order_by(AnalyticsAIKeys.updated_at.desc())
+        .first()
+    )
+    return getattr(other, column) if other is not None else None
+
+
 def get_ai_keys_status(profile_id: int, db: Session) -> AIKeysStatusOut:
-    row = get_ai_keys_row(profile_id, db)
+    configured = {p: resolve_ai_key_enc(profile_id, p, db) is not None for p in AI_KEY_COLUMNS}
     return AIKeysStatusOut(
         profile_id=profile_id,
-        openai_configured=row.openai_key_enc is not None,
-        anthropic_configured=row.anthropic_key_enc is not None,
-        perplexity_configured=row.perplexity_key_enc is not None,
-        groq_configured=row.groq_key_enc is not None,
-        gemini_configured=row.gemini_key_enc is not None,
+        openai_configured=configured["openai"],
+        anthropic_configured=configured["anthropic"],
+        perplexity_configured=configured["perplexity"],
+        groq_configured=configured["groq"],
+        gemini_configured=configured["gemini"],
     )
 
 
