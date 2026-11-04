@@ -105,6 +105,40 @@ def _get_decrypted_key(profile_id: int, provider: str, db: Session) -> str:
 
 # ── Prompt builder ────────────────────────────────────────────────────────────
 
+MIN_SAMPLE = 5
+
+_PROMPT_INSTRUCTIONS = """You are a trading performance coach reviewing one trader's closed trades.
+
+RULES
+1. English only. Use ONLY figures from the DATA block, copied exactly. Never invent, re-round or extrapolate.
+2. SAMPLE SIZE: rows tagged [n<5] have too few trades to conclude anything. Never use them in "What's working", "What needs fixing" or "Actions". They may only appear under "Too early to tell".
+3. Call a segment an edge or a weakness only if it has at least 5 trades and clearly differs from the overall figures.
+4. Overall KPIs (win rate, profit factor, expectancy, drawdown, streaks) are valid findings.
+5. Never repeat the same finding in two sections. Never state causes that the data does not show.
+6. Quote strategy, session and volatility-bucket names exactly as given; do not interpret them.
+
+OUTPUT FORMAT (Markdown only; start directly with the first heading; no intro, no outro):
+## ✅ What's working
+- 🔹 **Short label** — one sentence with the key figures (n trades).
+(2 to 4 bullets)
+## ⚠️ What needs fixing
+- 🔹 **Short label** — one sentence with the key figures (n trades).
+(2 to 4 bullets)
+## 🎯 Actions
+1. 🔹 **Imperative action** — why, tied to a figure above.
+(exactly 3 numbered actions, each based on a finding with at least 5 trades)
+## 🔎 Too early to tell
+- 🔹 **Label** — n trades, what to keep tracking.
+(0 to 3 bullets; omit this whole section if there is nothing)
+
+STYLE: each bullet at most 30 words; replace 🔹 with one emoji that fits the bullet; no tables, no nested lists, no horizontal rules, no HTML, no extra headings."""
+
+
+def _n(trades: int) -> str:
+    """Flag segments below the minimum sample so the model cannot over-read them."""
+    return f" [n<{MIN_SAMPLE}]" if trades < MIN_SAMPLE else ""
+
+
 def _build_prompt(report: PerformanceReport) -> str:
     kpi = report.kpi
     rr: float | str = round(abs(kpi.avg_win_pnl / kpi.avg_loss_pnl), 2) if (kpi.avg_win_pnl is not None and kpi.avg_loss_pnl) else "N/A"
@@ -112,19 +146,9 @@ def _build_prompt(report: PerformanceReport) -> str:
     max_dd_pct = min((p.drawdown_pct for p in report.drawdown), default=0.0) if report.drawdown else 0.0
 
     lines = [
-        "You are an expert trading performance coach. "
-        "Always respond in English. "
-        "Respond ONLY using the exact numbers provided below — never invent or extrapolate figures. "
-        "Only draw conclusions from data points with enough sample size to be statistically meaningful — "
-        "judge significance yourself from the trade counts (< 5 trades = inconclusive). "
-        "Use emojis generously throughout — not just on headers but inline on bullets to make feedback vivid. "
-        "Structure your response in exactly 3 sections:\n"
-        "✅ What's working\n"
-        "❌ What needs fixing\n"
-        "🎯 Actions to take\n"
-        "Each section: 3-5 bullet points, each starting with a relevant emoji, short and direct. "
-        "On the Actions section: be specific, actionable, and reference the actual numbers. "
-        "Cross-reference sessions vs strategies where the data shows a clear edge or a clear weakness.",
+        _PROMPT_INSTRUCTIONS,
+        "",
+        "=== DATA ===",
         "",
         "━━━ 📊 OVERALL KPIs ━━━",
         f"📅 Period: {report.period}",
@@ -140,18 +164,18 @@ def _build_prompt(report: PerformanceReport) -> str:
     for s in report.wr_by_session:
         if s.label == "Unknown":
             continue
-        lines.append(f"  {s.label}: {s.trades} trades | WR {s.wr_pct}% | avg PnL {s.avg_pnl} | total PnL {s.total_pnl}")
+        lines.append(f"  {s.label}: {s.trades} trades | WR {s.wr_pct}% | avg PnL {s.avg_pnl} | total PnL {s.total_pnl}{_n(s.trades)}")
 
     lines += ["", "━━━ 📈 STRATEGIES ━━━"]
     for s in report.wr_by_strategy[:6]:
-        lines.append(f"  {s.label}: {s.trades} trades | WR {s.wr_pct}% | avg PnL {s.avg_pnl} | total PnL {s.total_pnl}")
+        lines.append(f"  {s.label}: {s.trades} trades | WR {s.wr_pct}% | avg PnL {s.avg_pnl} | total PnL {s.total_pnl}{_n(s.trades)}")
 
     if report.wr_by_strategy_session:
         lines += ["", "━━━ 🔀 STRATEGY × SESSION CROSS-TAB ━━━"]
         lines.append("  (strategy | session: trades, WR%)")
         for row in report.wr_by_strategy_session:
             cells_str = " | ".join(
-                f"{c.session}: {c.trades}t {c.wr_pct}%"
+                f"{c.session}: {c.trades}t {c.wr_pct}%{_n(c.trades)}"
                 for c in row.cells if c.trades > 0
             )
             if cells_str:
@@ -159,15 +183,15 @@ def _build_prompt(report: PerformanceReport) -> str:
 
     lines += ["", "━━━ 💱 TOP PAIRS ━━━"]
     for p in report.pair_leaderboard[:6]:
-        lines.append(f"  {p.label}: {p.trades} trades | WR {p.wr_pct}% | avg PnL {p.avg_pnl} | avg PnL% {p.avg_pnl_pct}")
+        lines.append(f"  {p.label}: {p.trades} trades | WR {p.wr_pct}% | avg PnL {p.avg_pnl} | avg PnL% {p.avg_pnl_pct}{_n(p.trades)}")
 
     lines += ["", "━━━ ⏱️  TRADE STYLE ━━━"]
     for tt in report.trade_type_dist:
-        lines.append(f"  {tt.trade_type}: {tt.count} trades | WR {tt.wr_pct}% | avg PnL {tt.avg_pnl}")
+        lines.append(f"  {tt.trade_type}: {tt.count} trades | WR {tt.wr_pct}% | avg PnL {tt.avg_pnl}{_n(tt.count)}")
 
     lines += ["", "━━━ ↕️  DIRECTION ━━━"]
     for d in report.direction_bias:
-        lines.append(f"  {d.direction}: {d.trades} trades | WR {d.wr_pct}% | total PnL {d.total_pnl}")
+        lines.append(f"  {d.direction}: {d.trades} trades | WR {d.wr_pct}% | total PnL {d.total_pnl}{_n(d.trades)}")
 
     lines += ["", "━━━ 🏷️  TAGS ━━━"]
     if report.top_tags_winners:
@@ -185,7 +209,7 @@ def _build_prompt(report: PerformanceReport) -> str:
     if report.vi_correlation:
         lines += ["", "━━━ 🌊 VOLATILITY (pair VI buckets) ━━━"]
         for v in report.vi_correlation:
-            lines.append(f"  {v.bucket}: {v.trades} trades | WR {v.wr_pct}% | avg PnL {v.avg_pnl}")
+            lines.append(f"  {v.bucket}: {v.trades} trades | WR {v.wr_pct}% | avg PnL {v.avg_pnl}{_n(v.trades)}")
 
     if report.top_trades:
         lines += ["", "━━━ 🏆 BEST TRADES ━━━"]
@@ -203,6 +227,8 @@ def _build_prompt(report: PerformanceReport) -> str:
         "",
         "━━━ 📝 REVIEW RATE ━━━",
         f"  {report.review_rate.review_rate_pct}% of trades reviewed ({report.review_rate.reviewed_count}/{report.review_rate.total_closed})",
+        "",
+        "Write the review now, strictly in the OUTPUT FORMAT.",
     ]
     return "\n".join(lines)
 
@@ -281,7 +307,7 @@ async def _call_groq(api_key: str, model: str, prompt: str) -> tuple[str, int]:
         "messages": [{"role": "user", "content": prompt}],
         # Reasoning models spend part of the budget on hidden thinking tokens.
         "max_tokens": 3000,
-        "temperature": 0.7,
+        "temperature": 0.4,
     }
     if model.startswith("openai/gpt-oss"):
         payload["reasoning_effort"] = "low"
