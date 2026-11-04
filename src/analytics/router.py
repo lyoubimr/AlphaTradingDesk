@@ -41,6 +41,7 @@ from src.analytics.service import (
     compute_performance_report,
     get_ai_keys_status,
     get_analytics_settings,
+    get_effective_analytics_config,
     update_analytics_settings,
 )
 from src.core.deps import get_db
@@ -67,8 +68,8 @@ def get_settings(
     profile_id: int,
     db: Session = Depends(get_db),
 ) -> AnalyticsSettingsOut:
-    row = get_analytics_settings(profile_id, db)
-    return AnalyticsSettingsOut(profile_id=row.profile_id, config=row.config)
+    get_analytics_settings(profile_id, db)
+    return AnalyticsSettingsOut(profile_id=profile_id, config=get_effective_analytics_config(profile_id, db))
 
 
 @router.put("/settings/{profile_id}", response_model=AnalyticsSettingsOut)
@@ -78,8 +79,8 @@ def update_settings(
     db: Session = Depends(get_db),
 ) -> AnalyticsSettingsOut:
     patch = body.model_dump(exclude_none=True)
-    row = update_analytics_settings(profile_id, patch, db)
-    return AnalyticsSettingsOut(profile_id=row.profile_id, config=row.config)
+    update_analytics_settings(profile_id, patch, db)
+    return AnalyticsSettingsOut(profile_id=profile_id, config=get_effective_analytics_config(profile_id, db))
 
 
 # ── AI keys ───────────────────────────────────────────────────────────────────

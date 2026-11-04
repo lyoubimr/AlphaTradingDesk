@@ -26,7 +26,7 @@ const PROVIDER_MODELS: Record<Provider, string[]> = {
   openai: ['gpt-4o-mini', 'gpt-4o', 'gpt-4-turbo'],
   anthropic: ['claude-3-haiku-20240307', 'claude-3-5-sonnet-20241022', 'claude-3-opus-20240229'],
   perplexity: ['sonar', 'sonar-pro'],
-  groq: ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant', 'mistral-saba-24b'],
+  groq: ['openai/gpt-oss-120b', 'openai/gpt-oss-20b', 'qwen/qwen3.8-27b'],
   gemini: ['gemini-2.0-flash', 'gemini-2.0-flash-lite'],
 }
 const REFRESH_OPTIONS = [

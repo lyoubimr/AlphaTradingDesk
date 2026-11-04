@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from datetime import UTC, datetime
 
 import httpx
@@ -26,7 +27,12 @@ from sqlalchemy.orm import Session
 
 from src.analytics.models import AnalyticsAICache, AnalyticsAIKeys
 from src.analytics.schemas import AIGenerateOut, PerformanceReport
-from src.analytics.service import get_ai_keys_row, get_analytics_settings
+from src.analytics.service import (
+    AI_KEY_COLUMNS,
+    get_ai_keys_row,
+    get_effective_analytics_config,
+    resolve_ai_key_enc,
+)
 from src.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -65,34 +71,30 @@ def save_ai_keys(
     groq_key: str | None = None,
     gemini_key: str | None = None,
 ) -> None:
-    """Encrypt and persist AI API keys. None = keep existing, '' = clear."""
-    row = get_ai_keys_row(profile_id, db)
-
-    if openai_key is not None:
-        row.openai_key_enc = encrypt_key(openai_key) if openai_key else None
-    if anthropic_key is not None:
-        row.anthropic_key_enc = encrypt_key(anthropic_key) if anthropic_key else None
-    if perplexity_key is not None:
-        row.perplexity_key_enc = encrypt_key(perplexity_key) if perplexity_key else None
-    if groq_key is not None:
-        row.groq_key_enc = encrypt_key(groq_key) if groq_key else None
-    if gemini_key is not None:
-        row.gemini_key_enc = encrypt_key(gemini_key) if gemini_key else None
-
-    row.updated_at = datetime.now(UTC).replace(tzinfo=None)
+    """Encrypt and persist AI API keys for all profiles (shared). None = keep existing, '' = clear."""
+    get_ai_keys_row(profile_id, db)  # ensure the caller's row exists
+    submitted = {
+        "openai": openai_key,
+        "anthropic": anthropic_key,
+        "perplexity": perplexity_key,
+        "groq": groq_key,
+        "gemini": gemini_key,
+    }
+    now = datetime.now(UTC).replace(tzinfo=None)
+    rows = db.query(AnalyticsAIKeys).all()
+    for provider, plain in submitted.items():
+        if plain is None:
+            continue
+        enc = encrypt_key(plain) if plain else None
+        for row in rows:
+            setattr(row, AI_KEY_COLUMNS[provider], enc)
+            row.updated_at = now
     db.commit()
 
 
-def _get_decrypted_key(row: AnalyticsAIKeys, provider: str) -> str:
+def _get_decrypted_key(profile_id: int, provider: str, db: Session) -> str:
     """Return the decrypted API key for a provider, or raise 400 if not set."""
-    enc_col_map = {
-        "openai": row.openai_key_enc,
-        "anthropic": row.anthropic_key_enc,
-        "perplexity": row.perplexity_key_enc,
-        "groq": row.groq_key_enc,
-        "gemini": row.gemini_key_enc,
-    }
-    enc = enc_col_map.get(provider)
+    enc = resolve_ai_key_enc(profile_id, provider, db) if provider in AI_KEY_COLUMNS else None
     if not enc:
         raise HTTPException(
             status_code=400,
@@ -274,21 +276,28 @@ async def _call_perplexity(api_key: str, model: str, prompt: str) -> tuple[str, 
 
 async def _call_groq(api_key: str, model: str, prompt: str) -> tuple[str, int]:
     """Call Groq API (OpenAI-compatible, free tier). Returns (summary, tokens_used)."""
-    async with httpx.AsyncClient(timeout=60.0) as client:
+    payload: dict = {
+        "model": model,
+        "messages": [{"role": "user", "content": prompt}],
+        # Reasoning models spend part of the budget on hidden thinking tokens.
+        "max_tokens": 3000,
+        "temperature": 0.7,
+    }
+    if model.startswith("openai/gpt-oss"):
+        payload["reasoning_effort"] = "low"
+    async with httpx.AsyncClient(timeout=90.0) as client:
         resp = await client.post(
             "https://api.groq.com/openai/v1/chat/completions",
             headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-            json={
-                "model": model,
-                "messages": [{"role": "user", "content": prompt}],
-                "max_tokens": 800,
-                "temperature": 0.7,
-            },
+            json=payload,
         )
     if resp.status_code != 200:
         _raise_provider_error("Groq", resp)
     data = resp.json()
-    summary = data["choices"][0]["message"]["content"].strip()
+    content = data["choices"][0]["message"].get("content") or ""
+    summary = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
+    if not summary:
+        raise HTTPException(status_code=502, detail=f"Groq model '{model}' returned an empty answer.")
     tokens = data.get("usage", {}).get("total_tokens", 0)
     return summary, tokens
 
@@ -334,8 +343,7 @@ async def generate_ai_summary(
     db: Session,
 ) -> AIGenerateOut:
     """Generate and cache an AI narrative for the given performance report."""
-    settings_row = get_analytics_settings(profile_id, db)
-    config = settings_row.config or {}
+    config = get_effective_analytics_config(profile_id, db)
 
     if not config.get("ai_enabled", False):
         raise HTTPException(status_code=400, detail="AI insights are disabled. Enable them in Analytics settings.")
@@ -343,12 +351,11 @@ async def generate_ai_summary(
     provider = config.get("ai_provider", "openai")
     model = config.get("ai_model", "gpt-4o-mini")
 
-    keys_row = get_ai_keys_row(profile_id, db)
-    api_key = _get_decrypted_key(keys_row, provider)
+    api_key = _get_decrypted_key(profile_id, provider, db)
 
     prompt = _build_prompt(report)
 
-    # ── Call selected provider ─────────────────────────────────────────────
+    # ── Call selected provider ──
     if provider == "openai":
         summary, tokens = await _call_openai(api_key, model, prompt)
     elif provider == "anthropic":
