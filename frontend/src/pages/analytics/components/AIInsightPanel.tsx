@@ -5,6 +5,7 @@ import { ChevronDown, ChevronUp, RefreshCw, Settings, Sparkles } from 'lucide-re
 import { useNavigate } from 'react-router-dom'
 import { analyticsApi } from '../../../lib/api'
 import type { AIGenerateOut } from '../../../types/api'
+import { AIInsightBody } from './AIInsightBody'
 
 interface Props {
   profileId: number
@@ -125,11 +126,7 @@ export function AIInsightPanel({ profileId, period, aiEnabled, existing }: Props
             </div>
           )}
 
-          {result?.summary && (
-            <p className="text-sm text-slate-300 leading-relaxed whitespace-pre-line">
-              {result.summary}
-            </p>
-          )}
+          {result?.summary && <AIInsightBody summary={result.summary} />}
 
           {!result && !loading && !error && aiEnabled && (
             <p className="text-xs text-slate-600 py-2">
