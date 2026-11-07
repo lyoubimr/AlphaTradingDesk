@@ -29,6 +29,16 @@ class InsufficientSizeError(ValueError):
     """Raised when the quantized lot size is below the instrument minimum."""
 
 
+class PreflightMarginError(KrakenAPIError):
+    """Raised before any order is sent when the account margin cannot support the trade.
+
+    `body` holds the complete, user-facing explanation (shown as-is in the UI).
+    """
+
+    def __init__(self, message: str) -> None:
+        super().__init__(0, message)
+
+
 class ExceedsMaxSizeError(ValueError):
     """Raised when the requested size exceeds the instrument maximum."""
 

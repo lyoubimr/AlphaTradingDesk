@@ -89,7 +89,7 @@ export function AutomationToggle({ tradeId, tradeStatus, hasOrders, hasOpenEntry
       </div>
 
       {error && (
-        <p className="text-xs text-red-400">{error}</p>
+        <p className="text-xs text-red-400 whitespace-pre-line leading-relaxed">{error}</p>
       )}
 
       {canOpen && (
