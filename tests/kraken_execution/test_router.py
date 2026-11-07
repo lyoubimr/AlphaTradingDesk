@@ -308,6 +308,19 @@ class TestTriggerOpen:
             resp = client.post(f"{_PREFIX}/trades/{trade.id}/open")
         assert resp.status_code == 502
 
+    def test_returns_422_with_full_message_on_preflight_margin_error(
+        self, client: TestClient, trade: Trade
+    ):
+        from src.kraken_execution import PreflightMarginError
+
+        with patch(
+            "src.kraken_execution.router.open_automated_trade",
+            side_effect=PreflightMarginError("Trade not sent to Kraken.\n\nHow to fix\n1. Lower risk"),
+        ):
+            resp = client.post(f"{_PREFIX}/trades/{trade.id}/open")
+        assert resp.status_code == 422
+        assert resp.json()["detail"] == "Trade not sent to Kraken.\n\nHow to fix\n1. Lower risk"
+
     def test_returns_200_with_order_details_on_success(
         self, client: TestClient, trade: Trade
     ):
