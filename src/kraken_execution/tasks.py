@@ -799,6 +799,42 @@ def _alert_if_unprotected(
     trade = db.query(Trade).filter(Trade.id == order.trade_id).first()
     if replacement is not None or trade is None or trade.status not in ("open", "partial", "runner"):
         return
+
+    closing_margin_refused = "insufficient_closing_margin" in reason
+    if closing_margin_refused and order.role == "sl":
+        # The triggered stop was refused for lack of closing margin: do what the stop
+        # was meant to do (tighter-band close) instead of waiting for the user.
+        from src.kraken_execution.service import close_automated_trade  # noqa: PLC0415
+
+        try:
+            close_automated_trade(trade.id, db)
+        except Exception as exc:  # noqa: BLE001
+            logger.error("auto_close_after_rejected_sl_failed", trade_id=trade.id, error=str(exc))
+            auto_close_note = (
+                "ATD tried to close it automatically and Kraken refused again. "
+                "Kraken refuses closing orders when free margin is too low: deposit a little margin "
+                "(a few USD) then press Close in ATD, or send a LIMIT order on the opposite side "
+                "('Reduce only') just beyond the market price in Kraken."
+            )
+        else:
+            _notify_event(
+                order.profile_id,
+                "ORDER_ERROR",
+                db,
+                trade_id=trade.id,
+                pair=trade.pair,
+                direction=trade.direction,
+                error_message=(
+                    f"\U0001f6e1\ufe0f Your stop-loss on {trade.pair} (trade #{trade.id}) was refused by Kraken "
+                    "(insufficient closing margin). ATD closed the position automatically instead. "
+                    "Check the trade for the exit price. To avoid this, keep more free margin "
+                    "(smaller size or a deposit)."
+                ),
+            )
+            return
+    else:
+        auto_close_note = "Close it in ATD (Close button) or directly on Kraken."
+
     _notify_event(
         order.profile_id,
         "ORDER_ERROR",
@@ -807,8 +843,8 @@ def _alert_if_unprotected(
         pair=trade.pair,
         direction=trade.direction,
         error_message=(
-            f"🚨 STOP-LOSS LOST on {trade.pair} (trade #{trade.id}): {reason}. "
-            "The position is STILL OPEN on Kraken with NO stop. Act now."
+            f"\U0001f6a8 STOP-LOSS LOST on {trade.pair} (trade #{trade.id}): {reason}. "
+            f"The position is STILL OPEN on Kraken with NO stop. {auto_close_note}"
         ),
     )
 

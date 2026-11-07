@@ -1723,8 +1723,8 @@ export function NewTradePage() {
       <form ref={formRef} onSubmit={handleSubmit} className="max-w-2xl space-y-5 mt-2">
 
         {error && (
-          <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/30 text-red-400 text-xs">
-            <AlertTriangle size={14} className="shrink-0" />{error}
+          <div className="flex items-start gap-2 px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/30 text-red-400 text-xs whitespace-pre-line leading-relaxed">
+            <AlertTriangle size={14} className="shrink-0 mt-0.5" /><span>{error}</span>
           </div>
         )}
 
@@ -1774,7 +1774,7 @@ export function NewTradePage() {
                 <p className="text-sm font-semibold text-amber-300">
                   ⚡ Trade saved — Kraken order failed
                 </p>
-                <p className="text-xs text-amber-400/90 leading-relaxed">
+                <p className="text-xs text-amber-400/90 leading-relaxed whitespace-pre-line">
                   {automationWarning.msg}
                 </p>
               </div>

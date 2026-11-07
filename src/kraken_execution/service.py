@@ -29,14 +29,17 @@ from src.core.models.broker import Instrument
 from src.core.models.trade import Position, Trade
 from src.kraken_execution import (
     AutomationNotEnabledError,
+    InsufficientSizeError,
     KrakenAPIError,
     MissingAPIKeysError,
     MissingPrecisionError,
+    PreflightMarginError,
 )
 from src.kraken_execution.client import KrakenExecutionClient
 from src.kraken_execution.fills import aggregate_fills_by_order, is_fully_filled
 from src.kraken_execution.models import DEFAULT_AUTOMATION_CONFIG, AutomationSettings, KrakenOrder
 from src.kraken_execution.precision import quantize_size
+from src.kraken_execution.preflight import check_entry_margin, format_margin_error
 from src.risk_management.engine import _deep_merge
 from src.volatility.kraken_client import KrakenClient as PublicKrakenClient
 
@@ -427,21 +430,44 @@ def open_automated_trade(
                     error=str(pos_err),
                 )
             buffer_pct = Decimal(str(settings_row.config.get("preflight_margin_buffer_pct", _DEFAULT_PREFLIGHT_MARGIN_BUFFER_PCT)))
-            preflight_buffer = Decimal("1") + buffer_pct / Decimal("100")
-            if available >= 0 and available < required_margin * preflight_buffer:
-                buffered_required = (required_margin * preflight_buffer).quantize(Decimal("0.01"))
-                shortfall = (buffered_required - available).quantize(Decimal("0.01"))
-                raise KrakenAPIError(
-                    0,
-                    f"Insufficient Kraken margin for this trade (isolated margin): "
-                    f"you have {float(available):.2f} USD available, "
-                    f"but ~{float(buffered_required):.2f} USD are needed "
-                    f"({float(lot_size):.4f} units × {float(entry_price):.2f} / x{int(leverage)} leverage, "
-                    f"+{float(buffer_pct):.0f}% safety buffer — Kraken's real "
-                    f"requirement runs above the raw notional/leverage figure). "
-                    f"Add at least {float(shortfall):.2f} USD to your Kraken account "
-                    f"or reduce risk % to lower position size.",
+            if available >= 0:
+                margin = check_entry_margin(
+                    available=available,
+                    lot=lot_size,
+                    entry=entry_price,
+                    stop_loss=trade.stop_loss,
+                    leverage=leverage,
+                    buffer_pct=buffer_pct,
                 )
+                if not margin.ok:
+                    try:
+                        nearest_lot: Decimal | None = quantize_size(
+                            margin.max_lot_raw,
+                            instrument.contract_value_precision if instrument.contract_value_precision is not None else 2,
+                        )
+                    except InsufficientSizeError:
+                        nearest_lot = None
+                    logger.warning(
+                        "kraken_preflight_margin_blocked",
+                        trade_id=trade_id,
+                        binding=margin.binding,
+                        available=float(available),
+                        needed=float(margin.needed),
+                        risk_at_stop=float(margin.risk_at_stop),
+                        nearest_lot=str(nearest_lot),
+                    )
+                    raise PreflightMarginError(
+                        format_margin_error(
+                            margin,
+                            symbol=instrument.symbol,
+                            lot=lot_size,
+                            max_lot=nearest_lot,
+                            entry=entry_price,
+                            stop_loss=trade.stop_loss,
+                            leverage=leverage,
+                            buffer_pct=buffer_pct,
+                        )
+                    )
         except KrakenAPIError:
             raise  # re-raise preflight failures directly
         except Exception as preflight_err:  # noqa: BLE001
@@ -925,6 +951,61 @@ def place_sl_tp_orders(
     return orders
 
 
+# Tighter reduce-only IoC price bands tried after a market close is refused for
+# closing margin (a market order carries a 1% band that Kraken margin-checks at
+# its worst price).
+_CLOSE_BAND_LADDER_PCT = (Decimal("0.5"), Decimal("0.2"))
+
+
+def _send_close_with_margin_fallback(
+    client: KrakenExecutionClient, *, symbol: str, side: str, size: str
+) -> dict:
+    """Reduce-only market close; on insufficientClosingMargin retry with tighter IoC limits.
+
+    DOGE trade 158 (2026-11-07): the 1% market band was refused while a ~0.9% IoC
+    filled minutes later, so a narrower band needs less free margin.
+    Returns the last Kraken response (placed or not) — the caller checks sendStatus.
+    """
+    from decimal import ROUND_DOWN, ROUND_UP  # noqa: PLC0415
+
+    result = client.send_order(
+        order_type="mkt", symbol=symbol, side=side, size=size,
+        reduce_only=True, raise_on_rejection=False,
+    )
+    if result.get("sendStatus", {}).get("status") != "insufficientClosingMargin":
+        return result
+
+    try:
+        ticker = client.get_tickers()[symbol]
+        mark = Decimal(str(ticker["markPrice"]))
+        decimals = max(
+            -Decimal(str(ticker[k])).as_tuple().exponent  # type: ignore[operator]
+            for k in ("markPrice", "bid", "ask", "last") if ticker.get(k) is not None
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("close_margin_fallback_no_price", symbol=symbol, error=str(exc))
+        return result
+    tick = Decimal("1").scaleb(-max(decimals, 0))
+
+    for band in _CLOSE_BAND_LADDER_PCT:
+        factor = Decimal("1") - band / 100 if side == "sell" else Decimal("1") + band / 100
+        price = (mark * factor).quantize(tick, rounding=ROUND_DOWN if side == "sell" else ROUND_UP)
+        logger.warning(
+            "close_margin_fallback_attempt", symbol=symbol, band_pct=float(band), limit_price=str(price)
+        )
+        try:
+            result = client.send_order(
+                order_type="ioc", symbol=symbol, side=side, size=size,
+                limit_price=str(price), reduce_only=True, raise_on_rejection=False,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("close_margin_fallback_error", symbol=symbol, error=str(exc))
+            continue
+        if result.get("sendStatus", {}).get("status") == "placed":
+            break
+    return result
+
+
 def close_automated_trade(trade_id: int, db: Session) -> KrakenOrder:
     """Place a market close order for the REMAINING open size, then cancel SL/TP.
 
@@ -995,13 +1076,11 @@ def close_automated_trade(trade_id: int, db: Session) -> KrakenOrder:
         # the position is never left unprotected (same principle as
         # move_to_breakeven — see incident 2026-10-02).
         try:
-            close_result = client.send_order(
-                order_type="mkt",
+            close_result = _send_close_with_margin_fallback(
+                client,
                 symbol=instrument.symbol,
                 side=_exit_side(trade),
                 size=close_size,
-                reduce_only=True,
-                raise_on_rejection=False,
             )
         except Exception as _close_api_err:
             logger.error("automation_close_api_hard_error", trade_id=trade_id, error=str(_close_api_err))
@@ -1012,6 +1091,28 @@ def close_automated_trade(trade_id: int, db: Session) -> KrakenOrder:
         _close_oid = _close_send_status.get("order_id", "")
 
         if _close_placement_status != "placed":
+            _sl_still_live = any(o.role in ("sl", "runner") for o in open_orders)
+            _protection = (
+                "Your SL/TP orders were left untouched."
+                if _sl_still_live
+                else "WARNING: no stop-loss is active on this position."
+            )
+            if _close_placement_status == "insufficientClosingMargin":
+                _fail_msg = (
+                    "Close refused by Kraken: free margin is too low to close this position "
+                    '("insufficient closing margin"). ATD already retried with tighter limit '
+                    f"orders (0.5% then 0.2% from the market price). {_protection}\n\n"
+                    "What to do\n"
+                    "1. Deposit a little margin on Kraken (a few USD is often enough), then press Close again.\n"
+                    "2. Or in Kraken, send a LIMIT order on the opposite side for the full size, "
+                    "tick 'Reduce only', priced just beyond the current market price (about 0.5%).\n"
+                    "3. Do not wait: while the position stays open, the loss keeps growing."
+                )
+            else:
+                _fail_msg = (
+                    f"Close refused by Kraken (status: {_close_placement_status}). "
+                    f"{_protection} Retry the close, or close it directly on Kraken."
+                )
             _notify_execution_event(
                 profile_id=trade.profile_id,
                 event="ORDER_ERROR",
@@ -1019,16 +1120,9 @@ def close_automated_trade(trade_id: int, db: Session) -> KrakenOrder:
                 trade_id=trade_id,
                 pair=trade.pair,
                 direction=trade.direction,
-                error_message=(
-                    f"Manual close FAILED (status={_close_placement_status!r}) — "
-                    "SL/TP orders were kept untouched, position remains protected. Retry the close."
-                ),
+                error_message=_fail_msg,
             )
-            raise KrakenAPIError(
-                0,
-                f"Close order rejected by Kraken — status={_close_placement_status!r} | "
-                f"symbol={instrument.symbol} size={close_size}",
-            )
+            raise KrakenAPIError(0, _fail_msg)
 
         # Close confirmed accepted — now safe to cancel the remaining SL/TP
         # orders (redundant protection once the position is flat).

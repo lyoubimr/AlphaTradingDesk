@@ -29,6 +29,7 @@ from src.kraken_execution import (
     KrakenAPIError,
     MissingAPIKeysError,
     MissingPrecisionError,
+    PreflightMarginError,
 )
 from src.kraken_execution.models import AutomationSettings
 from src.kraken_execution.schemas import (
@@ -199,6 +200,8 @@ def _map_exc(exc: Exception) -> HTTPException:
         return HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc))
     if isinstance(exc, MissingPrecisionError):
         return HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc))
+    if isinstance(exc, PreflightMarginError):
+        return HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, detail=exc.body)
     if isinstance(exc, KrakenAPIError):
         return HTTPException(
             status.HTTP_502_BAD_GATEWAY,
