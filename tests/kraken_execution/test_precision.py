@@ -73,3 +73,29 @@ class TestQuantizeSize:
     def test_return_type_is_decimal(self):
         result = quantize_size(Decimal("1.5"), precision=2)
         assert isinstance(result, Decimal)
+
+
+class TestSnapPrice:
+    def test_rounds_onto_the_tick_grid(self):
+        from decimal import ROUND_DOWN, ROUND_UP
+
+        from src.kraken_execution.precision import snap_price
+
+        assert snap_price("67624.72000000", Decimal("1"), ROUND_DOWN) == "67624"
+        assert snap_price("67624.72", Decimal("1"), ROUND_UP) == "67625"
+        assert snap_price("2345.67", Decimal("0.1"), ROUND_DOWN) == "2345.6"
+        assert snap_price("0.071791", Decimal("0.00001"), ROUND_UP) == "0.0718"
+
+    def test_small_ticks_keep_their_decimals(self):
+        from decimal import ROUND_DOWN
+
+        from src.kraken_execution.precision import snap_price
+
+        assert snap_price("0.071796", Decimal("0.00001"), ROUND_DOWN) == "0.07179"
+
+    def test_price_on_the_grid_is_unchanged(self):
+        from decimal import ROUND_DOWN
+
+        from src.kraken_execution.precision import snap_price
+
+        assert snap_price("50000", Decimal("1"), ROUND_DOWN) == "50000"

@@ -14,12 +14,15 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac as _hmac
+from decimal import Decimal
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from src.kraken_execution import KrakenAPIError
 from src.kraken_execution.client import KrakenExecutionClient
+
+_REAL_GET_TICK_SIZE = KrakenExecutionClient.get_tick_size
 
 # ── Test fixtures ─────────────────────────────────────────────────────────────
 
@@ -29,6 +32,13 @@ _FAKE_API_KEY = "fake_api_key_for_tests"
 _FAKE_API_SECRET = base64.b64encode(b"a" * 64).decode()  # 64 bytes → valid HMAC key
 
 _BASE_URL = "https://test.kraken.local"
+
+
+@pytest.fixture(autouse=True)
+def no_tick_lookup():
+    """Keep tests offline: no tick size known -> prices are sent as given."""
+    with patch.object(KrakenExecutionClient, "get_tick_size", return_value=None):
+        yield
 
 
 @pytest.fixture()
@@ -271,3 +281,78 @@ class TestContextManager:
             with c:
                 pass
         mock_close.assert_called_once()
+
+
+# ── price snapping to the instrument tick ─────────────────────────────────────
+
+def _sent_body(client: KrakenExecutionClient, *args, **kwargs) -> str:
+    mock_resp = _mock_response(200, {"result": "success", "sendStatus": {"status": "placed"}})
+    with patch.object(client._http, "post", return_value=mock_resp) as mock_post:
+        client.send_order(*args, **kwargs)
+    return str(mock_post.call_args[1].get("content", ""))
+
+
+class TestPriceSnapping:
+    """PF_XBTUSD has tickSize 1: prices with decimals are refused (invalidPrice)."""
+
+    @pytest.fixture(autouse=True)
+    def tick_one(self):
+        with patch.object(KrakenExecutionClient, "get_tick_size", return_value=Decimal("1")):
+            yield
+
+    def test_short_sl_buy_stop_is_rounded_down_and_limit_up(self, client: KrakenExecutionClient):
+        # trade 174: stop 67624.72 / limit 68639.10 were both rejected
+        body = _sent_body(
+            client, "stp", "PF_XBTUSD", "buy", "0.0131",
+            stop_price="67624.72000000", limit_price="68639.10", reduce_only=True,
+        )
+        assert "stopPrice=67624&" in body + "&"
+        assert "limitPrice=68640&" in body + "&"
+
+    def test_long_sl_sell_stop_is_rounded_up_and_limit_down(self, client: KrakenExecutionClient):
+        body = _sent_body(
+            client, "stp", "PF_XBTUSD", "sell", "0.01",
+            stop_price="39000.4", limit_price="38415.4", reduce_only=True,
+        )
+        assert "stopPrice=39001&" in body + "&"
+        assert "limitPrice=38415&" in body + "&"
+
+    def test_take_profits_round_toward_the_market(self, client: KrakenExecutionClient):
+        short_tp = _sent_body(client, "lmt", "PF_XBTUSD", "buy", "0.0045", limit_price="65749.06", reduce_only=True)
+        long_tp = _sent_body(client, "lmt", "PF_XBTUSD", "sell", "0.0045", limit_price="70000.9", reduce_only=True)
+        assert "limitPrice=65750&" in short_tp + "&"
+        assert "limitPrice=70000&" in long_tp + "&"
+
+    def test_entry_limit_never_pays_more(self, client: KrakenExecutionClient):
+        buy = _sent_body(client, "lmt", "PF_XBTUSD", "buy", "0.01", limit_price="66798.7")
+        sell = _sent_body(client, "lmt", "PF_XBTUSD", "sell", "0.01", limit_price="66798.2")
+        assert "limitPrice=66798&" in buy + "&"
+        assert "limitPrice=66799&" in sell + "&"
+
+    def test_price_already_on_the_grid_is_unchanged(self, client: KrakenExecutionClient):
+        body = _sent_body(client, "lmt", "PF_XBTUSD", "buy", "0.01", limit_price="50000")
+        assert "limitPrice=50000" in body
+
+
+class TestGetTickSize:
+    @pytest.fixture(autouse=True)
+    def fresh_cache(self, monkeypatch: pytest.MonkeyPatch):
+        import src.kraken_execution.client as client_module
+
+        monkeypatch.setattr(client_module, "_TICKS", {})
+        monkeypatch.setattr(client_module, "_TICKS_AT", float("-inf"))
+        monkeypatch.setattr(KrakenExecutionClient, "get_tick_size", _REAL_GET_TICK_SIZE)
+
+    def test_reads_tick_sizes_and_caches_them(self, client: KrakenExecutionClient):
+        body = {"instruments": [
+            {"symbol": "PF_XBTUSD", "tickSize": 1},
+            {"symbol": "PF_DOGEUSD", "tickSize": 1e-05},
+        ]}
+        with patch.object(client._http, "get", return_value=_mock_response(200, body)) as mock_get:
+            assert client.get_tick_size("PF_XBTUSD") == Decimal("1")
+            assert client.get_tick_size("PF_DOGEUSD") == Decimal("0.00001")
+        mock_get.assert_called_once()
+
+    def test_returns_none_when_the_lookup_fails(self, client: KrakenExecutionClient):
+        with patch.object(client._http, "get", return_value=_mock_response(503, {})):
+            assert client.get_tick_size("PF_XBTUSD") is None

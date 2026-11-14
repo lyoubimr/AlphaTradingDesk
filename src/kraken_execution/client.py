@@ -18,6 +18,7 @@ import hashlib
 import hmac as _hmac
 import time
 from datetime import datetime
+from decimal import Decimal
 from typing import Any
 from urllib.parse import urlencode
 
@@ -26,8 +27,14 @@ import structlog
 
 from src.core.config import settings
 from src.kraken_execution import KrakenAPIError
+from src.kraken_execution.precision import price_rounding, snap_price
 
 logger = structlog.get_logger()
+
+# symbol -> tickSize, shared by all client instances (instrument ticks rarely change)
+_TICKS: dict[str, Decimal] = {}
+_TICKS_AT = float("-inf")
+_TICKS_TTL_SECONDS = 6 * 3600
 
 
 def _iso_to_ms(iso: str) -> int:
@@ -198,6 +205,26 @@ class KrakenExecutionClient:
         """
         return self._get("/derivatives/api/v3/accounts")
 
+    def get_tick_size(self, symbol: str) -> Decimal | None:
+        """Price tick of an instrument (public endpoint, cached for a few hours).
+
+        Returns None when it cannot be determined — callers then send prices as-is.
+        """
+        global _TICKS_AT  # noqa: PLW0603
+        stale = time.monotonic() - _TICKS_AT > _TICKS_TTL_SECONDS
+        if symbol not in _TICKS or stale:
+            try:
+                resp = self._http.get("/derivatives/api/v3/instruments")
+                if not resp.is_success:
+                    raise KrakenAPIError(resp.status_code, resp.text)
+                for inst in resp.json().get("instruments", []):
+                    if inst.get("symbol") and inst.get("tickSize") is not None:
+                        _TICKS[inst["symbol"]] = Decimal(str(inst["tickSize"]))
+                _TICKS_AT = time.monotonic()
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("kraken_tick_size_unavailable", symbol=symbol, error=str(exc))
+        return _TICKS.get(symbol)
+
     def send_order(
         self,
         order_type: str,
@@ -245,6 +272,27 @@ class KrakenExecutionClient:
             "side": side,
             "size": size,
         }
+        if limit_price is not None or stop_price is not None:
+            tick = self.get_tick_size(symbol)
+            if tick is not None:
+                if limit_price is not None:
+                    snapped = snap_price(
+                        limit_price, tick,
+                        price_rounding(order_type, side, reduce_only, is_stop_price=False),
+                    )
+                    if snapped != limit_price:
+                        logger.info("kraken_price_snapped", symbol=symbol, field="limitPrice",
+                                    original=limit_price, snapped=snapped, tick=str(tick))
+                    limit_price = snapped
+                if stop_price is not None:
+                    snapped = snap_price(
+                        stop_price, tick,
+                        price_rounding(order_type, side, reduce_only, is_stop_price=True),
+                    )
+                    if snapped != stop_price:
+                        logger.info("kraken_price_snapped", symbol=symbol, field="stopPrice",
+                                    original=stop_price, snapped=snapped, tick=str(tick))
+                    stop_price = snapped
         if limit_price is not None:
             payload["limitPrice"] = limit_price
         if stop_price is not None:
