@@ -16,6 +16,7 @@ import type {
   MASessionCreate, MASessionOut, MASessionListItem, MAStalenessItem, MATradeConclusion, MATimeframeLink,
   MASessionUpdate, MALinkedTrades, MAEvaluationStats,
   MarketVIOut, AggregatedMarketVIOut, PairsVIOut, WatchlistOut, WatchlistMetaOut, LivePricesResponse,
+  EmaSetupsOut,
   VolatilitySettingsOut, NotificationSettingsOut,
   RiskBudgetOut, RiskAdvisorOut, RiskSettingsOut, PairVIOut,
   AutomationSettingsOut, AutomationSettingsUpdateIn, ConnectionTestOut, KrakenOrderOut, OpenTradeIn,
@@ -565,6 +566,10 @@ export const volatilityApi = {
   /** GET /api/volatility/watchlist/{timeframe} → latest watchlist snapshot */
   getWatchlist: (timeframe: string): Promise<WatchlistOut> =>
     request(`/volatility/watchlist/${timeframe}`),
+
+  /** GET /api/volatility/ema-setups → top breakout/retest setups per timeframe (profile-aware) */
+  getEmaSetups: (profileId: number, top = 5, timeframes: string[] = ['1d', '4h', '1h']): Promise<EmaSetupsOut> =>
+    request(`/volatility/ema-setups?profile_id=${profileId}&top=${top}&timeframes=${timeframes.join(',')}`),
 
   /** GET /api/volatility/prices/live → BTC + ETH + XAU (cached 30s) */
   getLivePrices: (): Promise<LivePricesResponse> =>

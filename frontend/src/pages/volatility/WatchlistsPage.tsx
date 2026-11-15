@@ -13,6 +13,7 @@ import {
 import { PageHeader } from '../../components/ui/PageHeader'
 import { Tooltip } from '../../components/ui/Tooltip'
 import { VolatilityLegendPanel } from '../../components/volatility/VolatilityLegendPanel'
+import { EmaSetupsPanel } from '../../components/volatility/EmaSetupsPanel'
 import { volatilityApi, spotVolatilityApi } from '../../lib/api'
 import { formatPair, toTradingViewSymbol } from '../../lib/krakenSymbols'
 import { useProfile } from '../../context/ProfileContext'
@@ -569,6 +570,18 @@ export function WatchlistsPage() {
           'bg-zinc-900 border border-zinc-700 text-zinc-300'
         }`}>
           {runStatus}
+        </div>
+      )}
+
+      {/* ── EMA setups: best breakouts / retests per timeframe, pin in one click ── */}
+      {activeProfile && (
+        <div className="shrink-0 max-h-[42vh] overflow-y-auto rounded-xl">
+          <EmaSetupsPanel
+            profileId={activeProfile.id}
+            isSpot={activeProfile.account_type === 'spot'}
+            top={10}
+            collapsible
+          />
         </div>
       )}
 

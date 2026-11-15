@@ -20,6 +20,7 @@ import { PageHeader }  from '../../components/ui/PageHeader'
 import { StatCard }    from '../../components/ui/StatCard'
 import { useProfile }  from '../../context/ProfileContext'
 import { MarketVIWidget }  from '../../components/dashboard/MarketVIWidget'
+import { EmaSetupsPanel } from '../../components/volatility/EmaSetupsPanel'
 import {
   goalsApi, tradesApi, riskApi, ritualApi, investmentApi,
 } from '../../lib/api'
@@ -1069,6 +1070,9 @@ export function DashboardPage() {
           <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
             <div className="xl:col-span-2">
               <RitualWidget profileId={activeProfile.id} />
+            </div>
+            <div className="xl:col-span-2">
+              <EmaSetupsPanel profileId={activeProfile.id} isSpot={isSpot} top={5} showViewAll />
             </div>
             <MarketVIWidget profileId={activeProfile.id} />
             <GoalsWidget    profileId={activeProfile.id} />

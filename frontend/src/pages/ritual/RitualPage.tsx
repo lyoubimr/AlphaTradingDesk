@@ -17,6 +17,7 @@ import { PageHeader } from '../../components/ui/PageHeader'
 import { useProfile } from '../../context/ProfileContext'
 import { maApi, ritualApi } from '../../lib/api'
 import { cn } from '../../lib/cn'
+import { EmaSetupsPanel } from '../../components/volatility/EmaSetupsPanel'
 import { maAgeLabel } from '../../utils/maAge'
 import type {
   RitualSession, RitualStep, PinnedPair,
@@ -1665,6 +1666,17 @@ export function RitualPage() {
               </div>
             </div>
           )}
+
+          {/* ── EMA setups: breakouts / retests on the key EMA, pin in one click ── */}
+          <EmaSetupsPanel
+            key={`ema-${profileId}`}
+            profileId={profileId}
+            isSpot={isSpot}
+            top={5}
+            showViewAll
+            refreshKey={pinnedKey}
+            onPinsChanged={() => setPinnedKey(k => k + 1)}
+          />
 
           {/* ── Quick watchlist (works with or without a session) ─────────── */}
           <QuickWatchlist

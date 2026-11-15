@@ -5,6 +5,7 @@ Pydantic schemas for Volatility Engine endpoints (P2-9).
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel
 
@@ -72,6 +73,40 @@ class WatchlistMetaOut(BaseModel):
     regime: str
     pairs_count: int
     generated_at: datetime
+
+
+class EmaSetupOut(BaseModel):
+    """One breakout/retest opportunity on a timeframe's reference EMA."""
+
+    pair: str
+    timeframe: str  # "1D" | "4H" | "1H" — same labels as pinned pairs
+    signal: str
+    tier: Literal["prime", "fresh", "retest"]
+    direction: Literal["long", "short"]
+    vi_score: float
+    regime: str
+    change_24h: float | None = None
+    ema_ref_period: int
+    pin_id: int | None = None  # active pin of this pair+timeframe, if any
+
+
+class EmaSetupsTimeframeOut(BaseModel):
+    timeframe: str  # "1D" | "4H" | "1H"
+    generated_at: datetime | None = None
+    age_minutes: int | None = None
+    is_stale: bool = True
+    total: int = 0  # setups found before the top-N cut
+    prime_total: int = 0
+    setups: list[EmaSetupOut] = []
+
+
+class EmaSetupsOut(BaseModel):
+    """Response for GET /api/volatility/ema-setups."""
+
+    profile_id: int
+    is_spot: bool
+    prime_total: int  # prime setups across all returned timeframes
+    timeframes: list[EmaSetupsTimeframeOut]
 
 
 # ── Settings schemas ──────────────────────────────────────────────────────────
