@@ -916,6 +916,41 @@ export interface WatchlistMetaOut {
   generated_at: string
 }
 
+// ── EMA setups (breakouts / retests on the reference EMA) ─────────────────
+
+export type EmaSetupTier = 'prime' | 'fresh' | 'retest'
+export type EmaSetupTF = '1D' | '4H' | '1H'
+
+export interface EmaSetupOut {
+  pair: string
+  timeframe: EmaSetupTF
+  signal: string
+  tier: EmaSetupTier
+  direction: 'long' | 'short'
+  vi_score: number
+  regime: string
+  change_24h: number | null
+  ema_ref_period: number
+  pin_id: number | null
+}
+
+export interface EmaSetupsTimeframeOut {
+  timeframe: EmaSetupTF
+  generated_at: string | null
+  age_minutes: number | null
+  is_stale: boolean
+  total: number
+  prime_total: number
+  setups: EmaSetupOut[]
+}
+
+export interface EmaSetupsOut {
+  profile_id: number
+  is_spot: boolean
+  prime_total: number
+  timeframes: EmaSetupsTimeframeOut[]
+}
+
 // ── Spot Volatility (Phase 7) ─────────────────────────────────────────────
 
 export interface SpotWatchlistPairOut {

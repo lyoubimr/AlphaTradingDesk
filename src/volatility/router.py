@@ -7,6 +7,7 @@ Routes
   GET  /api/volatility/market/{timeframe}              ← latest Market VI (Redis → DB fallback)
   GET  /api/volatility/pairs/{timeframe}               ← latest per-pair VI (Redis → DB fallback)
   GET  /api/volatility/watchlist/{timeframe}           ← latest watchlist snapshot (DB)
+  GET  /api/volatility/ema-setups                      ← top breakout/retest setups per timeframe (profile-aware)
   GET  /api/volatility/settings/{profile_id}           ← volatility settings (create with defaults if missing)
   PUT  /api/volatility/settings/{profile_id}           ← merge-patch volatility settings
   GET  /api/volatility/notifications/{profile_id}      ← notification settings (create with defaults if missing)
@@ -19,7 +20,9 @@ Valid timeframes: 15m | 1h | 4h | 1d | 1w
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Body, Depends, HTTPException, status
+from typing import Any
+
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -41,6 +44,9 @@ from src.volatility.schemas import (
     _DEFAULT_PER_PAIR,
     _DEFAULT_REGIMES,
     AggregatedMarketVIOut,
+    EmaSetupOut,
+    EmaSetupsOut,
+    EmaSetupsTimeframeOut,
     MarketVIOut,
     NotificationSettingsOut,
     NotificationSettingsPatch,
@@ -356,6 +362,109 @@ def get_watchlist_by_id(
         pairs_count=row.pairs_count,
         pairs=row.pairs or [],
         generated_at=row.generated_at,
+    )
+
+
+# ── EMA setups (top breakouts / retests per timeframe) ────────────────────────
+
+@router.get("/ema-setups", response_model=EmaSetupsOut)
+def get_ema_setups(
+    profile_id: int,
+    top: int = Query(5, ge=1, le=20),
+    timeframes: str = Query("1d,4h,1h", description="Comma list of 1d | 4h | 1h"),
+    db: Session = Depends(get_db),
+) -> EmaSetupsOut:
+    """Best breakout / retest setups on each timeframe's reference EMA, from the latest snapshot.
+
+    Spot profiles read the spot snapshots (4h and 1d only) and only get long setups.
+    Each setup carries the id of the profile's active pin for that pair+timeframe, if any.
+    """
+    from datetime import UTC, datetime  # noqa: PLC0415
+
+    from src.core.models.broker import Profile  # noqa: PLC0415
+    from src.ritual.models import RitualPinnedPair  # noqa: PLC0415
+    from src.spot_volatility.models import SpotWatchlistSnapshot  # noqa: PLC0415
+    from src.volatility.ema_setups import (  # noqa: PLC0415
+        EMA_REF_PERIOD,
+        EMA_SETUP_TFS,
+        STALE_AFTER_SECONDS,
+        rank_setups,
+        snapshot_age_seconds,
+    )
+
+    profile = db.query(Profile).filter(Profile.id == profile_id).first()
+    if profile is None:
+        raise HTTPException(status_code=404, detail=f"Profile {profile_id} not found")
+    is_spot = profile.account_type == "spot"
+
+    requested = [t.strip().lower() for t in timeframes.split(",") if t.strip()]
+    invalid = [t for t in requested if t not in EMA_SETUP_TFS]
+    if invalid or not requested:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Invalid timeframes {invalid or timeframes!r}. Valid: {sorted(EMA_SETUP_TFS)}",
+        )
+    if is_spot:
+        requested = [t for t in requested if t != "1h"]  # spot snapshots only exist for 4h / 1d / 1w
+    requested = list(dict.fromkeys(requested))
+
+    now = datetime.now(UTC)
+    pins = {
+        (p.pair.upper(), p.timeframe): p.id
+        for p in db.query(RitualPinnedPair).filter(
+            RitualPinnedPair.profile_id == profile_id,
+            RitualPinnedPair.status == "active",
+            RitualPinnedPair.expires_at > now,
+        )
+    }
+
+    snapshot_model: Any = SpotWatchlistSnapshot if is_spot else WatchlistSnapshot
+    out_tfs: list[EmaSetupsTimeframeOut] = []
+    for tf in requested:
+        label = EMA_SETUP_TFS[tf]
+        row = (
+            db.query(snapshot_model)
+            .filter(snapshot_model.timeframe == tf)
+            .order_by(snapshot_model.generated_at.desc())
+            .first()
+        )
+        if row is None:
+            out_tfs.append(EmaSetupsTimeframeOut(timeframe=label))
+            continue
+
+        top_rows, total, prime_total = rank_setups(row.pairs or [], long_only=is_spot, top=top)
+        age = snapshot_age_seconds(row.generated_at, now)
+        out_tfs.append(
+            EmaSetupsTimeframeOut(
+                timeframe=label,
+                generated_at=row.generated_at,
+                age_minutes=age // 60,
+                is_stale=age > STALE_AFTER_SECONDS[tf],
+                total=total,
+                prime_total=prime_total,
+                setups=[
+                    EmaSetupOut(
+                        pair=r["pair"],
+                        timeframe=label,
+                        signal=r["ema_signal"],
+                        tier=r["tier"],
+                        direction=r["direction"],
+                        vi_score=float(r.get("vi_score") or 0.0),
+                        regime=r.get("regime") or "",
+                        change_24h=r.get("change_24h"),
+                        ema_ref_period=EMA_REF_PERIOD[tf],
+                        pin_id=pins.get((str(r["pair"]).upper(), label)),
+                    )
+                    for r in top_rows
+                ],
+            )
+        )
+
+    return EmaSetupsOut(
+        profile_id=profile_id,
+        is_spot=is_spot,
+        prime_total=sum(t.prime_total for t in out_tfs),
+        timeframes=out_tfs,
     )
 
 
