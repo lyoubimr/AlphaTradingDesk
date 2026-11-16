@@ -44,6 +44,7 @@ from src.volatility.schemas import (
     _DEFAULT_PER_PAIR,
     _DEFAULT_REGIMES,
     AggregatedMarketVIOut,
+    EmaSetupHistoryOut,
     EmaSetupOut,
     EmaSetupsOut,
     EmaSetupsTimeframeOut,
@@ -372,14 +373,17 @@ def get_ema_setups(
     profile_id: int,
     top: int = Query(5, ge=1, le=20),
     timeframes: str = Query("1d,4h,1h", description="Comma list of 1d | 4h | 1h"),
+    history_top: int = Query(15, ge=0, le=50, description="Earlier setups per timeframe (0 = no history)"),
     db: Session = Depends(get_db),
 ) -> EmaSetupsOut:
     """Best breakout / retest setups on each timeframe's reference EMA, from the latest snapshot.
 
     Spot profiles read the spot snapshots (4h and 1d only) and only get long setups.
     Each setup carries the id of the profile's active pin for that pair+timeframe, if any.
+    `earlier` lists setups seen in the history window (1h: 24 h, 4h: 48 h, 1d: 5 d) that are no
+    longer active, with whether they followed through (judged from the pair's latest signal).
     """
-    from datetime import UTC, datetime  # noqa: PLC0415
+    from datetime import UTC, datetime, timedelta  # noqa: PLC0415
 
     from src.core.models.broker import Profile  # noqa: PLC0415
     from src.ritual.models import RitualPinnedPair  # noqa: PLC0415
@@ -387,7 +391,11 @@ def get_ema_setups(
     from src.volatility.ema_setups import (  # noqa: PLC0415
         EMA_REF_PERIOD,
         EMA_SETUP_TFS,
+        HISTORY_HOURS,
         STALE_AFTER_SECONDS,
+        TIER_ORDER,
+        assess_outcome,
+        build_timeline,
         rank_setups,
         snapshot_age_seconds,
     )
@@ -422,22 +430,47 @@ def get_ema_setups(
     out_tfs: list[EmaSetupsTimeframeOut] = []
     for tf in requested:
         label = EMA_SETUP_TFS[tf]
-        row = (
+        latest = (
             db.query(snapshot_model)
             .filter(snapshot_model.timeframe == tf)
             .order_by(snapshot_model.generated_at.desc())
             .first()
         )
-        if row is None:
+        if latest is None:
             out_tfs.append(EmaSetupsTimeframeOut(timeframe=label))
             continue
 
-        top_rows, total, prime_total = rank_setups(row.pairs or [], long_only=is_spot, top=top)
-        age = snapshot_age_seconds(row.generated_at, now)
+        # Snapshots of the history window, oldest → newest, always ending with the latest one.
+        history_hours = HISTORY_HOURS[tf] if history_top > 0 else 0
+        window: list[Any] = []
+        if history_top > 0:
+            window = (
+                db.query(snapshot_model)
+                .filter(
+                    snapshot_model.timeframe == tf,
+                    snapshot_model.generated_at >= now - timedelta(hours=history_hours),
+                )
+                .order_by(snapshot_model.generated_at.asc())
+                .all()
+            )
+        if not window or window[-1].id != latest.id:
+            window.append(latest)
+        timeline = build_timeline([(r.generated_at, r.pairs or []) for r in window], long_only=is_spot)
+        by_key = {(e["pair"], e["direction"]): e for e in timeline}
+        current_signals = {p["pair"]: p.get("ema_signal") for p in latest.pairs or []}
+
+        top_rows, total, prime_total = rank_setups(latest.pairs or [], long_only=is_spot, top=top)
+        age = snapshot_age_seconds(latest.generated_at, now)
+
+        earlier_entries = sorted(
+            (e for e in timeline if not e["active"]),
+            key=lambda e: (-e["last_seen"].timestamp(), TIER_ORDER[e["best_tier"]]),
+        )
+
         out_tfs.append(
             EmaSetupsTimeframeOut(
                 timeframe=label,
-                generated_at=row.generated_at,
+                generated_at=latest.generated_at,
                 age_minutes=age // 60,
                 is_stale=age > STALE_AFTER_SECONDS[tf],
                 total=total,
@@ -454,8 +487,29 @@ def get_ema_setups(
                         change_24h=r.get("change_24h"),
                         ema_ref_period=EMA_REF_PERIOD[tf],
                         pin_id=pins.get((str(r["pair"]).upper(), label)),
+                        since=by_key[(r["pair"], r["direction"])]["streak_start"] if history_top > 0 else None,
+                        path=by_key[(r["pair"], r["direction"])]["path"] if history_top > 0 else [],
                     )
                     for r in top_rows
+                ],
+                history_hours=history_hours,
+                earlier_total=len(earlier_entries),
+                earlier=[
+                    EmaSetupHistoryOut(
+                        pair=e["pair"],
+                        timeframe=label,
+                        direction=e["direction"],
+                        best_tier=e["best_tier"],
+                        latest_signal=e["latest_signal"],
+                        path=e["path"],
+                        first_seen=e["first_seen"],
+                        last_seen=e["last_seen"],
+                        times_seen=e["times_seen"],
+                        outcome=assess_outcome(e["direction"], current_signals.get(e["pair"])),
+                        current_signal=current_signals.get(e["pair"]),
+                        pin_id=pins.get((str(e["pair"]).upper(), label)),
+                    )
+                    for e in earlier_entries[:history_top]
                 ],
             )
         )

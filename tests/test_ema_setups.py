@@ -5,12 +5,18 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
+import pytest
 from sqlalchemy.orm import Session
 
 from src.core.models.broker import Profile
 from src.ritual.models import RitualPinnedPair
 from src.spot_volatility.models import SpotWatchlistSnapshot
-from src.volatility.ema_setups import rank_setups, snapshot_age_seconds
+from src.volatility.ema_setups import (
+    assess_outcome,
+    build_timeline,
+    rank_setups,
+    snapshot_age_seconds,
+)
 from src.volatility.models import WatchlistSnapshot
 
 
@@ -162,3 +168,168 @@ class TestEmaSetupsEndpoint:
         assert client.get("/api/volatility/ema-setups", params={"profile_id": 999999}).status_code == 404
         bad = client.get("/api/volatility/ema-setups", params={"profile_id": profile.id, "timeframes": "15m"})
         assert bad.status_code == 422
+
+
+_T0 = datetime(2026, 11, 15, 6, 0, tzinfo=UTC)
+
+
+def _at(hours: int) -> datetime:
+    return _T0 + timedelta(hours=hours)
+
+
+class TestBuildTimeline:
+    def _entry(self, timeline: list[dict], pair: str, direction: str) -> dict:
+        return next(e for e in timeline if e["pair"] == pair and e["direction"] == direction)
+
+    def test_lifecycle_path_and_streak_of_an_active_setup(self):
+        timeline = build_timeline(
+            [
+                (_at(0), [_pair("PF_AAAUSD", "breakout_up", 0.5)]),
+                (_at(1), [_pair("PF_AAAUSD", "retest_after_breakout_up", 0.5)]),
+                (_at(2), [_pair("PF_AAAUSD", "retest_after_breakout_up", 0.5)]),
+            ],
+            long_only=False,
+        )
+
+        e = self._entry(timeline, "PF_AAAUSD", "long")
+        assert e["active"] is True
+        assert e["path"] == ["breakout_up", "retest_after_breakout_up"]
+        assert e["times_seen"] == 3 and e["best_tier"] == "prime"
+        assert e["streak_start"] == _at(0) and e["last_seen"] == _at(2)
+
+    def test_setup_that_disappeared_is_not_active(self):
+        timeline = build_timeline(
+            [(_at(0), [_pair("PF_BBBUSD", "breakout_up", 0.5)]), (_at(1), [_pair("PF_BBBUSD", "mixed", 0.5)])],
+            long_only=False,
+        )
+
+        e = self._entry(timeline, "PF_BBBUSD", "long")
+        assert e["active"] is False and e["last_seen"] == _at(0)
+
+    def test_a_gap_restarts_the_streak(self):
+        timeline = build_timeline(
+            [
+                (_at(0), [_pair("PF_CCCUSD", "breakout_up", 0.5)]),
+                (_at(1), [_pair("PF_CCCUSD", "mixed", 0.5)]),
+                (_at(2), [_pair("PF_CCCUSD", "breakout_up", 0.5)]),
+            ],
+            long_only=False,
+        )
+
+        e = self._entry(timeline, "PF_CCCUSD", "long")
+        assert e["active"] is True and e["times_seen"] == 2
+        assert e["streak_start"] == _at(2) and e["first_seen"] == _at(0)
+
+    def test_a_direction_flip_creates_two_entries(self):
+        timeline = build_timeline(
+            [(_at(0), [_pair("PF_DDDUSD", "breakout_up", 0.5)]), (_at(1), [_pair("PF_DDDUSD", "breakdown_down", 0.5)])],
+            long_only=False,
+        )
+
+        assert self._entry(timeline, "PF_DDDUSD", "long")["active"] is False
+        assert self._entry(timeline, "PF_DDDUSD", "short")["active"] is True
+
+    def test_long_only_and_dead_markets_are_ignored(self):
+        timeline = build_timeline(
+            [(_at(0), [_pair("PF_EEEUSD", "breakdown_down", 0.5), _pair("PF_FFFUSD", "breakout_up", 0.5, regime="dead")])],
+            long_only=True,
+        )
+
+        assert timeline == []
+
+
+class TestAssessOutcome:
+    @pytest.mark.parametrize(
+        ("direction", "signal", "expected"),
+        [
+            ("long", "above_all", "holding"),
+            ("long", "retest_up", "holding"),
+            ("long", "below_all", "failed"),
+            ("long", "breakdown_down", "failed"),
+            ("long", "mixed", "neutral"),
+            ("short", "below_all", "holding"),
+            ("short", "breakout_up", "failed"),
+            ("short", "mixed", "neutral"),
+            ("long", None, "unknown"),
+        ],
+    )
+    def test_follow_through_is_judged_from_the_current_signal(self, direction, signal, expected):
+        assert assess_outcome(direction, signal) == expected
+
+
+class TestEmaSetupsHistory:
+    def test_earlier_setups_with_outcome_and_active_lifecycle(self, client, db_session):
+        profile = _profile(db_session, "History")
+        # oldest → newest: AAA goes breakout → prime (still active); BBB breaks out then holds above all;
+        # CCC breaks out then loses the EMA
+        _snapshot(db_session, WatchlistSnapshot, "1h", [
+            _pair("PF_AAAUSD", "breakout_up", 0.5), _pair("PF_BBBUSD", "breakout_up", 0.5), _pair("PF_CCCUSD", "breakout_up", 0.5),
+        ], age_min=180)
+        _snapshot(db_session, WatchlistSnapshot, "1h", [
+            _pair("PF_AAAUSD", "retest_after_breakout_up", 0.5), _pair("PF_BBBUSD", "above_all", 0.5), _pair("PF_CCCUSD", "below_all", 0.5),
+        ], age_min=5)
+
+        res = client.get("/api/volatility/ema-setups", params={"profile_id": profile.id, "timeframes": "1h"})
+
+        tf = res.json()["timeframes"][0]
+        assert tf["history_hours"] == 24
+        active = tf["setups"][0]
+        assert active["pair"] == "PF_AAAUSD" and active["path"] == ["breakout_up", "retest_after_breakout_up"]
+        assert active["since"] is not None
+        earlier = {e["pair"]: e for e in tf["earlier"]}
+        assert tf["earlier_total"] == 2 and set(earlier) == {"PF_BBBUSD", "PF_CCCUSD"}
+        assert earlier["PF_BBBUSD"]["outcome"] == "holding" and earlier["PF_BBBUSD"]["current_signal"] == "above_all"
+        assert earlier["PF_CCCUSD"]["outcome"] == "failed"
+        assert earlier["PF_BBBUSD"]["best_tier"] == "fresh" and earlier["PF_BBBUSD"]["times_seen"] == 1
+
+    def test_pair_missing_from_latest_snapshot_has_unknown_outcome(self, client, db_session):
+        profile = _profile(db_session, "Unknown")
+        _snapshot(db_session, WatchlistSnapshot, "4h", [_pair("PF_AAAUSD", "breakout_up", 0.5)], age_min=300)
+        _snapshot(db_session, WatchlistSnapshot, "4h", [_pair("PF_ZZZUSD", "mixed", 0.5)], age_min=5)
+
+        res = client.get("/api/volatility/ema-setups", params={"profile_id": profile.id, "timeframes": "4h"})
+
+        assert res.json()["timeframes"][0]["earlier"][0]["outcome"] == "unknown"
+
+    def test_history_window_is_24h_for_1h_and_5_days_for_1d(self, client, db_session):
+        profile = _profile(db_session, "Window")
+        _snapshot(db_session, WatchlistSnapshot, "1h", [_pair("PF_OLDUSD", "breakout_up", 0.5)], age_min=26 * 60)
+        _snapshot(db_session, WatchlistSnapshot, "1h", [_pair("PF_NEWUSD", "mixed", 0.5)], age_min=5)
+        _snapshot(db_session, WatchlistSnapshot, "1d", [_pair("PF_DAYUSD", "breakout_up", 0.5)], age_min=4 * 24 * 60)
+        _snapshot(db_session, WatchlistSnapshot, "1d", [_pair("PF_NEWUSD", "mixed", 0.5)], age_min=5)
+
+        res = client.get("/api/volatility/ema-setups", params={"profile_id": profile.id, "timeframes": "1h,1d"})
+
+        by_tf = {t["timeframe"]: t for t in res.json()["timeframes"]}
+        assert by_tf["1H"]["earlier"] == []
+        assert [e["pair"] for e in by_tf["1D"]["earlier"]] == ["PF_DAYUSD"]
+        assert by_tf["1D"]["history_hours"] == 120
+
+    def test_history_top_zero_disables_the_history(self, client, db_session):
+        profile = _profile(db_session, "NoHistory")
+        _snapshot(db_session, WatchlistSnapshot, "4h", [_pair("PF_AAAUSD", "breakout_up", 0.5)], age_min=300)
+        _snapshot(db_session, WatchlistSnapshot, "4h", [_pair("PF_BBBUSD", "breakout_up", 0.5)], age_min=5)
+
+        res = client.get("/api/volatility/ema-setups", params={"profile_id": profile.id, "timeframes": "4h", "history_top": 0})
+
+        tf = res.json()["timeframes"][0]
+        assert tf["earlier"] == [] and tf["history_hours"] == 0
+        assert [s["pair"] for s in tf["setups"]] == ["PF_BBBUSD"] and tf["setups"][0]["since"] is None
+
+    def test_earlier_setups_are_most_recent_first_and_can_be_pinned(self, client, db_session):
+        profile = _profile(db_session, "Order")
+        _snapshot(db_session, WatchlistSnapshot, "4h", [_pair("PF_AAAUSD", "breakout_up", 0.5)], age_min=400)
+        _snapshot(db_session, WatchlistSnapshot, "4h", [_pair("PF_BBBUSD", "retest_down", 0.5)], age_min=200)
+        _snapshot(db_session, WatchlistSnapshot, "4h", [_pair("PF_ZZZUSD", "mixed", 0.5)], age_min=5)
+        now = datetime.now(UTC)
+        pin = RitualPinnedPair(profile_id=profile.id, pair="PF_AAAUSD", timeframe="4H", status="active",
+                               pinned_at=now, expires_at=now + timedelta(hours=5), source="watchlist")
+        db_session.add(pin)
+        db_session.flush()
+
+        res = client.get("/api/volatility/ema-setups", params={"profile_id": profile.id, "timeframes": "4h"})
+
+        earlier = res.json()["timeframes"][0]["earlier"]
+        assert [e["pair"] for e in earlier] == ["PF_BBBUSD", "PF_AAAUSD"]
+        assert earlier[0]["direction"] == "short" and earlier[0]["best_tier"] == "retest"
+        assert earlier[1]["pin_id"] == pin.id
