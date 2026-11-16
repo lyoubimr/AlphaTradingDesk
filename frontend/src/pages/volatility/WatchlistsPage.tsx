@@ -580,6 +580,8 @@ export function WatchlistsPage() {
             profileId={activeProfile.id}
             isSpot={activeProfile.account_type === 'spot'}
             top={10}
+            historyTop={30}
+            earlierOpenByDefault
             collapsible
           />
         </div>

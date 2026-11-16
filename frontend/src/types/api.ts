@@ -932,6 +932,25 @@ export interface EmaSetupOut {
   change_24h: number | null
   ema_ref_period: number
   pin_id: number | null
+  since: string | null
+  path: string[]
+}
+
+export type EmaOutcome = 'holding' | 'failed' | 'neutral' | 'unknown'
+
+export interface EmaSetupHistoryOut {
+  pair: string
+  timeframe: EmaSetupTF
+  direction: 'long' | 'short'
+  best_tier: EmaSetupTier
+  latest_signal: string
+  path: string[]
+  first_seen: string
+  last_seen: string
+  times_seen: number
+  outcome: EmaOutcome
+  current_signal: string | null
+  pin_id: number | null
 }
 
 export interface EmaSetupsTimeframeOut {
@@ -942,6 +961,9 @@ export interface EmaSetupsTimeframeOut {
   total: number
   prime_total: number
   setups: EmaSetupOut[]
+  history_hours: number
+  earlier_total: number
+  earlier: EmaSetupHistoryOut[]
 }
 
 export interface EmaSetupsOut {

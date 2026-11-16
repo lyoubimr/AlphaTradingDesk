@@ -568,8 +568,12 @@ export const volatilityApi = {
     request(`/volatility/watchlist/${timeframe}`),
 
   /** GET /api/volatility/ema-setups → top breakout/retest setups per timeframe (profile-aware) */
-  getEmaSetups: (profileId: number, top = 5, timeframes: string[] = ['1d', '4h', '1h']): Promise<EmaSetupsOut> =>
-    request(`/volatility/ema-setups?profile_id=${profileId}&top=${top}&timeframes=${timeframes.join(',')}`),
+  getEmaSetups: (
+    profileId: number, top = 5, timeframes: string[] = ['1d', '4h', '1h'], historyTop = 15,
+  ): Promise<EmaSetupsOut> =>
+    request(
+      `/volatility/ema-setups?profile_id=${profileId}&top=${top}&timeframes=${timeframes.join(',')}&history_top=${historyTop}`,
+    ),
 
   /** GET /api/volatility/prices/live → BTC + ETH + XAU (cached 30s) */
   getLivePrices: (): Promise<LivePricesResponse> =>

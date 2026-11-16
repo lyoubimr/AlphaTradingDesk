@@ -88,6 +88,25 @@ class EmaSetupOut(BaseModel):
     change_24h: float | None = None
     ema_ref_period: int
     pin_id: int | None = None  # active pin of this pair+timeframe, if any
+    since: datetime | None = None  # start of the unbroken run of this setup in the history window
+    path: list[str] = []  # distinct signals seen in the window, oldest first (e.g. breakout → retest)
+
+
+class EmaSetupHistoryOut(BaseModel):
+    """A setup seen earlier in the history window that is no longer active."""
+
+    pair: str
+    timeframe: str  # "1D" | "4H" | "1H"
+    direction: Literal["long", "short"]
+    best_tier: Literal["prime", "fresh", "retest"]
+    latest_signal: str  # last signal it showed as a setup
+    path: list[str]
+    first_seen: datetime
+    last_seen: datetime
+    times_seen: int
+    outcome: Literal["holding", "failed", "neutral", "unknown"]
+    current_signal: str | None = None  # the pair's signal in the latest snapshot
+    pin_id: int | None = None
 
 
 class EmaSetupsTimeframeOut(BaseModel):
@@ -98,6 +117,9 @@ class EmaSetupsTimeframeOut(BaseModel):
     total: int = 0  # setups found before the top-N cut
     prime_total: int = 0
     setups: list[EmaSetupOut] = []
+    history_hours: int = 0
+    earlier_total: int = 0  # earlier setups found before the history cut
+    earlier: list[EmaSetupHistoryOut] = []
 
 
 class EmaSetupsOut(BaseModel):
